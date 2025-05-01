@@ -41,6 +41,7 @@ type RealDebrid struct {
 	MountPath   string
 	logger      zerolog.Logger
 	CheckCached bool
+	UnpackRar   bool
 }
 
 func New(dc config.Debrid) *RealDebrid {
@@ -72,6 +73,7 @@ func New(dc config.Debrid) *RealDebrid {
 		APIKey:           dc.APIKey,
 		DownloadKeys:     accounts,
 		DownloadUncached: dc.DownloadUncached,
+		UnpackRar:        dc.UnpackRar,
 		client: request.New(
 			request.WithHeaders(headers),
 			request.WithRateLimiter(rl),
@@ -120,6 +122,29 @@ func (r *RealDebrid) getSelectedFiles(t *types.Torrent, data torrentInfo) map[st
 
 	// Handle RARed torrents (single link, multiple files)
 	if len(data.Links) == 1 && len(selectedFiles) > 1 {
+		if r.UnpackRar {
+			r.logger.Info().Msgf("Unpacking RAR file: %s", data.Links[0])
+		} else {
+			r.logger.Debug().Msgf("RAR file detected, but unpacking is disabled: %s", data.Links[0])
+			// make a new file of the RAR archive
+			// and set the link to the first link
+			// and set the size to the size of the entire torrent
+			file := types.File{
+				TorrentId: t.Id,
+				Id:        strconv.Itoa(0),
+				Name:      t.Name + ".rar",
+				Size:      0,
+				IsRar:     true,
+				ByteRange: nil,
+				Path:      t.Name + ".rar",
+				Link:      t.Links[0],
+				AccountId: selectedFiles[0].AccountId,
+				Generated: time.Now(),
+			}
+			files[file.Name] = file
+			return files
+		}
+
 		linkFile := &types.File{TorrentId: t.Id, Link: data.Links[0]}
 		downloadLinkObj, err := r.GetDownloadLink(t, linkFile)
 
