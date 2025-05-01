@@ -2,14 +2,15 @@ package types
 
 import (
 	"fmt"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/arr"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/logger"
+	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/arr"
 )
 
 type Torrent struct {
@@ -81,7 +82,8 @@ type File struct {
 	Id           string        `json:"id"`
 	Name         string        `json:"name"`
 	Size         int64         `json:"size"`
-	ByteRange    string        `json:"byte_range"`
+	IsRar        bool          `json:"is_rar"`
+	ByteRange    *[2]int64     `json:"byte_range,omitempty"`
 	Path         string        `json:"path"`
 	Link         string        `json:"link"`
 	DownloadLink *DownloadLink `json:"-"`

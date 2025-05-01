@@ -2,26 +2,28 @@ package qbit
 
 import (
 	"fmt"
-	"github.com/cavaliergopher/grab/v3"
-	"github.com/sirrobot01/decypharr/internal/request"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	debrid "github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"io"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/cavaliergopher/grab/v3"
+	"github.com/sirrobot01/decypharr/internal/request"
+	"github.com/sirrobot01/decypharr/internal/utils"
+	debrid "github.com/sirrobot01/decypharr/pkg/debrid/types"
 )
 
-func Download(client *grab.Client, url, filename string, byterange string, progressCallback func(int64, int64)) error {
+func Download(client *grab.Client, url, filename string, byterange *[2]int64, progressCallback func(int64, int64)) error {
 	req, err := grab.NewRequest(filename, url)
 	if err != nil {
 		return err
 	}
 
 	// Set byte range if specified
-	if byterange != "" {
-		req.HTTPRequest.Header.Set("Range", "bytes="+byterange)
+	if byterange != nil {
+		byterangeStr := fmt.Sprintf("%d-%d", byterange[0], byterange[1])
+		req.HTTPRequest.Header.Set("Range", "bytes="+byterangeStr)
 	}
 
 	resp := client.Do(req)

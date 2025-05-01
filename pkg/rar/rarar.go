@@ -70,8 +70,8 @@ func (f *RarFile) Name() string {
 	return filepath.Base(f.Path)
 }
 
-func (f *RarFile) ByteRange() string {
-	return fmt.Sprintf("%d-%d", f.DataOffset, f.DataOffset+f.CompressedSize-1)
+func (f *RarFile) ByteRange() *[2]int64 {
+	return &[2]int64{f.DataOffset, f.DataOffset + f.CompressedSize - 1}
 }
 
 // HttpFile represents a file accessed over HTTP

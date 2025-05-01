@@ -131,7 +131,9 @@ func (r *RealDebrid) getSelectedFiles(t *types.Torrent, data torrentInfo) map[st
 				for _, rarFile := range reader.GetFiles() {
 					for _, f := range selectedFiles {
 						if f.Name == rarFile.Name() {
+							f.IsRar = true
 							f.ByteRange = rarFile.ByteRange()
+
 							f.Link = data.Links[0]
 							f.DownloadLink = &types.DownloadLink{
 								Link:         data.Links[0],
@@ -148,8 +150,10 @@ func (r *RealDebrid) getSelectedFiles(t *types.Torrent, data torrentInfo) map[st
 				return files
 			}
 			r.logger.Error().Err(err).Msg("Failed to create RAR reader")
+			return nil
 		} else {
 			r.logger.Error().Err(err).Msg("Failed to get download link for RAR file")
+			return nil
 		}
 	}
 

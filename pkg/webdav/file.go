@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -81,28 +80,7 @@ func (f *File) GetDownloadByteRange() (int64, int64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	if byteRange == "" {
-		return 0, 0, os.ErrNotExist
-	}
-	parts := strings.Split(byteRange, "-")
-	if len(parts) == 2 {
-		start, err := strconv.ParseInt(parts[0], 10, 64)
-		if err != nil {
-			return 0, 0, err
-		}
-		end, err := strconv.ParseInt(parts[1], 10, 64)
-		if err != nil {
-			return 0, 0, err
-		}
-		return start, end, nil
-	} else if len(parts) == 1 {
-		start, err := strconv.ParseInt(parts[0], 10, 64)
-		if err != nil {
-			return 0, 0, err
-		}
-		return start, start, nil
-	}
-	return 0, f.size, nil
+	return byteRange[0], byteRange[1], nil
 }
 
 func (f *File) stream() (*http.Response, error) {
