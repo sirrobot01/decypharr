@@ -3,12 +3,14 @@ package webdav
 import (
 	"crypto/tls"
 	"fmt"
-	"github.com/sirrobot01/decypharr/pkg/debrid/debrid"
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sirrobot01/decypharr/pkg/debrid/debrid"
 )
 
 var sharedClient = &http.Client{
@@ -74,6 +76,35 @@ func (f *File) getDownloadLink() (string, error) {
 	return "", os.ErrNotExist
 }
 
+func (f *File) GetDownloadByteRange() (int64, int64, error) {
+	byteRange, err := f.cache.GetDownloadByteRange(f.torrentName, f.name)
+	if err != nil {
+		return 0, 0, err
+	}
+	if byteRange == "" {
+		return 0, 0, os.ErrNotExist
+	}
+	parts := strings.Split(byteRange, "-")
+	if len(parts) == 2 {
+		start, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			return 0, 0, err
+		}
+		end, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			return 0, 0, err
+		}
+		return start, end, nil
+	} else if len(parts) == 1 {
+		start, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			return 0, 0, err
+		}
+		return start, start, nil
+	}
+	return 0, f.size, nil
+}
+
 func (f *File) stream() (*http.Response, error) {
 	client := sharedClient // Might be replaced with the custom client
 	_log := f.cache.GetLogger()
@@ -93,6 +124,12 @@ func (f *File) stream() (*http.Response, error) {
 		return nil, io.EOF
 	}
 
+	byteRangeStart, _, err := f.GetDownloadByteRange()
+	if err != nil {
+		_log.Trace().Msgf("Failed to get download byte range for %s. %s", f.name, err)
+		return nil, io.EOF
+	}
+
 	req, err := http.NewRequest("GET", downloadLink, nil)
 	if err != nil {
 		_log.Trace().Msgf("Failed to create HTTP request: %s", err)
@@ -100,7 +137,10 @@ func (f *File) stream() (*http.Response, error) {
 	}
 
 	if f.offset > 0 {
-		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", f.offset))
+		byteRange := fmt.Sprintf("%d-", byteRangeStart+f.offset)
+		req.Header.Set("Range", byteRange)
+	} else {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", byteRangeStart))
 	}
 
 	resp, err := client.Do(req)

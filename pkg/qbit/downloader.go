@@ -13,11 +13,17 @@ import (
 	"time"
 )
 
-func Download(client *grab.Client, url, filename string, progressCallback func(int64, int64)) error {
+func Download(client *grab.Client, url, filename string, byterange string, progressCallback func(int64, int64)) error {
 	req, err := grab.NewRequest(filename, url)
 	if err != nil {
 		return err
 	}
+
+	// Set byte range if specified
+	if byterange != "" {
+		req.HTTPRequest.Header.Set("Range", "bytes="+byterange)
+	}
+
 	resp := client.Do(req)
 
 	t := time.NewTicker(time.Second)
@@ -111,6 +117,7 @@ func (q *QBit) downloadFiles(torrent *Torrent, parent string) {
 				client,
 				file.DownloadLink.DownloadLink,
 				filepath.Join(parent, filename),
+				file.ByteRange,
 				progressCallback,
 			)
 

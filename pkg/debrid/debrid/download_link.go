@@ -183,3 +183,15 @@ func (c *Cache) IsDownloadLinkInvalid(downloadLink string) bool {
 	}
 	return false
 }
+
+func (c *Cache) GetDownloadByteRange(torrentName, filename string) (string, error) {
+	ct := c.GetTorrentByName(torrentName)
+	if ct == nil {
+		return "", fmt.Errorf("torrent not found")
+	}
+	file := ct.Files[filename]
+	if file.ByteRange == "" {
+		return "", fmt.Errorf("file %s does not have a byte range", filename)
+	}
+	return file.ByteRange, nil
+}
