@@ -123,38 +123,43 @@ func (r *RealDebrid) getSelectedFiles(t *types.Torrent, data torrentInfo) map[st
 		linkFile := &types.File{TorrentId: t.Id, Link: data.Links[0]}
 		downloadLinkObj, err := r.GetDownloadLink(t, linkFile)
 
-		if err == nil {
-			dlLink := downloadLinkObj.DownloadLink
-
-			// For each RAR file, map it to a RD file and get the byte range
-			if reader, err := rar.NewRar3Reader(dlLink); err == nil {
-				for _, rarFile := range reader.GetFiles() {
-					for _, f := range selectedFiles {
-						if f.Name == rarFile.Name() {
-							f.IsRar = true
-							f.ByteRange = rarFile.ByteRange()
-
-							f.Link = data.Links[0]
-							f.DownloadLink = &types.DownloadLink{
-								Link:         data.Links[0],
-								DownloadLink: dlLink,
-								Filename:     f.Name,
-								Size:         f.Size,
-								Generated:    time.Now(),
-							}
-							files[f.Name] = f
-							break
-						}
-					}
-				}
-				return files
-			}
-			r.logger.Error().Err(err).Msg("Failed to create RAR reader")
-			return nil
-		} else {
+		if err != nil {
 			r.logger.Error().Err(err).Msg("Failed to get download link for RAR file")
 			return nil
 		}
+
+		dlLink := downloadLinkObj.DownloadLink
+		reader, err := rar.NewRar3Reader(dlLink)
+
+		if err != nil {
+			r.logger.Error().Err(err).Msg("Failed to create RAR reader")
+			return nil
+		}
+
+		rarFiles := reader.GetFiles()
+		fileMap := make(map[string]*types.File)
+
+		// Create lookup map for faster matching
+		for i := range selectedFiles {
+			fileMap[selectedFiles[i].Name] = &selectedFiles[i]
+		}
+
+		for _, rarFile := range rarFiles {
+			if file, exists := fileMap[rarFile.Name()]; exists {
+				file.IsRar = true
+				file.ByteRange = rarFile.ByteRange()
+				file.Link = data.Links[0]
+				file.DownloadLink = &types.DownloadLink{
+					Link:         data.Links[0],
+					DownloadLink: dlLink,
+					Filename:     file.Name,
+					Size:         file.Size,
+					Generated:    time.Now(),
+				}
+				files[file.Name] = *file
+			}
+		}
+		return files
 	}
 
 	// Standard case - map files to links
