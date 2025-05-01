@@ -81,6 +81,7 @@ type File struct {
 	Id           string        `json:"id"`
 	Name         string        `json:"name"`
 	Size         int64         `json:"size"`
+	ByteRange    string        `json:"byte_range"`
 	Path         string        `json:"path"`
 	Link         string        `json:"link"`
 	DownloadLink *DownloadLink `json:"-"`

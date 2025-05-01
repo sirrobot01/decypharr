@@ -4,14 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/goccy/go-json"
-	"github.com/puzpuzpuz/xsync/v3"
-	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/internal/request"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"io"
 	"net/http"
 	gourl "net/url"
@@ -22,6 +14,16 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/goccy/go-json"
+	"github.com/puzpuzpuz/xsync/v3"
+	"github.com/rs/zerolog"
+	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/logger"
+	"github.com/sirrobot01/decypharr/internal/request"
+	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"github.com/sirrobot01/decypharr/pkg/rar"
 )
 
 type RealDebrid struct {
@@ -100,29 +102,65 @@ func (r *RealDebrid) GetLogger() zerolog.Logger {
 	return r.logger
 }
 
-func getSelectedFiles(t *types.Torrent, data torrentInfo) map[string]types.File {
+func (r *RealDebrid) getSelectedFiles(t *types.Torrent, data torrentInfo) map[string]types.File {
+	files := make(map[string]types.File)
 	selectedFiles := make([]types.File, 0)
+
 	for _, f := range data.Files {
 		if f.Selected == 1 {
-			name := filepath.Base(f.Path)
-			file := types.File{
+			selectedFiles = append(selectedFiles, types.File{
 				TorrentId: t.Id,
-				Name:      name,
-				Path:      name,
+				Name:      filepath.Base(f.Path),
+				Path:      filepath.Base(f.Path),
 				Size:      f.Bytes,
 				Id:        strconv.Itoa(f.ID),
+			})
+		}
+	}
+
+	// Handle RARed torrents (single link, multiple files)
+	if len(data.Links) == 1 && len(selectedFiles) > 1 {
+		linkFile := &types.File{TorrentId: t.Id, Link: data.Links[0]}
+		downloadLinkObj, err := r.GetDownloadLink(t, linkFile)
+
+		if err == nil {
+			dlLink := downloadLinkObj.DownloadLink
+
+			// For each RAR file, map it to a RD file and get the byte range
+			if reader, err := rar.NewRar3Reader(dlLink); err == nil {
+				for _, rarFile := range reader.GetFiles() {
+					for _, f := range selectedFiles {
+						if f.Name == rarFile.Name() {
+							f.ByteRange = rarFile.ByteRange()
+							f.Link = data.Links[0]
+							f.DownloadLink = &types.DownloadLink{
+								Link:         data.Links[0],
+								DownloadLink: dlLink,
+								Filename:     f.Name,
+								Size:         f.Size,
+								Generated:    time.Now(),
+							}
+							files[f.Name] = f
+							break
+						}
+					}
+				}
+				return files
 			}
-			selectedFiles = append(selectedFiles, file)
+			r.logger.Error().Err(err).Msg("Failed to create RAR reader")
+		} else {
+			r.logger.Error().Err(err).Msg("Failed to get download link for RAR file")
 		}
 	}
-	files := make(map[string]types.File)
-	for index, f := range selectedFiles {
-		if index >= len(data.Links) {
-			break
+
+	// Standard case - map files to links
+	for i, f := range selectedFiles {
+		if i < len(data.Links) {
+			f.Link = data.Links[i]
+			files[f.Name] = f
 		}
-		f.Link = data.Links[index]
-		files[f.Name] = f
 	}
+
 	return files
 }
 
@@ -337,7 +375,7 @@ func (r *RealDebrid) UpdateTorrent(t *types.Torrent) error {
 	t.MountPath = r.MountPath
 	t.Debrid = r.Name
 	t.Added = data.Added
-	t.Files = getSelectedFiles(t, data) // Get selected files
+	t.Files = r.getSelectedFiles(t, data) // Get selected files
 	return nil
 }
 
@@ -386,7 +424,7 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent, isSymlink bool) (*types.Torre
 				return t, err
 			}
 		} else if status == "downloaded" {
-			t.Files = getSelectedFiles(t, data) // Get selected files
+			t.Files = r.getSelectedFiles(t, data) // Get selected files
 			r.logger.Info().Msgf("Torrent: %s downloaded to RD", t.Name)
 			if !isSymlink {
 				err = r.GenerateDownloadLinks(t)
