@@ -2,6 +2,10 @@ package web
 
 import (
 	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/goccy/go-json"
 	"github.com/sirrobot01/decypharr/internal/config"
@@ -11,9 +15,6 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/qbit"
 	"github.com/sirrobot01/decypharr/pkg/service"
 	"github.com/sirrobot01/decypharr/pkg/version"
-	"net/http"
-	"strings"
-	"time"
 )
 
 func (ui *Handler) handleGetArrs(w http.ResponseWriter, r *http.Request) {
@@ -142,7 +143,7 @@ func (ui *Handler) handleGetVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ui *Handler) handleGetTorrents(w http.ResponseWriter, r *http.Request) {
-	request.JSONResponse(w, ui.qbit.Storage.GetAll("", "", nil), http.StatusOK)
+	request.JSONResponse(w, ui.qbit.Storage.GetAllSorted("", "", nil, "added_on", false), http.StatusOK)
 }
 
 func (ui *Handler) handleDeleteTorrent(w http.ResponseWriter, r *http.Request) {
