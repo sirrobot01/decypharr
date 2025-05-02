@@ -221,7 +221,17 @@ func (h *Handler) Stat(ctx context.Context, name string) (os.FileInfo, error) {
 func (h *Handler) getFileInfos(torrent *types.Torrent) []os.FileInfo {
 	files := make([]os.FileInfo, 0, len(torrent.Files))
 	now := time.Now()
+
+	// Sort by file name since the order is lost when using the map
+	sortedFiles := make([]*types.File, 0, len(torrent.Files))
 	for _, file := range torrent.Files {
+		sortedFiles = append(sortedFiles, &file)
+	}
+	slices.SortFunc(sortedFiles, func(a, b *types.File) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+
+	for _, file := range sortedFiles {
 		files = append(files, &FileInfo{
 			name:    file.Name,
 			size:    file.Size,
