@@ -154,7 +154,7 @@ func (r *RealDebrid) getSelectedFiles(t *types.Torrent, data torrentInfo) map[st
 		}
 
 		dlLink := downloadLinkObj.DownloadLink
-		reader, err := rar.NewRar3Reader(dlLink)
+		reader, err := rar.NewReader(dlLink)
 
 		if err != nil {
 			r.logger.Error().Err(err).Msg("Failed to create RAR reader")

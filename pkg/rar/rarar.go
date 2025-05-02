@@ -1,4 +1,5 @@
-// AI generated Go translation of the RARAR.py library https://github.com/eliasbenb/RARAR.py
+// Source: https://github.com/eliasbenb/RARAR.py
+// Note that this code only translates the original Python for RAR3 (not RAR5) support.
 
 package rar
 
@@ -20,21 +21,21 @@ var (
 	MaxSearchSize    = 1 << 20 // 1MB
 
 	// RAR marker and block types
-	Rar3Marker      = []byte{0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00}
-	Rar3BlockFile   = byte(0x74)
-	Rar3BlockHeader = byte(0x73)
-	Rar3BlockMarker = byte(0x72)
-	Rar3BlockEnd    = byte(0x7B)
+	Rar3Marker  = []byte{0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00}
+	BlockFile   = byte(0x74)
+	BlockHeader = byte(0x73)
+	BlockMarker = byte(0x72)
+	BlockEnd    = byte(0x7B)
 
 	// Header flags
-	Rar3FlagDirectory      = 0xE0
-	Rar3FlagHasHighSize    = 0x100
-	Rar3FlagHasUnicodeName = 0x200
-	Rar3FlagHasData        = 0x8000
+	FlagDirectory      = 0xE0
+	FlagHasHighSize    = 0x100
+	FlagHasUnicodeName = 0x200
+	FlagHasData        = 0x8000
 )
 
 // Compression methods
-var Rar3CompressionMethods = map[byte]string{
+var CompressionMethods = map[byte]string{
 	0x30: "Store",
 	0x31: "Fastest",
 	0x32: "Fast",
@@ -45,16 +46,16 @@ var Rar3CompressionMethods = map[byte]string{
 
 // Error definitions
 var (
-	ErrRarMarkerNotFound            = errors.New("RAR marker not found within search limit")
-	ErrInvalidRarFormat             = errors.New("invalid RAR format")
+	ErrMarkerNotFound               = errors.New("RAR marker not found within search limit")
+	ErrInvalidFormat                = errors.New("invalid RAR format")
 	ErrNetworkError                 = errors.New("network error")
 	ErrRangeRequestsNotSupported    = errors.New("server does not support range requests")
 	ErrCompressionNotSupported      = errors.New("compression method not supported")
 	ErrDirectoryExtractNotSupported = errors.New("directory extract not supported")
 )
 
-// RarFile represents a file entry in a RAR archive
-type RarFile struct {
+// File represents a file entry in a RAR archive
+type File struct {
 	Path           string
 	Size           int64
 	CompressedSize int64
@@ -66,11 +67,11 @@ type RarFile struct {
 }
 
 // Name returns the base filename of the file
-func (f *RarFile) Name() string {
+func (f *File) Name() string {
 	return filepath.Base(f.Path)
 }
 
-func (f *RarFile) ByteRange() *[2]int64 {
+func (f *File) ByteRange() *[2]int64 {
 	return &[2]int64{f.DataOffset, f.DataOffset + f.CompressedSize - 1}
 }
 
@@ -194,33 +195,33 @@ func (f *HttpFile) ReadAt(p []byte, off int64) (n int, err error) {
 	}
 }
 
-// Rar3Reader reads RAR3 format archives
-type Rar3Reader struct {
+// Reader reads RAR3 format archives
+type Reader struct {
 	File      *HttpFile
 	ChunkSize int
-	RarMarker int64
-	Files     []*RarFile
+	Marker    int64
+	Files     []*File
 }
 
-// NewRar3Reader creates a new RAR3 reader
-func NewRar3Reader(url string) (*Rar3Reader, error) {
+// NewReader creates a new RAR3 reader
+func NewReader(url string) (*Reader, error) {
 	file, err := NewHttpFile(url)
 	if err != nil {
 		return nil, err
 	}
 
-	reader := &Rar3Reader{
+	reader := &Reader{
 		File:      file,
 		ChunkSize: HttpChunkSize,
-		Files:     make([]*RarFile, 0),
+		Files:     make([]*File, 0),
 	}
 
 	// Find RAR marker
-	marker, err := reader.findRarMarker()
+	marker, err := reader.findMarker()
 	if err != nil {
 		return nil, err
 	}
-	reader.RarMarker = marker
+	reader.Marker = marker
 
 	// Generate file list
 	if err := reader.readFiles(); err != nil {
@@ -231,7 +232,7 @@ func NewRar3Reader(url string) (*Rar3Reader, error) {
 }
 
 // readBytes reads a range of bytes from the file
-func (r *Rar3Reader) readBytes(start int64, length int) ([]byte, error) {
+func (r *Reader) readBytes(start int64, length int) ([]byte, error) {
 	if length <= 0 {
 		return []byte{}, nil
 	}
@@ -250,8 +251,8 @@ func (r *Rar3Reader) readBytes(start int64, length int) ([]byte, error) {
 	return data, nil
 }
 
-// findRarMarker finds the RAR marker in the file
-func (r *Rar3Reader) findRarMarker() (int64, error) {
+// findMarker finds the RAR marker in the file
+func (r *Reader) findMarker() (int64, error) {
 	// First try to find marker in the first chunk
 	firstChunkSize := 8192 // 8KB
 	chunk, err := r.readBytes(0, firstChunkSize)
@@ -284,11 +285,11 @@ func (r *Rar3Reader) findRarMarker() (int64, error) {
 		position += int64(max(1, len(chunk)-len(Rar3Marker)+1))
 	}
 
-	return 0, ErrRarMarkerNotFound
+	return 0, ErrMarkerNotFound
 }
 
-// decodeRar3Unicode decodes RAR3 Unicode encoding
-func decodeRar3Unicode(asciiStr string, unicodeData []byte) string {
+// decodeUnicode decodes RAR3 Unicode encoding
+func decodeUnicode(asciiStr string, unicodeData []byte) string {
 	if len(unicodeData) == 0 {
 		return asciiStr
 	}
@@ -371,8 +372,8 @@ func decodeRar3Unicode(asciiStr string, unicodeData []byte) string {
 }
 
 // readFiles reads all file entries in the archive
-func (r *Rar3Reader) readFiles() error {
-	pos := r.RarMarker
+func (r *Reader) readFiles() error {
+	pos := r.Marker
 	pos += int64(len(Rar3Marker)) // Skip marker block
 
 	// Read archive header
@@ -384,8 +385,8 @@ func (r *Rar3Reader) readFiles() error {
 	headType := headerData[2]
 	headSize := int(binary.LittleEndian.Uint16(headerData[5:7]))
 
-	if headType != Rar3BlockHeader {
-		return ErrInvalidRarFormat
+	if headType != BlockHeader {
+		return ErrInvalidFormat
 	}
 
 	pos += int64(headSize) // Skip archive header
@@ -402,12 +403,12 @@ func (r *Rar3Reader) readFiles() error {
 		headFlags := int(binary.LittleEndian.Uint16(headerData[3:5]))
 		headSize := int(binary.LittleEndian.Uint16(headerData[5:7]))
 
-		if headType == Rar3BlockEnd {
+		if headType == BlockEnd {
 			// End of archive
 			break
 		}
 
-		if headType == Rar3BlockFile {
+		if headType == BlockFile {
 			// Get complete header data
 			completeHeader, err := r.readBytes(pos, headSize)
 			if err != nil || len(completeHeader) < headSize {
@@ -427,7 +428,7 @@ func (r *Rar3Reader) readFiles() error {
 			pos += int64(headSize)
 
 			// Skip data if present
-			if headFlags&Rar3FlagHasData != 0 {
+			if headFlags&FlagHasData != 0 {
 				// Read data size
 				sizeData, err := r.readBytes(pos-4, 4)
 				if err != nil || len(sizeData) < 4 {
@@ -444,7 +445,7 @@ func (r *Rar3Reader) readFiles() error {
 }
 
 // parseFileHeader parses a file header and returns file info
-func (r *Rar3Reader) parseFileHeader(headerData []byte, position int64) (*RarFile, error) {
+func (r *Reader) parseFileHeader(headerData []byte, position int64) (*File, error) {
 	if len(headerData) < 7 {
 		return nil, fmt.Errorf("header data too short")
 	}
@@ -453,7 +454,7 @@ func (r *Rar3Reader) parseFileHeader(headerData []byte, position int64) (*RarFil
 	headFlags := int(binary.LittleEndian.Uint16(headerData[3:5]))
 	headSize := int(binary.LittleEndian.Uint16(headerData[5:7]))
 
-	if headType != Rar3BlockFile {
+	if headType != BlockFile {
 		return nil, fmt.Errorf("not a file block")
 	}
 
@@ -479,7 +480,7 @@ func (r *Rar3Reader) parseFileHeader(headerData []byte, position int64) (*RarFil
 
 	offset := 32 // Start after basic header fields
 
-	if headFlags&Rar3FlagHasHighSize != 0 {
+	if headFlags&FlagHasHighSize != 0 {
 		if offset+8 <= len(headerData) {
 			highPackSize = binary.LittleEndian.Uint32(headerData[offset : offset+4])
 			highUnpSize = binary.LittleEndian.Uint32(headerData[offset+4 : offset+8])
@@ -496,14 +497,14 @@ func (r *Rar3Reader) parseFileHeader(headerData []byte, position int64) (*RarFil
 	if offset+int(nameSize) <= len(headerData) {
 		fileNameBytes := headerData[offset : offset+int(nameSize)]
 
-		if headFlags&Rar3FlagHasUnicodeName != 0 {
+		if headFlags&FlagHasUnicodeName != 0 {
 			// Handle Unicode filename
 			zeroPos := bytes.IndexByte(fileNameBytes, 0)
 			if zeroPos != -1 {
 				// Has ASCII and Unicode parts
 				asciiPart := string(fileNameBytes[:zeroPos])
 				unicodePart := fileNameBytes[zeroPos+1:]
-				fileName = decodeRar3Unicode(asciiPart, unicodePart)
+				fileName = decodeUnicode(asciiPart, unicodePart)
 			} else {
 				// No null byte, try as UTF-8
 				fileName = string(fileNameBytes)
@@ -516,18 +517,18 @@ func (r *Rar3Reader) parseFileHeader(headerData []byte, position int64) (*RarFil
 		fileName = fmt.Sprintf("UnknownFile%d", len(r.Files))
 	}
 
-	isDirectory := (headFlags & Rar3FlagDirectory) == Rar3FlagDirectory
+	isDirectory := (headFlags & FlagDirectory) == FlagDirectory
 
 	// Calculate data offsets
 	dataOffset := position + int64(headSize)
 	nextOffset := dataOffset
 
 	// Only add data size if it's not a directory and has data
-	if !isDirectory && headFlags&Rar3FlagHasData != 0 {
+	if !isDirectory && headFlags&FlagHasData != 0 {
 		nextOffset += fullPackSize
 	}
 
-	return &RarFile{
+	return &File{
 		Path:           fileName,
 		Size:           fullUnpSize,
 		CompressedSize: fullPackSize,
@@ -540,12 +541,12 @@ func (r *Rar3Reader) parseFileHeader(headerData []byte, position int64) (*RarFil
 }
 
 // GetFiles returns all files in the archive
-func (r *Rar3Reader) GetFiles() []*RarFile {
+func (r *Reader) GetFiles() []*File {
 	return r.Files
 }
 
 // ExtractFile extracts a file from the archive
-func (r *Rar3Reader) ExtractFile(file *RarFile) ([]byte, error) {
+func (r *Reader) ExtractFile(file *File) ([]byte, error) {
 	if file.IsDirectory {
 		return nil, ErrDirectoryExtractNotSupported
 	}
