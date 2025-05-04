@@ -75,7 +75,7 @@ func (f *File) getDownloadLink() (string, error) {
 	return "", os.ErrNotExist
 }
 
-func (f *File) GetDownloadByteRange() (*[2]int64, error) {
+func (f *File) getDownloadByteRange() (*[2]int64, error) {
 	byteRange, err := f.cache.GetDownloadByteRange(f.torrentName, f.name)
 	if err != nil {
 		return nil, err
@@ -98,7 +98,7 @@ func (f *File) stream() (*http.Response, error) {
 		return nil, fmt.Errorf("empty download link")
 	}
 
-	byteRange, err := f.GetDownloadByteRange()
+	byteRange, err := f.getDownloadByteRange()
 	if err != nil {
 		_log.Trace().Msgf("Failed to get download byte range for %s: %v", f.name, err)
 		return nil, err
