@@ -7,14 +7,13 @@ import (
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/arr"
-	db "github.com/sirrobot01/decypharr/pkg/debrid/debrid"
-	debrid "github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"github.com/sirrobot01/decypharr/pkg/debrid/debrid"
+	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/service"
 	"io"
 	"mime/multipart"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 )
@@ -56,7 +55,7 @@ func (q *QBit) Process(ctx context.Context, magnet *utils.Magnet, category strin
 		return fmt.Errorf("arr not found in context")
 	}
 	isSymlink := ctx.Value("isSymlink").(bool)
-	debridTorrent, err := db.ProcessTorrent(svc.Debrid, magnet, a, isSymlink, false)
+	debridTorrent, err := debrid.ProcessTorrent(svc.Debrid, magnet, a, isSymlink, false)
 	if err != nil || debridTorrent == nil {
 		if err == nil {
 			err = fmt.Errorf("failed to process torrent")
@@ -69,22 +68,27 @@ func (q *QBit) Process(ctx context.Context, magnet *utils.Magnet, category strin
 	return nil
 }
 
-func (q *QBit) ProcessFiles(torrent *Torrent, debridTorrent *debrid.Torrent, arr *arr.Arr, isSymlink bool) {
+func (q *QBit) ProcessFiles(torrent *Torrent, debridTorrent *debridTypes.Torrent, arr *arr.Arr, isSymlink bool) {
 	svc := service.GetService()
 	client := svc.Debrid.GetClient(debridTorrent.Debrid)
+	downloadingStatuses := client.GetDownloadingStatus()
 	for debridTorrent.Status != "downloaded" {
 		q.logger.Debug().Msgf("%s <- (%s) Download Progress: %.2f%%", debridTorrent.Debrid, debridTorrent.Name, debridTorrent.Progress)
 		dbT, err := client.CheckStatus(debridTorrent, isSymlink)
 		if err != nil {
 			if dbT != nil && dbT.Id != "" {
 				// Delete the torrent if it was not downloaded
-				_ = client.DeleteTorrent(dbT.Id)
+				go func() {
+					_ = client.DeleteTorrent(dbT.Id)
+				}()
 			}
 			q.logger.Error().Msgf("Error checking status: %v", err)
 			q.MarkAsFailed(torrent)
-			if err := arr.Refresh(); err != nil {
-				q.logger.Error().Msgf("Error refreshing arr: %v", err)
-			}
+			go func() {
+				if err := arr.Refresh(); err != nil {
+					q.logger.Error().Msgf("Error refreshing arr: %v", err)
+				}
+			}()
 			return
 		}
 
@@ -92,22 +96,24 @@ func (q *QBit) ProcessFiles(torrent *Torrent, debridTorrent *debrid.Torrent, arr
 		torrent = q.UpdateTorrentMin(torrent, debridTorrent)
 
 		// Exit the loop for downloading statuses to prevent memory buildup
-		if !slices.Contains(client.GetDownloadingStatus(), debridTorrent.Status) {
+		if debridTorrent.Status == "downloaded" || !utils.Contains(downloadingStatuses, debridTorrent.Status) {
+			break
+		}
+		if !utils.Contains(client.GetDownloadingStatus(), debridTorrent.Status) {
 			break
 		}
 		time.Sleep(time.Duration(q.RefreshInterval) * time.Second)
 	}
-	var (
-		torrentSymlinkPath string
-		err                error
-	)
+	var torrentSymlinkPath string
+	var err error
 	debridTorrent.Arr = arr
 
 	// Check if debrid supports webdav by checking cache
 	if isSymlink {
-		cache, ok := svc.Debrid.Caches[debridTorrent.Debrid]
-		if ok {
+		cache, useWebdav := svc.Debrid.Caches[debridTorrent.Debrid]
+		if useWebdav {
 			q.logger.Info().Msgf("Using internal webdav for %s", debridTorrent.Debrid)
+			timer := time.Now()
 			// Use webdav to download the file
 
 			if err := cache.AddTorrent(debridTorrent); err != nil {
@@ -118,7 +124,6 @@ func (q *QBit) ProcessFiles(torrent *Torrent, debridTorrent *debrid.Torrent, arr
 
 			rclonePath := filepath.Join(debridTorrent.MountPath, cache.GetTorrentFolder(debridTorrent)) // /mnt/remote/realdebrid/MyTVShow
 			torrentFolderNoExt := utils.RemoveExtension(debridTorrent.Name)
-			timer := time.Now()
 			torrentSymlinkPath, err = q.createSymlinksWebdav(debridTorrent, rclonePath, torrentFolderNoExt) // /mnt/symlinks/{category}/MyTVShow/
 			q.logger.Debug().Msgf("Adding %s took %s", debridTorrent.Name, time.Since(timer))
 
@@ -160,7 +165,7 @@ func (q *QBit) MarkAsFailed(t *Torrent) *Torrent {
 	return t
 }
 
-func (q *QBit) UpdateTorrentMin(t *Torrent, debridTorrent *debrid.Torrent) *Torrent {
+func (q *QBit) UpdateTorrentMin(t *Torrent, debridTorrent *debridTypes.Torrent) *Torrent {
 	if debridTorrent == nil {
 		return t
 	}
@@ -202,7 +207,7 @@ func (q *QBit) UpdateTorrentMin(t *Torrent, debridTorrent *debrid.Torrent) *Torr
 	return t
 }
 
-func (q *QBit) UpdateTorrent(t *Torrent, debridTorrent *debrid.Torrent) *Torrent {
+func (q *QBit) UpdateTorrent(t *Torrent, debridTorrent *debridTypes.Torrent) *Torrent {
 	if debridTorrent == nil {
 		return t
 	}
@@ -298,10 +303,10 @@ func (q *QBit) SetTorrentTags(t *Torrent, tags []string) bool {
 		if tag == "" {
 			continue
 		}
-		if !slices.Contains(torrentTags, tag) {
+		if !utils.Contains(torrentTags, tag) {
 			torrentTags = append(torrentTags, tag)
 		}
-		if !slices.Contains(q.Tags, tag) {
+		if !utils.Contains(q.Tags, tag) {
 			q.Tags = append(q.Tags, tag)
 		}
 	}
@@ -324,7 +329,7 @@ func (q *QBit) AddTags(tags []string) bool {
 		if tag == "" {
 			continue
 		}
-		if !slices.Contains(q.Tags, tag) {
+		if !utils.Contains(q.Tags, tag) {
 			q.Tags = append(q.Tags, tag)
 		}
 	}

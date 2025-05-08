@@ -1,6 +1,7 @@
 package debrid
 
 import (
+	"context"
 	"fmt"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/utils"
@@ -64,7 +65,7 @@ func (c *Cache) RefreshListings(refreshRclone bool) {
 	}
 
 	if refreshRclone {
-		if err := c.RefreshRclone(); err != nil {
+		if err := c.refreshRclone(); err != nil {
 			c.logger.Trace().Err(err).Msg("Failed to refresh rclone") // silent error
 		}
 	}
@@ -128,23 +129,17 @@ func (c *Cache) refreshTorrents() {
 		go func() {
 			defer wg.Done()
 			for t := range workChan {
-				select {
-				default:
-					if err := c.ProcessTorrent(t); err != nil {
-						c.logger.Error().Err(err).Msgf("Failed to process new torrent %s", t.Id)
-						errChan <- err
-					}
-					counter++
+				if err := c.ProcessTorrent(t); err != nil {
+					c.logger.Error().Err(err).Msgf("Failed to process new torrent %s", t.Id)
+					errChan <- err
 				}
+				counter++
 			}
 		}()
 	}
 
 	for _, t := range newTorrents {
-		select {
-		default:
-			workChan <- t
-		}
+		workChan <- t
 	}
 	close(workChan)
 	wg.Wait()
@@ -154,58 +149,68 @@ func (c *Cache) refreshTorrents() {
 	c.logger.Debug().Msgf("Processed %d new torrents", counter)
 }
 
-func (c *Cache) RefreshRclone() error {
+func (c *Cache) refreshRclone() error {
 	cfg := config.Get().WebDav
 
 	if cfg.RcUrl == "" {
 		return nil
 	}
+
+	if cfg.RcUrl == "" {
+		return nil
+	}
+
+	// Create an optimized HTTP client
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:        10,
+			IdleConnTimeout:     30 * time.Second,
+			DisableCompression:  false,
+			MaxIdleConnsPerHost: 5,
+		},
+	}
 	// Create form data
 	data := "dir=__all__&dir2=torrents"
 
-	// Create a POST request with form URL-encoded content
-	forgetReq, err := http.NewRequest("POST", fmt.Sprintf("%s/vfs/forget", cfg.RcUrl), strings.NewReader(data))
-	if err != nil {
-		return err
-	}
-	if cfg.RcUser != "" && cfg.RcPass != "" {
-		forgetReq.SetBasicAuth(cfg.RcUser, cfg.RcPass)
+	sendRequest := func(endpoint string) error {
+		req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s", cfg.RcUrl, endpoint), strings.NewReader(data))
+		if err != nil {
+			return err
+		}
+
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+		if cfg.RcUser != "" && cfg.RcPass != "" {
+			req.SetBasicAuth(cfg.RcUser, cfg.RcPass)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		req = req.WithContext(ctx)
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != 200 {
+			// Only read a limited amount of the body on error
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+			return fmt.Errorf("failed to perform %s: %s - %s", endpoint, resp.Status, string(body))
+		}
+
+		// Discard response body to reuse connection
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil
 	}
 
-	// Set the appropriate content type for form data
-	forgetReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	// Send the request
-	client := &http.Client{}
-	client.Timeout = 10 * time.Second
-	forgetResp, err := client.Do(forgetReq)
-	if err != nil {
+	if err := sendRequest("vfs/forget"); err != nil {
 		return err
 	}
-	defer forgetResp.Body.Close()
-
-	if forgetResp.StatusCode != 200 {
-		body, _ := io.ReadAll(forgetResp.Body)
-		return fmt.Errorf("failed to forget rclone: %s - %s", forgetResp.Status, string(body))
-	}
-
-	// Run vfs/refresh
-	refreshReq, err := http.NewRequest("POST", fmt.Sprintf("%s/vfs/refresh", cfg.RcUrl), strings.NewReader(data))
-	if err != nil {
+	if err := sendRequest("vfs/refresh"); err != nil {
 		return err
-	}
-	if cfg.RcUser != "" && cfg.RcPass != "" {
-		refreshReq.SetBasicAuth(cfg.RcUser, cfg.RcPass)
-	}
-	refreshReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	refreshResp, err := client.Do(refreshReq)
-	if err != nil {
-		return err
-	}
-	defer refreshResp.Body.Close()
-	if refreshResp.StatusCode != 200 {
-		body, _ := io.ReadAll(refreshResp.Body)
-		return fmt.Errorf("failed to refresh rclone: %s - %s", refreshResp.Status, string(body))
 	}
 
 	return nil
@@ -226,7 +231,9 @@ func (c *Cache) refreshTorrent(torrentId string) *CachedTorrent {
 		AddedOn:    addedOn,
 		IsComplete: len(torrent.Files) > 0,
 	}
-	c.setTorrent(ct)
+	c.setTorrent(ct, func(torrent *CachedTorrent) {
+		go c.RefreshListings(false)
+	})
 
 	return ct
 }

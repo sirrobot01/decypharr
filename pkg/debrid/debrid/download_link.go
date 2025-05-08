@@ -9,50 +9,13 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 )
 
-type downloadLinkRequest struct {
-	result string
-	err    error
-	done   chan struct{}
-}
-
-func newDownloadLinkRequest() *downloadLinkRequest {
-	return &downloadLinkRequest{
-		done: make(chan struct{}),
-	}
-}
-
-func (r *downloadLinkRequest) Complete(result string, err error) {
-	r.result = result
-	r.err = err
-	close(r.done)
-}
-
-func (r *downloadLinkRequest) Wait() (string, error) {
-	<-r.done
-	return r.result, r.err
-}
-
 func (c *Cache) GetDownloadLink(torrentName, filename, fileLink string) (string, error) {
 	// Check link cache
 	if dl := c.checkDownloadLink(fileLink); dl != "" {
 		return dl, nil
 	}
 
-	if req, inFlight := c.downloadLinkRequests.Load(fileLink); inFlight {
-		// Wait for the other request to complete and use its result
-		result := req.(*downloadLinkRequest)
-		return result.Wait()
-	}
-
-	// Create a new request object
-	req := newDownloadLinkRequest()
-	c.downloadLinkRequests.Store(fileLink, req)
-
 	downloadLink, err := c.fetchDownloadLink(torrentName, filename, fileLink)
-
-	// Complete the request and remove it from the map
-	req.Complete(downloadLink, err)
-	c.downloadLinkRequests.Delete(fileLink)
 
 	return downloadLink, err
 }

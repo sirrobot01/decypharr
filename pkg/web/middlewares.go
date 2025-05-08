@@ -18,7 +18,7 @@ func (ui *Handler) setupMiddleware(next http.Handler) http.Handler {
 		// strip inco from URL
 		if inco := r.URL.Query().Get("inco"); inco != "" && needsAuth == nil && r.URL.Path == "/config" {
 			// redirect to the same URL without the inco parameter
-			http.Redirect(w, r, fmt.Sprintf("/config"), http.StatusSeeOther)
+			http.Redirect(w, r, "/config", http.StatusSeeOther)
 		}
 		next.ServeHTTP(w, r)
 	})

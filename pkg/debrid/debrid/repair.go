@@ -8,7 +8,6 @@ import (
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"slices"
 	"sync"
 	"time"
 )
@@ -43,7 +42,7 @@ func (c *Cache) IsTorrentBroken(t *CachedTorrent, filenames []string) bool {
 	files := make(map[string]types.File)
 	if len(filenames) > 0 {
 		for name, f := range t.Files {
-			if slices.Contains(filenames, name) {
+			if utils.Contains(filenames, name) {
 				files[name] = f
 			}
 		}
@@ -201,8 +200,9 @@ func (c *Cache) reInsertTorrent(ct *CachedTorrent) (*CachedTorrent, error) {
 		AddedOn:    addedOn,
 		IsComplete: len(newTorrent.Files) > 0,
 	}
-	c.setTorrent(ct)
-	c.RefreshListings(true)
+	c.setTorrent(ct, func(torrent *CachedTorrent) {
+		go c.RefreshListings(true)
+	})
 
 	// We can safely delete the old torrent here
 	if oldID != "" {

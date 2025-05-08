@@ -293,6 +293,7 @@ func New(options ...ClientOption) *Client {
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: client.skipTLSVerify,
 			},
+			DisableKeepAlives: false,
 		}
 
 		// Configure proxy if needed

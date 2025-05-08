@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/goccy/go-json"
-	"github.com/puzpuzpuz/xsync/v3"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
@@ -18,7 +17,6 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,7 +27,8 @@ type Torbox struct {
 	Name             string
 	Host             string `json:"host"`
 	APIKey           string
-	DownloadKeys     *xsync.MapOf[string, types.Account]
+	accounts         map[string]types.Account
+	accountsMutex    sync.RWMutex
 	DownloadUncached bool
 	client           *request.Client
 
@@ -53,21 +52,21 @@ func New(dc config.Debrid) *Torbox {
 		request.WithProxy(dc.Proxy),
 	)
 
-	accounts := xsync.NewMapOf[string, types.Account]()
+	accounts := make(map[string]types.Account)
 	for idx, key := range dc.DownloadAPIKeys {
 		id := strconv.Itoa(idx)
-		accounts.Store(id, types.Account{
+		accounts[id] = types.Account{
 			Name:  key,
 			ID:    id,
 			Token: key,
-		})
+		}
 	}
 
 	return &Torbox{
 		Name:             "torbox",
 		Host:             "https://api.torbox.app/v1",
 		APIKey:           dc.APIKey,
-		DownloadKeys:     accounts,
+		accounts:         accounts,
 		DownloadUncached: dc.DownloadUncached,
 		client:           client,
 		MountPath:        dc.Folder,
@@ -176,7 +175,7 @@ func getTorboxStatus(status string, finished bool) string {
 		"forcedUP", "allocating", "downloading", "metaDL", "pausedDL",
 		"queuedDL", "checkingDL", "forcedDL", "checkingResumeData", "moving"}
 	switch {
-	case slices.Contains(downloading, status):
+	case utils.Contains(downloading, status):
 		return "downloading"
 	default:
 		return "error"
@@ -328,7 +327,7 @@ func (tb *Torbox) CheckStatus(torrent *types.Torrent, isSymlink bool) (*types.To
 				}
 			}
 			break
-		} else if slices.Contains(tb.GetDownloadingStatus(), status) {
+		} else if utils.Contains(tb.GetDownloadingStatus(), status) {
 			if !torrent.DownloadUncached {
 				return torrent, fmt.Errorf("torrent: %s not cached", torrent.Name)
 			}

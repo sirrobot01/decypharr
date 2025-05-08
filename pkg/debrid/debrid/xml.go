@@ -6,35 +6,9 @@ import (
 	"github.com/sirrobot01/decypharr/internal/request"
 	"net/http"
 	"os"
-	path "path/filepath"
+	"path"
 	"time"
 )
-
-// resetPropfindResponse resets the propfind response cache for the specified parent directories.
-func (c *Cache) resetPropfindResponse() error {
-	// Right now, parents are hardcoded
-	parents := []string{"__all__", "torrents"}
-	// Reset only the parent directories
-	// Convert the parents to a keys
-	// This is a bit hacky, but it works
-	// Instead of deleting all the keys, we only delete the parent keys, e.g __all__/ or torrents/
-	keys := make([]string, 0, len(parents))
-	for _, p := range parents {
-		// Construct the key
-		// construct url
-		url := path.Clean(path.Join("/webdav", c.client.GetName(), p))
-		key0 := fmt.Sprintf("propfind:%s:0", url)
-		key1 := fmt.Sprintf("propfind:%s:1", url)
-		keys = append(keys, key0, key1)
-	}
-
-	// Delete the keys
-	for _, k := range keys {
-		c.PropfindResp.Delete(k)
-	}
-	c.logger.Trace().Msgf("Reset XML cache for %s", c.client.GetName())
-	return nil
-}
 
 func (c *Cache) refreshParentXml() error {
 	parents := []string{"__all__", "torrents"}
@@ -86,17 +60,12 @@ func (c *Cache) refreshFolderXml(torrents []os.FileInfo, clientName, parent stri
 		return fmt.Errorf("failed to generate XML: %v", err)
 	}
 
-	// Store in cache
-	key0 := fmt.Sprintf("propfind:%s:0", baseUrl)
-	key1 := fmt.Sprintf("propfind:%s:1", baseUrl)
-
 	res := PropfindResponse{
 		Data:        xmlData,
 		GzippedData: request.Gzip(xmlData),
 		Ts:          time.Now(),
 	}
-	c.PropfindResp.Store(key0, res)
-	c.PropfindResp.Store(key1, res)
+	c.PropfindResp.Set(baseUrl, res)
 	return nil
 }
 

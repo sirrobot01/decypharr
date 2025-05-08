@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 // getName: Returns the torrent name and filename from the path
@@ -26,4 +27,15 @@ func isValidURL(str string) bool {
 	u, err := url.Parse(str)
 	// A valid URL should parse without error, and have a non-empty scheme and host.
 	return err == nil && u.Scheme != "" && u.Host != ""
+}
+
+// Determine TTL based on the requested folder:
+//   - If the path is exactly the parent folder (which changes frequently),
+//     use a short TTL.
+//   - Otherwise, for deeper (torrent folder) paths, use a longer TTL.
+func (h *Handler) getCacheTTL(urlPath string) time.Duration {
+	if h.isParentPath(urlPath) {
+		return 30 * time.Second // Short TTL for parent folders
+	}
+	return 2 * time.Minute // Longer TTL for other paths
 }

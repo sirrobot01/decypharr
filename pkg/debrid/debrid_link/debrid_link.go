@@ -4,15 +4,14 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/goccy/go-json"
-	"github.com/puzpuzpuz/xsync/v3"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"net/http"
@@ -23,7 +22,8 @@ type DebridLink struct {
 	Name             string
 	Host             string `json:"host"`
 	APIKey           string
-	DownloadKeys     *xsync.MapOf[string, types.Account]
+	accounts         map[string]types.Account
+	accountsMutex    sync.RWMutex
 	DownloadUncached bool
 	client           *request.Client
 
@@ -286,7 +286,7 @@ func (dl *DebridLink) CheckStatus(torrent *types.Torrent, isSymlink bool) (*type
 				return torrent, err
 			}
 			break
-		} else if slices.Contains(dl.GetDownloadingStatus(), status) {
+		} else if utils.Contains(dl.GetDownloadingStatus(), status) {
 			if !torrent.DownloadUncached {
 				return torrent, fmt.Errorf("torrent: %s not cached", torrent.Name)
 			}
@@ -351,20 +351,20 @@ func New(dc config.Debrid) *DebridLink {
 		request.WithProxy(dc.Proxy),
 	)
 
-	accounts := xsync.NewMapOf[string, types.Account]()
+	accounts := make(map[string]types.Account)
 	for idx, key := range dc.DownloadAPIKeys {
 		id := strconv.Itoa(idx)
-		accounts.Store(id, types.Account{
+		accounts[id] = types.Account{
 			Name:  key,
 			ID:    id,
 			Token: key,
-		})
+		}
 	}
 	return &DebridLink{
 		Name:             "debridlink",
 		Host:             "https://debrid-link.com/api/v2",
 		APIKey:           dc.APIKey,
-		DownloadKeys:     accounts,
+		accounts:         accounts,
 		DownloadUncached: dc.DownloadUncached,
 		client:           client,
 		MountPath:        dc.Folder,

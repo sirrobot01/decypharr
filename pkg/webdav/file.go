@@ -24,7 +24,7 @@ var sharedClient = &http.Client{
 		ExpectContinueTimeout: 1 * time.Second,
 		DisableKeepAlives:     false,
 	},
-	Timeout: 60 * time.Second,
+	Timeout: 0,
 }
 
 type File struct {

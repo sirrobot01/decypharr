@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,26 +36,11 @@ const (
 	WebdavUseHash              WebDavFolderNaming = "infohash"
 )
 
-type PropfindResponse struct {
-	Data        []byte
-	GzippedData []byte
-	Ts          time.Time
-}
-
 type CachedTorrent struct {
 	*types.Torrent
 	AddedOn      time.Time `json:"added_on"`
 	IsComplete   bool      `json:"is_complete"`
 	DuplicateIds []string  `json:"duplicate_ids"`
-}
-
-func (ct *CachedTorrent) addDuplicateId(id string) {
-	if ct.DuplicateIds == nil {
-		ct.DuplicateIds = make([]string, 0)
-	}
-	if !slices.Contains(ct.DuplicateIds, id) {
-		ct.DuplicateIds = append(ct.DuplicateIds, id)
-	}
 }
 
 type downloadLinkCache struct {
@@ -89,13 +74,12 @@ type Cache struct {
 	listings             atomic.Value
 	downloadLinks        *xsync.MapOf[string, downloadLinkCache]
 	invalidDownloadLinks *xsync.MapOf[string, string]
-	PropfindResp         *xsync.MapOf[string, PropfindResponse]
+	PropfindResp         *PropfindCache
 	folderNaming         WebDavFolderNaming
 
 	// monitors
-	repairRequest        sync.Map
-	failedToReinsert     sync.Map
-	downloadLinkRequests sync.Map
+	repairRequest    sync.Map
+	failedToReinsert sync.Map
 
 	// repair
 	repairChan chan RepairRequest
@@ -131,13 +115,13 @@ func New(dc config.Debrid, client types.Client) *Cache {
 		torrents:                      xsync.NewMapOf[string, string](),
 		torrentsNames:                 xsync.NewMapOf[string, *CachedTorrent](),
 		invalidDownloadLinks:          xsync.NewMapOf[string, string](),
+		PropfindResp:                  NewPropfindCache(),
 		client:                        client,
 		logger:                        logger.New(fmt.Sprintf("%s-webdav", client.GetName())),
 		workers:                       dc.Workers,
 		downloadLinks:                 xsync.NewMapOf[string, downloadLinkCache](),
 		torrentRefreshInterval:        dc.TorrentsRefreshInterval,
 		downloadLinksRefreshInterval:  dc.DownloadLinksRefreshInterval,
-		PropfindResp:                  xsync.NewMapOf[string, PropfindResponse](),
 		folderNaming:                  WebDavFolderNaming(dc.FolderNaming),
 		autoExpiresLinksAfterDuration: autoExpiresLinksAfter,
 		saveSemaphore:                 make(chan struct{}, 50),
@@ -251,7 +235,7 @@ func (c *Cache) load() (map[string]*CachedTorrent, error) {
 						}
 						ct.IsComplete = true
 						ct.Files = fs
-						ct.Name = filepath.Clean(ct.Name)
+						ct.Name = path.Clean(ct.Name)
 						results.Store(ct.Id, &ct)
 					}
 				}
@@ -326,7 +310,9 @@ func (c *Cache) Sync() error {
 	}
 
 	// Write these torrents to the cache
-	c.setTorrents(cachedTorrents)
+	c.setTorrents(cachedTorrents, func() {
+		go c.RefreshListings(false)
+	}) // This is set to false, cos it's likely rclone hs not started yet.
 	c.logger.Info().Msgf("Loaded %d torrents from cache", len(cachedTorrents))
 
 	if len(newTorrents) > 0 {
@@ -404,23 +390,23 @@ func (c *Cache) sync(torrents []*types.Torrent) error {
 func (c *Cache) GetTorrentFolder(torrent *types.Torrent) string {
 	switch c.folderNaming {
 	case WebDavUseFileName:
-		return filepath.Clean(torrent.Filename)
+		return path.Clean(torrent.Filename)
 	case WebDavUseOriginalName:
-		return filepath.Clean(torrent.OriginalFilename)
+		return path.Clean(torrent.OriginalFilename)
 	case WebDavUseFileNameNoExt:
-		return filepath.Clean(utils.RemoveExtension(torrent.Filename))
+		return path.Clean(utils.RemoveExtension(torrent.Filename))
 	case WebDavUseOriginalNameNoExt:
-		return filepath.Clean(utils.RemoveExtension(torrent.OriginalFilename))
+		return path.Clean(utils.RemoveExtension(torrent.OriginalFilename))
 	case WebDavUseID:
 		return torrent.Id
 	case WebdavUseHash:
 		return strings.ToLower(torrent.InfoHash)
 	default:
-		return filepath.Clean(torrent.Filename)
+		return path.Clean(torrent.Filename)
 	}
 }
 
-func (c *Cache) setTorrent(t *CachedTorrent) {
+func (c *Cache) setTorrent(t *CachedTorrent, callback func(torrent *CachedTorrent)) {
 	torrentKey := c.GetTorrentFolder(t.Torrent)
 	c.torrents.Store(t.Id, torrentKey) // Store the torrent id with the folder name(we might change the id after,  hence why it's stored here)
 	if o, ok := c.torrentsNames.Load(torrentKey); ok && o.Id != t.Id {
@@ -437,9 +423,12 @@ func (c *Cache) setTorrent(t *CachedTorrent) {
 	}
 	c.torrentsNames.Store(torrentKey, t)
 	c.SaveTorrent(t)
+	if callback != nil {
+		callback(t)
+	}
 }
 
-func (c *Cache) setTorrents(torrents map[string]*CachedTorrent) {
+func (c *Cache) setTorrents(torrents map[string]*CachedTorrent, callback func()) {
 	for _, t := range torrents {
 		torrentKey := c.GetTorrentFolder(t.Torrent)
 		c.torrents.Store(t.Id, torrentKey)
@@ -453,8 +442,10 @@ func (c *Cache) setTorrents(torrents map[string]*CachedTorrent) {
 		}
 		c.torrentsNames.Store(torrentKey, t)
 	}
-	c.RefreshListings(false)
 	c.SaveTorrents()
+	if callback != nil {
+		callback()
+	}
 }
 
 func (c *Cache) GetListing() []os.FileInfo {
@@ -606,7 +597,7 @@ func (c *Cache) ProcessTorrent(t *types.Torrent) error {
 			IsComplete: len(t.Files) > 0,
 			AddedOn:    addedOn,
 		}
-		c.setTorrent(ct)
+		c.setTorrent(ct, nil)
 	}
 	return nil
 }
@@ -626,8 +617,9 @@ func (c *Cache) AddTorrent(t *types.Torrent) error {
 		IsComplete: len(t.Files) > 0,
 		AddedOn:    addedOn,
 	}
-	c.setTorrent(ct)
-	c.RefreshListings(true)
+	c.setTorrent(ct, func(tor *CachedTorrent) {
+		go c.RefreshListings(true)
+	})
 	go c.GenerateDownloadLinks(ct)
 	return nil
 
@@ -697,7 +689,7 @@ func (c *Cache) deleteTorrent(id string, removeFromDebrid bool) bool {
 				t.Files = newFiles
 				newId = cmp.Or(newId, t.Id)
 				t.Id = newId
-				c.setTorrent(t)
+				c.setTorrent(t, nil)
 			}
 		}
 		return true

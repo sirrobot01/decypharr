@@ -52,9 +52,9 @@ func (h *Handler) RemoveAll(ctx context.Context, name string) error {
 	if name[0] != '/' {
 		name = "/" + name
 	}
-	name = filepath.Clean(name)
+	name = path.Clean(name)
 
-	rootDir := filepath.Clean(h.getRootPath())
+	rootDir := path.Clean(h.getRootPath())
 
 	if name == rootDir {
 		return os.ErrPermission
@@ -112,8 +112,8 @@ func (h *Handler) OpenFile(ctx context.Context, name string, flag int, perm os.F
 	if name[0] != '/' {
 		name = "/" + name
 	}
-	name = utils.UnescapePath(filepath.Clean(name))
-	rootDir := filepath.Clean(h.getRootPath())
+	name = utils.UnescapePath(path.Clean(name))
+	rootDir := path.Clean(h.getRootPath())
 
 	metadataOnly := ctx.Value("metadataOnly") != nil
 
@@ -165,7 +165,7 @@ func (h *Handler) OpenFile(ctx context.Context, name string, flag int, perm os.F
 	_path := strings.TrimPrefix(name, rootDir)
 	parts := strings.Split(strings.TrimPrefix(_path, string(os.PathSeparator)), string(os.PathSeparator))
 
-	if len(parts) >= 2 && (slices.Contains(h.getParentItems(), parts[0])) {
+	if len(parts) >= 2 && (utils.Contains(h.getParentItems(), parts[0])) {
 
 		torrentName := parts[1]
 		cachedTorrent := h.cache.GetTorrentByName(torrentName)
@@ -221,7 +221,17 @@ func (h *Handler) Stat(ctx context.Context, name string) (os.FileInfo, error) {
 func (h *Handler) getFileInfos(torrent *types.Torrent) []os.FileInfo {
 	files := make([]os.FileInfo, 0, len(torrent.Files))
 	now := time.Now()
+
+	// Sort by file name since the order is lost when using the map
+	sortedFiles := make([]*types.File, 0, len(torrent.Files))
 	for _, file := range torrent.Files {
+		sortedFiles = append(sortedFiles, &file)
+	}
+	slices.SortFunc(sortedFiles, func(a, b *types.File) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+
+	for _, file := range sortedFiles {
 		files = append(files, &FileInfo{
 			name:    file.Name,
 			size:    file.Size,
@@ -247,7 +257,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Set metadata only
 		ctx := context.WithValue(r.Context(), "metadataOnly", true)
 		r = r.WithContext(ctx)
-		cleanPath := filepath.Clean(r.URL.Path)
+		cleanPath := path.Clean(r.URL.Path)
 		if r.Header.Get("Depth") == "" {
 			r.Header.Set("Depth", "1")
 		}
@@ -256,21 +266,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Depth") == "infinity" {
 			r.Header.Set("Depth", "1")
 		}
-		depth := r.Header.Get("Depth")
-		// Use both path and Depth header to form the cache key.
-		cacheKey := fmt.Sprintf("propfind:%s:%s", cleanPath, depth)
 
-		// Determine TTL based on the requested folder:
-		// - If the path is exactly the parent folder (which changes frequently),
-		//   use a short TTL.
-		// - Otherwise, for deeper (torrent folder) paths, use a longer TTL.
-		ttl := 1 * time.Minute
-		if h.isParentPath(r.URL.Path) {
-			// __all__ or torrents folder
-			ttl = 30 * time.Second
-		}
-
-		if served := h.serveFromCacheIfValid(w, r, cacheKey, ttl); served {
+		if served := h.serveFromCacheIfValid(w, r, cleanPath); served {
 			return
 		}
 
@@ -291,7 +288,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Create compressed version
 
-		h.cache.PropfindResp.Store(cacheKey, debrid.PropfindResponse{
+		h.cache.PropfindResp.Set(cleanPath, debrid.PropfindResponse{
 			Data:        responseData,
 			GzippedData: gzippedData,
 			Ts:          time.Now(),
@@ -441,25 +438,27 @@ func getContentType(fileName string) string {
 	return contentType
 }
 
-func (h *Handler) isParentPath(_path string) bool {
-	rootPath := h.getRootPath()
+func (h *Handler) isParentPath(urlPath string) bool {
 	parents := h.getParentItems()
+	lastComponent := path.Base(urlPath)
 	for _, p := range parents {
-		if filepath.Clean(_path) == filepath.Clean(filepath.Join(rootPath, p)) {
+		if p == lastComponent {
 			return true
 		}
 	}
 	return false
 }
 
-func (h *Handler) serveFromCacheIfValid(w http.ResponseWriter, r *http.Request, cacheKey string, ttl time.Duration) bool {
-	respCache, ok := h.cache.PropfindResp.Load(cacheKey)
+func (h *Handler) serveFromCacheIfValid(w http.ResponseWriter, r *http.Request, urlPath string) bool {
+	respCache, ok := h.cache.PropfindResp.Get(urlPath)
 	if !ok {
 		return false
 	}
 
+	ttl := h.getCacheTTL(urlPath)
+
 	if time.Since(respCache.Ts) >= ttl {
-		// Remove expired cache entry
+		h.cache.PropfindResp.Remove(urlPath)
 		return false
 	}
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
