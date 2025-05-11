@@ -11,8 +11,9 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
-	"path/filepath"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Constants from the Python code
@@ -70,7 +71,10 @@ type File struct {
 
 // Name returns the base filename of the file
 func (f *File) Name() string {
-	return filepath.Base(f.Path)
+	if i := strings.LastIndexAny(f.Path, "\\/"); i >= 0 {
+		return f.Path[i+1:]
+	}
+	return f.Path
 }
 
 func (f *File) ByteRange() *[2]int64 {
@@ -394,9 +398,9 @@ func decodeUnicode(asciiStr string, unicodeData []byte) string {
 			case 2:
 				// Unicode character with current high byte
 				if dataPos < len(unicodeData) {
-					lowByte := unicodeData[dataPos]
+					lowByte := uint(unicodeData[dataPos])
 					dataPos++
-					result = append(result, rune(lowByte)|rune(highByte)<<8)
+					result = append(result, rune(lowByte|(uint(highByte)<<8)))
 				}
 			case 3:
 				// Set new high byte
@@ -615,20 +619,33 @@ func (r *Reader) parseFileHeader(headerData []byte, position int64) (*File, erro
 		fileNameBytes := headerData[offset : offset+int(nameSize)]
 
 		if headFlags&FlagHasUnicodeName != 0 {
-			// Handle Unicode filename
 			zeroPos := bytes.IndexByte(fileNameBytes, 0)
 			if zeroPos != -1 {
-				// Has ASCII and Unicode parts
-				asciiPart := string(fileNameBytes[:zeroPos])
-				unicodePart := fileNameBytes[zeroPos+1:]
-				fileName = decodeUnicode(asciiPart, unicodePart)
+				// Try UTF-8 first
+				asciiPart := fileNameBytes[:zeroPos]
+				if utf8.Valid(asciiPart) {
+					fileName = string(asciiPart)
+				} else {
+					// Fall back to custom decoder
+					asciiStr := string(asciiPart)
+					unicodePart := fileNameBytes[zeroPos+1:]
+					fileName = decodeUnicode(asciiStr, unicodePart)
+				}
 			} else {
-				// No null byte, try as UTF-8
-				fileName = string(fileNameBytes)
+				// No null byte
+				if utf8.Valid(fileNameBytes) {
+					fileName = string(fileNameBytes)
+				} else {
+					fileName = string(fileNameBytes) // Last resort
+				}
 			}
 		} else {
-			// Try UTF-8, then fall back to ASCII
-			fileName = string(fileNameBytes)
+			// Non-Unicode filename
+			if utf8.Valid(fileNameBytes) {
+				fileName = string(fileNameBytes)
+			} else {
+				fileName = string(fileNameBytes) // Fallback
+			}
 		}
 	} else {
 		fileName = fmt.Sprintf("UnknownFile%d", len(r.Files))
