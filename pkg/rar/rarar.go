@@ -242,11 +242,26 @@ func NewReader(url string) (*Reader, error) {
 		return nil, err
 	}
 	reader.Marker = marker
+	pos := reader.Marker + int64(len(Rar3Marker)) // Skip marker block
 
-	// Generate file list
-	if err := reader.readFiles(); err != nil {
+	headerData, err := reader.readBytes(pos, 7)
+	if err != nil {
 		return nil, err
 	}
+
+	if len(headerData) < 7 {
+		return nil, ErrInvalidFormat
+	}
+
+	headType := headerData[2]
+	headSize := int(binary.LittleEndian.Uint16(headerData[5:7]))
+
+	if headType != BlockHeader {
+		return nil, ErrInvalidFormat
+	}
+
+	// Store the position after the archive header
+	reader.HeaderEndPos = pos + int64(headSize)
 
 	return reader, nil
 }
@@ -645,8 +660,15 @@ func (r *Reader) parseFileHeader(headerData []byte, position int64) (*File, erro
 }
 
 // GetFiles returns all files in the archive
-func (r *Reader) GetFiles() []*File {
-	return r.Files
+func (r *Reader) GetFiles() ([]*File, error) {
+	if len(r.Files) == 0 {
+		err := r.readFiles()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return r.Files, nil
 }
 
 // ExtractFile extracts a file from the archive

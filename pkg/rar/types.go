@@ -29,8 +29,9 @@ type HttpFile struct {
 
 // Reader reads RAR3 format archives
 type Reader struct {
-	File      *HttpFile
-	ChunkSize int
-	Marker    int64
-	Files     []*File
+	File         *HttpFile
+	ChunkSize    int
+	Marker       int64
+	HeaderEndPos int64 // Position after the archive header
+	Files        []*File
 }

@@ -192,7 +192,11 @@ func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, select
 		return nil, fmt.Errorf("failed to create RAR reader: %w", err)
 	}
 
-	rarFiles := reader.GetFiles()
+	rarFiles, err := reader.GetFiles()
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to read RAR files: %w", err)
+	}
 
 	// Create lookup map for faster matching
 	fileMap := make(map[string]*types.File)
