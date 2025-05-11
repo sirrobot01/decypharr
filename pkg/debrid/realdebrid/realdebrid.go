@@ -41,6 +41,8 @@ type RealDebrid struct {
 	logger      zerolog.Logger
 	CheckCached bool
 	UnpackRar   bool
+
+	rarSemaphore chan struct{}
 }
 
 func New(dc config.Debrid) *RealDebrid {
@@ -92,6 +94,7 @@ func New(dc config.Debrid) *RealDebrid {
 		MountPath:          dc.Folder,
 		logger:             logger.New(dc.Name),
 		CheckCached:        dc.CheckCached,
+		rarSemaphore:       make(chan struct{}, 2),
 	}
 }
 
@@ -147,6 +150,12 @@ func (r *RealDebrid) getSelectedFiles(t *types.Torrent, data torrentInfo) (map[s
 
 // handleRarArchive processes RAR archives with multiple files
 func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, selectedFiles []types.File) (map[string]types.File, error) {
+	// This will block if 2 RAR operations are already in progress
+	r.rarSemaphore <- struct{}{}
+	defer func() {
+		<-r.rarSemaphore
+	}()
+
 	files := make(map[string]types.File)
 
 	if !r.UnpackRar {
@@ -209,7 +218,7 @@ func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, select
 
 			files[file.Name] = *file
 		} else {
-			r.logger.Info().Msgf("File %s not found in torrent files", rarFile.Name())
+			r.logger.Warn().Msgf("RAR file %s not found in torrent files", rarFile.Name())
 		}
 	}
 
