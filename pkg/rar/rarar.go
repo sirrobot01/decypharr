@@ -9,8 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"path/filepath"
+	"time"
 )
 
 // Constants from the Python code
@@ -77,19 +79,22 @@ func (f *File) ByteRange() *[2]int64 {
 
 // HttpFile represents a file accessed over HTTP
 type HttpFile struct {
-	URL      string
-	Position int64
-	Client   *http.Client
-	FileSize int64
+	URL        string
+	Position   int64
+	Client     *http.Client
+	FileSize   int64
+	MaxRetries int
+	RetryDelay time.Duration
 }
 
-// NewHttpFile creates a new HTTP file
 func NewHttpFile(url string) (*HttpFile, error) {
 	client := &http.Client{}
 	file := &HttpFile{
-		URL:      url,
-		Position: 0,
-		Client:   client,
+		URL:        url,
+		Position:   0,
+		Client:     client,
+		MaxRetries: 3,
+		RetryDelay: time.Second,
 	}
 
 	// Get file size
@@ -102,30 +107,63 @@ func NewHttpFile(url string) (*HttpFile, error) {
 	return file, nil
 }
 
+func (f *HttpFile) doWithRetry(operation func() (interface{}, error)) (interface{}, error) {
+	var lastErr error
+	for attempt := 0; attempt <= f.MaxRetries; attempt++ {
+		if attempt > 0 {
+			// Jitter + exponential backoff delay
+			delay := f.RetryDelay * time.Duration(1<<uint(attempt-1))
+			jitter := time.Duration(rand.Int63n(int64(delay / 4)))
+			time.Sleep(delay + jitter)
+		}
+
+		result, err := operation()
+		if err == nil {
+			return result, nil
+		}
+
+		lastErr = err
+		// Only retry on network errors
+		if !errors.Is(err, ErrNetworkError) {
+			return nil, err
+		}
+	}
+
+	return nil, fmt.Errorf("after %d retries: %w", f.MaxRetries, lastErr)
+}
+
 // getFileSize gets the total file size from the server
 func (f *HttpFile) getFileSize() (int64, error) {
-	resp, err := f.Client.Head(f.URL)
+	result, err := f.doWithRetry(func() (interface{}, error) {
+		resp, err := f.Client.Head(f.URL)
+		if err != nil {
+			return int64(0), fmt.Errorf("%w: %v", ErrNetworkError, err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return int64(0), fmt.Errorf("%w: unexpected status code: %d", ErrNetworkError, resp.StatusCode)
+		}
+
+		contentLength := resp.Header.Get("Content-Length")
+		if contentLength == "" {
+			return int64(0), fmt.Errorf("%w: content length not provided", ErrNetworkError)
+		}
+
+		var size int64
+		_, err = fmt.Sscanf(contentLength, "%d", &size)
+		if err != nil {
+			return int64(0), fmt.Errorf("%w: %v", ErrNetworkError, err)
+		}
+
+		return size, nil
+	})
+
 	if err != nil {
-		return 0, fmt.Errorf("%w: %v", ErrNetworkError, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("%w: unexpected status code: %d", ErrNetworkError, resp.StatusCode)
+		return 0, err
 	}
 
-	contentLength := resp.Header.Get("Content-Length")
-	if contentLength == "" {
-		return 0, fmt.Errorf("%w: content length not provided", ErrNetworkError)
-	}
-
-	var size int64
-	_, err = fmt.Sscanf(contentLength, "%d", &size)
-	if err != nil {
-		return 0, fmt.Errorf("%w: %v", ErrNetworkError, err)
-	}
-
-	return size, nil
+	return result.(int64), nil
 }
 
 // ReadAt implements the io.ReaderAt interface
@@ -147,52 +185,60 @@ func (f *HttpFile) ReadAt(p []byte, off int64) (n int, err error) {
 		}
 	}
 
-	// Create HTTP request with Range header
-	req, err := http.NewRequest("GET", f.URL, nil)
-	if err != nil {
-		return 0, fmt.Errorf("%w: %v", ErrNetworkError, err)
-	}
-
-	end := off + size - 1
-	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", off, end))
-
-	// Make the request
-	resp, err := f.Client.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("%w: %v", ErrNetworkError, err)
-	}
-	defer resp.Body.Close()
-
-	// Handle response
-	switch resp.StatusCode {
-	case http.StatusPartialContent:
-		// Read the content
-		return io.ReadFull(resp.Body, p)
-	case http.StatusOK:
-		// Some servers return the full content instead of partial
-		// In this case, we need to read the entire response and extract the part we need
-		fullData, err := io.ReadAll(resp.Body)
+	result, err := f.doWithRetry(func() (interface{}, error) {
+		// Create HTTP request with Range header
+		req, err := http.NewRequest("GET", f.URL, nil)
 		if err != nil {
 			return 0, fmt.Errorf("%w: %v", ErrNetworkError, err)
 		}
 
-		if int64(len(fullData)) <= off {
+		end := off + size - 1
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", off, end))
+
+		// Make the request
+		resp, err := f.Client.Do(req)
+		if err != nil {
+			return 0, fmt.Errorf("%w: %v", ErrNetworkError, err)
+		}
+		defer resp.Body.Close()
+
+		// Handle response
+		switch resp.StatusCode {
+		case http.StatusPartialContent:
+			// Read the content
+			bytesRead, err := io.ReadFull(resp.Body, p)
+			return bytesRead, err
+		case http.StatusOK:
+			// Some servers return the full content instead of partial
+			fullData, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return 0, fmt.Errorf("%w: %v", ErrNetworkError, err)
+			}
+
+			if int64(len(fullData)) <= off {
+				return 0, io.EOF
+			}
+
+			end = off + size
+			if int64(len(fullData)) < end {
+				end = int64(len(fullData))
+			}
+
+			copy(p, fullData[off:end])
+			return int(end - off), nil
+		case http.StatusRequestedRangeNotSatisfiable:
+			// We're at EOF
 			return 0, io.EOF
+		default:
+			return 0, fmt.Errorf("%w: unexpected status code: %d", ErrNetworkError, resp.StatusCode)
 		}
+	})
 
-		end = off + size
-		if int64(len(fullData)) < end {
-			end = int64(len(fullData))
-		}
-
-		copy(p, fullData[off:end])
-		return int(end - off), nil
-	case http.StatusRequestedRangeNotSatisfiable:
-		// We're at EOF
-		return 0, io.EOF
-	default:
-		return 0, fmt.Errorf("%w: unexpected status code: %d", ErrNetworkError, resp.StatusCode)
+	if err != nil {
+		return 0, err
 	}
+
+	return result.(int), nil
 }
 
 // Reader reads RAR3 format archives
@@ -382,6 +428,10 @@ func (r *Reader) readFiles() error {
 		return err
 	}
 
+	if len(headerData) < 7 {
+		return ErrInvalidFormat
+	}
+
 	headType := headerData[2]
 	headSize := int(binary.LittleEndian.Uint16(headerData[5:7]))
 
@@ -391,12 +441,41 @@ func (r *Reader) readFiles() error {
 
 	pos += int64(headSize) // Skip archive header
 
+	// Track whether we've found the end marker
+	foundEndMarker := false
+
 	// Process file entries
-	for {
+	for !foundEndMarker {
 		headerData, err := r.readBytes(pos, 7)
-		if err != nil || len(headerData) < 7 {
-			// Reached end of file
-			break
+		if err != nil {
+			// Don't stop on EOF, might be temporary network error
+			// For definitive errors, return the error
+			if !errors.Is(err, io.EOF) && !errors.Is(err, ErrNetworkError) {
+				return fmt.Errorf("error reading block header: %w", err)
+			}
+
+			// If we get EOF or network error, retry a few times
+			retryCount := 0
+			maxRetries := 3
+			retryDelay := time.Second
+
+			for retryCount < maxRetries {
+				time.Sleep(retryDelay * time.Duration(1<<uint(retryCount)))
+				retryCount++
+
+				headerData, err = r.readBytes(pos, 7)
+				if err == nil && len(headerData) >= 7 {
+					break // Successfully got data
+				}
+			}
+
+			if len(headerData) < 7 {
+				return fmt.Errorf("failed to read block header after retries: %w", err)
+			}
+		}
+
+		if len(headerData) < 7 {
+			return fmt.Errorf("incomplete block header at position %d", pos)
 		}
 
 		headType := headerData[2]
@@ -405,6 +484,7 @@ func (r *Reader) readFiles() error {
 
 		if headType == BlockEnd {
 			// End of archive
+			foundEndMarker = true
 			break
 		}
 
@@ -412,8 +492,24 @@ func (r *Reader) readFiles() error {
 			// Get complete header data
 			completeHeader, err := r.readBytes(pos, headSize)
 			if err != nil || len(completeHeader) < headSize {
-				// Couldn't read complete header
-				break
+				// Retry logic for incomplete headers
+				retryCount := 0
+				maxRetries := 3
+				retryDelay := time.Second
+
+				for retryCount < maxRetries && (err != nil || len(completeHeader) < headSize) {
+					time.Sleep(retryDelay * time.Duration(1<<uint(retryCount)))
+					retryCount++
+
+					completeHeader, err = r.readBytes(pos, headSize)
+					if err == nil && len(completeHeader) >= headSize {
+						break // Successfully got data
+					}
+				}
+
+				if len(completeHeader) < headSize {
+					return fmt.Errorf("failed to read complete file header after retries: %w", err)
+				}
 			}
 
 			fileInfo, err := r.parseFileHeader(completeHeader, pos)
@@ -432,13 +528,34 @@ func (r *Reader) readFiles() error {
 				// Read data size
 				sizeData, err := r.readBytes(pos-4, 4)
 				if err != nil || len(sizeData) < 4 {
-					break
+					// Retry logic for data size read errors
+					retryCount := 0
+					maxRetries := 3
+					retryDelay := time.Second
+
+					for retryCount < maxRetries && (err != nil || len(sizeData) < 4) {
+						time.Sleep(retryDelay * time.Duration(1<<uint(retryCount)))
+						retryCount++
+
+						sizeData, err = r.readBytes(pos-4, 4)
+						if err == nil && len(sizeData) >= 4 {
+							break // Successfully got data
+						}
+					}
+
+					if len(sizeData) < 4 {
+						return fmt.Errorf("failed to read data size after retries: %w", err)
+					}
 				}
 
 				dataSize := int64(binary.LittleEndian.Uint32(sizeData))
 				pos += dataSize
 			}
 		}
+	}
+
+	if !foundEndMarker {
+		return fmt.Errorf("end marker not found in archive")
 	}
 
 	return nil
