@@ -57,18 +57,6 @@ var (
 	ErrDirectoryExtractNotSupported = errors.New("directory extract not supported")
 )
 
-// File represents a file entry in a RAR archive
-type File struct {
-	Path           string
-	Size           int64
-	CompressedSize int64
-	Method         byte
-	CRC            uint32
-	IsDirectory    bool
-	DataOffset     int64
-	NextOffset     int64
-}
-
 // Name returns the base filename of the file
 func (f *File) Name() string {
 	if i := strings.LastIndexAny(f.Path, "\\/"); i >= 0 {
@@ -79,16 +67,6 @@ func (f *File) Name() string {
 
 func (f *File) ByteRange() *[2]int64 {
 	return &[2]int64{f.DataOffset, f.DataOffset + f.CompressedSize - 1}
-}
-
-// HttpFile represents a file accessed over HTTP
-type HttpFile struct {
-	URL        string
-	Position   int64
-	Client     *http.Client
-	FileSize   int64
-	MaxRetries int
-	RetryDelay time.Duration
 }
 
 func NewHttpFile(url string) (*HttpFile, error) {
@@ -243,14 +221,6 @@ func (f *HttpFile) ReadAt(p []byte, off int64) (n int, err error) {
 	}
 
 	return result.(int), nil
-}
-
-// Reader reads RAR3 format archives
-type Reader struct {
-	File      *HttpFile
-	ChunkSize int
-	Marker    int64
-	Files     []*File
 }
 
 // NewReader creates a new RAR3 reader
