@@ -199,7 +199,7 @@ func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, select
 	for i := range selectedFiles {
 		// RD converts special chars to '_' for RAR file paths
 		// TOOD: there might be more special chars to replace
-		safeName := strings.NewReplacer("|", "_", "\"", "_", "\\", "_", "?", "_", "*", "_", ":", "_").Replace(selectedFiles[i].Name)
+		safeName := strings.NewReplacer("|", "_", "\"", "_", "\\", "_", "?", "_", "*", "_", ":", "_", "<", "_", ">", "_").Replace(selectedFiles[i].Name)
 		fileMap[safeName] = &selectedFiles[i]
 	}
 
@@ -217,7 +217,7 @@ func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, select
 			}
 
 			files[file.Name] = *file
-		} else {
+		} else if !rarFile.IsDirectory {
 			r.logger.Warn().Msgf("RAR file %s not found in torrent files", rarFile.Name())
 		}
 	}
