@@ -148,6 +148,9 @@ func (r *RealDebrid) getSelectedFiles(t *types.Torrent, data torrentInfo) (map[s
 // handleRarArchive processes RAR archives with multiple files
 func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, selectedFiles []types.File) (map[string]types.File, error) {
 	files := make(map[string]types.File)
+	for _, f := range selectedFiles {
+		fmt.Println(f.Name)
+	}
 
 	if !r.UnpackRar {
 		r.logger.Debug().Msgf("RAR file detected, but unpacking is disabled: %s", t.Name)
@@ -188,7 +191,10 @@ func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, select
 	// Create lookup map for faster matching
 	fileMap := make(map[string]*types.File)
 	for i := range selectedFiles {
-		fileMap[selectedFiles[i].Name] = &selectedFiles[i]
+		// RD converts special chars to '_' for RAR file paths
+		// TOOD: there might be more special chars to replace
+		safeName := strings.NewReplacer("|", "_", "\"", "_", "\\", "_", "?", "_", "*", "_", ":", "_").Replace(selectedFiles[i].Name)
+		fileMap[safeName] = &selectedFiles[i]
 	}
 
 	for _, rarFile := range rarFiles {
@@ -205,6 +211,8 @@ func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, select
 			}
 
 			files[file.Name] = *file
+		} else {
+			r.logger.Info().Msgf("File %s not found in torrent files", rarFile.Name())
 		}
 	}
 
