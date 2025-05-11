@@ -148,9 +148,6 @@ func (r *RealDebrid) getSelectedFiles(t *types.Torrent, data torrentInfo) (map[s
 // handleRarArchive processes RAR archives with multiple files
 func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, selectedFiles []types.File) (map[string]types.File, error) {
 	files := make(map[string]types.File)
-	for _, f := range selectedFiles {
-		fmt.Println(f.Name)
-	}
 
 	if !r.UnpackRar {
 		r.logger.Debug().Msgf("RAR file detected, but unpacking is disabled: %s", t.Name)
