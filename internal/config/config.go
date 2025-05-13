@@ -4,11 +4,12 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
-	"github.com/goccy/go-json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
+
+	"github.com/goccy/go-json"
 )
 
 var (
@@ -26,6 +27,7 @@ type Debrid struct {
 	CheckCached      bool     `json:"check_cached,omitempty"`
 	RateLimit        string   `json:"rate_limit,omitempty"` // 200/minute or 10/second
 	Proxy            string   `json:"proxy,omitempty"`
+	UnpackRar        bool     `json:"unpack_rar,omitempty"`
 
 	UseWebDav bool `json:"use_webdav,omitempty"`
 	WebDav

@@ -3,9 +3,10 @@ package debrid
 import (
 	"errors"
 	"fmt"
+	"time"
+
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"time"
 )
 
 type linkCache struct {
@@ -187,4 +188,13 @@ func (c *Cache) IsDownloadLinkInvalid(downloadLink string) bool {
 		return true
 	}
 	return false
+}
+
+func (c *Cache) GetDownloadByteRange(torrentName, filename string) (*[2]int64, error) {
+	ct := c.GetTorrentByName(torrentName)
+	if ct == nil {
+		return nil, fmt.Errorf("torrent not found")
+	}
+	file := ct.Files[filename]
+	return file.ByteRange, nil
 }
