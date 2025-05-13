@@ -50,9 +50,9 @@ func (h *Handler) RemoveAll(ctx context.Context, name string) error {
 	if name[0] != '/' {
 		name = "/" + name
 	}
-	name = path.Clean(name)
+	name = filepath.Clean(name)
 
-	rootDir := path.Clean(h.getRootPath())
+	rootDir := filepath.Clean(h.getRootPath())
 
 	if name == rootDir {
 		return os.ErrPermission
@@ -115,14 +115,12 @@ func (h *Handler) getParentFiles() []os.FileInfo {
 
 // returns the os.FileInfo slice for “depth-1” children of cleanPath
 func (h *Handler) getChildren(name string) []os.FileInfo {
-
-	if name[0] != '/' {
-		name = "/" + name
+	name = utils.PathUnescape(name)
+	name = filepath.Clean(name)
+	if !strings.HasPrefix(name, string(os.PathSeparator)) {
+		name = string(os.PathSeparator) + name
 	}
-	name = utils.PathUnescape(path.Clean(name))
-	root := path.Clean(h.getRootPath())
-
-	// top‐level “parents” (e.g. __all__, torrents etc)
+	root := filepath.Clean(h.getRootPath())
 	if name == root {
 		return h.getParentFiles()
 	}
@@ -143,11 +141,12 @@ func (h *Handler) getChildren(name string) []os.FileInfo {
 }
 
 func (h *Handler) OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error) {
-	if !strings.HasPrefix(name, "/") {
-		name = "/" + name
+	name = utils.PathUnescape(name)
+	name = filepath.Clean(name)
+	if !strings.HasPrefix(name, string(os.PathSeparator)) {
+		name = string(os.PathSeparator) + name
 	}
-	name = utils.PathUnescape(path.Clean(name))
-	rootDir := path.Clean(h.getRootPath())
+	rootDir := filepath.Clean(h.getRootPath())
 	metadataOnly := ctx.Value("metadataOnly") != nil
 	now := time.Now()
 
@@ -167,7 +166,7 @@ func (h *Handler) OpenFile(ctx context.Context, name string, flag int, perm os.F
 
 	// 2) directory case: ask getChildren
 	if children := h.getChildren(name); children != nil {
-		displayName := path.Base(name)
+		displayName := filepath.Base(name)
 		if name == rootDir {
 			displayName = string(os.PathSeparator)
 		}

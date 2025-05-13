@@ -2,14 +2,16 @@ package webdav
 
 import (
 	"context"
-	"github.com/stanNthe5/stringbuf"
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/stanNthe5/stringbuf"
 )
 
 var builderPool = sync.Pool{
@@ -27,7 +29,7 @@ func (h *Handler) handlePropfind(w http.ResponseWriter, r *http.Request) {
 		depth = "1"
 	}
 
-	cleanPath := path.Clean(r.URL.Path)
+	cleanPath := filepath.Clean(r.URL.Path)
 
 	// Build the list of entries
 	type entry struct {

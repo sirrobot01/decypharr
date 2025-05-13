@@ -6,9 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/puzpuzpuz/xsync/v4"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -16,6 +14,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/puzpuzpuz/xsync/v4"
 
 	"github.com/go-co-op/gocron/v2"
 	"github.com/goccy/go-json"
@@ -262,7 +262,7 @@ func (c *Cache) load() (map[string]CachedTorrent, error) {
 						}
 						ct.IsComplete = true
 						ct.Files = fs
-						ct.Name = path.Clean(ct.Name)
+						ct.Name = filepath.Clean(ct.Name)
 						mu.Lock()
 						torrents[ct.Id] = ct
 						mu.Unlock()
@@ -413,19 +413,19 @@ func (c *Cache) sync(torrents []*types.Torrent) error {
 func (c *Cache) GetTorrentFolder(torrent *types.Torrent) string {
 	switch c.folderNaming {
 	case WebDavUseFileName:
-		return path.Clean(torrent.Filename)
+		return filepath.Clean(torrent.Filename)
 	case WebDavUseOriginalName:
-		return path.Clean(torrent.OriginalFilename)
+		return filepath.Clean(torrent.OriginalFilename)
 	case WebDavUseFileNameNoExt:
-		return path.Clean(utils.RemoveExtension(torrent.Filename))
+		return filepath.Clean(utils.RemoveExtension(torrent.Filename))
 	case WebDavUseOriginalNameNoExt:
-		return path.Clean(utils.RemoveExtension(torrent.OriginalFilename))
+		return filepath.Clean(utils.RemoveExtension(torrent.OriginalFilename))
 	case WebDavUseID:
 		return torrent.Id
 	case WebdavUseHash:
 		return strings.ToLower(torrent.InfoHash)
 	default:
-		return path.Clean(torrent.Filename)
+		return filepath.Clean(torrent.Filename)
 	}
 }
 
