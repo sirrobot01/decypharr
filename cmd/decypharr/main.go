@@ -14,10 +14,10 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/worker"
 	"net/http"
 	"os"
+	"runtime"
 	"runtime/debug"
 	"strconv"
 	"sync"
-	"time"
 )
 
 func Start(ctx context.Context) error {
@@ -30,114 +30,89 @@ func Start(ctx context.Context) error {
 		SetUmask(int(umask))
 	}
 
-	appCtx := ctx
-
-	// Service context - can be cancelled and recreated for restarts
-	svcCtx, cancelSvc := context.WithCancel(context.Background())
-
-	// Create a channel to listen for restart signals
 	restartCh := make(chan struct{}, 1)
-
-	// Create a function to expose for requesting restarts
-	RequestRestart := func() {
+	web.SetRestartFunc(func() {
 		select {
 		case restartCh <- struct{}{}:
-			// Signal sent successfully
 		default:
-			// Channel is full, ignore
+		}
+	})
+
+	svcCtx, cancelSvc := context.WithCancel(ctx)
+	defer cancelSvc()
+
+	for {
+		cfg := config.Get()
+		_log := logger.Default()
+
+		// ascii banner
+		fmt.Printf(`
++-------------------------------------------------------+
+|                                                       |
+|  ╔╦╗╔═╗╔═╗╦ ╦╔═╗╦ ╦╔═╗╦═╗╦═╗                          |
+|   ║║║╣ ║  └┬┘╠═╝╠═╣╠═╣╠╦╝╠╦╝ (%s)        |
+|  ═╩╝╚═╝╚═╝ ┴ ╩  ╩ ╩╩ ╩╩╚═╩╚═                          |
+|                                                       |
++-------------------------------------------------------+
+|  Log Level: %s                                        |
++-------------------------------------------------------+
+`, version.GetInfo(), cfg.LogLevel)
+
+		// Initialize services
+		qb := qbit.New()
+		wd := webdav.New()
+
+		ui := web.New(qb).Routes()
+		webdavRoutes := wd.Routes()
+		qbitRoutes := qb.Routes()
+
+		// Register routes
+		handlers := map[string]http.Handler{
+			"/":       ui,
+			"/api/v2": qbitRoutes,
+			"/webdav": webdavRoutes,
+		}
+		srv := server.New(handlers)
+
+		done := make(chan struct{})
+		go func(ctx context.Context) {
+			if err := startServices(ctx, wd, srv); err != nil {
+				_log.Error().Err(err).Msg("Error starting services")
+				cancelSvc()
+			}
+			close(done)
+		}(svcCtx)
+
+		select {
+		case <-ctx.Done():
+			// graceful shutdown
+			cancelSvc() // propagate to services
+			<-done      // wait for them to finish
+			return nil
+
+		case <-restartCh:
+			cancelSvc() // tell existing services to shut down
+			_log.Info().Msg("Restarting Decypharr...")
+			<-done // wait for them to finish
+			qb.Reset()
+			service.Reset()
+
+			// rebuild svcCtx off the original parent
+			svcCtx, cancelSvc = context.WithCancel(ctx)
+			runtime.GC()
+
+			config.Reload()
+			service.Reset()
+			// loop will restart services automatically
 		}
 	}
-
-	web.SetRestartFunc(RequestRestart)
-
-	go func() {
-		for {
-			select {
-			case <-appCtx.Done():
-				// Parent context is done, exit the loop and shut down all services
-				cancelSvc()
-				return
-			case <-restartCh:
-				_log := logger.Default()
-				_log.Info().Msg("Restarting services with new config...")
-
-				// Cancel current service context to shut down all services
-				cancelSvc()
-
-				// Wait a moment for services to shut down
-				time.Sleep(500 * time.Millisecond)
-
-				// Create a new service context
-				svcCtx, cancelSvc = context.WithCancel(context.Background())
-
-				// Reload configuration
-				config.Reload()
-
-				// Start services again with new context
-				go func() {
-					err := startServices(svcCtx)
-					if err != nil {
-						_log.Error().Err(err).Msg("Error restarting services")
-					}
-				}()
-
-				_log.Info().Msg("Services restarted successfully")
-			}
-		}
-	}()
-
-	go func() {
-		err := startServices(svcCtx)
-		if err != nil {
-			_log := logger.Default()
-			_log.Error().Err(err).Msg("Error starting services")
-		}
-	}()
-
-	// Start services for the first time
-	<-appCtx.Done()
-
-	// Clean up
-	cancelSvc()
-	return nil
 }
 
-func startServices(ctx context.Context) error {
-	cfg := config.Get()
+func startServices(ctx context.Context, wd *webdav.WebDav, srv *server.Server) error {
 	var wg sync.WaitGroup
 	errChan := make(chan error)
 
 	_log := logger.Default()
-
-	asciiArt := `
-+-------------------------------------------------------+
-|                                                       |
-|  ╔╦╗╔═╗╔═╗╦ ╦╔═╗╦ ╦╔═╗╦═╗╦═╗                          |
-|   ║║║╣ ║  └┬┘╠═╝╠═╣╠═╣╠╦╝╠╦╝ (%s)		|
-|  ═╩╝╚═╝╚═╝ ┴ ╩  ╩ ╩╩ ╩╩╚═╩╚═                          |
-|                                                       |
-+-------------------------------------------------------+
-|  Log Level: %s                         		|
-+-------------------------------------------------------+
-`
-
-	fmt.Printf(asciiArt, version.GetInfo(), cfg.LogLevel)
-
-	svc := service.New()
-	_qbit := qbit.New()
-	_webdav := webdav.New()
-
-	ui := web.New(_qbit).Routes()
-	webdavRoutes := _webdav.Routes()
-	qbitRoutes := _qbit.Routes()
-
-	// Register routes
-	handlers := map[string]http.Handler{
-		"/":       ui,
-		"/api/v2": qbitRoutes,
-		"/webdav": webdavRoutes,
-	}
-	srv := server.New(handlers)
 
 	safeGo := func(f func() error) {
 		wg.Add(1)
@@ -163,7 +138,7 @@ func startServices(ctx context.Context) error {
 	}
 
 	safeGo(func() error {
-		return _webdav.Start(ctx)
+		return wd.Start(ctx)
 	})
 
 	safeGo(func() error {
@@ -175,16 +150,22 @@ func startServices(ctx context.Context) error {
 	})
 
 	safeGo(func() error {
-		return svc.Arr.StartSchedule(ctx)
+		arr := service.GetService().Arr
+		if arr == nil {
+			return nil
+		}
+		return arr.StartSchedule(ctx)
 	})
 
-	if cfg.Repair.Enabled {
+	if cfg := config.Get(); cfg.Repair.Enabled {
 		safeGo(func() error {
-			err := svc.Repair.Start(ctx)
-			if err != nil {
-				_log.Error().Err(err).Msg("Error during repair")
+			r := service.GetService().Repair
+			if r != nil {
+				if err := r.Start(ctx); err != nil {
+					_log.Error().Err(err).Msg("repair failed")
+				}
 			}
-			return nil // Not propagating repair errors to terminate the app
+			return nil
 		})
 	}
 

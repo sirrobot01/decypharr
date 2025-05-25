@@ -45,7 +45,24 @@ func New(prefix string) zerolog.Logger {
 		TimeFormat: "2006-01-02 15:04:05",
 		NoColor:    false, // Set to true if you don't want colors
 		FormatLevel: func(i interface{}) string {
-			return strings.ToUpper(fmt.Sprintf("| %-6s|", i))
+			var colorCode string
+			switch strings.ToLower(fmt.Sprintf("%s", i)) {
+			case "debug":
+				colorCode = "\033[36m"
+			case "info":
+				colorCode = "\033[32m"
+			case "warn":
+				colorCode = "\033[33m"
+			case "error":
+				colorCode = "\033[31m"
+			case "fatal":
+				colorCode = "\033[35m"
+			case "panic":
+				colorCode = "\033[41m"
+			default:
+				colorCode = "\033[37m" // White
+			}
+			return fmt.Sprintf("%s| %-6s|\033[0m", colorCode, strings.ToUpper(fmt.Sprintf("%s", i)))
 		},
 		FormatMessage: func(i interface{}) string {
 			return fmt.Sprintf("[%s] %v", prefix, i)

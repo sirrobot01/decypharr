@@ -7,11 +7,11 @@ import (
 )
 
 type Engine struct {
-	Clients  map[string]types.Client
+	Clients   map[string]types.Client
 	clientsMu sync.Mutex
-	Caches   map[string]*Cache
-	CacheMu sync.Mutex
-	LastUsed string
+	Caches    map[string]*Cache
+	CacheMu   sync.Mutex
+	LastUsed  string
 }
 
 func NewEngine() *Engine {
@@ -44,6 +44,16 @@ func (d *Engine) GetClient(name string) types.Client {
 	d.clientsMu.Lock()
 	defer d.clientsMu.Unlock()
 	return d.Clients[name]
+}
+
+func (d *Engine) Reset() {
+	d.clientsMu.Lock()
+	d.Clients = make(map[string]types.Client)
+	d.clientsMu.Unlock()
+
+	d.CacheMu.Lock()
+	d.Caches = make(map[string]*Cache)
+	d.CacheMu.Unlock()
 }
 
 func (d *Engine) GetDebrids() map[string]types.Client {

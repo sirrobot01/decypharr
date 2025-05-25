@@ -2,8 +2,8 @@ package arr
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"github.com/goccy/go-json"
 	"golang.org/x/sync/errgroup"
 	"net/http"
 	"strconv"

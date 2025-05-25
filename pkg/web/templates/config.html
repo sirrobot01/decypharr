@@ -258,7 +258,7 @@
                                 <div class="col-md-4 mb-3">
                                     <label class="form-label" for="repair.interval">Interval</label>
                                     <input type="text" class="form-control" name="repair.interval" id="repair.interval" placeholder="e.g., 24h">
-                                    <small class="form-text text-muted">Interval for the repair process(e.g., 24h, 1d, 03:00)</small>
+                                    <small class="form-text text-muted">Interval for the repair process(e.g., 24h, 1d, 03:00, or a crontab)</small>
                                 </div>
                                 <div class="col-md-5 mb-3">
                                     <label class="form-label" for="repair.zurg_url">Zurg URL</label>
@@ -280,13 +280,6 @@
                                         <label class="form-check-label" for="repair.run_on_start">Run on Start</label>
                                     </div>
                                     <small class="form-text text-muted">Run repair on startup</small>
-                                </div>
-                                <div class="col-md-3 mb-3">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" name="repair.reinsert" id="repair.reinsert">
-                                        <label class="form-check-label" for="repair.reinsert">Re-Insert Nerfed Release</label>
-                                    </div>
-                                    <small class="form-text text-muted">Tries to autofix broken releases by re-inserting the torrent</small>
                                 </div>
                                 <div class="col-md-3 mb-3">
                                     <div class="form-check">
@@ -348,21 +341,28 @@
         </div>
     </div>
     <div class="row">
-        <div class="col-md-4">
+        <div class="col-md-3">
              <div class="form-check me-3">
                 <input type="checkbox" class="form-check-input" name="debrid[${index}].download_uncached" id="debrid[${index}].download_uncached">
                 <label class="form-check-label" for="debrid[${index}].download_uncached">Download Uncached</label>
             </div>
             <small class="form-text text-muted">Download uncached files from the debrid service</small>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-3">
             <div class="form-check me-3">
                 <input type="checkbox" class="form-check-input" name="debrid[${index}].check_cached" id="debrid[${index}].check_cached">
                 <label class="form-check-label" for="debrid[${index}].check_cached" disabled>Check Cached</label>
             </div>
             <small class="form-text text-muted">Check if the file is cached before downloading(Disabled)</small>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-3">
+            <div class="form-check me-3">
+                <input type="checkbox" class="form-check-input" name="debrid[${index}].add_samples" id="debrid[${index}].add_samples">
+                <label class="form-check-label" for="debrid[${index}].add_samples">Add Samples</label>
+            </div>
+             <small class="form-text text-muted">Add samples, extras etc when adding torrent to debrid(disabled by default)</small>
+        </div>
+        <div class="col-md-3">
             <div class="form-check me-3">
                 <input type="checkbox" class="form-check-input" name="debrid[${index}].unpack_rar" id="debrid[${index}].unpack_rar">
                 <label class="form-check-label" for="debrid[${index}].unpack_rar">Unpack RAR</label>
@@ -377,58 +377,257 @@
             <small class="form-text text-muted">Create an internal webdav for this debrid</small>
         </div>
     </div>
-    <div class="row mt-3 webdav d-none">
+    <div class="webdav d-none">
         <h6 class="pb-2">Webdav</h6>
-        <div class="col-md-3 mb-3">
-            <label class="form-label" for="debrid[${index}].torrents_refresh_interval">Torrents Refresh Interval</label>
-            <input type="text" class="form-control webdav-field" name="debrid[${index}].torrents_refresh_interval" id="debrid[${index}].torrents_refresh_interval" placeholder="15s" value="15s">
-            <small class="form-text text-muted">How often to refresh the torrents list from debrid(instant when using webdav)</small>
+        <div class="row mt-3">
+            <div class="col-md-3 mb-3">
+                <label class="form-label" for="debrid[${index}].torrents_refresh_interval">Torrents Refresh Interval</label>
+                <input type="text" class="form-control webdav-field" name="debrid[${index}].torrents_refresh_interval" id="debrid[${index}].torrents_refresh_interval" placeholder="15s" value="15s">
+                <small class="form-text text-muted">How often to refresh the torrents list from debrid</small>
+                </div>
+            <div class="col-md-3 mb-3">
+                <label class="form-label" for="debrid[${index}].download_links_refresh_interval">Links Refresh Interval</label>
+                <input type="text" class="form-control webdav-field" name="debrid[${index}].download_links_refresh_interval" id="debrid[${index}].download_links_refresh_interval" placeholder="40m" value="40m">
+                <small class="form-text text-muted">How often to refresh the download links list from debrid</small>
+            </div>
+            <div class="col-md-3 mb-3">
+                <label class="form-label" for="debrid[${index}].auto_expire_links_after">Expire Links After</label>
+                <input type="text" class="form-control webdav-field" name="debrid[${index}].auto_expire_links_after" id="debrid[${index}].auto_expire_links_after" placeholder="3d" value="3d">
+                <small class="form-text text-muted">How long to keep the links in the webdav before expiring</small>
+            </div>
+            <div class="col-md-3 mb-3">
+                <label class="form-label" for="debrid[${index}].workers">Number of Workers</label>
+                <input type="text" class="form-control webdav-field" name="debrid[${index}].workers" id="debrid[${index}].workers" placeholder="e.g., 50" value="50">
+                <small class="form-text text-muted">Number of workers to use for the webdav server(when refreshing)</small>
+            </div>
+            <div class="col-md-3 mb-3">
+                <label class="form-label" for="debrid[${index}].folder_naming">Folder Naming Structure</label>
+                <select class="form-select webdav-field" name="debrid[${index}].folder_naming" id="debrid[${index}].folder_naming">
+                    <option value="original_no_ext" selected>Original name with No Ext</option>
+                    <option value="original">Original name</option>
+                    <option value="filename">File name</option>
+                    <option value="filename_no_ext">File name with No Ext</option>
+                    <option value="id">Use ID</option>
+                    <option value="infohash">Use Infohash</option>
+                </select>
+                <small class="form-text text-muted">How to name each torrent directory in the webdav</small>
+            </div>
+            <div class="col-md-3 mb-3">
+                <label class="form-label" for="debrid[${index}].rc_url">Rclone RC URL</label>
+                <input type="text" class="form-control webdav-field" name="debrid[${index}].rc_url" id="debrid[${index}].rc_url" placeholder="e.g., http://localhost:9990">
+                <small class="form-text text-muted">Rclone RC URL for the webdav server(speeds up import significantly)</small>
+            </div>
+            <div class="col-md-3 mb-3">
+                <label class="form-label" for="debrid[${index}].rc_refresh_dirs">Rclone RC Dirs</label>
+                <input type="text" class="form-control webdav-field" name="debrid[${index}].rc_refresh_dirs" id="debrid[${index}].rc_refresh_dirs">
+                <small class="form-text text-muted">Directories to refresh via RC(comma-seperated e.g. __all__, torrents) </small>
+            </div>
+            <div class="col-md-3 mb-3">
+                <label class="form-label" for="debrid[${index}].rc_user">Rclone RC User</label>
+                <input type="text" class="form-control webdav-field" name="debrid[${index}].rc_user" id="debrid[${index}].rc_user">
+                <small class="form-text text-muted">Rclone RC User for the webdav server</small>
+            </div>
+            <div class="col-md-3 mb-3">
+                <label class="form-label" for="debrid[${index}].rc_pass">Rclone RC Password</label>
+                <input type="password" class="form-control webdav-field" name="debrid[${index}].rc_pass" id="debrid[${index}].rc_pass">
+                <small class="form-text text-muted">Rclone RC Password for the webdav server</small>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="form-check me-3">
+                    <input type="checkbox" class="form-check-input" name="debrid[${index}].serve_from_rclone" id="debrid[${index}].serve_from_rclone">
+                    <label class="form-check-label" for="debrid[${index}].serve_from_rclone">Serve From Rclone</label>
+                </div>
+                 <small class="form-text text-muted">Rclone handles serving/streaming the download link</small>
+            </div>
         </div>
-        <div class="col-md-3 mb-3">
-            <label class="form-label" for="debrid[${index}].download_links_refresh_interval">Download Links Refresh Interval</label>
-            <input type="text" class="form-control webdav-field" name="debrid[${index}].download_links_refresh_interval" id="debrid[${index}].download_links_refresh_interval" placeholder="40m" value="40m">
-            <small class="form-text text-muted">How often to refresh the download links list from debrid</small>
-        </div>
-        <div class="col-md-3 mb-3">
-            <label class="form-label" for="debrid[${index}].auto_expire_links_after">Expire Links After</label>
-            <input type="text" class="form-control webdav-field" name="debrid[${index}].auto_expire_links_after" id="debrid[${index}].auto_expire_links_after" placeholder="3d" value="3d">
-            <small class="form-text text-muted">How long to keep the links in the webdav before expiring</small>
-        </div>
-        <div class="col-md-3 mb-3">
-            <label class="form-label" for="debrid[${index}].folder_naming">Folder Naming Structure</label>
-            <select class="form-select webdav-field" name="debrid[${index}].folder_naming" id="debrid[${index}].folder_naming">
-                <option value="original_no_ext" selected>Original name with No Ext</option>
-                <option value="original">Original name</option>
-                <option value="filename">File name</option>
-                <option value="filename_no_ext">File name with No Ext</option>
-                <option value="id">Use ID</option>
-                <option value="infohash">Use Infohash</option>
-            </select>
-            <small class="form-text text-muted">How to name each torrent directory in the webdav</small>
-        </div>
-        <div class="col-md-3 mb-3">
-            <label class="form-label" for="debrid[${index}].workers">Number of Workers</label>
-            <input type="text" class="form-control webdav-field" name="debrid[${index}].workers" id="debrid[${index}].workers" placeholder="e.g., 50" value="50">
-            <small class="form-text text-muted">Number of workers to use for the webdav server(when refreshing)</small>
-        </div>
-        <div class="col-md-3 mb-3">
-            <label class="form-label" for="debrid[${index}].rc_url">Rclone RC URL</label>
-            <input type="text" class="form-control webdav-field" name="debrid[${index}].rc_url" id="debrid[${index}].rc_url" placeholder="e.g., http://localhost:9990">
-            <small class="form-text text-muted">Rclone RC URL for the webdav server(speeds up import significantly)</small>
-        </div>
-        <div class="col-md-3 mb-3">
-            <label class="form-label" for="debrid[${index}].rc_user">Rclone RC User</label>
-            <input type="text" class="form-control webdav-field" name="debrid[${index}].rc_user" id="debrid[${index}].rc_user">
-            <small class="form-text text-muted">Rclone RC User for the webdav server</small>
-        </div>
-        <div class="col-md-3 mb-3">
-            <label class="form-label" for="debrid[${index}].rc_pass">Rclone RC Password</label>
-            <input type="password" class="form-control webdav-field" name="debrid[${index}].rc_pass" id="debrid[${index}].rc_pass">
-            <small class="form-text text-muted">Rclone RC Password for the webdav server</small>
+        <div class="row mt-3">
+            <div class="col mt-3">
+                <h6 class="pb-2">Custom Folders</h6>
+                <div class="col-12">
+                    <p class="text-muted small">Create virtual directories with filters to organize your content</p>
+                    <div class="directories-container" id="debrid[${index}].directories">
+                        <!-- Dynamic directories will be added here -->
+                    </div>
+                    <button type="button" class="btn btn-secondary mt-2 webdav-field" onclick="addDirectory(${index});">
+                        <i class="bi bi-plus"></i> Add Directory
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 </div>
 `;
+    // Template for directory entries (with filter buttons for both positive and negative variants)
+    const directoryTemplate = (debridIndex, dirIndex) => `
+<div class="directory-item mb-3 border rounded p-3 position-relative">
+    <button type="button" class="btn btn-sm btn-danger position-absolute top-0 end-0 m-2"
+            onclick="removeDirectory(this);" title="Remove directory">
+        <i class="bi bi-trash"></i>
+    </button>
+
+    <div class="col-md-4 mb-3">
+        <label class="form-label">Folder Name</label>
+        <input type="text" class="form-control webdav-field"
+              name="debrid[${debridIndex}].directory[${dirIndex}].name"
+              placeholder="e.g., Movies, TV Shows, Spiderman Collection">
+    </div>
+
+    <div class="col-12">
+        <h6 class="mb-3">
+            Filters
+            <button type="button" class="btn btn-sm btn-link" onclick="showFilterHelp();">
+                <i class="bi bi-question-circle"></i>
+            </button>
+        </h6>
+        <div class="filters-container" id="debrid[${debridIndex}].directory[${dirIndex}].filters">
+            <!-- Filters will be added here -->
+        </div>
+
+        <div class="mt-2">
+            <div class="dropdown d-inline-block me-2 mb-2">
+                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                        data-bs-toggle="dropdown" aria-expanded="false">
+                    Add Text Filter
+                </button>
+                <ul class="dropdown-menu">
+                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'include'); return false;">Include</a></li>
+                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'exclude'); return false;">Exclude</a></li>
+                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'starts_with'); return false;">Starts With</a></li>
+                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'not_starts_with'); return false;">Not Starts With</a></li>
+                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'ends_with'); return false;">Ends With</a></li>
+                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'not_ends_with'); return false;">Not Ends With</a></li>
+                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'exact_match'); return false;">Exact Match</a></li>
+                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'not_exact_match'); return false;">Not Exact Match</a></li>
+                </ul>
+            </div>
+
+            <div class="dropdown d-inline-block me-2 mb-2">
+                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                        data-bs-toggle="dropdown" aria-expanded="false">
+                    Add Regex Filter
+                </button>
+                <ul class="dropdown-menu">
+                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'regex'); return false;">Regex Match</a></li>
+                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'not_regex'); return false;">Regex Not Match</a></li>
+                </ul>
+            </div>
+
+            <div class="dropdown d-inline-block me-2 mb-2">
+                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                        data-bs-toggle="dropdown" aria-expanded="false">
+                    Add Size Filter
+                </button>
+                <ul class="dropdown-menu">
+                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'size_gt'); return false;">Size Greater Than</a></li>
+                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'size_lt'); return false;">Size Less Than</a></li>
+                </ul>
+            </div>
+
+            <button type="button" class="btn btn-sm btn-outline-secondary me-2"
+                    onclick="addFilter(${debridIndex}, ${dirIndex}, 'last_added');">
+                Add Last Added Filter
+            </button>
+        </div>
+    </div>
+</div>
+`;
+    // Enhanced filter template with support for all filter types
+    const filterTemplate = (debridIndex, dirIndex, filterIndex, filterType) => {
+        let placeholder, label;
+
+        switch(filterType) {
+            case 'include':
+                placeholder = "Text that should be included in filename";
+                label = "Include";
+                break;
+            case 'exclude':
+                placeholder = "Text that should not be in filename";
+                label = "Exclude";
+                break;
+            case 'regex':
+                placeholder = "Regular expression pattern";
+                label = "Regex Match";
+                break;
+            case 'not_regex':
+                placeholder = "Regular expression pattern that should not match";
+                label = "Regex Not Match";
+                break;
+            case 'exact_match':
+                placeholder = "Exact text to match";
+                label = "Exact Match";
+                break;
+            case 'not_exact_match':
+                placeholder = "Exact text that should not match";
+                label = "Not Exact Match";
+                break;
+            case 'starts_with':
+                placeholder = "Text that filename starts with";
+                label = "Starts With";
+                break;
+            case 'not_starts_with':
+                placeholder = "Text that filename should not start with";
+                label = "Not Starts With";
+                break;
+            case 'ends_with':
+                placeholder = "Text that filename ends with";
+                label = "Ends With";
+                break;
+            case 'not_ends_with':
+                placeholder = "Text that filename should not end with";
+                label = "Not Ends With";
+                break;
+            case 'size_gt':
+                placeholder = "Size in bytes, KB, MB, GB (e.g. 700MB)";
+                label = "Size Greater Than";
+                break;
+            case 'size_lt':
+                placeholder = "Size in bytes, KB, MB, GB (e.g. 700MB)";
+                label = "Size Less Than";
+                break;
+            case 'last_added':
+                placeholder = "Time duration (e.g. 24h, 7d, 30d)";
+                label = "Added in the last";
+                break;
+            default:
+                placeholder = "Filter value";
+                label = filterType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        }
+
+        // Use a color coding scheme for filter types
+        let badgeClass = "bg-secondary";
+        if (filterType.startsWith('not_') || filterType === 'exclude' || filterType === 'size_lt') {
+            badgeClass = "bg-danger"; // Negative filters
+        } else if (filterType === 'last_added') {
+            badgeClass = "bg-info"; // Time-based filters
+        } else if (filterType === 'size_gt') {
+            badgeClass = "bg-success"; // Size filters
+        } else if (filterType === 'regex' || filterType === 'not_regex') {
+            badgeClass = "bg-warning"; // Regex filters
+        } else if (filterType === 'include' || filterType === 'starts_with' || filterType === 'ends_with' || filterType === 'exact_match') {
+            badgeClass = "bg-primary"; // Positive text filters
+        }
+
+        return `
+    <div class="filter-item row mb-2 align-items-center">
+        <div class="col-md-3">
+            <span class="badge ${badgeClass}">${label}</span>
+            <input type="hidden"
+                   name="debrid[${debridIndex}].directory[${dirIndex}].filter[${filterIndex}].type"
+                   value="${filterType}">
+        </div>
+        <div class="col-md-8">
+            <input type="text" class="form-control form-control-sm webdav-field"
+                   name="debrid[${debridIndex}].directory[${dirIndex}].filter[${filterIndex}].value"
+                   placeholder="${placeholder}">
+        </div>
+        <div class="col-md-1">
+            <button type="button" class="btn btn-sm btn-danger" onclick="removeFilter(this);">
+                <i class="bi bi-x"></i>
+            </button>
+        </div>
+    </div>
+    `;
+    };
 
     const arrTemplate = (index) => `
     <div class="config-item position-relative mb-3 p-3 border rounded">
@@ -473,6 +672,91 @@
         </div>
     </div>
     `;
+
+    const debridDirectoryCounts = {};
+    const directoryFilterCounts = {};
+
+    // Helper function to show a tooltip explaining filter types
+    function showFilterHelp() {
+        const helpContent = `
+        <h5>Filter Types</h5>
+        <ul>
+            <li><strong>Include/Exclude</strong>: Simple text inclusion/exclusion</li>
+            <li><strong>Starts/Ends With</strong>: Matches beginning or end of filename</li>
+            <li><strong>Exact Match</strong>: Match the entire filename</li>
+            <li><strong>Regex</strong>: Use regular expressions for complex patterns</li>
+            <li><strong>Size</strong>: Filter by file size</li>
+            <li><strong>Last Added</strong>: Show only recently added content</li>
+        </ul>
+        <p>Negative filters (Not...) will exclude matches instead of including them.</p>
+    `;
+
+        // Show a modal or tooltip with this content
+        // This will depend on your UI framework
+        // For Bootstrap:
+        $('#filterHelpModal .modal-body').html(helpContent);
+        $('#filterHelpModal').modal('show');
+    }
+
+    function addDirectory(debridIndex, data = {}) {
+        if (!debridDirectoryCounts[debridIndex]) {
+            debridDirectoryCounts[debridIndex] = 0;
+        }
+
+        const dirIndex = debridDirectoryCounts[debridIndex];
+        const container = document.getElementById(`debrid[${debridIndex}].directories`);
+        container.insertAdjacentHTML('beforeend', directoryTemplate(debridIndex, dirIndex));
+
+        // Set up tracking for filters in this directory
+        const dirKey = `${debridIndex}-${dirIndex}`;
+        directoryFilterCounts[dirKey] = 0;
+
+        // Fill with directory name if provided
+        if (data.name) {
+            const nameInput = document.querySelector(`[name="debrid[${debridIndex}].directory[${dirIndex}].name"]`);
+            if (nameInput) nameInput.value = data.name;
+        }
+
+        // Add filters if provided
+        if (data.filters) {
+            Object.entries(data.filters).forEach(([filterType, filterValue]) => {
+                addFilter(debridIndex, dirIndex, filterType, filterValue);
+            });
+        }
+
+        debridDirectoryCounts[debridIndex]++;
+        return dirIndex;
+    }
+    function addFilter(debridIndex, dirIndex, filterType, filterValue = "") {
+        const dirKey = `${debridIndex}-${dirIndex}`;
+        if (!directoryFilterCounts[dirKey]) {
+            directoryFilterCounts[dirKey] = 0;
+        }
+
+        const filterIndex = directoryFilterCounts[dirKey];
+        const container = document.getElementById(`debrid[${debridIndex}].directory[${dirIndex}].filters`);
+
+        if (container) {
+            container.insertAdjacentHTML('beforeend', filterTemplate(debridIndex, dirIndex, filterIndex, filterType));
+
+            // Set filter value if provided
+            if (filterValue) {
+                const valueInput = container.querySelector(`[name="debrid[${debridIndex}].directory[${dirIndex}].filter[${filterIndex}].value"]`);
+                if (valueInput) valueInput.value = filterValue;
+            }
+
+            directoryFilterCounts[dirKey]++;
+        }
+    }
+
+    function removeDirectory(button) {
+        button.closest('.directory-item').remove();
+    }
+
+    // Function to remove a filter
+    function removeFilter(button) {
+        button.closest('.filter-item').remove();
+    }
 
     // Main functionality
     document.addEventListener('DOMContentLoaded', function() {
@@ -717,6 +1001,19 @@
                         }
                     }
                 });
+
+                if (data.use_webdav && data.directories) {
+                    Object.entries(data.directories).forEach(([dirName, dirData]) => {
+                        const dirIndex = addDirectory(debridCount, { name: dirName });
+
+                        // Add filters if available
+                        if (dirData.filters) {
+                            Object.entries(dirData.filters).forEach(([filterType, filterValue]) => {
+                                addFilter(debridCount, dirIndex, filterType, filterValue);
+                            });
+                        }
+                    });
+                }
             }
 
             debridCount++;
@@ -784,7 +1081,6 @@
                     enabled: document.querySelector('[name="repair.enabled"]').checked,
                     interval: document.querySelector('[name="repair.interval"]').value,
                     run_on_start: document.querySelector('[name="repair.run_on_start"]').checked,
-                    reinsert: document.querySelector('[name="repair.reinsert"]').checked,
                     zurg_url: document.querySelector('[name="repair.zurg_url"]').value,
                     use_webdav: document.querySelector('[name="repair.use_webdav"]').checked,
                     auto_process: document.querySelector('[name="repair.auto_process"]').checked
@@ -804,7 +1100,8 @@
                     download_uncached: document.querySelector(`[name="debrid[${i}].download_uncached"]`).checked,
                     check_cached: document.querySelector(`[name="debrid[${i}].check_cached"]`).checked,
                     unpack_rar: document.querySelector(`[name="debrid[${i}].unpack_rar"]`).checked,
-                    use_webdav: document.querySelector(`[name="debrid[${i}].use_webdav"]`).checked,
+                    add_samples: document.querySelector(`[name="debrid[${i}].add_samples"]`).checked,
+                    use_webdav: document.querySelector(`[name="debrid[${i}].use_webdav"]`).checked
                 };
 
                 // Add WebDAV specific properties if enabled
@@ -817,6 +1114,35 @@
                     debrid.rc_url = document.querySelector(`[name="debrid[${i}].rc_url"]`).value;
                     debrid.rc_user = document.querySelector(`[name="debrid[${i}].rc_user"]`).value;
                     debrid.rc_pass = document.querySelector(`[name="debrid[${i}].rc_pass"]`).value;
+                    debrid.rc_refresh_dirs = document.querySelector(`[name="debrid[${i}].rc_refresh_dirs"]`).value;
+                    debrid.serve_from_rclone = document.querySelector(`[name="debrid[${i}].serve_from_rclone"]`).checked;
+
+                    //custom folders
+                    debrid.directories = {};
+                    const dirCount = debridDirectoryCounts[i] || 0;
+
+                    for (let j = 0; j < dirCount; j++) {
+                        const nameInput = document.querySelector(`[name="debrid[${i}].directory[${j}].name"]`);
+                        if (nameInput && nameInput.value) {
+                            const dirName = nameInput.value;
+                            debrid.directories[dirName] = { filters: {} };
+
+                            // Get directory key for filter counting
+                            const dirKey = `${i}-${j}`;
+                            const filterCount = directoryFilterCounts[dirKey] || 0;
+
+                            // Collect all filters for this directory
+                            for (let k = 0; k < filterCount; k++) {
+                                const filterTypeInput = document.querySelector(`[name="debrid[${i}].directory[${j}].filter[${k}].type"]`);
+                                const filterValueInput = document.querySelector(`[name="debrid[${i}].directory[${j}].filter[${k}].value"]`);
+
+                                if (filterTypeInput && filterValueInput && filterValueInput.value) {
+                                    const filterType = filterTypeInput.value;
+                                    debrid.directories[dirName].filters[filterType] = filterValueInput.value;
+                                }
+                            }
+                        }
+                    }
                 }
 
                 if (debrid.name && debrid.api_key) {
@@ -854,10 +1180,10 @@
                 navigator.registerProtocolHandler(
                     'magnet',
                     `${window.location.origin}/download?magnet=%s`,
-                    'DecyphArr'
+                    'Decypharr'
                 );
                 localStorage.setItem('magnetHandler', 'true');
-                document.getElementById('registerMagnetLink').innerText = '✅ DecyphArr Can Open Magnet Links';
+                document.getElementById('registerMagnetLink').innerText = '✅ Decypharr Can Open Magnet Links';
                 document.getElementById('registerMagnetLink').classList.add('bg-white', 'text-black');
                 console.log('Registered magnet link handler successfully.');
             } catch (error) {
@@ -868,8 +1194,26 @@
 
     var magnetHandler = localStorage.getItem('magnetHandler');
     if (magnetHandler === 'true') {
-        document.getElementById('registerMagnetLink').innerText = '✅ DecyphArr Can Open Magnet Links';
+        document.getElementById('registerMagnetLink').innerText = '✅ Decypharr Can Open Magnet Links';
         document.getElementById('registerMagnetLink').classList.add('bg-white', 'text-black');
     }
 </script>
+
+<!-- Filter Help Modal -->
+<div class="modal fade" id="filterHelpModal" tabindex="-1" aria-labelledby="filterHelpModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="filterHelpModalLabel">Directory Filter Help</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Content will be injected by the showFilterHelp function -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
 {{ end }}

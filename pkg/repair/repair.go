@@ -2,8 +2,9 @@ package repair
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"github.com/goccy/go-json"
+	"github.com/go-co-op/gocron/v2"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
@@ -38,7 +39,33 @@ type Repair struct {
 	logger      zerolog.Logger
 	filename    string
 	workers     int
+	scheduler   gocron.Scheduler
 	ctx         context.Context
+}
+
+type JobStatus string
+
+const (
+	JobStarted    JobStatus = "started"
+	JobPending    JobStatus = "pending"
+	JobFailed     JobStatus = "failed"
+	JobCompleted  JobStatus = "completed"
+	JobProcessing JobStatus = "processing"
+)
+
+type Job struct {
+	ID          string                       `json:"id"`
+	Arrs        []string                     `json:"arrs"`
+	MediaIDs    []string                     `json:"media_ids"`
+	StartedAt   time.Time                    `json:"created_at"`
+	BrokenItems map[string][]arr.ContentFile `json:"broken_items"`
+	Status      JobStatus                    `json:"status"`
+	CompletedAt time.Time                    `json:"finished_at"`
+	FailedAt    time.Time                    `json:"failed_at"`
+	AutoProcess bool                         `json:"auto_process"`
+	Recurrent   bool                         `json:"recurrent"`
+
+	Error string `json:"error"`
 }
 
 func New(arrs *arr.Storage, engine *debrid.Engine) *Repair {
@@ -69,8 +96,24 @@ func New(arrs *arr.Storage, engine *debrid.Engine) *Repair {
 	return r
 }
 
+func (r *Repair) Reset() {
+	// Stop scheduler
+	if r.scheduler != nil {
+		if err := r.scheduler.StopJobs(); err != nil {
+			r.logger.Error().Err(err).Msg("Error stopping scheduler")
+		}
+
+		if err := r.scheduler.Shutdown(); err != nil {
+			r.logger.Error().Err(err).Msg("Error shutting down scheduler")
+		}
+	}
+	// Reset jobs
+	r.Jobs = make(map[string]*Job)
+
+}
+
 func (r *Repair) Start(ctx context.Context) error {
-	r.ctx = ctx
+	//r.ctx = ctx
 	if r.runOnStart {
 		r.logger.Info().Msgf("Running initial repair")
 		go func() {
@@ -80,45 +123,31 @@ func (r *Repair) Start(ctx context.Context) error {
 		}()
 	}
 
-	job, err := utils.ScheduleJob(r.ctx, r.interval, time.Local, func() {
-		r.logger.Info().Msgf("Repair job started at %s", time.Now().Format("15:04:05"))
-		if err := r.AddJob([]string{}, []string{}, r.autoProcess, true); err != nil {
-			r.logger.Error().Err(err).Msg("Error running repair job")
+	r.scheduler, _ = gocron.NewScheduler(gocron.WithLocation(time.Local))
+
+	if jd, err := utils.ConvertToJobDef(r.interval); err != nil {
+		r.logger.Error().Err(err).Str("interval", r.interval).Msg("Error converting interval")
+	} else {
+		_, err2 := r.scheduler.NewJob(jd, gocron.NewTask(func() {
+			r.logger.Info().Msgf("Repair job started at %s", time.Now().Format("15:04:05"))
+			if err := r.AddJob([]string{}, []string{}, r.autoProcess, true); err != nil {
+				r.logger.Error().Err(err).Msg("Error running repair job")
+			}
+		}))
+		if err2 != nil {
+			r.logger.Error().Err(err2).Msg("Error creating repair job")
+		} else {
+			r.scheduler.Start()
+			r.logger.Info().Msgf("Repair job scheduled every %s", r.interval)
 		}
-	})
-	if err != nil {
-		r.logger.Error().Err(err).Msg("Error scheduling repair job")
-		return err
 	}
-	if t, err := job.NextRun(); err == nil {
-		r.logger.Info().Msgf("Next repair job scheduled at %s", t.Format("15:04:05"))
-	}
+
+	<-ctx.Done()
+
+	r.logger.Info().Msg("Stopping repair scheduler")
+	r.Reset()
+
 	return nil
-}
-
-type JobStatus string
-
-const (
-	JobStarted    JobStatus = "started"
-	JobPending    JobStatus = "pending"
-	JobFailed     JobStatus = "failed"
-	JobCompleted  JobStatus = "completed"
-	JobProcessing JobStatus = "processing"
-)
-
-type Job struct {
-	ID          string                       `json:"id"`
-	Arrs        []string                     `json:"arrs"`
-	MediaIDs    []string                     `json:"media_ids"`
-	StartedAt   time.Time                    `json:"created_at"`
-	BrokenItems map[string][]arr.ContentFile `json:"broken_items"`
-	Status      JobStatus                    `json:"status"`
-	CompletedAt time.Time                    `json:"finished_at"`
-	FailedAt    time.Time                    `json:"failed_at"`
-	AutoProcess bool                         `json:"auto_process"`
-	Recurrent   bool                         `json:"recurrent"`
-
-	Error string `json:"error"`
 }
 
 func (j *Job) discordContext() string {
@@ -737,7 +766,7 @@ func (r *Repair) loadFromFile() {
 	_jobs := make(map[string]*Job)
 	err = json.Unmarshal(data, &_jobs)
 	if err != nil {
-		r.logger.Trace().Err(err).Msg("Failed to unmarshal jobs; resetting")
+		r.logger.Error().Err(err).Msg("Failed to unmarshal jobs; resetting")
 		r.Jobs = make(map[string]*Job)
 		return
 	}
@@ -764,4 +793,13 @@ func (r *Repair) DeleteJobs(ids []string) {
 		}
 	}
 	go r.saveToFile()
+}
+
+// Cleanup Cleans up the repair instance
+func (r *Repair) Cleanup() {
+	r.Jobs = make(map[string]*Job)
+	r.arrs = nil
+	r.deb = nil
+	r.ctx = nil
+	r.logger.Info().Msg("Repair stopped")
 }

@@ -20,6 +20,10 @@ import (
 	"time"
 )
 
+var (
+	hexRegex = regexp.MustCompile("^[0-9a-fA-F]{40}$")
+)
+
 type Magnet struct {
 	Name     string
 	InfoHash string
@@ -188,7 +192,6 @@ func ExtractInfoHash(magnetDesc string) string {
 
 func processInfoHash(input string) (string, error) {
 	// Regular expression for a valid 40-character hex infohash
-	hexRegex := regexp.MustCompile("^[0-9a-fA-F]{40}$")
 
 	// If it's already a valid hex infohash, return it as is
 	if hexRegex.MatchString(input) {

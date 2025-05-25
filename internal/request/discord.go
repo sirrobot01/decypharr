@@ -2,8 +2,8 @@ package request
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
-	"github.com/goccy/go-json"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"io"
 	"net/http"

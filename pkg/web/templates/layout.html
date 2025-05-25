@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DecyphArr - {{.Title}}</title>
+    <title>Decypharr - {{.Title}}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"/>
@@ -68,17 +68,6 @@
             font-weight: 500;
         }
 
-        .badge#channel-badge {
-            background-color: #0d6efd;
-        }
-
-        .badge#channel-badge.beta {
-            background-color: #fd7e14;
-        }
-        .badge#channel-badge.nightly {
-            background-color: #6c757d;
-        }
-
         .table {
             color: var(--text-color);
         }
@@ -137,7 +126,7 @@
 <nav class="navbar navbar-expand-lg navbar-light mb-4">
     <div class="container">
         <a class="navbar-brand" href="/">
-            <i class="bi bi-cloud-download me-2"></i>DecyphArr
+            <i class="bi bi-cloud-download me-2"></i>Decypharr
         </a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
             <span class="navbar-toggler-icon"></span>
@@ -145,32 +134,32 @@
         <div class="collapse navbar-collapse" id="navbarNav">
             <ul class="navbar-nav me-auto">
                 <li class="nav-item">
-                    <a class="nav-link {{if eq .Page "index"}}active{{end}}" href="/">
+                    <a class="nav-link {{if eq .Page "index"}}active{{end}}" href="{{.URLBase}}">
                     <i class="bi bi-table me-1"></i>Torrents
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link {{if eq .Page "download"}}active{{end}}" href="/download">
+                    <a class="nav-link {{if eq .Page "download"}}active{{end}}" href="{{.URLBase}}download">
                     <i class="bi bi-cloud-download me-1"></i>Download
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link {{if eq .Page "repair"}}active{{end}}" href="/repair">
+                    <a class="nav-link {{if eq .Page "repair"}}active{{end}}" href="{{.URLBase}}repair">
                     <i class="bi bi-tools me-1"></i>Repair
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link {{if eq .Page "config"}}active{{end}}" href="/config">
+                    <a class="nav-link {{if eq .Page "config"}}active{{end}}" href="{{.URLBase}}config">
                     <i class="bi bi-gear me-1"></i>Settings
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="/webdav" target="_blank">
+                    <a class="nav-link" href="{{.URLBase}}webdav" target="_blank">
                         <i class="bi bi-cloud me-1"></i>WebDAV
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="/logs" target="_blank">
+                    <a class="nav-link" href="{{.URLBase}}logs" target="_blank">
                         <i class="bi bi-journal me-1"></i>Logs
                     </a>
                 </li>
@@ -180,7 +169,9 @@
                     <i class="bi bi-sun-fill" id="lightIcon"></i>
                     <i class="bi bi-moon-fill d-none" id="darkIcon"></i>
                 </div>
-                <span class="badge me-2" id="channel-badge">Loading...</span>
+                <a href="{{.URLBase}}stats" class="me-2">
+                    <i class="bi bi-bar-chart-line me-1"></i>Stats
+                </a>
                 <span class="badge bg-primary" id="version-badge">Loading...</span>
             </div>
         </div>
@@ -209,23 +200,22 @@
 
     window.urlBase = "{{.URLBase}}";
 
-    function joinUrl (base, path) {
-        if (path.substring(0, 1) === "/") {
-            // path starts with `/`. Thus it is absolute.
-            return path;
+    function joinURL(base, path) {
+        if (!base.endsWith('/')) {
+            base += '/';
         }
-        if (base.substring(base.length-1) === "/") {
-            // base ends with `/`
-            return base + path;
+        if (path.startsWith('/')) {
+            path = path.substring(1);
         }
-        return base + "/" + path;
+        return base + path;
+
     }
 
     function fetcher(endpoint, options = {}) {
         // Use the global urlBase or default to empty string
         let baseUrl = window.urlBase || '';
 
-        let url = joinUrl(baseUrl, endpoint);
+        let url = joinURL(baseUrl, endpoint);
 
         // Return the regular fetcher with the complete URL
         return fetch(url, options);
@@ -267,7 +257,7 @@
         const toast = new bootstrap.Toast(toastElement, {
             autohide: true,
             delay: toastTimeouts[type]
-            
+
         });
 
         toast.show();
@@ -331,22 +321,20 @@
             .then(response => response.json())
             .then(data => {
                 const versionBadge = document.getElementById('version-badge');
-                const channelBadge = document.getElementById('channel-badge');
 
                 // Add url to version badge
-                versionBadge.innerHTML = `<a href="https://github.com/sirrobot01/debrid-blackhole/releases/tag/${data.version}" target="_blank" class="text-white">${data.version}</a>`;
-                channelBadge.textContent = data.channel.charAt(0).toUpperCase() + data.channel.slice(1);
+                versionBadge.innerHTML = `<a href="https://github.com/sirrobot01/decypharr/releases/tag/${data.version}" target="_blank" class="text-white">${data.channel}-${data.version}</a>`;
+
 
                 if (data.channel === 'beta') {
-                    channelBadge.classList.add('beta');
+                    versionBadge.classList.add('beta');
                 } else if (data.channel === 'nightly') {
-                    channelBadge.classList.add('nightly');
+                    versionBadge.classList.add('nightly');
                 }
             })
             .catch(error => {
                 console.error('Error fetching version:', error);
                 document.getElementById('version-badge').textContent = 'Unknown';
-                document.getElementById('channel-badge').textContent = 'Unknown';
             });
     });
 </script>

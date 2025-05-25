@@ -1,7 +1,7 @@
 package web
 
 import (
-	"github.com/goccy/go-json"
+	"encoding/json"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"golang.org/x/crypto/bcrypt"
 	"net/http"

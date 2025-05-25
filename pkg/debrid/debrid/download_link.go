@@ -3,11 +3,77 @@ package debrid
 import (
 	"errors"
 	"fmt"
+
+	"sync"
 	"time"
 
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 )
+
+type linkCache struct {
+	Id        string
+	link      string
+	accountId string
+	expiresAt time.Time
+}
+
+type downloadLinkCache struct {
+	data map[string]linkCache
+	mu   sync.Mutex
+}
+
+func newDownloadLinkCache() *downloadLinkCache {
+	return &downloadLinkCache{
+		data: make(map[string]linkCache),
+	}
+}
+
+func (c *downloadLinkCache) reset() {
+	c.mu.Lock()
+	c.data = make(map[string]linkCache)
+	c.mu.Unlock()
+}
+
+func (c *downloadLinkCache) Load(key string) (linkCache, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	dl, ok := c.data[key]
+	return dl, ok
+}
+func (c *downloadLinkCache) Store(key string, value linkCache) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.data[key] = value
+}
+func (c *downloadLinkCache) Delete(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.data, key)
+}
+
+type downloadLinkRequest struct {
+	result string
+	err    error
+	done   chan struct{}
+}
+
+func newDownloadLinkRequest() *downloadLinkRequest {
+	return &downloadLinkRequest{
+		done: make(chan struct{}),
+	}
+}
+
+func (r *downloadLinkRequest) Complete(result string, err error) {
+	r.result = result
+	r.err = err
+	close(r.done)
+}
+
+func (r *downloadLinkRequest) Wait() (string, error) {
+	<-r.done
+	return r.result, r.err
+}
 
 func (c *Cache) GetDownloadLink(torrentName, filename, fileLink string) (string, error) {
 	// Check link cache
@@ -15,7 +81,21 @@ func (c *Cache) GetDownloadLink(torrentName, filename, fileLink string) (string,
 		return dl, nil
 	}
 
+	if req, inFlight := c.downloadLinkRequests.Load(fileLink); inFlight {
+		// Wait for the other request to complete and use its result
+		result := req.(*downloadLinkRequest)
+		return result.Wait()
+	}
+
+	// Create a new request object
+	req := newDownloadLinkRequest()
+	c.downloadLinkRequests.Store(fileLink, req)
+
 	downloadLink, err := c.fetchDownloadLink(torrentName, filename, fileLink)
+
+	// Complete the request and remove it from the map
+	req.Complete(downloadLink, err)
+	c.downloadLinkRequests.Delete(fileLink)
 
 	return downloadLink, err
 }
@@ -46,7 +126,6 @@ func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (strin
 		}
 		ct = newCt
 		file = ct.Files[filename]
-		c.logger.Debug().Str("name", ct.Name).Str("id", ct.Id).Msgf("Reinserted torrent")
 	}
 
 	c.logger.Trace().Msgf("Getting download link for %s(%s)", filename, file.Link)
@@ -59,7 +138,6 @@ func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (strin
 			}
 			ct = newCt
 			file = ct.Files[filename]
-			c.logger.Debug().Str("name", ct.Name).Str("id", ct.Id).Msgf("Reinserted torrent")
 			// Retry getting the download link
 			downloadLink, err = c.client.GetDownloadLink(ct.Torrent, &file)
 			if err != nil {
@@ -84,33 +162,32 @@ func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (strin
 	return downloadLink.DownloadLink, nil
 }
 
-func (c *Cache) GenerateDownloadLinks(t *CachedTorrent) {
+func (c *Cache) GenerateDownloadLinks(t CachedTorrent) {
 	if err := c.client.GenerateDownloadLinks(t.Torrent); err != nil {
-		c.logger.Error().Err(err).Msg("Failed to generate download links")
+		c.logger.Error().Err(err).Str("torrent", t.Name).Msg("Failed to generate download links")
 		return
 	}
 	for _, file := range t.Files {
 		if file.DownloadLink != nil {
 			c.updateDownloadLink(file.DownloadLink)
 		}
-
 	}
-	c.SaveTorrent(t)
+	c.setTorrent(t, nil)
 }
 
 func (c *Cache) updateDownloadLink(dl *types.DownloadLink) {
-	c.downloadLinks.Store(dl.Link, downloadLinkCache{
+	c.downloadLinks.Store(dl.Link, linkCache{
 		Id:        dl.Id,
-		Link:      dl.DownloadLink,
-		ExpiresAt: time.Now().Add(c.autoExpiresLinksAfterDuration),
-		AccountId: dl.AccountId,
+		link:      dl.DownloadLink,
+		expiresAt: time.Now().Add(c.autoExpiresLinksAfterDuration),
+		accountId: dl.AccountId,
 	})
 }
 
 func (c *Cache) checkDownloadLink(link string) string {
 	if dl, ok := c.downloadLinks.Load(link); ok {
-		if dl.ExpiresAt.After(time.Now()) && !c.IsDownloadLinkInvalid(dl.Link) {
-			return dl.Link
+		if dl.expiresAt.After(time.Now()) && !c.IsDownloadLinkInvalid(dl.link) {
+			return dl.link
 		}
 	}
 	return ""
@@ -121,8 +198,8 @@ func (c *Cache) MarkDownloadLinkAsInvalid(link, downloadLink, reason string) {
 	// Remove the download api key from active
 	if reason == "bandwidth_exceeded" {
 		if dl, ok := c.downloadLinks.Load(link); ok {
-			if dl.AccountId != "" && dl.Link == downloadLink {
-				c.client.DisableAccount(dl.AccountId)
+			if dl.accountId != "" && dl.link == downloadLink {
+				c.client.DisableAccount(dl.accountId)
 			}
 		}
 	}

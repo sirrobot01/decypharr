@@ -4,20 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"os"
-	"os/signal"
-	"runtime"
-	"syscall"
-
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/request"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"runtime"
 )
 
 type Server struct {
@@ -69,13 +66,9 @@ func (s *Server) Start(ctx context.Context) error {
 		Handler: s.router,
 	}
 
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			s.logger.Info().Msgf("Error starting server: %v", err)
-			stop()
 		}
 	}()
 
@@ -124,7 +117,7 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
 		// Memory stats
 		"heap_alloc_mb":  fmt.Sprintf("%.2fMB", float64(memStats.HeapAlloc)/1024/1024),
 		"total_alloc_mb": fmt.Sprintf("%.2fMB", float64(memStats.TotalAlloc)/1024/1024),
-		"sys_mb":         fmt.Sprintf("%.2fMB", float64(memStats.Sys)/1024/1024),
+		"memory_used":    fmt.Sprintf("%.2fMB", float64(memStats.Sys)/1024/1024),
 
 		// GC stats
 		"gc_cycles": memStats.NumGC,
@@ -133,6 +126,11 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
 
 		// System info
 		"num_cpu": runtime.NumCPU(),
+
+		// OS info
+		"os":         runtime.GOOS,
+		"arch":       runtime.GOARCH,
+		"go_version": runtime.Version(),
 	}
 	request.JSONResponse(w, stats, http.StatusOK)
 }

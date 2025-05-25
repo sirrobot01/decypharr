@@ -1,10 +1,10 @@
 # Installation
 
-There are multiple ways to install and run DecyphArr. Choose the method that works best for your setup.
+There are multiple ways to install and run Decypharr. Choose the method that works best for your setup.
 
 ## Docker Installation (Recommended)
 
-Docker is the easiest way to get started with DecyphArr.
+Docker is the easiest way to get started with Decypharr.
 
 ### Available Docker Registries
 
@@ -21,6 +21,25 @@ You can use either Docker Hub or GitHub Container Registry to pull the image:
 - `nightly`: The latest nightly build (usually unstable)
 - `experimental`: The latest experimental build (highly unstable)
 
+### Docker CLI Setup
+
+Pull the Docker image:
+```bash
+docker pull cy01/blackhole:latest
+```
+Run the Docker container:
+```bash
+docker run -d \
+  --name decypharr \
+  -p 8282:8282 \
+  -v /mnt/:/mnt \
+  -v ./config/:/app \
+  -e PUID=1000 \
+  -e PGID=1000 \
+  -e UMASK=002 \
+  cy01/blackhole:latest
+```
+
 ### Docker Compose Setup
 
 Create a `docker-compose.yml` file with the following content:
@@ -29,25 +48,20 @@ Create a `docker-compose.yml` file with the following content:
 version: '3.7'
 services:
   decypharr:
-    image: cy01/blackhole:latest # or cy01/blackhole:beta
+    image: cy01/blackhole:latest
     container_name: decypharr
     ports:
       - "8282:8282"
     user: "1000:1000"
     volumes:
-      - /mnt/:/mnt
+      - /mnt/:/mnt # Mount your media directory
       - ./config/:/app # config.json must be in this directory
     environment:
       - PUID=1000
       - PGID=1000
       - UMASK=002
       - QBIT_PORT=8282 # qBittorrent Port (optional)
-      - PORT=8181 # Proxy Port (optional)
     restart: unless-stopped
-    depends_on:
-      - rclone # If you are using rclone with docker
-
-
 ```
 
 Run the Docker Compose setup:
@@ -71,7 +85,9 @@ The config directory should contain your config.json file.
 
 ## config.json
 
-The `config.json` file is where you configure DecyphArr. You can find a sample configuration file in the `configs` directory of the repository.
+The `config.json` file is where you configure Decypharr. You can find a sample configuration file in the `configs` directory of the repository.
+
+You can also configure Decypharr through the web interface, but it's recommended to start with the config file for initial setup.
 
 ```json
 {
@@ -92,3 +108,9 @@ The `config.json` file is where you configure DecyphArr. You can find a sample c
   "port": "8282"
 }
 ```
+
+### Few Notes
+
+- Make sure decypharr has access to the directories specified in the configuration file.
+- Ensure decypharr have write permissions to the qbittorrent download folder.
+- Make sure decypharr can write to the `./config/` directory.

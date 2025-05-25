@@ -30,7 +30,7 @@ To enable and configure the Repair Worker, add the following to your `config.jso
 
 - `enabled`: Set to `true` to enable the Repair Worker.
 - `interval`: The time interval for the Repair Worker to run (e.g., `12h`, `1d`).
-- `run_on_start`: If set to `true`, the Repair Worker will run immediately after DecyphArr starts.
+- `run_on_start`: If set to `true`, the Repair Worker will run immediately after Decypharr starts.
 - `use_webdav`: If set to `true`, the Repair Worker will use WebDAV for file operations.
 - `zurg_url`: The URL for the Zurg service (if using).
 - `auto_process`: If set to `true`, the Repair Worker will automatically process files that it finds issues with.

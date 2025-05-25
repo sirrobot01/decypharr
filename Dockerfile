@@ -1,5 +1,5 @@
 # Stage 1: Build binaries
-FROM --platform=$BUILDPLATFORM golang:1.23-alpine as builder
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine as builder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -57,10 +57,10 @@ COPY --from=dirsetup --chown=nonroot:nonroot /app /app
 
 # Metadata
 ENV LOG_PATH=/app/logs
-EXPOSE 8181 8282
+EXPOSE 8282
 VOLUME ["/app"]
 USER nonroot:nonroot
 
-HEALTHCHECK --interval=5s --timeout=3s --retries=10 CMD ["/usr/bin/healthcheck", "--config", "/app"]
+HEALTHCHECK --interval=3s --retries=10 CMD ["/usr/bin/healthcheck", "--config", "/app"]
 
 CMD ["/usr/bin/decypharr", "--config", "/app"]

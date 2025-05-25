@@ -1,17 +1,17 @@
 package utils
 
-import "strings"
+import (
+	"net/url"
+	"strings"
+)
 
-func EscapePath(path string) string {
-	// escape %
-	escapedPath := strings.ReplaceAll(path, "%", "%25")
+func PathUnescape(path string) string {
 
-	// add others
+	// try to use url.PathUnescape
+	if unescaped, err := url.PathUnescape(path); err == nil {
+		return unescaped
+	}
 
-	return escapedPath
-}
-
-func UnescapePath(path string) string {
 	// unescape %
 	unescapedPath := strings.ReplaceAll(path, "%25", "%")
 

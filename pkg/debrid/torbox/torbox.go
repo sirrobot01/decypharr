@@ -2,8 +2,8 @@ package torbox
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
-	"github.com/goccy/go-json"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
@@ -28,13 +28,13 @@ type Torbox struct {
 	Host             string `json:"host"`
 	APIKey           string
 	accounts         map[string]types.Account
-	accountsMutex    sync.RWMutex
 	DownloadUncached bool
 	client           *request.Client
 
 	MountPath   string
 	logger      zerolog.Logger
-	CheckCached bool
+	checkCached bool
+	addSamples  bool
 }
 
 func New(dc config.Debrid) *Torbox {
@@ -71,7 +71,8 @@ func New(dc config.Debrid) *Torbox {
 		client:           client,
 		MountPath:        dc.Folder,
 		logger:           _log,
-		CheckCached:      dc.CheckCached,
+		checkCached:      dc.CheckCached,
+		addSamples:       dc.AddSamples,
 	}
 }
 
@@ -217,7 +218,7 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 	cfg := config.Get()
 	for _, f := range data.Files {
 		fileName := filepath.Base(f.Name)
-		if utils.IsSampleFile(f.AbsolutePath) {
+		if !tb.addSamples && utils.IsSampleFile(f.AbsolutePath) {
 			// Skip sample files
 			continue
 		}
@@ -278,7 +279,7 @@ func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
 	cfg := config.Get()
 	for _, f := range data.Files {
 		fileName := filepath.Base(f.Name)
-		if utils.IsSampleFile(f.AbsolutePath) {
+		if !tb.addSamples && utils.IsSampleFile(f.AbsolutePath) {
 			// Skip sample files
 			continue
 		}
@@ -432,7 +433,7 @@ func (tb *Torbox) GetDownloadingStatus() []string {
 }
 
 func (tb *Torbox) GetCheckCached() bool {
-	return tb.CheckCached
+	return tb.checkCached
 }
 
 func (tb *Torbox) GetTorrents() ([]*types.Torrent, error) {

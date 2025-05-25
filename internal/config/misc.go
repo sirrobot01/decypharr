@@ -50,7 +50,7 @@ func getDefaultExtensions() []string {
 	return unique
 }
 
-func parseSize(sizeStr string) (int64, error) {
+func ParseSize(sizeStr string) (int64, error) {
 	sizeStr = strings.ToUpper(strings.TrimSpace(sizeStr))
 
 	// Absolute size-based cache

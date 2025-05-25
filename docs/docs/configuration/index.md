@@ -1,6 +1,6 @@
 # Configuration Overview
 
-DecyphArr uses a JSON configuration file to manage its settings. This file should be named `config.json` and placed in your configured directory.
+Decypharr uses a JSON configuration file to manage its settings. This file should be named `config.json` and placed in your configured directory.
 
 ## Basic Configuration
 
@@ -33,7 +33,7 @@ Here's a minimal configuration to get started:
 
 ### Configuration Sections
 
-DecyphArr's configuration is divided into several sections:
+Decypharr's configuration is divided into several sections:
 
 - [General Configuration](general.md) - Basic settings like logging and authentication
 - [Debrid Providers](debrid.md) - Configure one or more Debrid services

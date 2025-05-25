@@ -1,6 +1,6 @@
 # Arr Applications Configuration
 
-DecyphArr can integrate directly with Sonarr, Radarr, and other Arr applications. This section explains how to configure the Arr integration in your `config.json` file.
+Decypharr can integrate directly with Sonarr, Radarr, and other Arr applications. This section explains how to configure the Arr integration in your `config.json` file.
 
 ## Basic Configuration
 
@@ -34,6 +34,8 @@ Each Arr application supports the following options:
 - `host`: The host URL of the Arr application, including protocol and port
 - `token`: The API token/key of the Arr application
 - `cleanup`: Whether to clean up the Arr queue (removes completed downloads). This is only useful for Sonarr.
+- `skip_repair`: Automated repair will be skipped for this *arr.
+- `download_uncached`: Whether to download uncached torrents (defaults to debrid/manual setting)
 
 ### Finding Your API Key
 #### Sonarr/Radarr/Lidarr

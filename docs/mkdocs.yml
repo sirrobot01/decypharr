@@ -1,8 +1,8 @@
 site_name: Decypharr
-site_url: https://sirrobot01.github.io/debrid-blackhole
+site_url: https://sirrobot01.github.io/decypharr
 site_description: QbitTorrent with Debrid Support
-repo_url: https://github.com/sirrobot01/debrid-blackhole
-repo_name: sirrobot01/debrid-blackhole
+repo_url: https://github.com/sirrobot01/decypharr
+repo_name: sirrobot01/decypharr
 edit_uri: blob/main/docs
 
 
@@ -69,6 +69,9 @@ nav:
       - Overview: features/index.md
       - Repair Worker: features/repair-worker.md
       - WebDAV: features/webdav.md
+  - Guides:
+      - Overview: guides/index.md
+      - Setting Up with Rclone: guides/rclone.md
   - Changelog: changelog.md
 
 

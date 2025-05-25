@@ -64,7 +64,7 @@
                             createToast(errorText || 'Registration failed', 'error');
                         });
                     } else {
-                        window.location.href = joinUrl(window.urlBase, '/');
+                        window.location.href = joinURL(window.urlBase, '/');
                     }
 
                 })
@@ -78,7 +78,7 @@
             fetcher('/skip-auth', { method: 'GET' })
                 .then(response => {
                     if (response.ok) {
-                        window.location.href = joinUrl(window.urlBase, '/');
+                        window.location.href = joinURL(window.urlBase, '/');
                     } else {
                         throw new Error('Failed to skip authentication');
                     }

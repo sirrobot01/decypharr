@@ -2,14 +2,14 @@ package config
 
 import (
 	"cmp"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
-
-	"github.com/goccy/go-json"
 )
 
 var (
@@ -28,6 +28,7 @@ type Debrid struct {
 	RateLimit        string   `json:"rate_limit,omitempty"` // 200/minute or 10/second
 	Proxy            string   `json:"proxy,omitempty"`
 	UnpackRar        bool     `json:"unpack_rar,omitempty"`
+	AddSamples       bool     `json:"add_samples,omitempty"`
 
 	UseWebDav bool `json:"use_webdav,omitempty"`
 	WebDav
@@ -69,21 +70,6 @@ type Auth struct {
 	Password string `json:"password,omitempty"`
 }
 
-type WebDav struct {
-	TorrentsRefreshInterval      string `json:"torrents_refresh_interval,omitempty"`
-	DownloadLinksRefreshInterval string `json:"download_links_refresh_interval,omitempty"`
-	Workers                      int    `json:"workers,omitempty"`
-	AutoExpireLinksAfter         string `json:"auto_expire_links_after,omitempty"`
-
-	// Folder
-	FolderNaming string `json:"folder_naming,omitempty"`
-
-	// Rclone
-	RcUrl  string `json:"rc_url,omitempty"`
-	RcUser string `json:"rc_user,omitempty"`
-	RcPass string `json:"rc_pass,omitempty"`
-}
-
 type Config struct {
 	// server
 	BindAddress string `json:"bind_address,omitempty"`
@@ -121,19 +107,21 @@ func (c *Config) loadConfig() error {
 	file, err := os.ReadFile(c.JsonFile())
 	if err != nil {
 		if os.IsNotExist(err) {
+			fmt.Printf("Config file not found, creating a new one at %s\n", c.JsonFile())
 			// Create a default config file if it doesn't exist
 			if err := c.createConfig(c.Path); err != nil {
 				return fmt.Errorf("failed to create config file: %w", err)
 			}
-		} else {
-			return fmt.Errorf("error reading config file: %w", err)
+			return c.Save()
 		}
-	} else {
-		if err := json.Unmarshal(file, &c); err != nil {
-			return fmt.Errorf("error unmarshaling config: %w", err)
-		}
+		return fmt.Errorf("error reading config file: %w", err)
 	}
-	return c.Save()
+
+	if err := json.Unmarshal(file, &c); err != nil {
+		return fmt.Errorf("error unmarshaling config: %w", err)
+	}
+	c.setDefaults()
+	return nil
 }
 
 func validateDebrids(debrids []Debrid) error {
@@ -212,7 +200,7 @@ func (c *Config) GetMinFileSize() int64 {
 	if c.MinFileSize == "" {
 		return 0
 	}
-	s, err := parseSize(c.MinFileSize)
+	s, err := ParseSize(c.MinFileSize)
 	if err != nil {
 		return 0
 	}
@@ -224,7 +212,7 @@ func (c *Config) GetMaxFileSize() int64 {
 	if c.MaxFileSize == "" {
 		return 0
 	}
-	s, err := parseSize(c.MaxFileSize)
+	s, err := ParseSize(c.MaxFileSize)
 	if err != nil {
 		return 0
 	}
@@ -307,6 +295,19 @@ func (c *Config) updateDebrid(d Debrid) Debrid {
 	if d.AutoExpireLinksAfter == "" {
 		d.AutoExpireLinksAfter = cmp.Or(c.WebDav.AutoExpireLinksAfter, "3d") // 2 days
 	}
+
+	// Merge debrid specified directories with global directories
+
+	directories := c.WebDav.Directories
+	if directories == nil {
+		directories = make(map[string]WebdavDirectories)
+	}
+
+	for name, dir := range d.Directories {
+		directories[name] = dir
+	}
+	d.Directories = directories
+
 	d.RcUrl = cmp.Or(d.RcUrl, c.WebDav.RcUrl)
 	d.RcUser = cmp.Or(d.RcUser, c.WebDav.RcUser)
 	d.RcPass = cmp.Or(d.RcPass, c.WebDav.RcPass)
@@ -314,7 +315,7 @@ func (c *Config) updateDebrid(d Debrid) Debrid {
 	return d
 }
 
-func (c *Config) Save() error {
+func (c *Config) setDefaults() {
 	for i, debrid := range c.Debrids {
 		c.Debrids[i] = c.updateDebrid(debrid)
 	}
@@ -329,12 +330,21 @@ func (c *Config) Save() error {
 		c.URLBase = "/"
 	}
 	// validate url base starts with /
-	if c.URLBase[0] != '/' {
+	if !strings.HasPrefix(c.URLBase, "/") {
 		c.URLBase = "/" + c.URLBase
+	}
+	if !strings.HasSuffix(c.URLBase, "/") {
+		c.URLBase += "/"
 	}
 
 	// Load the auth file
 	c.Auth = c.GetAuth()
+}
+
+func (c *Config) Save() error {
+
+	c.setDefaults()
+
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err

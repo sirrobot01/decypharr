@@ -1,10 +1,9 @@
 package debrid
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"github.com/puzpuzpuz/xsync/v3"
-	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
@@ -33,6 +32,31 @@ func (r *reInsertRequest) Complete(result *CachedTorrent, err error) {
 func (r *reInsertRequest) Wait() (*CachedTorrent, error) {
 	<-r.done
 	return r.result, r.err
+}
+
+func (c *Cache) markAsFailedToReinsert(torrentId string) {
+	c.failedToReinsert.Store(torrentId, struct{}{})
+
+	// Remove the torrent from the directory if it has failed to reinsert, max retries are hardcoded to 5
+	if torrent, ok := c.torrents.getByID(torrentId); ok {
+		torrent.Bad = true
+		c.setTorrent(torrent, func(t CachedTorrent) {
+			c.RefreshListings(false)
+		})
+	}
+}
+
+func (c *Cache) markAsSuccessfullyReinserted(torrentId string) {
+	if _, ok := c.failedToReinsert.Load(torrentId); !ok {
+		return
+	}
+	c.failedToReinsert.Delete(torrentId)
+	if torrent, ok := c.torrents.getByID(torrentId); ok {
+		torrent.Bad = false
+		c.setTorrent(torrent, func(torrent CachedTorrent) {
+			c.RefreshListings(false)
+		})
+	}
 }
 
 func (c *Cache) IsTorrentBroken(t *CachedTorrent, filenames []string) bool {
@@ -86,9 +110,8 @@ func (c *Cache) IsTorrentBroken(t *CachedTorrent, filenames []string) bool {
 			}
 		}
 	}
-	cfg := config.Get()
 	// Try to reinsert the torrent if it's broken
-	if cfg.Repair.ReInsert && isBroken && t.Torrent != nil {
+	if isBroken && t.Torrent != nil {
 		// Check if the torrent is already in progress
 		if _, err := c.reInsertTorrent(t); err != nil {
 			c.logger.Error().Err(err).Str("torrentId", t.Torrent.Id).Msg("Failed to reinsert torrent")
@@ -100,31 +123,43 @@ func (c *Cache) IsTorrentBroken(t *CachedTorrent, filenames []string) bool {
 	return isBroken
 }
 
-func (c *Cache) repairWorker() {
-	// This watches a channel for torrents to repair
-	for req := range c.repairChan {
-		torrentId := req.TorrentID
-		c.logger.Debug().Str("torrentId", req.TorrentID).Msg("Received repair request")
+func (c *Cache) repairWorker(ctx context.Context) {
+	// This watches a channel for torrents to repair and can be cancelled via context
+	for {
+		select {
+		case <-ctx.Done():
+			return
 
-		// Get the torrent from the cache
-		cachedTorrent := c.GetTorrent(torrentId)
-		if cachedTorrent == nil {
-			c.logger.Warn().Str("torrentId", torrentId).Msg("Torrent not found in cache")
-			continue
-		}
+		case req, ok := <-c.repairChan:
+			// Channel was closed
+			if !ok {
+				c.logger.Debug().Msg("Repair channel closed, shutting down worker")
+				return
+			}
 
-		switch req.Type {
-		case RepairTypeReinsert:
-			c.logger.Debug().Str("torrentId", torrentId).Msg("Reinserting torrent")
-			if _, err := c.reInsertTorrent(cachedTorrent); err != nil {
-				c.logger.Error().Err(err).Str("torrentId", cachedTorrent.Id).Msg("Failed to reinsert torrent")
+			torrentId := req.TorrentID
+			c.logger.Debug().Str("torrentId", req.TorrentID).Msg("Received repair request")
+
+			// Get the torrent from the cache
+			cachedTorrent := c.GetTorrent(torrentId)
+			if cachedTorrent == nil {
+				c.logger.Warn().Str("torrentId", torrentId).Msg("Torrent not found in cache")
 				continue
 			}
-		case RepairTypeDelete:
-			c.logger.Debug().Str("torrentId", torrentId).Msg("Deleting torrent")
-			if err := c.DeleteTorrent(torrentId); err != nil {
-				c.logger.Error().Err(err).Str("torrentId", torrentId).Msg("Failed to delete torrent")
-				continue
+
+			switch req.Type {
+			case RepairTypeReinsert:
+				c.logger.Debug().Str("torrentId", torrentId).Msg("Reinserting torrent")
+				if _, err := c.reInsertTorrent(cachedTorrent); err != nil {
+					c.logger.Error().Err(err).Str("torrentId", cachedTorrent.Id).Msg("Failed to reinsert torrent")
+					continue
+				}
+			case RepairTypeDelete:
+				c.logger.Debug().Str("torrentId", torrentId).Msg("Deleting torrent")
+				if err := c.DeleteTorrent(torrentId); err != nil {
+					c.logger.Error().Err(err).Str("torrentId", torrentId).Msg("Failed to delete torrent")
+					continue
+				}
 			}
 		}
 	}
@@ -162,14 +197,14 @@ func (c *Cache) reInsertTorrent(ct *CachedTorrent) (*CachedTorrent, error) {
 	var err error
 	newTorrent, err = c.client.SubmitMagnet(newTorrent)
 	if err != nil {
-		c.failedToReinsert.Store(oldID, struct{}{})
+		c.markAsFailedToReinsert(oldID)
 		// Remove the old torrent from the cache and debrid service
 		return ct, fmt.Errorf("failed to submit magnet: %w", err)
 	}
 
 	// Check if the torrent was submitted
 	if newTorrent == nil || newTorrent.Id == "" {
-		c.failedToReinsert.Store(oldID, struct{}{})
+		c.markAsFailedToReinsert(oldID)
 		return ct, fmt.Errorf("failed to submit magnet: empty torrent")
 	}
 	newTorrent.DownloadUncached = false // Set to false, avoid re-downloading
@@ -179,30 +214,32 @@ func (c *Cache) reInsertTorrent(ct *CachedTorrent) (*CachedTorrent, error) {
 			// Delete the torrent if it was not downloaded
 			_ = c.client.DeleteTorrent(newTorrent.Id)
 		}
-		c.failedToReinsert.Store(oldID, struct{}{})
+		c.markAsFailedToReinsert(oldID)
 		return ct, err
 	}
 
 	// Update the torrent in the cache
-	addedOn, err := time.Parse(time.RFC3339, torrent.Added)
+	addedOn, err := time.Parse(time.RFC3339, newTorrent.Added)
 	if err != nil {
 		addedOn = time.Now()
 	}
 	for _, f := range newTorrent.Files {
 		if f.Link == "" {
-			c.failedToReinsert.Store(oldID, struct{}{})
+			c.markAsFailedToReinsert(oldID)
 			return ct, fmt.Errorf("failed to reinsert torrent: empty link")
 		}
 	}
 	// Set torrent to newTorrent
-	ct = &CachedTorrent{
+	newCt := CachedTorrent{
 		Torrent:    newTorrent,
 		AddedOn:    addedOn,
 		IsComplete: len(newTorrent.Files) > 0,
 	}
-	c.setTorrent(ct, func(torrent *CachedTorrent) {
-		go c.RefreshListings(true)
+	c.setTorrent(newCt, func(torrent CachedTorrent) {
+		c.RefreshListings(true)
 	})
+
+	ct = &newCt // Update ct to point to the new torrent
 
 	// We can safely delete the old torrent here
 	if oldID != "" {
@@ -212,13 +249,14 @@ func (c *Cache) reInsertTorrent(ct *CachedTorrent) (*CachedTorrent, error) {
 	}
 
 	req.Complete(ct, err)
-	c.failedToReinsert.Delete(oldID) // Delete the old torrent from the failed list
+	c.markAsSuccessfullyReinserted(oldID)
+
+	c.logger.Debug().Str("torrentId", torrent.Id).Msg("Torrent successfully reinserted")
 
 	return ct, nil
 }
 
 func (c *Cache) resetInvalidLinks() {
-	c.invalidDownloadLinks = xsync.NewMapOf[string, string]()
+	c.invalidDownloadLinks = sync.Map{}
 	c.client.ResetActiveDownloadKeys() // Reset the active download keys
-	c.failedToReinsert = sync.Map{}    // Reset the failed to reinsert map
 }

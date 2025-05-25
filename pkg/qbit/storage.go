@@ -1,8 +1,8 @@
 package qbit
 
 import (
+	"encoding/json"
 	"fmt"
-	"github.com/goccy/go-json"
 	"github.com/sirrobot01/decypharr/pkg/service"
 	"os"
 	"sort"
@@ -271,4 +271,10 @@ func (ts *TorrentStorage) saveToFile() error {
 		return err
 	}
 	return os.WriteFile(ts.filename, data, 0644)
+}
+
+func (ts *TorrentStorage) Reset() {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	ts.torrents = make(Torrents)
 }

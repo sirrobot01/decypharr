@@ -42,3 +42,11 @@ func New() *QBit {
 		downloadSemaphore: make(chan struct{}, cmp.Or(cfg.MaxDownloads, 5)),
 	}
 }
+
+func (q *QBit) Reset() {
+	if q.Storage != nil {
+		q.Storage.Reset()
+	}
+	q.Tags = nil
+	close(q.downloadSemaphore)
+}

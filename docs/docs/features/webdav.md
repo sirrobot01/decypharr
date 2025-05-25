@@ -1,14 +1,15 @@
 # WebDAV Server
 
-DecyphArr includes a built-in WebDAV server that provides direct access to your Debrid files, making them easily accessible to media players and other applications.
+Decypharr includes a built-in WebDAV server that provides direct access to your Debrid files, making them easily accessible to media players and other applications.
+
 
 ## Overview
 
-While most Debrid providers have their own WebDAV servers, DecyphArr's implementation offers faster access and additional features. The WebDAV server listens on port `8080` by default.
+While most Debrid providers have their own WebDAV servers, Decypharr's implementation offers faster access and additional features.
 
 ## Accessing the WebDAV Server
 
-- URL: `http://localhost:8282/webdav` or `http://<your-server-ip>:8080/webdav`
+- URL: `http://localhost:8282/webdav` or `http://<your-server-ip>:8282/webdav`
 
 ## Configuration
 
@@ -22,7 +23,16 @@ You can configure WebDAV settings either globally or per-Debrid provider in your
   "auto_expire_links_after": "3d",
   "rc_url": "http://localhost:5572",
   "rc_user": "username",
-  "rc_pass": "password"
+  "rc_pass": "password",
+  "serve_from_rclone": false,
+  "directories": {
+      "Newly Added": {
+        "filters": {
+          "exclude": "9-1-1",
+          "last_added": "20h"
+        }
+      }
+  }
 }
 ```
 
@@ -39,13 +49,15 @@ You can configure WebDAV settings either globally or per-Debrid provider in your
   - `id`: Torrent ID
 - `auto_expire_links_after`: Time after which download links will expire (e.g., `3d`, `1w`).
 - `rc_url`, `rc_user`, `rc_pass`: Rclone RC configuration for VFS refreshes
+- `directories`: A map of virtual folders to serve via the WebDAV server. The key is the virtual folder name, and the values are a map of filters and their values.
+- `serve_from_rclone`: Whether to serve files directly from Rclone (disabled by default).
 
 ### Using with Media Players
 The WebDAV server works well with media players like:
 
 - Infuse
 - VidHub
-- Plex (via mounting)
+- Plex, Emby, Jellyfin (with rclone, Check [this guide](../guides/rclone.md))
 - Kodi
 
 ### Mounting with Rclone

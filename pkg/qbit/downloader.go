@@ -3,13 +3,13 @@ package qbit
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/cavaliergopher/grab/v3"
-	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	debrid "github.com/sirrobot01/decypharr/pkg/debrid/types"
 )
@@ -28,7 +28,7 @@ func Download(client *grab.Client, url, filename string, byterange *[2]int64, pr
 
 	resp := client.Do(req)
 
-	t := time.NewTicker(time.Second)
+	t := time.NewTicker(time.Second * 2)
 	defer t.Stop()
 
 	var lastReported int64
@@ -100,9 +100,14 @@ func (q *QBit) downloadFiles(torrent *Torrent, parent string) {
 		q.UpdateTorrentMin(torrent, debridTorrent)
 	}
 	client := &grab.Client{
-		UserAgent:  "Decypharr[QBitTorrent]",
-		HTTPClient: request.New(request.WithTimeout(60 * time.Second)),
+		UserAgent: "Decypharr[QBitTorrent]",
+		HTTPClient: &http.Client{
+			Transport: &http.Transport{
+				Proxy: http.ProxyFromEnvironment,
+			},
+		},
 	}
+	errChan := make(chan error, len(debridTorrent.Files))
 	for _, file := range debridTorrent.Files {
 		if file.DownloadLink == nil {
 			q.logger.Info().Msgf("No download link found for %s", file.Name)
@@ -113,7 +118,7 @@ func (q *QBit) downloadFiles(torrent *Torrent, parent string) {
 		go func(file debrid.File) {
 			defer wg.Done()
 			defer func() { <-q.downloadSemaphore }()
-			filename := file.Link
+			filename := file.Name
 
 			err := Download(
 				client,
@@ -125,12 +130,25 @@ func (q *QBit) downloadFiles(torrent *Torrent, parent string) {
 
 			if err != nil {
 				q.logger.Error().Msgf("Failed to download %s: %v", filename, err)
+				errChan <- err
 			} else {
 				q.logger.Info().Msgf("Downloaded %s", filename)
 			}
 		}(file)
 	}
 	wg.Wait()
+
+	close(errChan)
+	var errors []error
+	for err := range errChan {
+		if err != nil {
+			errors = append(errors, err)
+		}
+	}
+	if len(errors) > 0 {
+		q.logger.Error().Msgf("Errors occurred during download: %v", errors)
+		return
+	}
 	q.logger.Info().Msgf("Downloaded all files for %s", debridTorrent.Name)
 }
 
@@ -168,7 +186,7 @@ func (q *QBit) createSymlinksWebdav(debridTorrent *debrid.Torrent, rclonePath, t
 
 	remainingFiles := make(map[string]debrid.File)
 	for _, file := range files {
-		remainingFiles[utils.EscapePath(file.Name)] = file
+		remainingFiles[file.Name] = file
 	}
 
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -299,7 +317,7 @@ func (q *QBit) getTorrentPath(rclonePath string, debridTorrent *debrid.Torrent) 
 }
 
 func (q *QBit) preCacheFile(name string, filePaths []string) error {
-	q.logger.Trace().Msgf("Pre-caching file: %s", name)
+	q.logger.Trace().Msgf("Pre-caching torrent: %s", name)
 	if len(filePaths) == 0 {
 		return fmt.Errorf("no file paths provided")
 	}
@@ -309,7 +327,11 @@ func (q *QBit) preCacheFile(name string, filePaths []string) error {
 
 			file, err := os.Open(f)
 			if err != nil {
-				return err
+				if os.IsNotExist(err) {
+					// File has probably been moved by arr, return silently
+					return nil
+				}
+				return fmt.Errorf("failed to open file: %s: %v", f, err)
 			}
 			defer file.Close()
 

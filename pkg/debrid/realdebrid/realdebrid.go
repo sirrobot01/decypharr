@@ -2,6 +2,7 @@ package realdebrid
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,13 +15,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goccy/go-json"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+
 	"github.com/sirrobot01/decypharr/pkg/rar"
 )
 
@@ -37,12 +38,13 @@ type RealDebrid struct {
 	client           *request.Client
 	downloadClient   *request.Client
 
-	MountPath   string
-	logger      zerolog.Logger
-	CheckCached bool
-	UnpackRar   bool
+	MountPath string
+	logger    zerolog.Logger
+	UnpackRar bool
 
 	rarSemaphore chan struct{}
+	checkCached  bool
+	addSamples   bool
 }
 
 func New(dc config.Debrid) *RealDebrid {
@@ -80,21 +82,22 @@ func New(dc config.Debrid) *RealDebrid {
 			request.WithRateLimiter(rl),
 			request.WithLogger(_log),
 			request.WithMaxRetries(5),
-			request.WithRetryableStatus(429),
+			request.WithRetryableStatus(429, 502),
 			request.WithProxy(dc.Proxy),
 		),
 		downloadClient: request.New(
 			request.WithHeaders(downloadHeaders),
 			request.WithLogger(_log),
 			request.WithMaxRetries(10),
-			request.WithRetryableStatus(429, 447),
+			request.WithRetryableStatus(429, 447, 502),
 			request.WithProxy(dc.Proxy),
 		),
 		currentDownloadKey: currentDownloadKey,
 		MountPath:          dc.Folder,
 		logger:             logger.New(dc.Name),
-		CheckCached:        dc.CheckCached,
 		rarSemaphore:       make(chan struct{}, 2),
+		checkCached:        dc.CheckCached,
+		addSamples:         dc.AddSamples,
 	}
 }
 
@@ -232,14 +235,14 @@ func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, select
 // getTorrentFiles returns a list of torrent files from the torrent info
 // validate is used to determine if the files should be validated
 // if validate is false, selected files will be returned
-func getTorrentFiles(t *types.Torrent, data torrentInfo) map[string]types.File {
+func (r *RealDebrid) getTorrentFiles(t *types.Torrent, data torrentInfo) map[string]types.File {
 	files := make(map[string]types.File)
 	cfg := config.Get()
 	idx := 0
 
 	for _, f := range data.Files {
 		name := filepath.Base(f.Path)
-		if utils.IsSampleFile(f.Path) {
+		if !r.addSamples && utils.IsSampleFile(f.Path) {
 			// Skip sample files
 			continue
 		}
@@ -400,7 +403,7 @@ func (r *RealDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 		Debrid:           r.Name,
 		MountPath:        r.MountPath,
 	}
-	t.Files = getTorrentFiles(t, data) // Get selected files
+	t.Files = r.getTorrentFiles(t, data) // Get selected files
 	return t, nil
 }
 
@@ -472,7 +475,7 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent, isSymlink bool) (*types.Torre
 		t.Debrid = r.Name
 		t.MountPath = r.MountPath
 		if status == "waiting_files_selection" {
-			t.Files = getTorrentFiles(t, data)
+			t.Files = r.getTorrentFiles(t, data)
 			if len(t.Files) == 0 {
 				return t, fmt.Errorf("no video files found")
 			}
@@ -609,7 +612,7 @@ func (r *RealDebrid) _getDownloadLink(file *types.File) (*types.DownloadLink, er
 		}
 		var data ErrorResponse
 		if err = json.Unmarshal(b, &data); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error unmarshalling %d || %s \n %s", resp.StatusCode, err, string(b))
 		}
 		switch data.ErrorCode {
 		case 19:
@@ -690,7 +693,7 @@ func (r *RealDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types
 }
 
 func (r *RealDebrid) GetCheckCached() bool {
-	return r.CheckCached
+	return r.checkCached
 }
 
 func (r *RealDebrid) getTorrents(offset int, limit int) (int, []*types.Torrent, error) {
@@ -730,9 +733,6 @@ func (r *RealDebrid) getTorrents(offset int, limit int) (int, []*types.Torrent, 
 		if t.Status != "downloaded" {
 			continue
 		}
-		if _, exists := filenames[t.Filename]; exists {
-			continue
-		}
 		torrents = append(torrents, &types.Torrent{
 			Id:               t.Id,
 			Name:             t.Filename,
@@ -757,32 +757,22 @@ func (r *RealDebrid) GetTorrents() ([]*types.Torrent, error) {
 	limit := 5000
 
 	// Get first batch and total count
-	totalItems, firstBatch, err := r.getTorrents(0, limit)
-	if err != nil {
-		return nil, err
-	}
-
-	allTorrents := firstBatch
-
-	// Calculate remaining requests
-	remaining := totalItems - len(firstBatch)
-	if remaining <= 0 {
-		return allTorrents, nil
-	}
-
-	// Prepare for concurrent fetching
+	allTorrents := make([]*types.Torrent, 0)
 	var fetchError error
-
-	// Calculate how many more requests we need
-	batchCount := (remaining + limit - 1) / limit // ceiling division
-
-	for i := 1; i <= batchCount; i++ {
-		_, batch, err := r.getTorrents(i*limit, limit)
+	offset := 0
+	for {
+		// Fetch next batch of torrents
+		_, torrents, err := r.getTorrents(offset, limit)
 		if err != nil {
 			fetchError = err
-			continue
+			break
 		}
-		allTorrents = append(allTorrents, batch...)
+		totalTorrents := len(torrents)
+		if totalTorrents == 0 {
+			break
+		}
+		allTorrents = append(allTorrents, torrents...)
+		offset += totalTorrents
 	}
 
 	if fetchError != nil {

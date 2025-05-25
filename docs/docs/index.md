@@ -1,20 +1,21 @@
-# DecyphArr
+# Decypharr
 
-![DecyphArr UI](images/main.png)
+![Decypharr UI](images/main.png)
 
-**DecyphArr** is an implementation of QbitTorrent with **Multiple Debrid service support**, written in Go.
+**Decypharr** is an implementation of QbitTorrent with **Multiple Debrid service support**, written in Go.
 
-## What is DecyphArr?
+## What is Decypharr?
 
-DecyphArr combines the power of QBittorrent with popular Debrid services to enhance your media management. It provides a familiar interface for Sonarr, Radarr, and other \*Arr applications while leveraging the capabilities of Debrid providers.
+TLDR; Decypharr is a self-hosted, open-source torrent client that integrates with multiple Debrid services. It provides a user-friendly interface for managing torrents and supports popular media management applications like Sonarr and Radarr.
+
 
 ## Key Features
 
-- 🔄 Mock Qbittorent API that supports Sonarr, Radarr, Lidarr and other Arr applications
-- 🖥️ Full-fledged UI for managing torrents
-- 🔌 Multiple Debrid providers support
-- 📁 WebDAV server support for each Debrid provider
-- 🔧 Repair Worker for missing files
+- Mock Qbittorent API that supports Sonarr, Radarr, Lidarr, and other Arr applications
+- Full-fledged UI for managing torrents
+- Multiple Debrid providers support
+- WebDAV server support for each Debrid provider
+- Repair Worker for missing files, symlinks etc
 
 ## Supported Debrid Providers
 
@@ -25,4 +26,4 @@ DecyphArr combines the power of QBittorrent with popular Debrid services to enha
 
 ## Getting Started
 
-Check out our [Installation Guide](installation.md) to get started with DecyphArr.
+Check out our [Installation Guide](installation.md) to get started with Decypharr.

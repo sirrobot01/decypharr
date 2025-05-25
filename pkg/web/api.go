@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"encoding/json"
 	"github.com/go-chi/chi/v5"
-	"github.com/goccy/go-json"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
@@ -35,6 +35,9 @@ func (ui *Handler) handleAddContent(w http.ResponseWriter, r *http.Request) {
 	arrName := r.FormValue("arr")
 	notSymlink := r.FormValue("notSymlink") == "true"
 	downloadUncached := r.FormValue("downloadUncached") == "true"
+	if arrName == "" {
+		arrName = "uncategorized"
+	}
 
 	_arr := svc.Arr.Get(arrName)
 	if _arr == nil {
@@ -148,7 +151,7 @@ func (ui *Handler) handleGetTorrents(w http.ResponseWriter, r *http.Request) {
 
 func (ui *Handler) handleDeleteTorrent(w http.ResponseWriter, r *http.Request) {
 	hash := chi.URLParam(r, "hash")
-	category := r.URL.Query().Get("category")
+	category := chi.URLParam(r, "category")
 	removeFromDebrid := r.URL.Query().Get("removeFromDebrid") == "true"
 	if hash == "" {
 		http.Error(w, "No hash provided", http.StatusBadRequest)

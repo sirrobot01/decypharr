@@ -4,34 +4,33 @@ import (
 	"context"
 	"fmt"
 	"github.com/go-co-op/gocron/v2"
+	"github.com/robfig/cron/v3"
 	"strconv"
 	"strings"
 	"time"
 )
 
-func ScheduleJob(ctx context.Context, interval string, loc *time.Location, jobFunc func()) (gocron.Job, error) {
+func ScheduleJob(ctx context.Context, interval string, loc *time.Location, jobFunc func()) (gocron.Scheduler, error) {
 	if loc == nil {
 		loc = time.Local
 	}
-	var job gocron.Job
 	s, err := gocron.NewScheduler(gocron.WithLocation(loc))
 	if err != nil {
-		return job, fmt.Errorf("failed to create scheduler: %w", err)
+		return s, fmt.Errorf("failed to create scheduler: %w", err)
 	}
-	jd, err := convertToJD(interval)
+	jd, err := ConvertToJobDef(interval)
 	if err != nil {
-		return job, fmt.Errorf("failed to convert interval to job definition: %w", err)
+		return s, fmt.Errorf("failed to convert interval to job definition: %w", err)
 	}
 	// Schedule the job
-	if job, err = s.NewJob(jd, gocron.NewTask(jobFunc), gocron.WithContext(ctx)); err != nil {
-		return job, fmt.Errorf("failed to create job: %w", err)
+	if _, err = s.NewJob(jd, gocron.NewTask(jobFunc), gocron.WithContext(ctx)); err != nil {
+		return s, fmt.Errorf("failed to create job: %w", err)
 	}
-	s.Start()
-	return job, nil
+	return s, nil
 }
 
 // ConvertToJobDef converts a string interval to a gocron.JobDefinition.
-func convertToJD(interval string) (gocron.JobDefinition, error) {
+func ConvertToJobDef(interval string) (gocron.JobDefinition, error) {
 	// Parse the interval string
 	// Interval could be in the format "1h", "30m", "15s" or "1h30m" or "04:05"
 	var jd gocron.JobDefinition
@@ -40,14 +39,17 @@ func convertToJD(interval string) (gocron.JobDefinition, error) {
 		return gocron.DailyJob(1, gocron.NewAtTimes(
 			gocron.NewAtTime(uint(t.Hour()), uint(t.Minute()), uint(t.Second())),
 		)), nil
-	} else {
-		dur, err := time.ParseDuration(interval)
-		if err != nil {
-			return jd, fmt.Errorf("failed to parse duration: %w", err)
-		}
-		jd = gocron.DurationJob(dur)
 	}
-	return jd, nil
+
+	if _, err := cron.ParseStandard(interval); err == nil {
+		return gocron.CronJob(interval, false), nil
+	}
+
+	if dur, err := time.ParseDuration(interval); err == nil {
+		return gocron.DurationJob(dur), nil
+	}
+
+	return jd, fmt.Errorf("invalid interval format: %s", interval)
 }
 
 func parseClockTime(s string) (time.Time, bool) {

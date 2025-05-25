@@ -3,13 +3,12 @@ package arr
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
-	"github.com/goccy/go-json"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/request"
-	"github.com/sirrobot01/decypharr/internal/utils"
 	"io"
 	"net/http"
 	"strconv"
@@ -118,8 +117,14 @@ func (a *Arr) Validate() error {
 
 type Storage struct {
 	Arrs   map[string]*Arr // name -> arr
-	mu     sync.RWMutex
+	mu     sync.Mutex
 	logger zerolog.Logger
+}
+
+func (as *Storage) Cleanup() {
+	as.mu.Lock()
+	defer as.mu.Unlock()
+	as.Arrs = make(map[string]*Arr)
 }
 
 func InferType(host, name string) Type {
@@ -159,14 +164,14 @@ func (as *Storage) AddOrUpdate(arr *Arr) {
 }
 
 func (as *Storage) Get(name string) *Arr {
-	as.mu.RLock()
-	defer as.mu.RUnlock()
+	as.mu.Lock()
+	defer as.mu.Unlock()
 	return as.Arrs[name]
 }
 
 func (as *Storage) GetAll() []*Arr {
-	as.mu.RLock()
-	defer as.mu.RUnlock()
+	as.mu.Lock()
+	defer as.mu.Unlock()
 	arrs := make([]*Arr, 0, len(as.Arrs))
 	for _, arr := range as.Arrs {
 		if arr.Host != "" && arr.Token != "" {
@@ -183,10 +188,15 @@ func (as *Storage) Clear() {
 }
 
 func (as *Storage) StartSchedule(ctx context.Context) error {
-	// Schedule the cleanup job every 10 seconds
-	_, err := utils.ScheduleJob(ctx, "10s", nil, as.cleanupArrsQueue)
-	if err != nil {
-		return err
+
+	ticker := time.NewTicker(10 * time.Second)
+
+	select {
+	case <-ticker.C:
+		as.cleanupArrsQueue()
+	case <-ctx.Done():
+		ticker.Stop()
+		return nil
 	}
 	return nil
 }

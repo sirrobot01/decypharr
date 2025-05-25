@@ -49,7 +49,7 @@ services:
 
 ## Documentation
 
-For complete documentation, please visit our [Documentation](https://sirrobot01.github.io/debrid-blackhole/).
+For complete documentation, please visit our [Documentation](https://sirrobot01.github.io/decypharr/).
 
 The documentation includes:
 

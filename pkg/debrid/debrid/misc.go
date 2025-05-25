@@ -10,7 +10,7 @@ import (
 // This is useful for deduplicating files across multiple torrents.
 // The order of the torrents is determined by the AddedOn time, with the earliest added torrent first.
 // If a file with the same name exists in multiple torrents, the last one will be used.
-func mergeFiles(torrents ...*CachedTorrent) map[string]types.File {
+func mergeFiles(torrents ...CachedTorrent) map[string]types.File {
 	merged := make(map[string]types.File)
 
 	// order torrents by added time

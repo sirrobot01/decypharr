@@ -2,8 +2,8 @@ package debrid_link
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
-	"github.com/goccy/go-json"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
@@ -11,7 +11,6 @@ import (
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"strconv"
-	"sync"
 	"time"
 
 	"net/http"
@@ -23,13 +22,13 @@ type DebridLink struct {
 	Host             string `json:"host"`
 	APIKey           string
 	accounts         map[string]types.Account
-	accountsMutex    sync.RWMutex
 	DownloadUncached bool
 	client           *request.Client
 
 	MountPath   string
 	logger      zerolog.Logger
-	CheckCached bool
+	checkCached bool
+	addSamples  bool
 }
 
 func (dl *DebridLink) GetName() string {
@@ -329,7 +328,7 @@ func (dl *DebridLink) GetDownloadingStatus() []string {
 }
 
 func (dl *DebridLink) GetCheckCached() bool {
-	return dl.CheckCached
+	return dl.checkCached
 }
 
 func (dl *DebridLink) GetDownloadUncached() bool {
@@ -369,7 +368,8 @@ func New(dc config.Debrid) *DebridLink {
 		client:           client,
 		MountPath:        dc.Folder,
 		logger:           logger.New(dc.Name),
-		CheckCached:      dc.CheckCached,
+		checkCached:      dc.CheckCached,
+		addSamples:       dc.AddSamples,
 	}
 }
 

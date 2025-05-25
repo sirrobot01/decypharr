@@ -110,10 +110,11 @@ func (q *QBit) ProcessFiles(torrent *Torrent, debridTorrent *debridTypes.Torrent
 
 	// Check if debrid supports webdav by checking cache
 	if isSymlink {
+		timer := time.Now()
 		cache, useWebdav := svc.Debrid.Caches[debridTorrent.Debrid]
 		if useWebdav {
 			q.logger.Info().Msgf("Using internal webdav for %s", debridTorrent.Debrid)
-			timer := time.Now()
+
 			// Use webdav to download the file
 
 			if err := cache.AddTorrent(debridTorrent); err != nil {
@@ -125,12 +126,12 @@ func (q *QBit) ProcessFiles(torrent *Torrent, debridTorrent *debridTypes.Torrent
 			rclonePath := filepath.Join(debridTorrent.MountPath, cache.GetTorrentFolder(debridTorrent)) // /mnt/remote/realdebrid/MyTVShow
 			torrentFolderNoExt := utils.RemoveExtension(debridTorrent.Name)
 			torrentSymlinkPath, err = q.createSymlinksWebdav(debridTorrent, rclonePath, torrentFolderNoExt) // /mnt/symlinks/{category}/MyTVShow/
-			q.logger.Debug().Msgf("Adding %s took %s", debridTorrent.Name, time.Since(timer))
 
 		} else {
 			// User is using either zurg or debrid webdav
 			torrentSymlinkPath, err = q.ProcessSymlink(torrent) // /mnt/symlinks/{category}/MyTVShow/
 		}
+		q.logger.Info().Msgf("Adding %s took %s", debridTorrent.Name, time.Since(timer))
 	} else {
 		torrentSymlinkPath, err = q.ProcessManualFile(torrent)
 	}

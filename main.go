@@ -25,7 +25,7 @@ func main() {
 	config.SetConfigPath(configPath)
 	config.Get()
 
-	// Create a context that's cancelled on SIGINT/SIGTERM
+	// Create a context canceled on SIGINT/SIGTERM
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

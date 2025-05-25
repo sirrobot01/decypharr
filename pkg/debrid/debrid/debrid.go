@@ -54,13 +54,11 @@ func ProcessTorrent(d *Engine, magnet *utils.Magnet, a *arr.Arr, isSymlink, over
 
 	for index, db := range d.Clients {
 		logger := db.GetLogger()
-		logger.Info().Msgf("Processing debrid: %s", db.GetName())
+		logger.Info().Str("Debrid", db.GetName()).Str("Hash", debridTorrent.InfoHash).Msg("Processing torrent")
 
 		if !overrideDownloadUncached && a.DownloadUncached == nil {
 			debridTorrent.DownloadUncached = db.GetDownloadUncached()
 		}
-
-		logger.Info().Msgf("Torrent Hash: %s", debridTorrent.InfoHash)
 
 		//if db.GetCheckCached() {
 		//	hash, exists := db.IsAvailable([]string{debridTorrent.InfoHash})[debridTorrent.InfoHash]
@@ -78,7 +76,7 @@ func ProcessTorrent(d *Engine, magnet *utils.Magnet, a *arr.Arr, isSymlink, over
 			continue
 		}
 		dbt.Arr = a
-		logger.Info().Msgf("Torrent: %s(id=%s) submitted to %s", dbt.Name, dbt.Id, db.GetName())
+		logger.Info().Str("id", dbt.Id).Msgf("Torrent: %s submitted to %s", dbt.Name, db.GetName())
 		d.LastUsed = index
 
 		torrent, err := db.CheckStatus(dbt, isSymlink)
@@ -93,15 +91,13 @@ func ProcessTorrent(d *Engine, magnet *utils.Magnet, a *arr.Arr, isSymlink, over
 	if len(errs) == 0 {
 		return nil, fmt.Errorf("failed to process torrent: no clients available")
 	}
-	var errBuilder strings.Builder
-	errBuilder.WriteString("failed to process torrent:")
-
-	for _, e := range errs {
-		if e != nil {
-			errBuilder.WriteString("\n")
-			errBuilder.WriteString(e.Error())
+	if len(errs) == 1 {
+		return nil, fmt.Errorf("failed to process torrent: %w", errs[0])
+	} else {
+		errStrings := make([]string, 0, len(errs))
+		for _, err := range errs {
+			errStrings = append(errStrings, err.Error())
 		}
+		return nil, fmt.Errorf("failed to process torrent: %s", strings.Join(errStrings, ", "))
 	}
-
-	return nil, fmt.Errorf(errBuilder.String())
 }

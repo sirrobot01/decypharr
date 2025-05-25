@@ -17,7 +17,7 @@ import (
 type HealthStatus struct {
 	QbitAPI       bool `json:"qbit_api"`
 	WebUI         bool `json:"web_ui"`
-	WebDAVService bool `json:"webdav_service,omitempty"`
+	WebDAVService bool `json:"webdav_service"`
 	OverallStatus bool `json:"overall_status"`
 }
 
