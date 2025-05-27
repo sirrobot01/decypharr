@@ -195,7 +195,7 @@ func (q *QBit) ProcessSymlink(torrent *Torrent) (string, error) {
 		q.logger.Warn().Msgf("Error while scanning rclone path: %v", err)
 	}
 
-	pending := make(map[string]debridTypes.File)
+	pending := make(map[string]debrid.File)
 	for _, file := range files {
 		if realRelPath, ok := realPaths[file.Name]; ok {
 			file.Path = realRelPath
