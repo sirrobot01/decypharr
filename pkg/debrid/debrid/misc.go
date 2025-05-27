@@ -19,7 +19,7 @@ func mergeFiles(torrents ...CachedTorrent) map[string]types.File {
 	})
 
 	for _, torrent := range torrents {
-		for _, file := range torrent.Files {
+		for _, file := range torrent.GetFiles() {
 			merged[file.Name] = file
 		}
 	}

@@ -68,7 +68,7 @@ func (q *QBit) downloadFiles(torrent *Torrent, parent string) {
 	var wg sync.WaitGroup
 
 	totalSize := int64(0)
-	for _, file := range debridTorrent.Files {
+	for _, file := range debridTorrent.GetFiles() {
 		totalSize += file.Size
 	}
 	debridTorrent.Mu.Lock()
@@ -100,7 +100,7 @@ func (q *QBit) downloadFiles(torrent *Torrent, parent string) {
 		},
 	}
 	errChan := make(chan error, len(debridTorrent.Files))
-	for _, file := range debridTorrent.Files {
+	for _, file := range debridTorrent.GetFiles() {
 		if file.DownloadLink == nil {
 			q.logger.Info().Msgf("No download link found for %s", file.Name)
 			continue
@@ -170,15 +170,34 @@ func (q *QBit) ProcessSymlink(torrent *Torrent) (string, error) {
 		return "", fmt.Errorf("failed to create directory: %s: %v", torrentSymlinkPath, err)
 	}
 
+	realPaths := make(map[string]string)
+	err = filepath.WalkDir(torrentRclonePath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() {
+			filename := d.Name()
+			rel, _ := filepath.Rel(torrentRclonePath, path)
+			realPaths[filename] = rel
+		}
+		return nil
+	})
+	if err != nil {
+		q.logger.Warn().Msgf("Error while scanning rclone path: %v", err)
+	}
+
 	pending := make(map[string]debridTypes.File)
-	filePaths := make([]string, 0, len(files))
 	for _, file := range files {
+		if realRelPath, ok := realPaths[file.Name]; ok {
+			file.Path = realRelPath
+		}
 		pending[file.Path] = file
 	}
+
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
-
-	timeout := time.After(30 * time.Minute) // Adjust timeout duration as needed
+	timeout := time.After(30 * time.Minute)
+	filePaths := make([]string, 0, len(pending))
 
 	for len(pending) > 0 {
 		select {
@@ -194,7 +213,6 @@ func (q *QBit) ProcessSymlink(torrent *Torrent) (string, error) {
 						delete(pending, path)
 						q.logger.Info().Msgf("File is ready: %s", file.Name)
 					}
-
 				}
 			}
 		case <-timeout:

@@ -23,6 +23,7 @@ import (
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+	_ "time/tzdata"
 )
 
 type WebDavFolderNaming string
@@ -109,9 +110,16 @@ type Cache struct {
 
 func New(dc config.Debrid, client types.Client) *Cache {
 	cfg := config.Get()
-	cet, _ := time.LoadLocation("CET")
-	cetSc, _ := gocron.NewScheduler(gocron.WithLocation(cet))
-	scheduler, _ := gocron.NewScheduler(gocron.WithLocation(time.Local))
+	cetSc, err := gocron.NewScheduler(gocron.WithLocation(time.UTC))
+	if err != nil {
+		// If we can't create a CET scheduler, fallback to local time
+		cetSc, _ = gocron.NewScheduler(gocron.WithLocation(time.Local))
+	}
+	scheduler, err := gocron.NewScheduler(gocron.WithLocation(time.Local))
+	if err != nil {
+		// If we can't create a local scheduler, fallback to CET
+		scheduler = cetSc
+	}
 
 	autoExpiresLinksAfter, err := time.ParseDuration(dc.AutoExpireLinksAfter)
 	if autoExpiresLinksAfter == 0 || err != nil {
@@ -307,10 +315,10 @@ func (c *Cache) load(ctx context.Context) (map[string]CachedTorrent, error) {
 				}
 
 				isComplete := true
-				if len(ct.Files) != 0 {
+				if len(ct.GetFiles()) != 0 {
 					// Check if all files are valid, if not, delete the file.json and remove from cache.
-					fs := make(map[string]types.File, len(ct.Files))
-					for _, f := range ct.Files {
+					fs := make(map[string]types.File, len(ct.GetFiles()))
+					for _, f := range ct.GetFiles() {
 						if f.Link == "" {
 							isComplete = false
 							break
@@ -756,7 +764,7 @@ func (c *Cache) deleteTorrent(id string, removeFromDebrid bool) bool {
 
 			newFiles := map[string]types.File{}
 			newId := ""
-			for _, file := range t.Files {
+			for _, file := range t.GetFiles() {
 				if file.TorrentId != "" && file.TorrentId != id {
 					if newId == "" && file.TorrentId != "" {
 						newId = file.TorrentId
@@ -813,6 +821,36 @@ func (c *Cache) OnRemove(torrentId string) {
 		c.logger.Error().Err(err).Msgf("Failed to delete torrent: %s", torrentId)
 		return
 	}
+}
+
+// RemoveFile removes a file from the torrent cache
+// TODO sends a re-insert that removes the file from debrid
+func (c *Cache) RemoveFile(torrentId string, filename string) error {
+	c.logger.Debug().Str("torrent_id", torrentId).Msgf("Removing file %s", filename)
+	torrent, ok := c.torrents.getByID(torrentId)
+	if !ok {
+		return fmt.Errorf("torrent %s not found", torrentId)
+	}
+	file, ok := torrent.GetFile(filename)
+	if !ok {
+		return fmt.Errorf("file %s not found in torrent %s", filename, torrentId)
+	}
+	file.Deleted = true
+	torrent.Files[filename] = file
+
+	// If the torrent has no files left, delete it
+	if len(torrent.GetFiles()) == 0 {
+		c.logger.Debug().Msgf("Torrent %s has no files left, deleting it", torrentId)
+		if err := c.DeleteTorrent(torrentId); err != nil {
+			return fmt.Errorf("failed to delete torrent %s: %w", torrentId, err)
+		}
+		return nil
+	}
+
+	c.setTorrent(torrent, func(torrent CachedTorrent) {
+		c.listingDebouncer.Call(true)
+	}) // Update the torrent in the cache
+	return nil
 }
 
 func (c *Cache) GetLogger() zerolog.Logger {

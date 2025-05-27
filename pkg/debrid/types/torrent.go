@@ -29,6 +29,7 @@ type Torrent struct {
 	Seeders          int             `json:"seeders"`
 	Links            []string        `json:"links"`
 	MountPath        string          `json:"mount_path"`
+	DeletedFiles     []string        `json:"deleted_files"`
 
 	Debrid string `json:"debrid"`
 
@@ -75,6 +76,24 @@ func (t *Torrent) GetMountFolder(rClonePath string) (string, error) {
 	return "", fmt.Errorf("no path found")
 }
 
+func (t *Torrent) GetFile(filename string) (File, bool) {
+	f, ok := t.Files[filename]
+	if !ok {
+		return File{}, false
+	}
+	return f, !f.Deleted
+}
+
+func (t *Torrent) GetFiles() []File {
+	files := make([]File, 0, len(t.Files))
+	for _, f := range t.Files {
+		if !f.Deleted {
+			files = append(files, f)
+		}
+	}
+	return files
+}
+
 type File struct {
 	TorrentId    string        `json:"torrent_id"`
 	Id           string        `json:"id"`
@@ -85,6 +104,7 @@ type File struct {
 	DownloadLink *DownloadLink `json:"-"`
 	AccountId    string        `json:"account_id"`
 	Generated    time.Time     `json:"generated"`
+	Deleted      bool          `json:"deleted"`
 }
 
 func (t *Torrent) Cleanup(remove bool) {
@@ -94,15 +114,6 @@ func (t *Torrent) Cleanup(remove bool) {
 			return
 		}
 	}
-}
-
-func (t *Torrent) GetFile(id string) *File {
-	for _, f := range t.Files {
-		if f.Id == id {
-			return &f
-		}
-	}
-	return nil
 }
 
 type Account struct {
