@@ -61,25 +61,58 @@ func (h *Handler) readinessMiddleware(next http.Handler) http.Handler {
 
 // RemoveAll implements webdav.FileSystem
 func (h *Handler) RemoveAll(ctx context.Context, name string) error {
-	if name[0] != '/' {
+	if !strings.HasPrefix(name, "/") {
 		name = "/" + name
 	}
-	name = path.Clean(name)
-
+	name = utils.PathUnescape(path.Clean(name))
 	rootDir := path.Clean(h.RootPath)
 
 	if name == rootDir {
 		return os.ErrPermission
 	}
 
-	torrentName, _ := getName(rootDir, name)
-	cachedTorrent := h.cache.GetTorrentByName(torrentName)
-	if cachedTorrent == nil {
-		h.logger.Debug().Msgf("Torrent not found: %s", torrentName)
-		return nil // It's possible that the torrent was removed
+	// Skip if it's version.txt
+	if name == path.Join(rootDir, "version.txt") {
+		return os.ErrPermission
 	}
 
-	h.cache.OnRemove(cachedTorrent.Id)
+	// Check if the name is a parent path
+	if _, ok := h.isParentPath(name); ok {
+		return os.ErrPermission
+	}
+
+	// Check if the name is a torrent folder
+	rel := strings.TrimPrefix(name, rootDir+"/")
+	parts := strings.Split(rel, "/")
+	if len(parts) == 2 && utils.Contains(h.getParentItems(), parts[0]) {
+		torrentName := parts[1]
+		torrent := h.cache.GetTorrentByName(torrentName)
+		if torrent == nil {
+			return os.ErrNotExist
+		}
+		// Remove the torrent from the cache and debrid
+		h.cache.OnRemove(torrent.Id)
+		return nil
+	}
+	// If we reach here, it means the path is a file
+	if len(parts) >= 2 {
+		if utils.Contains(h.getParentItems(), parts[0]) {
+			torrentName := parts[1]
+			cached := h.cache.GetTorrentByName(torrentName)
+			if cached != nil && len(parts) >= 3 {
+				filename := filepath.Clean(path.Join(parts[2:]...))
+				if file, ok := cached.GetFile(filename); ok {
+					if err := h.cache.RemoveFile(cached.Id, file.Name); err != nil {
+						h.logger.Error().Err(err).Msgf("Failed to remove file %s from torrent %s", file.Name, torrentName)
+						return err
+					}
+					// If the file was successfully removed, we can return nil
+					return nil
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -202,7 +235,7 @@ func (h *Handler) OpenFile(ctx context.Context, name string, flag int, perm os.F
 			cached := h.cache.GetTorrentByName(torrentName)
 			if cached != nil && len(parts) >= 3 {
 				filename := filepath.Clean(path.Join(parts[2:]...))
-				if file, ok := cached.Files[filename]; ok {
+				if file, ok := cached.GetFile(filename); ok && !file.Deleted {
 					return &File{
 						cache:        h.cache,
 						torrentName:  torrentName,
@@ -233,12 +266,13 @@ func (h *Handler) Stat(ctx context.Context, name string) (os.FileInfo, error) {
 }
 
 func (h *Handler) getFileInfos(torrent *types.Torrent) []os.FileInfo {
-	files := make([]os.FileInfo, 0, len(torrent.Files))
+	torrentFiles := torrent.GetFiles()
+	files := make([]os.FileInfo, 0, len(torrentFiles))
 	now := time.Now()
 
 	// Sort by file name since the order is lost when using the map
-	sortedFiles := make([]*types.File, 0, len(torrent.Files))
-	for _, file := range torrent.Files {
+	sortedFiles := make([]*types.File, 0, len(torrentFiles))
+	for _, file := range torrentFiles {
 		sortedFiles = append(sortedFiles, &file)
 	}
 	slices.SortFunc(sortedFiles, func(a, b *types.File) int {
@@ -273,7 +307,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handlePropfind(w, r)
 		return
 	case "DELETE":
-		if err := h.handleDelete(w, r); err == nil {
+		if err := h.handleIDDelete(w, r); err == nil {
 			return
 		}
 		// fallthrough to default
@@ -504,7 +538,7 @@ func (h *Handler) handleOptions(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDelete deletes a torrent from using id
-func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) error {
+func (h *Handler) handleIDDelete(w http.ResponseWriter, r *http.Request) error {
 	cleanPath := path.Clean(r.URL.Path) // Remove any leading slashes
 
 	_, torrentId := path.Split(cleanPath)

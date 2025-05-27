@@ -234,7 +234,7 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 			Id:        strconv.Itoa(f.Id),
 			Name:      fileName,
 			Size:      f.Size,
-			Path:      fileName,
+			Path:      f.Name,
 		}
 		t.Files[fileName] = file
 	}

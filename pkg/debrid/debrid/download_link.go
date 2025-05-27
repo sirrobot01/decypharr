@@ -103,7 +103,10 @@ func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (strin
 	if ct == nil {
 		return "", fmt.Errorf("torrent not found")
 	}
-	file := ct.Files[filename]
+	file, ok := ct.GetFile(filename)
+	if !ok {
+		return "", fmt.Errorf("file %s not found in torrent %s", filename, torrentName)
+	}
 
 	if file.Link == "" {
 		// file link is empty, refresh the torrent to get restricted links
@@ -111,7 +114,10 @@ func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (strin
 		if ct == nil {
 			return "", fmt.Errorf("failed to refresh torrent")
 		} else {
-			file = ct.Files[filename]
+			file, ok = ct.GetFile(filename)
+			if !ok {
+				return "", fmt.Errorf("file %s not found in refreshed torrent %s", filename, torrentName)
+			}
 		}
 	}
 
@@ -123,7 +129,10 @@ func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (strin
 			return "", fmt.Errorf("failed to reinsert torrent. %w", err)
 		}
 		ct = newCt
-		file = ct.Files[filename]
+		file, ok = ct.GetFile(filename)
+		if !ok {
+			return "", fmt.Errorf("file %s not found in reinserted torrent %s", filename, torrentName)
+		}
 	}
 
 	c.logger.Trace().Msgf("Getting download link for %s(%s)", filename, file.Link)
@@ -135,7 +144,10 @@ func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (strin
 				return "", fmt.Errorf("failed to reinsert torrent: %w", err)
 			}
 			ct = newCt
-			file = ct.Files[filename]
+			file, ok = ct.GetFile(filename)
+			if !ok {
+				return "", fmt.Errorf("file %s not found in reinserted torrent %s", filename, torrentName)
+			}
 			// Retry getting the download link
 			downloadLink, err = c.client.GetDownloadLink(ct.Torrent, &file)
 			if err != nil {
@@ -165,7 +177,7 @@ func (c *Cache) GenerateDownloadLinks(t CachedTorrent) {
 		c.logger.Error().Err(err).Str("torrent", t.Name).Msg("Failed to generate download links")
 		return
 	}
-	for _, file := range t.Files {
+	for _, file := range t.GetFiles() {
 		if file.DownloadLink != nil {
 			c.updateDownloadLink(file.DownloadLink)
 		}

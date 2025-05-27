@@ -109,8 +109,8 @@ func (q *QBit) ProcessFiles(torrent *Torrent, debridTorrent *debridTypes.Torrent
 	debridTorrent.Arr = arr
 
 	// Check if debrid supports webdav by checking cache
+	timer := time.Now()
 	if isSymlink {
-		timer := time.Now()
 		cache, useWebdav := svc.Debrid.Caches[debridTorrent.Debrid]
 		if useWebdav {
 			q.logger.Info().Msgf("Using internal webdav for %s", debridTorrent.Debrid)
@@ -131,7 +131,6 @@ func (q *QBit) ProcessFiles(torrent *Torrent, debridTorrent *debridTypes.Torrent
 			// User is using either zurg or debrid webdav
 			torrentSymlinkPath, err = q.ProcessSymlink(torrent) // /mnt/symlinks/{category}/MyTVShow/
 		}
-		q.logger.Info().Msgf("Adding %s took %s", debridTorrent.Name, time.Since(timer))
 	} else {
 		torrentSymlinkPath, err = q.ProcessManualFile(torrent)
 	}
@@ -145,6 +144,7 @@ func (q *QBit) ProcessFiles(torrent *Torrent, debridTorrent *debridTypes.Torrent
 	}
 	torrent.TorrentPath = torrentSymlinkPath
 	q.UpdateTorrent(torrent, debridTorrent)
+	q.logger.Info().Msgf("Adding %s took %s", debridTorrent.Name, time.Since(timer))
 	go func() {
 		if err := request.SendDiscordMessage("download_complete", "success", torrent.discordContext()); err != nil {
 			q.logger.Error().Msgf("Error sending discord message: %v", err)
@@ -289,7 +289,7 @@ func (q *QBit) GetTorrentFiles(t *Torrent) []*TorrentFile {
 	if t.DebridTorrent == nil {
 		return files
 	}
-	for _, file := range t.DebridTorrent.Files {
+	for _, file := range t.DebridTorrent.GetFiles() {
 		files = append(files, &TorrentFile{
 			Name: file.Path,
 			Size: file.Size,

@@ -59,11 +59,9 @@ func (c *Cache) markAsSuccessfullyReinserted(torrentId string) {
 	}
 }
 
-func (c *Cache) IsTorrentBroken(t *CachedTorrent, filenames []string) bool {
-	// Check torrent files
-
-	isBroken := false
+func (c *Cache) GetBrokenFiles(t *CachedTorrent, filenames []string) []string {
 	files := make(map[string]types.File)
+	brokenFiles := make([]string, 0)
 	if len(filenames) > 0 {
 		for name, f := range t.Files {
 			if utils.Contains(filenames, name) {
@@ -73,8 +71,6 @@ func (c *Cache) IsTorrentBroken(t *CachedTorrent, filenames []string) bool {
 	} else {
 		files = t.Files
 	}
-
-	// Check empty links
 	for _, f := range files {
 		// Check if file is missing
 		if f.Link == "" {
@@ -83,14 +79,14 @@ func (c *Cache) IsTorrentBroken(t *CachedTorrent, filenames []string) bool {
 				t = newT
 			} else {
 				c.logger.Error().Str("torrentId", t.Torrent.Id).Msg("Failed to refresh torrent")
-				return true
+				return filenames // Return original filenames if refresh fails(torrent is somehow botched)
 			}
 		}
 	}
 
 	if t.Torrent == nil {
 		c.logger.Error().Str("torrentId", t.Torrent.Id).Msg("Failed to refresh torrent")
-		return true
+		return filenames // Return original filenames if refresh fails(torrent is somehow botched)
 	}
 
 	files = t.Files
@@ -98,29 +94,28 @@ func (c *Cache) IsTorrentBroken(t *CachedTorrent, filenames []string) bool {
 	for _, f := range files {
 		// Check if file link is still missing
 		if f.Link == "" {
-			isBroken = true
-			break
+			brokenFiles = append(brokenFiles, f.Name)
 		} else {
 			// Check if file.Link not in the downloadLink Cache
 			if err := c.client.CheckLink(f.Link); err != nil {
 				if errors.Is(err, request.HosterUnavailableError) {
-					isBroken = true
-					break
+					brokenFiles = append(brokenFiles, f.Name)
 				}
 			}
 		}
 	}
+
 	// Try to reinsert the torrent if it's broken
-	if isBroken && t.Torrent != nil {
+	if len(brokenFiles) > 0 && t.Torrent != nil {
 		// Check if the torrent is already in progress
 		if _, err := c.reInsertTorrent(t); err != nil {
 			c.logger.Error().Err(err).Str("torrentId", t.Torrent.Id).Msg("Failed to reinsert torrent")
-			return true
+			return brokenFiles // Return broken files if reinsert fails
 		}
-		return false
+		return nil // Return nil if the torrent was successfully reinserted
 	}
 
-	return isBroken
+	return brokenFiles
 }
 
 func (c *Cache) repairWorker(ctx context.Context) {
@@ -223,7 +218,7 @@ func (c *Cache) reInsertTorrent(ct *CachedTorrent) (*CachedTorrent, error) {
 	if err != nil {
 		addedOn = time.Now()
 	}
-	for _, f := range newTorrent.Files {
+	for _, f := range newTorrent.GetFiles() {
 		if f.Link == "" {
 			c.markAsFailedToReinsert(oldID)
 			return ct, fmt.Errorf("failed to reinsert torrent: empty link")

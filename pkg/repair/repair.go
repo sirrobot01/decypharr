@@ -492,15 +492,14 @@ func (r *Repair) getFileBrokenFiles(media arr.Content) []arr.ContentFile {
 
 	uniqueParents := collectFiles(media)
 
-	for parent, f := range uniqueParents {
+	for parent, files := range uniqueParents {
 		// Check stat
 		// Check file stat first
-		firstFile := f[0]
-		// Read a tiny bit of the file
-		if err := fileIsReadable(firstFile.Path); err != nil {
-			r.logger.Debug().Msgf("Broken file found at: %s", parent)
-			brokenFiles = append(brokenFiles, f...)
-			continue
+		for _, file := range files {
+			if err := fileIsReadable(file.Path); err != nil {
+				r.logger.Debug().Msgf("Broken file found at: %s", parent)
+				brokenFiles = append(brokenFiles, file)
+			}
 		}
 	}
 	if len(brokenFiles) == 0 {
@@ -526,41 +525,44 @@ func (r *Repair) getZurgBrokenFiles(media arr.Content) []arr.ContentFile {
 	}
 	client := request.New(request.WithTimeout(0), request.WithTransport(tr))
 	// Access zurg url + symlink folder + first file(encoded)
-	for parent, f := range uniqueParents {
+	for parent, files := range uniqueParents {
 		r.logger.Debug().Msgf("Checking %s", parent)
 		torrentName := url.PathEscape(filepath.Base(parent))
-		encodedFile := url.PathEscape(f[0].TargetPath)
-		fullURL := fmt.Sprintf("%s/http/__all__/%s/%s", r.ZurgURL, torrentName, encodedFile)
-		// Check file stat first
-		if _, err := os.Stat(f[0].Path); os.IsNotExist(err) {
-			r.logger.Debug().Msgf("Broken symlink found: %s", fullURL)
-			brokenFiles = append(brokenFiles, f...)
+
+		if len(files) == 0 {
+			r.logger.Debug().Msgf("No files found for %s. Skipping", torrentName)
 			continue
 		}
 
-		resp, err := client.Get(fullURL)
-		if err != nil {
-			r.logger.Error().Err(err).Msgf("Failed to reach %s", fullURL)
-			brokenFiles = append(brokenFiles, f...)
-			continue
-		}
-
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			r.logger.Debug().Msgf("Failed to get download url for %s", fullURL)
+		for _, file := range files {
+			encodedFile := url.PathEscape(file.TargetPath)
+			fullURL := fmt.Sprintf("%s/http/__all__/%s/%s", r.ZurgURL, torrentName, encodedFile)
+			if _, err := os.Stat(file.Path); os.IsNotExist(err) {
+				r.logger.Debug().Msgf("Broken symlink found: %s", fullURL)
+				brokenFiles = append(brokenFiles, file)
+				continue
+			}
+			resp, err := client.Get(fullURL)
+			if err != nil {
+				r.logger.Error().Err(err).Msgf("Failed to reach %s", fullURL)
+				brokenFiles = append(brokenFiles, file)
+				continue
+			}
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				r.logger.Debug().Msgf("Failed to get download url for %s", fullURL)
+				resp.Body.Close()
+				brokenFiles = append(brokenFiles, file)
+				continue
+			}
+			downloadUrl := resp.Request.URL.String()
 			resp.Body.Close()
-			brokenFiles = append(brokenFiles, f...)
-			continue
-		}
-
-		downloadUrl := resp.Request.URL.String()
-		resp.Body.Close()
-
-		if downloadUrl != "" {
-			r.logger.Trace().Msgf("Found download url: %s", downloadUrl)
-		} else {
-			r.logger.Debug().Msgf("Failed to get download url for %s", fullURL)
-			brokenFiles = append(brokenFiles, f...)
-			continue
+			if downloadUrl != "" {
+				r.logger.Trace().Msgf("Found download url: %s", downloadUrl)
+			} else {
+				r.logger.Debug().Msgf("Failed to get download url for %s", fullURL)
+				brokenFiles = append(brokenFiles, file)
+				continue
+			}
 		}
 	}
 	if len(brokenFiles) == 0 {
@@ -588,7 +590,6 @@ func (r *Repair) getWebdavBrokenFiles(media arr.Content) []arr.ContentFile {
 
 	brokenFiles := make([]arr.ContentFile, 0)
 	uniqueParents := collectFiles(media)
-	// Access zurg url + symlink folder + first file(encoded)
 	for torrentPath, f := range uniqueParents {
 		r.logger.Debug().Msgf("Checking %s", torrentPath)
 		// Get the debrid first
@@ -627,11 +628,15 @@ func (r *Repair) getWebdavBrokenFiles(media arr.Content) []arr.ContentFile {
 			files = append(files, file.TargetPath)
 		}
 
-		if cache.IsTorrentBroken(torrent, files) {
-			r.logger.Debug().Msgf("[webdav] Broken symlink found: %s", torrentPath)
-			// Delete the torrent?
-			brokenFiles = append(brokenFiles, f...)
-			continue
+		_brokenFiles := cache.GetBrokenFiles(torrent, files)
+		totalBrokenFiles := len(_brokenFiles)
+		if totalBrokenFiles > 0 {
+			r.logger.Debug().Msgf("%d broken files found in %s", totalBrokenFiles, torrentName)
+			for _, contentFile := range f {
+				if utils.Contains(_brokenFiles, contentFile.TargetPath) {
+					brokenFiles = append(brokenFiles, contentFile)
+				}
+			}
 		}
 
 	}
