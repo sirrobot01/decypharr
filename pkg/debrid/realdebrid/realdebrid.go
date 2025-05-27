@@ -5,12 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/internal/request"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"io"
 	"net/http"
 	gourl "net/url"
@@ -20,6 +14,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/logger"
+	"github.com/sirrobot01/decypharr/internal/request"
+	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+
+	"github.com/sirrobot01/decypharr/pkg/rar"
 )
 
 type RealDebrid struct {
@@ -35,10 +38,13 @@ type RealDebrid struct {
 	client           *request.Client
 	downloadClient   *request.Client
 
-	MountPath   string
-	logger      zerolog.Logger
-	checkCached bool
-	addSamples  bool
+	MountPath string
+	logger    zerolog.Logger
+	UnpackRar bool
+
+	rarSemaphore chan struct{}
+	checkCached  bool
+	addSamples   bool
 }
 
 func New(dc config.Debrid) *RealDebrid {
@@ -70,6 +76,7 @@ func New(dc config.Debrid) *RealDebrid {
 		APIKey:           dc.APIKey,
 		accounts:         accounts,
 		DownloadUncached: dc.DownloadUncached,
+		UnpackRar:        dc.UnpackRar,
 		client: request.New(
 			request.WithHeaders(headers),
 			request.WithRateLimiter(rl),
@@ -88,6 +95,7 @@ func New(dc config.Debrid) *RealDebrid {
 		currentDownloadKey: currentDownloadKey,
 		MountPath:          dc.Folder,
 		logger:             logger.New(dc.Name),
+		rarSemaphore:       make(chan struct{}, 2),
 		checkCached:        dc.CheckCached,
 		addSamples:         dc.AddSamples,
 	}
@@ -101,30 +109,127 @@ func (r *RealDebrid) GetLogger() zerolog.Logger {
 	return r.logger
 }
 
-func getSelectedFiles(t *types.Torrent, data torrentInfo) map[string]types.File {
+func (r *RealDebrid) getSelectedFiles(t *types.Torrent, data torrentInfo) (map[string]types.File, error) {
+	files := make(map[string]types.File)
 	selectedFiles := make([]types.File, 0)
+
 	for _, f := range data.Files {
 		if f.Selected == 1 {
-			name := filepath.Base(f.Path)
-			file := types.File{
+			selectedFiles = append(selectedFiles, types.File{
 				TorrentId: t.Id,
-				Name:      name,
-				Path:      name,
+				Name:      filepath.Base(f.Path),
+				Path:      filepath.Base(f.Path),
 				Size:      f.Bytes,
 				Id:        strconv.Itoa(f.ID),
-			}
-			selectedFiles = append(selectedFiles, file)
+			})
 		}
 	}
+
+	if len(selectedFiles) == 0 {
+		return files, nil
+	}
+
+	// Handle RARed torrents (single link, multiple files)
+	if len(data.Links) == 1 && len(selectedFiles) > 1 {
+		return r.handleRarArchive(t, data, selectedFiles)
+	}
+
+	// Standard case - map files to links
+	if len(selectedFiles) > len(data.Links) {
+		r.logger.Warn().Msgf("More files than links available: %d files, %d links for %s", len(selectedFiles), len(data.Links), t.Name)
+	}
+
+	for i, f := range selectedFiles {
+		if i < len(data.Links) {
+			f.Link = data.Links[i]
+			files[f.Name] = f
+		} else {
+			r.logger.Warn().Str("file", f.Name).Msg("No link available for file")
+		}
+	}
+
+	return files, nil
+}
+
+// handleRarArchive processes RAR archives with multiple files
+func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, selectedFiles []types.File) (map[string]types.File, error) {
+	// This will block if 2 RAR operations are already in progress
+	r.rarSemaphore <- struct{}{}
+	defer func() {
+		<-r.rarSemaphore
+	}()
+
 	files := make(map[string]types.File)
-	for index, f := range selectedFiles {
-		if index >= len(data.Links) {
-			break
+
+	if !r.UnpackRar {
+		r.logger.Debug().Msgf("RAR file detected, but unpacking is disabled: %s", t.Name)
+		// Create a single file representing the RAR archive
+		file := types.File{
+			TorrentId: t.Id,
+			Id:        "0",
+			Name:      t.Name + ".rar",
+			Size:      0,
+			IsRar:     true,
+			ByteRange: nil,
+			Path:      t.Name + ".rar",
+			Link:      data.Links[0],
+			AccountId: selectedFiles[0].AccountId,
+			Generated: time.Now(),
 		}
-		f.Link = data.Links[index]
-		files[f.Name] = f
+		files[file.Name] = file
+		return files, nil
 	}
-	return files
+
+	r.logger.Info().Msgf("RAR file detected, unpacking: %s", t.Name)
+	linkFile := &types.File{TorrentId: t.Id, Link: data.Links[0]}
+	downloadLinkObj, err := r.GetDownloadLink(t, linkFile)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get download link for RAR file: %w", err)
+	}
+
+	dlLink := downloadLinkObj.DownloadLink
+	reader, err := rar.NewReader(dlLink)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to create RAR reader: %w", err)
+	}
+
+	rarFiles, err := reader.GetFiles()
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to read RAR files: %w", err)
+	}
+
+	// Create lookup map for faster matching
+	fileMap := make(map[string]*types.File)
+	for i := range selectedFiles {
+		// RD converts special chars to '_' for RAR file paths
+		// TOOD: there might be more special chars to replace
+		safeName := strings.NewReplacer("|", "_", "\"", "_", "\\", "_", "?", "_", "*", "_", ":", "_", "<", "_", ">", "_").Replace(selectedFiles[i].Name)
+		fileMap[safeName] = &selectedFiles[i]
+	}
+
+	for _, rarFile := range rarFiles {
+		if file, exists := fileMap[rarFile.Name()]; exists {
+			file.IsRar = true
+			file.ByteRange = rarFile.ByteRange()
+			file.Link = data.Links[0]
+			file.DownloadLink = &types.DownloadLink{
+				Link:         data.Links[0],
+				DownloadLink: dlLink,
+				Filename:     file.Name,
+				Size:         file.Size,
+				Generated:    time.Now(),
+			}
+
+			files[file.Name] = *file
+		} else if !rarFile.IsDirectory {
+			r.logger.Warn().Msgf("RAR file %s not found in torrent files", rarFile.Name())
+		}
+	}
+
+	return files, nil
 }
 
 // getTorrentFiles returns a list of torrent files from the torrent info
@@ -338,7 +443,8 @@ func (r *RealDebrid) UpdateTorrent(t *types.Torrent) error {
 	t.MountPath = r.MountPath
 	t.Debrid = r.Name
 	t.Added = data.Added
-	t.Files = getSelectedFiles(t, data) // Get selected files
+	t.Files, _ = r.getSelectedFiles(t, data) // Get selected files
+
 	return nil
 }
 
@@ -390,7 +496,11 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent, isSymlink bool) (*types.Torre
 				return t, fmt.Errorf("realdebrid API error: Status: %d", res.StatusCode)
 			}
 		} else if status == "downloaded" {
-			t.Files = getSelectedFiles(t, data) // Get selected files
+			t.Files, err = r.getSelectedFiles(t, data) // Get selected files
+			if err != nil {
+				return t, err
+			}
+
 			r.logger.Info().Msgf("Torrent: %s downloaded to RD", t.Name)
 			if !isSymlink {
 				err = r.GenerateDownloadLinks(t)

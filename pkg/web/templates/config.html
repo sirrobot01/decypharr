@@ -364,10 +364,17 @@
         </div>
         <div class="col-md-3">
             <div class="form-check me-3">
+                <input type="checkbox" class="form-check-input" name="debrid[${index}].unpack_rar" id="debrid[${index}].unpack_rar">
+                <label class="form-check-label" for="debrid[${index}].unpack_rar">Unpack RAR</label>
+            </div>
+            <small class="form-text text-muted">Preprocess RARed torrents to allow reading the files inside</small>
+        </div>
+        <div class="col-md-4">
+            <div class="form-check me-3">
                 <input type="checkbox" class="form-check-input useWebdav" name="debrid[${index}].use_webdav" id="debrid[${index}].use_webdav">
                 <label class="form-check-label" for="debrid[${index}].use_webdav">Enable WebDav Server</label>
             </div>
-             <small class="form-text text-muted">Create an internal webdav for this debrid</small>
+            <small class="form-text text-muted">Create an internal webdav for this debrid</small>
         </div>
     </div>
     <div class="webdav d-none">
@@ -1092,6 +1099,7 @@
                     rate_limit: document.querySelector(`[name="debrid[${i}].rate_limit"]`).value,
                     download_uncached: document.querySelector(`[name="debrid[${i}].download_uncached"]`).checked,
                     check_cached: document.querySelector(`[name="debrid[${i}].check_cached"]`).checked,
+                    unpack_rar: document.querySelector(`[name="debrid[${i}].unpack_rar"]`).checked,
                     add_samples: document.querySelector(`[name="debrid[${i}].add_samples"]`).checked,
                     use_webdav: document.querySelector(`[name="debrid[${i}].use_webdav"]`).checked
                 };

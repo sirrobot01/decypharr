@@ -3,12 +3,13 @@ package webdav
 import (
 	"crypto/tls"
 	"fmt"
-	"github.com/sirrobot01/decypharr/pkg/debrid/debrid"
 	"io"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/sirrobot01/decypharr/pkg/debrid/debrid"
 )
 
 var sharedClient = &http.Client{
@@ -76,104 +77,143 @@ func (f *File) getDownloadLink() (string, error) {
 	return "", os.ErrNotExist
 }
 
-func (f *File) stream() (*http.Response, error) {
-	client := sharedClient // Might be replaced with the custom client
-	_log := f.cache.GetLogger()
-	var (
-		err          error
-		downloadLink string
-	)
-
-	downloadLink, err = f.getDownloadLink()
+func (f *File) getDownloadByteRange() (*[2]int64, error) {
+	byteRange, err := f.cache.GetDownloadByteRange(f.torrentName, f.name)
 	if err != nil {
-
-		_log.Trace().Msgf("Failed to get download link for %s. %s", f.name, err)
-		return nil, io.EOF
+		return nil, err
 	}
+	return byteRange, nil
+}
+
+func (f *File) stream() (*http.Response, error) {
+	client := sharedClient
+	_log := f.cache.GetLogger()
+
+	downloadLink, err := f.getDownloadLink()
+	if err != nil {
+		_log.Trace().Msgf("Failed to get download link for %s: %v", f.name, err)
+		return nil, err
+	}
+
 	if downloadLink == "" {
 		_log.Trace().Msgf("Failed to get download link for %s. Empty download link", f.name)
-		return nil, io.EOF
+		return nil, fmt.Errorf("empty download link")
+	}
+
+	byteRange, err := f.getDownloadByteRange()
+	if err != nil {
+		_log.Trace().Msgf("Failed to get download byte range for %s: %v", f.name, err)
+		return nil, err
 	}
 
 	req, err := http.NewRequest("GET", downloadLink, nil)
 	if err != nil {
-		_log.Trace().Msgf("Failed to create HTTP request: %s", err)
-		return nil, io.EOF
+		_log.Trace().Msgf("Failed to create HTTP request: %v", err)
+		return nil, err
 	}
 
-	if f.offset > 0 {
-		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", f.offset))
+	if byteRange == nil {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", max(0, f.offset)))
+	} else {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", byteRange[0]+max(0, f.offset)))
 	}
 
+	// Make the request
 	resp, err := client.Do(req)
 	if err != nil {
-		return resp, io.EOF
+		_log.Trace().Msgf("HTTP request failed: %v", err)
+		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		f.downloadLink = ""
-		closeResp := func() {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+
+		cleanupResp := func() {
+			if resp.Body != nil {
+				io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+			}
 		}
 
-		if resp.StatusCode == http.StatusServiceUnavailable {
-			b, _ := io.ReadAll(resp.Body)
-			err := resp.Body.Close()
-			if err != nil {
-				_log.Trace().Msgf("Failed to close response body: %s", err)
-				return nil, io.EOF
+		switch resp.StatusCode {
+		case http.StatusServiceUnavailable:
+			// Read the body to check for specific error messages
+			body, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			if readErr != nil {
+				_log.Trace().Msgf("Failed to read response body: %v", readErr)
+				return nil, fmt.Errorf("failed to read error response: %w", readErr)
 			}
-			if strings.Contains(string(b), "You can not download this file because you have exceeded your traffic on this hoster") {
+
+			bodyStr := string(body)
+			if strings.Contains(bodyStr, "You can not download this file because you have exceeded your traffic on this hoster") {
 				_log.Trace().Msgf("Bandwidth exceeded for %s. Download token will be disabled if you have more than one", f.name)
 				f.cache.MarkDownloadLinkAsInvalid(f.link, downloadLink, "bandwidth_exceeded")
 				// Retry with a different API key if it's available
 				return f.stream()
-			} else {
-				_log.Trace().Msgf("Failed to get download link for %s. %s", f.name, string(b))
-				return resp, io.EOF
 			}
 
-		} else if resp.StatusCode == http.StatusNotFound {
-			closeResp()
+			return nil, fmt.Errorf("service unavailable: %s", bodyStr)
+
+		case http.StatusNotFound:
+			cleanupResp()
 			// Mark download link as not found
 			// Regenerate a new download link
+			_log.Trace().Msgf("File not found (404) for %s. Marking link as invalid and regenerating", f.name)
 			f.cache.MarkDownloadLinkAsInvalid(f.link, downloadLink, "link_not_found")
 			// Generate a new download link
-			downloadLink, err = f.getDownloadLink()
+			downloadLink, err := f.getDownloadLink()
 			if err != nil {
 				_log.Trace().Msgf("Failed to get download link for %s. %s", f.name, err)
-				return nil, io.EOF
+				return nil, err
 			}
+
 			if downloadLink == "" {
 				_log.Trace().Msgf("Failed to get download link for %s", f.name)
-				return nil, io.EOF
-			}
-			req, err = http.NewRequest("GET", downloadLink, nil)
-			if err != nil {
-				return nil, io.EOF
-			}
-			if f.offset > 0 {
-				req.Header.Set("Range", fmt.Sprintf("bytes=%d-", f.offset))
+				return nil, fmt.Errorf("failed to regenerate download link")
 			}
 
-			resp, err = client.Do(req)
+			req, err := http.NewRequest("GET", downloadLink, nil)
 			if err != nil {
-				return resp, fmt.Errorf("HTTP request error: %w", err)
+				return nil, err
 			}
-			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-				closeResp()
-				// Read the body to consume the response
+
+			// Set the range header again
+			if byteRange == nil {
+				req.Header.Set("Range", fmt.Sprintf("bytes=%d-", max(0, f.offset)))
+			} else {
+				req.Header.Set("Range", fmt.Sprintf("bytes=%d-", byteRange[0]+max(0, f.offset)))
+			}
+
+			newResp, err := client.Do(req)
+			if err != nil {
+				return nil, err
+			}
+
+			if newResp.StatusCode != http.StatusOK && newResp.StatusCode != http.StatusPartialContent {
+				cleanupBody := func() {
+					if newResp.Body != nil {
+						io.Copy(io.Discard, newResp.Body)
+						newResp.Body.Close()
+					}
+				}
+
+				cleanupBody()
+				_log.Trace().Msgf("Regenerated link also failed with status %d", newResp.StatusCode)
 				f.cache.MarkDownloadLinkAsInvalid(f.link, downloadLink, "link_not_found")
-				return resp, io.EOF
+				return nil, fmt.Errorf("failed with status code %d even after link regeneration", newResp.StatusCode)
 			}
-			return resp, nil
 
-		} else {
-			closeResp()
-			return resp, io.EOF
+			return newResp, nil
+
+		default:
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			_log.Trace().Msgf("Unexpected status code %d for %s: %s", resp.StatusCode, f.name, string(body))
+			return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
 		}
-
 	}
 	return resp, nil
 }
@@ -196,7 +236,7 @@ func (f *File) Read(p []byte) (n int, err error) {
 
 	// If we haven't started streaming the file yet or need to reposition
 	if f.reader == nil || f.seekPending {
-		if f.reader != nil && f.seekPending {
+		if f.reader != nil {
 			f.reader.Close()
 			f.reader = nil
 		}
@@ -207,7 +247,7 @@ func (f *File) Read(p []byte) (n int, err error) {
 			return 0, err
 		}
 		if resp == nil {
-			return 0, io.EOF
+			return 0, fmt.Errorf("stream returned nil response")
 		}
 
 		f.reader = resp.Body

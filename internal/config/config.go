@@ -27,6 +27,7 @@ type Debrid struct {
 	CheckCached      bool     `json:"check_cached,omitempty"`
 	RateLimit        string   `json:"rate_limit,omitempty"` // 200/minute or 10/second
 	Proxy            string   `json:"proxy,omitempty"`
+	UnpackRar        bool     `json:"unpack_rar,omitempty"`
 	AddSamples       bool     `json:"add_samples,omitempty"`
 
 	UseWebDav bool `json:"use_webdav,omitempty"`
