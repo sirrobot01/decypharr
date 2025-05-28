@@ -2,11 +2,19 @@ package arr
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
-	"github.com/sirrobot01/debrid-blackhole/common"
+	"fmt"
+	"github.com/rs/zerolog"
+	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/logger"
+	"github.com/sirrobot01/decypharr/internal/request"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Type is a type of arr
@@ -19,57 +27,107 @@ const (
 	Readarr Type = "readarr"
 )
 
-var (
-	client *common.RLHTTPClient = common.NewRLHTTPClient(nil, nil)
-)
-
 type Arr struct {
-	Name  string `json:"name"`
-	Host  string `json:"host"`
-	Token string `json:"token"`
-	Type  Type   `json:"type"`
+	Name             string `json:"name"`
+	Host             string `json:"host"`
+	Token            string `json:"token"`
+	Type             Type   `json:"type"`
+	Cleanup          bool   `json:"cleanup"`
+	SkipRepair       bool   `json:"skip_repair"`
+	DownloadUncached *bool  `json:"download_uncached"`
+	client           *request.Client
 }
 
-func NewArr(name, host, token string, arrType Type) *Arr {
+func New(name, host, token string, cleanup, skipRepair bool, downloadUncached *bool) *Arr {
 	return &Arr{
-		Name:  name,
-		Host:  host,
-		Token: token,
-		Type:  arrType,
+		Name:             name,
+		Host:             host,
+		Token:            strings.TrimSpace(token),
+		Type:             InferType(host, name),
+		Cleanup:          cleanup,
+		SkipRepair:       skipRepair,
+		DownloadUncached: downloadUncached,
+		client:           request.New(),
 	}
 }
 
 func (a *Arr) Request(method, endpoint string, payload interface{}) (*http.Response, error) {
 	if a.Token == "" || a.Host == "" {
-		return nil, nil
+		return nil, fmt.Errorf("arr not configured")
 	}
-	url, err := common.JoinURL(a.Host, endpoint)
+	url, err := request.JoinURL(a.Host, endpoint)
 	if err != nil {
 		return nil, err
 	}
-	var jsonPayload []byte
-
+	var body io.Reader
 	if payload != nil {
-		jsonPayload, err = json.Marshal(payload)
+		b, err := json.Marshal(payload)
 		if err != nil {
 			return nil, err
 		}
+		body = bytes.NewReader(b)
 	}
-	req, err := http.NewRequest(method, url, bytes.NewBuffer(jsonPayload))
+	req, err := http.NewRequest(method, url, body)
+
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Api-Key", a.Token)
-	return client.Do(req)
+	if a.client == nil {
+		a.client = request.New()
+	}
+
+	var resp *http.Response
+
+	for attempts := 0; attempts < 5; attempts++ {
+		resp, err = a.client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+
+		// If we got a 401, wait briefly and retry
+		if resp.StatusCode == http.StatusUnauthorized {
+			resp.Body.Close() // Don't leak response bodies
+			if attempts < 4 { // Don't sleep on the last attempt
+				time.Sleep(time.Duration(attempts+1) * 100 * time.Millisecond)
+				continue
+			}
+		}
+
+		return resp, nil
+	}
+
+	return resp, err
+}
+
+func (a *Arr) Validate() error {
+	if a.Token == "" || a.Host == "" {
+		return nil
+	}
+	resp, err := a.Request("GET", "/api/v3/health", nil)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("arr test failed: %s", resp.Status)
+	}
+	return nil
 }
 
 type Storage struct {
-	Arrs map[string]*Arr // name -> arr
-	mu   sync.RWMutex
+	Arrs   map[string]*Arr // name -> arr
+	mu     sync.Mutex
+	logger zerolog.Logger
 }
 
-func inferType(host, name string) Type {
+func (as *Storage) Cleanup() {
+	as.mu.Lock()
+	defer as.mu.Unlock()
+	as.Arrs = make(map[string]*Arr)
+}
+
+func InferType(host, name string) Type {
 	switch {
 	case strings.Contains(host, "sonarr") || strings.Contains(name, "sonarr"):
 		return Sonarr
@@ -84,14 +142,15 @@ func inferType(host, name string) Type {
 	}
 }
 
-func NewStorage(cfg []common.ArrConfig) *Storage {
+func NewStorage() *Storage {
 	arrs := make(map[string]*Arr)
-	for _, a := range cfg {
+	for _, a := range config.Get().Arrs {
 		name := a.Name
-		arrs[name] = NewArr(name, a.Host, a.Token, inferType(a.Host, name))
+		arrs[name] = New(name, a.Host, a.Token, a.Cleanup, a.SkipRepair, a.DownloadUncached)
 	}
 	return &Storage{
-		Arrs: arrs,
+		Arrs:   arrs,
+		logger: logger.New("arr"),
 	}
 }
 
@@ -105,14 +164,14 @@ func (as *Storage) AddOrUpdate(arr *Arr) {
 }
 
 func (as *Storage) Get(name string) *Arr {
-	as.mu.RLock()
-	defer as.mu.RUnlock()
+	as.mu.Lock()
+	defer as.mu.Unlock()
 	return as.Arrs[name]
 }
 
 func (as *Storage) GetAll() []*Arr {
-	as.mu.RLock()
-	defer as.mu.RUnlock()
+	as.mu.Lock()
+	defer as.mu.Unlock()
 	arrs := make([]*Arr, 0, len(as.Arrs))
 	for _, arr := range as.Arrs {
 		if arr.Host != "" && arr.Token != "" {
@@ -120,4 +179,59 @@ func (as *Storage) GetAll() []*Arr {
 		}
 	}
 	return arrs
+}
+
+func (as *Storage) Clear() {
+	as.mu.Lock()
+	defer as.mu.Unlock()
+	as.Arrs = make(map[string]*Arr)
+}
+
+func (as *Storage) StartSchedule(ctx context.Context) error {
+
+	ticker := time.NewTicker(10 * time.Second)
+
+	select {
+	case <-ticker.C:
+		as.cleanupArrsQueue()
+	case <-ctx.Done():
+		ticker.Stop()
+		return nil
+	}
+	return nil
+}
+
+func (as *Storage) cleanupArrsQueue() {
+	arrs := make([]*Arr, 0)
+	for _, arr := range as.Arrs {
+		if !arr.Cleanup {
+			continue
+		}
+		arrs = append(arrs, arr)
+	}
+	if len(arrs) > 0 {
+		for _, arr := range arrs {
+			if err := arr.CleanupQueue(); err != nil {
+				as.logger.Error().Err(err).Msgf("Failed to cleanup arr %s", arr.Name)
+			}
+		}
+	}
+}
+
+func (a *Arr) Refresh() error {
+	payload := struct {
+		Name string `json:"name"`
+	}{
+		Name: "RefreshMonitoredDownloads",
+	}
+
+	resp, err := a.Request(http.MethodPost, "api/v3/command", payload)
+	if err == nil && resp != nil {
+		statusOk := strconv.Itoa(resp.StatusCode)[0] == '2'
+		if statusOk {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("failed to refresh: %v", err)
 }

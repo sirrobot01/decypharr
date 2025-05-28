@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="">
+<head>
+    <title>Index of {{.Path}}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            color: #2c3e50;
+        }
+        ul {
+            list-style: none;
+            padding: 0;
+        }
+        li {
+            margin: 10px 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        a {
+            color: #3498db;
+            text-decoration: none;
+            padding: 10px;
+            flex: 1;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            position: relative;
+            padding-left: 50px; /* room for number */
+        }
+        a:hover {
+            background-color: #f7f9fa;
+        }
+        .file-info {
+            color: #666;
+            font-size: 0.9em;
+            float: right;
+        }
+        .parent-dir {
+            background-color: #f8f9fa;
+        }
+        .file-number {
+            position: absolute;
+            left: 10px;
+            top: 10px;
+            width: 30px;
+            color: #777;
+            font-weight: bold;
+            text-align: right;
+        }
+        .file-name {
+            display: inline-block;
+            max-width: 70%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .delete-btn {
+            background: transparent;
+            border: none;
+            color: #c00;
+            cursor: pointer;
+            font-size: 0.9em;
+            margin-left: 12px;
+        }
+        .btn {
+            display: inline-block;
+            padding: 4px 8px;
+            font-size: 0.9em;
+            text-decoration: none;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            color: #333;
+            background-color: #f8f8f8;
+            cursor: pointer;
+        }
+        .btn:hover {
+            background-color: #e8e8e8;
+        }
+        .delete-btn:disabled {
+            color: #ccc;
+            cursor: not-allowed;
+        }
+        .disabled a {
+            color: #999;
+            pointer-events: none;
+            border-color: #f0f0f0;
+            background-color: #f8f8f8;
+        }
+    </style>
+</head>
+<body>
+<nav>
+    <a href="{{.URLBase}}" class="btn">&larr; Home</a>
+</nav>
+<h3>Index of {{.Path}}</h3>
+<ul>
+    {{- if .ShowParent}}
+    <li>
+        <a href="{{urlpath .ParentPath}}" class="parent-dir">
+            <span class="file-number"></span> Parent Directory
+        </a>
+    </li>
+    {{- end}}
+    {{$isBadPath := hasSuffix .Path "__bad__"}}
+    {{- range $i, $file := .Children}}
+    <li class="{{if $isBadPath}}disabled{{end}}">
+        <a {{ if not $isBadPath}}href="{{urlpath (printf "%s/%s" $.Path $file.Name)}}"{{end}}>
+        <span class="file-number">{{add $i 1}}.</span>
+        <span class="file-name">{{$file.Name}}{{if $file.IsDir}}/{{end}}</span>
+        <span class="file-info">
+                    {{formatSize $file.Size}} ||
+                    {{$file.ModTime.Format "2006-01-02 15:04:05"}}
+                </span>
+        </a>
+        {{- if and $.CanDelete }}
+        <button
+                class="delete-btn"
+                data-name="{{$file.Name}}"
+                data-path="{{printf "%s/%s" $.Path $file.ID}}">
+        Delete
+        </button>
+        {{- end}}
+    </li>
+    {{- end}}
+</ul>
+<script>
+    document.querySelectorAll('.delete-btn').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+            let p = btn.getAttribute('data-path');
+            let name = btn.getAttribute('data-name');
+            if(!confirm('Delete '+name+'?')) return;
+            fetch(p, { method: 'DELETE' })
+                .then(_=>location.reload());
+        });
+    });
+</script>
+</body>
+</html>

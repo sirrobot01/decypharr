@@ -1,0 +1,80 @@
+site_name: Decypharr
+site_url: https://sirrobot01.github.io/decypharr
+site_description: QbitTorrent with Debrid Support
+repo_url: https://github.com/sirrobot01/decypharr
+repo_name: sirrobot01/decypharr
+edit_uri: blob/main/docs
+
+
+theme:
+  name: material
+  logo: images/logo.png
+  font:
+    text: Roboto
+    code: Roboto Mono
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.search.highlight
+    - navigation.search.suggest
+    - navigation.search.share
+    - navigation.search.suggest
+    - navigation.search.share
+    - navigation.search.highlight
+    - navigation.search.suggest
+    - navigation.search.share
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:materialx.emoji.to_svg
+  - attr_list
+  - md_in_html
+  - def_list
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Usage: usage.md
+  - Configuration:
+      - Overview: configuration/index.md
+      - General: configuration/general.md
+      - Debrid Providers: configuration/debrid.md
+      - qBittorrent: configuration/qbittorrent.md
+      - Arr Integration: configuration/arrs.md
+  - Features:
+      - Overview: features/index.md
+      - Repair Worker: features/repair-worker.md
+      - WebDAV: features/webdav.md
+  - Guides:
+      - Overview: guides/index.md
+      - Setting Up with Rclone: guides/rclone.md
+  - Changelog: changelog.md
+
+
+plugins:
+  - search
+  - tags

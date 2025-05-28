@@ -54,4 +54,4 @@ git push origin "$TAG" || exit 1
 
 echo "Deployment initiated successfully!"
 echo "GitHub Actions will handle the release process."
-echo "Check the progress at: https://github.com/sirrobot01/debrid-blackhole/actions"
+echo "Check the progress at: https://github.com/sirrobot01/decypharr/actions"

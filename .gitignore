@@ -1,6 +1,5 @@
 data/
 config.json
-docker-compose.yml
 .idea/
 .DS_Store
 *.torrent
@@ -12,3 +11,5 @@ dist/
 tmp/**
 torrents.json
 logs/**
+auth.json
+.ven/

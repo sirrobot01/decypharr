@@ -1,0 +1,92 @@
+{{ define "register" }}
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-6 col-lg-4">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="mb-0 text-center">First Time Auth Setup</h4>
+                </div>
+                <div class="card-body">
+                    <form id="authForm">
+                        <div class="mb-3">
+                            <label for="username" class="form-label">Username</label>
+                            <input type="text" class="form-control" id="username" name="username" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="password" class="form-label">Password</label>
+                            <input type="password" class="form-control" id="password" name="password" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="confirmPassword" class="form-label">Confirm Password</label>
+                            <input type="password" class="form-control" id="confirmPassword" name="confirmPassword" required>
+                        </div>
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary mb-2">Save</button>
+                            <button type="button" id="skipAuthBtn" class="btn btn-secondary">Skip</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const authForm = document.getElementById('authForm');
+        const skipAuthBtn = document.getElementById('skipAuthBtn');
+
+        authForm.addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            // Validate passwords match
+            const password = document.getElementById('password').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+
+            if (password !== confirmPassword) {
+                alert('Passwords do not match!');
+                return;
+            }
+
+            // Collect form data
+            let formData = new FormData();
+            formData.append('username', document.getElementById('username').value);
+            formData.append('password', password);
+            formData.append('confirmPassword', confirmPassword);
+            await fetcher('/register', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.text().then(errorText => {
+                            // Throw an error with the response text
+                            createToast(errorText || 'Registration failed', 'error');
+                        });
+                    } else {
+                        window.location.href = joinURL(window.urlBase, '/');
+                    }
+
+                })
+                .catch(error => {
+                    alert('Registration failed: ' + error.message);
+                });
+        });
+
+        // Handle skip auth button
+        skipAuthBtn.addEventListener('click', function() {
+            fetcher('/skip-auth', { method: 'GET' })
+                .then(response => {
+                    if (response.ok) {
+                        window.location.href = joinURL(window.urlBase, '/');
+                    } else {
+                        throw new Error('Failed to skip authentication');
+                    }
+                })
+                .catch(error => {
+                    alert('Error: ' + error.message);
+                });
+        });
+    });
+</script>
+{{ end }}

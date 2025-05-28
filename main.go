@@ -3,25 +3,33 @@ package main
 import (
 	"context"
 	"flag"
-	"github.com/sirrobot01/debrid-blackhole/cmd"
-	"github.com/sirrobot01/debrid-blackhole/common"
+	"github.com/sirrobot01/decypharr/cmd/decypharr"
+	"github.com/sirrobot01/decypharr/internal/config"
 	"log"
+	"os"
+	"os/signal"
+	"runtime/debug"
+	"syscall"
 )
 
 func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("FATAL: Recovered from panic in main: %v\n", r)
+			debug.PrintStack()
+		}
+	}()
 	var configPath string
-	flag.StringVar(&configPath, "config", "config.json", "path to the config file")
+	flag.StringVar(&configPath, "config", "/data", "path to the data folder")
 	flag.Parse()
+	config.SetConfigPath(configPath)
+	config.Get()
 
-	// Load the config file
-	conf, err := common.LoadConfig(configPath)
-	common.CONFIG = conf
-	if err != nil {
+	// Create a context canceled on SIGINT/SIGTERM
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := decypharr.Start(ctx); err != nil {
 		log.Fatal(err)
 	}
-	ctx := context.Background()
-	if err := cmd.Start(ctx, conf); err != nil {
-		log.Fatal(err)
-	}
-
 }

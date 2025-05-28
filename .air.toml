@@ -3,9 +3,9 @@ testdata_dir = "testdata"
 tmp_dir = "tmp"
 
 [build]
-  args_bin = []
+  args_bin = ["--config", "data/"]
   bin = "./tmp/main"
-  cmd = "bash -c 'VERSION=$(git describe --tags --always --abbrev=0 2>/dev/null || echo dev) && go build -ldflags \"-X github.com/sirrobot01/debrid-blackhole/pkg/version.Version=$VERSION -X github.com/sirrobot01/debrid-blackhole/pkg/version.Channel=beta\" -o ./tmp/main .'"
+  cmd = "bash -c 'go build -ldflags \"-X github.com/sirrobot01/decypharr/pkg/version.Version=0.0.0 -X github.com/sirrobot01/decypharr/pkg/version.Channel=dev\" -o ./tmp/main .'"
   delay = 1000
   exclude_dir = ["assets", "tmp", "vendor", "testdata", "data"]
   exclude_file = []
