@@ -64,6 +64,23 @@
             </div>
         </div>
     </div>
+
+    <!-- Context menu for torrent rows -->
+    <div class="dropdown-menu context-menu shadow" id="torrentContextMenu">
+        <h6 class="dropdown-header torrent-name text-truncate"></h6>
+        <div class="dropdown-divider"></div>
+        <button class="dropdown-item" data-action="copy-magnet">
+            <i class="bi bi-magnet me-2"></i>Copy Magnet Link
+        </button>
+        <button class="dropdown-item" data-action="copy-name">
+            <i class="bi bi-copy me-2"></i>Copy Name
+        </button>
+        <div class="dropdown-divider"></div>
+        <button class="dropdown-item text-danger" data-action="delete">
+            <i class="bi bi-trash me-2"></i>Delete
+        </button>
+    </div>
+
     <script>
         let refs = {
             torrentsList: document.getElementById('torrentsList'),
@@ -73,6 +90,7 @@
             selectAll: document.getElementById('selectAll'),
             batchDeleteBtn: document.getElementById('batchDeleteBtn'),
             refreshBtn: document.getElementById('refreshBtn'),
+            torrentContextMenu: document.getElementById('torrentContextMenu'),
             paginationControls: document.getElementById('paginationControls'),
             paginationInfo: document.getElementById('paginationInfo')
         };
@@ -83,13 +101,14 @@
             states: new Set('downloading', 'pausedUP', 'error'),
             selectedCategory: refs.categoryFilter?.value || '',
             selectedState: refs.stateFilter?.value || '',
+            selectedTorrentContextMenu: null,
             sortBy: refs.sortSelector?.value || 'added_on',
             itemsPerPage: 20,
             currentPage: 1
         };
 
         const torrentRowTemplate = (torrent) => `
-        <tr data-hash="${torrent.hash}">
+        <tr data-hash="${torrent.hash}" data-magnet="${torrent.magnet || ''}" data-name="${torrent.name}">
             <td>
                 <input type="checkbox" class="form-check-input torrent-select" data-hash="${torrent.hash}" ${state.selectedTorrents.has(torrent.hash) ? 'checked' : ''}>
             </td>
@@ -415,6 +434,66 @@
 
             window.addEventListener('beforeunload', () => {
                 clearInterval(refreshInterval);
+            });
+
+            document.addEventListener('click', (e) => {
+                if (!refs.torrentContextMenu.contains(e.target)) {
+                    refs.torrentContextMenu.style.display = 'none';
+                }
+            });
+
+            refs.torrentsList.addEventListener('contextmenu', (e) => {
+                const row = e.target.closest('tr');
+                if (!row) return;
+
+                e.preventDefault();
+                state.selectedTorrentContextMenu = row.dataset.hash;
+
+                refs.torrentContextMenu.querySelector('.torrent-name').textContent = row.dataset.name;
+                refs.torrentContextMenu.style.display = 'block';
+
+                const { pageX, pageY } = e;
+                const { clientWidth, clientHeight } = document.documentElement;
+                const { offsetWidth, offsetHeight } = refs.torrentContextMenu;
+
+                refs.torrentContextMenu.style.maxWidth = `${clientWidth - 72}px`;
+                refs.torrentContextMenu.style.left = `${Math.min(pageX, clientWidth - offsetWidth - 5)}px`;
+                refs.torrentContextMenu.style.top = `${Math.min(pageY, clientHeight - offsetHeight - 5)}px`;
+            });
+
+            refs.torrentContextMenu.addEventListener('click', async (e) => {
+                const action = e.target.closest('[data-action]')?.dataset.action;
+                if (!action) return;
+
+                const actions = {
+                    'copy-magnet': async (torrent) => {
+                        try {
+                            await navigator.clipboard.writeText(`magnet:?xt=urn:btih:${torrent.hash}`);
+                            createToast('Magnet link copied to clipboard');
+                        } catch (error) {
+                            console.error('Error copying magnet link:', error);
+                            createToast('Failed to copy magnet link', 'error');
+                        }
+                    },
+                    'copy-name': async (torrent) => {
+                        try {
+                            await navigator.clipboard.writeText(torrent.name);
+                            createToast('Torrent name copied to clipboard');
+                        } catch (error) {
+                            console.error('Error copying torrent name:', error);
+                            createToast('Failed to copy torrent name', 'error');
+                        }
+                    },
+                    'delete': async (torrent) => {
+                        await deleteTorrent(torrent.hash);
+                    }
+                };
+
+                const torrent = state.torrents.find(t => t.hash === state.selectedTorrentContextMenu);
+                if (torrent && actions[action]) {
+                    await actions[action](torrent);
+                    refs.torrentContextMenu.style.display = 'none';
+                }
             });
         });
     </script>
