@@ -125,3 +125,25 @@ type Account struct {
 	Name     string `json:"name"`
 	Token    string `json:"token"`
 }
+
+type IngestData struct {
+	Debrid string `json:"debrid"`
+	Name   string `json:"name"`
+	Hash   string `json:"hash"`
+	Size   int64  `json:"size"`
+}
+
+type Profile struct {
+	Name       string    `json:"name"`
+	Id         int64     `json:"id"`
+	Username   string    `json:"username"`
+	Email      string    `json:"email"`
+	Points     int64     `json:"points"`
+	Type       string    `json:"type"`
+	Premium    int       `json:"premium"`
+	Expiration time.Time `json:"expiration"`
+
+	LibrarySize int `json:"library_size"`
+	BadTorrents int `json:"bad_torrents"`
+	ActiveLinks int `json:"active_links"`
+}

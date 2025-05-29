@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-func createDebridClient(dc config.Debrid) types.Client {
+func createDebridClient(dc config.Debrid) (types.Client, error) {
 	switch dc.Name {
 	case "realdebrid":
 		return realdebrid.New(dc)

@@ -37,7 +37,11 @@ type Torbox struct {
 	addSamples  bool
 }
 
-func New(dc config.Debrid) *Torbox {
+func (tb *Torbox) GetProfile() (*types.Profile, error) {
+	return nil, nil
+}
+
+func New(dc config.Debrid) (*Torbox, error) {
 	rl := request.ParseRateLimit(dc.RateLimit)
 
 	headers := map[string]string{
@@ -73,7 +77,7 @@ func New(dc config.Debrid) *Torbox {
 		logger:           _log,
 		checkCached:      dc.CheckCached,
 		addSamples:       dc.AddSamples,
-	}
+	}, nil
 }
 
 func (tb *Torbox) GetName() string {

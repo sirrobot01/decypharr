@@ -139,3 +139,15 @@ type ErrorResponse struct {
 	Error     string `json:"error"`
 	ErrorCode int    `json:"error_code"`
 }
+
+type profileResponse struct {
+	Id         int64     `json:"id"`
+	Username   string    `json:"username"`
+	Email      string    `json:"email"`
+	Points     int64     `json:"points"`
+	Locale     string    `json:"locale"`
+	Avatar     string    `json:"avatar"`
+	Type       string    `json:"type"`
+	Premium    int       `json:"premium"`
+	Expiration time.Time `json:"expiration"`
+}

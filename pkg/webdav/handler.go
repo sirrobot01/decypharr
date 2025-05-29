@@ -326,7 +326,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	handler.ServeHTTP(w, r)
-	return
 }
 
 func getContentType(fileName string) string {

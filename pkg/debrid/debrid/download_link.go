@@ -52,6 +52,12 @@ func (c *downloadLinkCache) Delete(key string) {
 	delete(c.data, key)
 }
 
+func (c *downloadLinkCache) Len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.data)
+}
+
 type downloadLinkRequest struct {
 	result string
 	err    error
@@ -244,4 +250,8 @@ func (c *Cache) GetDownloadByteRange(torrentName, filename string) (*[2]int64, e
 	}
 	file := ct.Files[filename]
 	return file.ByteRange, nil
+}
+
+func (c *Cache) GetTotalActiveDownloadLinks() int {
+	return c.downloadLinks.Len()
 }

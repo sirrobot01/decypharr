@@ -31,6 +31,48 @@ type DebridLink struct {
 	addSamples  bool
 }
 
+func New(dc config.Debrid) (*DebridLink, error) {
+	rl := request.ParseRateLimit(dc.RateLimit)
+
+	headers := map[string]string{
+		"Authorization": fmt.Sprintf("Bearer %s", dc.APIKey),
+		"Content-Type":  "application/json",
+	}
+	_log := logger.New(dc.Name)
+	client := request.New(
+		request.WithHeaders(headers),
+		request.WithLogger(_log),
+		request.WithRateLimiter(rl),
+		request.WithProxy(dc.Proxy),
+	)
+
+	accounts := make(map[string]types.Account)
+	for idx, key := range dc.DownloadAPIKeys {
+		id := strconv.Itoa(idx)
+		accounts[id] = types.Account{
+			Name:  key,
+			ID:    id,
+			Token: key,
+		}
+	}
+	return &DebridLink{
+		Name:             "debridlink",
+		Host:             "https://debrid-link.com/api/v2",
+		APIKey:           dc.APIKey,
+		accounts:         accounts,
+		DownloadUncached: dc.DownloadUncached,
+		client:           client,
+		MountPath:        dc.Folder,
+		logger:           logger.New(dc.Name),
+		checkCached:      dc.CheckCached,
+		addSamples:       dc.AddSamples,
+	}, nil
+}
+
+func (dl *DebridLink) GetProfile() (*types.Profile, error) {
+	return nil, nil
+}
+
 func (dl *DebridLink) GetName() string {
 	return dl.Name
 }
@@ -333,44 +375,6 @@ func (dl *DebridLink) GetCheckCached() bool {
 
 func (dl *DebridLink) GetDownloadUncached() bool {
 	return dl.DownloadUncached
-}
-
-func New(dc config.Debrid) *DebridLink {
-	rl := request.ParseRateLimit(dc.RateLimit)
-
-	headers := map[string]string{
-		"Authorization": fmt.Sprintf("Bearer %s", dc.APIKey),
-		"Content-Type":  "application/json",
-	}
-	_log := logger.New(dc.Name)
-	client := request.New(
-		request.WithHeaders(headers),
-		request.WithLogger(_log),
-		request.WithRateLimiter(rl),
-		request.WithProxy(dc.Proxy),
-	)
-
-	accounts := make(map[string]types.Account)
-	for idx, key := range dc.DownloadAPIKeys {
-		id := strconv.Itoa(idx)
-		accounts[id] = types.Account{
-			Name:  key,
-			ID:    id,
-			Token: key,
-		}
-	}
-	return &DebridLink{
-		Name:             "debridlink",
-		Host:             "https://debrid-link.com/api/v2",
-		APIKey:           dc.APIKey,
-		accounts:         accounts,
-		DownloadUncached: dc.DownloadUncached,
-		client:           client,
-		MountPath:        dc.Folder,
-		logger:           logger.New(dc.Name),
-		checkCached:      dc.CheckCached,
-		addSamples:       dc.AddSamples,
-	}
 }
 
 func (dl *DebridLink) GetTorrents() ([]*types.Torrent, error) {

@@ -45,9 +45,10 @@ type RealDebrid struct {
 	rarSemaphore chan struct{}
 	checkCached  bool
 	addSamples   bool
+	Profile      *types.Profile
 }
 
-func New(dc config.Debrid) *RealDebrid {
+func New(dc config.Debrid) (*RealDebrid, error) {
 	rl := request.ParseRateLimit(dc.RateLimit)
 
 	headers := map[string]string{
@@ -70,7 +71,7 @@ func New(dc config.Debrid) *RealDebrid {
 		"Authorization": fmt.Sprintf("Bearer %s", currentDownloadKey),
 	}
 
-	return &RealDebrid{
+	r := &RealDebrid{
 		Name:             "realdebrid",
 		Host:             "https://api.real-debrid.com/rest/1.0",
 		APIKey:           dc.APIKey,
@@ -98,6 +99,12 @@ func New(dc config.Debrid) *RealDebrid {
 		rarSemaphore:       make(chan struct{}, 2),
 		checkCached:        dc.CheckCached,
 		addSamples:         dc.AddSamples,
+	}
+
+	if _, err := r.GetProfile(); err != nil {
+		return nil, err
+	} else {
+		return r, nil
 	}
 }
 
@@ -907,4 +914,31 @@ func (r *RealDebrid) DeleteDownloadLink(linkId string) error {
 		return err
 	}
 	return nil
+}
+
+func (r *RealDebrid) GetProfile() (*types.Profile, error) {
+	if r.Profile != nil {
+		return r.Profile, nil
+	}
+	url := fmt.Sprintf("%s/user", r.Host)
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+
+	resp, err := r.client.MakeRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	var data profileResponse
+	if json.Unmarshal(resp, &data) != nil {
+		return nil, err
+	}
+	profile := &types.Profile{
+		Id:         data.Id,
+		Username:   data.Username,
+		Email:      data.Email,
+		Points:     data.Points,
+		Premium:    data.Premium,
+		Expiration: data.Expiration,
+		Type:       data.Type,
+	}
+	return profile, nil
 }

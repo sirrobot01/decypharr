@@ -31,7 +31,11 @@ type AllDebrid struct {
 	addSamples  bool
 }
 
-func New(dc config.Debrid) *AllDebrid {
+func (ad *AllDebrid) GetProfile() (*types.Profile, error) {
+	return nil, nil
+}
+
+func New(dc config.Debrid) (*AllDebrid, error) {
 	rl := request.ParseRateLimit(dc.RateLimit)
 
 	headers := map[string]string{
@@ -65,7 +69,7 @@ func New(dc config.Debrid) *AllDebrid {
 		logger:           logger.New(dc.Name),
 		checkCached:      dc.CheckCached,
 		addSamples:       dc.AddSamples,
-	}
+	}, nil
 }
 
 func (ad *AllDebrid) GetName() string {

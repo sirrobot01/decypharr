@@ -11,16 +11,6 @@ import (
 	"time"
 )
 
-// getName: Returns the torrent name and filename from the path
-func getName(rootDir, path string) (string, string) {
-	path = strings.TrimPrefix(path, rootDir)
-	parts := strings.Split(strings.TrimPrefix(path, string(os.PathSeparator)), string(os.PathSeparator))
-	if len(parts) < 2 {
-		return "", ""
-	}
-	return parts[1], strings.Join(parts[2:], string(os.PathSeparator)) // Note the change from [0] to [1]
-}
-
 func isValidURL(str string) bool {
 	u, err := url.Parse(str)
 	// A valid URL should parse without error, and have a non-empty scheme and host.

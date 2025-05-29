@@ -25,3 +25,18 @@ func mergeFiles(torrents ...CachedTorrent) map[string]types.File {
 	}
 	return merged
 }
+
+func (c *Cache) GetIngests() ([]types.IngestData, error) {
+	torrents := c.GetTorrents()
+	debridName := c.client.GetName()
+	var ingests []types.IngestData
+	for _, torrent := range torrents {
+		ingests = append(ingests, types.IngestData{
+			Debrid: debridName,
+			Name:   torrent.Filename,
+			Hash:   torrent.InfoHash,
+			Size:   torrent.Bytes,
+		})
+	}
+	return ingests, nil
+}

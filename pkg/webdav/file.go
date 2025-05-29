@@ -31,7 +31,6 @@ type File struct {
 	cache       *debrid.Cache
 	fileId      string
 	torrentName string
-	torrentId   string
 
 	modTime time.Time
 
@@ -47,7 +46,6 @@ type File struct {
 
 	downloadLink string
 	link         string
-	canDelete    bool
 }
 
 // File interface implementations for File

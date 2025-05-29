@@ -25,4 +25,5 @@ type Client interface {
 	DisableAccount(string)
 	ResetActiveDownloadKeys()
 	DeleteDownloadLink(linkId string) error
+	GetProfile() (*Profile, error)
 }

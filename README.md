@@ -36,14 +36,9 @@ services:
     container_name: decypharr
     ports:
       - "8282:8282" # qBittorrent
-    user: "1000:1000"
     volumes:
       - /mnt/:/mnt
       - ./configs/:/app # config.json must be in this directory
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - UMASK=002
     restart: unless-stopped
 ```
 

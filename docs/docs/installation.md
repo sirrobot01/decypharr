@@ -52,14 +52,9 @@ services:
     container_name: decypharr
     ports:
       - "8282:8282"
-    user: "1000:1000"
     volumes:
       - /mnt/:/mnt # Mount your media directory
       - ./config/:/app # config.json must be in this directory
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - UMASK=002
       - QBIT_PORT=8282 # qBittorrent Port (optional)
     restart: unless-stopped
 ```
@@ -68,6 +63,13 @@ Run the Docker Compose setup:
 ```bash
 docker-compose up -d
 ```
+
+#### Notes for Docker Users
+
+- Ensure that the `/mnt/` directory is mounted correctly to access your media files.
+- The `./config/` directory should contain your `config.json` file.
+- You can adjust the `PUID` and `PGID` environment variables to match your user and group IDs for proper file permissions.
+- The `UMASK` environment variable can be set to control file permissions created by Decypharr.
 
 
 ## Binary Installation
@@ -108,9 +110,3 @@ You can also configure Decypharr through the web interface, but it's recommended
   "port": "8282"
 }
 ```
-
-### Few Notes
-
-- Make sure decypharr has access to the directories specified in the configuration file.
-- Ensure decypharr have write permissions to the qbittorrent download folder.
-- Make sure decypharr can write to the `./config/` directory.
