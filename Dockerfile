@@ -61,4 +61,8 @@ EXPOSE 8282
 VOLUME ["/app"]
 USER nonroot:nonroot
 
+
+# Base healthcheck
+HEALTHCHECK --interval=3s --retries=10 CMD ["/usr/bin/healthcheck", "--config", "/app", "--basic"]
+
 CMD ["/usr/bin/decypharr", "--config", "/app"]

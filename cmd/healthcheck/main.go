@@ -22,8 +22,12 @@ type HealthStatus struct {
 }
 
 func main() {
-	var configPath string
+	var (
+		configPath   string
+		isBasicCheck bool
+	)
 	flag.StringVar(&configPath, "config", "/data", "path to the data folder")
+	flag.BoolVar(&isBasicCheck, "basic", false, "perform basic health check without WebDAV")
 	flag.Parse()
 	config.SetConfigPath(configPath)
 	cfg := config.Get()
@@ -64,7 +68,7 @@ func main() {
 	}
 
 	// Check WebDAV if enabled
-	if webdavPath != "" {
+	if !isBasicCheck && webdavPath != "" {
 		if checkWebDAV(ctx, baseUrl, port, webdavPath) {
 			status.WebDAVService = true
 		}
