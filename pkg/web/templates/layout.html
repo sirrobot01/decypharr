@@ -36,6 +36,22 @@
             background-color: var(--bg-color);
             color: var(--text-color);
             transition: background-color 0.3s ease, color 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        footer {
+            background-color: var(--bg-color);
+            border-top: 1px solid var(--border-color);
+        }
+
+        footer a {
+            color: var(--text-color);
+        }
+
+        footer a:hover {
+            color: var(--primary-color);
         }
 
         .navbar {
@@ -192,6 +208,20 @@
 {{ template "register" . }}
 {{ else }}
 {{ end }}
+
+<footer class="mt-auto py-2 text-center border-top">
+    <div class="container">
+        <small class="text-muted">
+            <a href="https://github.com/sirrobot01/decypharr" target="_blank" class="text-decoration-none me-3">
+                <i class="bi bi-github me-1"></i>GitHub
+            </a>
+            <a href="https://sirrobot01.github.io/decypharr" target="_blank" class="text-decoration-none">
+                <i class="bi bi-book me-1"></i>Documentation
+            </a>
+        </small>
+    </div>
+</footer>
+
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>

@@ -17,10 +17,32 @@
 
                     <hr />
 
-                    <div class="mb-3">
-                        <label for="category" class="form-label">Enter Category</label>
-                        <input type="text" class="form-control" id="category" name="arr" placeholder="Enter Category (e.g sonarr, radarr, radarr4k)">
+                    <div class="row mb-3">
+                       <div class="col-md-6">
+                           <label for="downloadFolder" class="form-label">Download Folder</label>
+                           <input type="text" class="form-control" id="downloadFolder" name="downloadFolder" placeholder="Enter Download Folder (e.g /downloads/torrents)">
+                           <small class="text-muted">Default is your qbittorent download_folder</small>
+                       </div>
+                        <div class="col-md-6">
+                            <label for="arr" class="form-label">Arr (if any)</label>
+                            <input type="text" class="form-control" id="arr" name="arr" placeholder="Enter Category (e.g sonarr, radarr, radarr4k)">
+                            <small class="text-muted">Optional, leave empty if not using Arr</small>
+                        </div>
                     </div>
+
+                    {{ if .HasMultiDebrid }}
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="debrid" class="form-label">Select Debrid</label>
+                            <select class="form-select" id="debrid" name="debrid">
+                                {{ range $index, $debrid := .Debrids }}
+                                <option value="{{ $debrid }}" {{ if eq $index 0 }}selected{{end}}>{{ $debrid }}</option>
+                                {{ end }}
+                            </select>
+                            <small class="text-muted">Select a debrid service to use for this download</small>
+                        </div>
+                    </div>
+                    {{ end }}
 
                     <div class="row mb-3">
                         <div class="col-md-2 mb-3">
@@ -48,23 +70,27 @@
     </div>
 
     <script>
+        let downloadFolder = '{{ .DownloadFolder }}';
         document.addEventListener('DOMContentLoaded', () => {
             const loadSavedDownloadOptions = () => {
                 const savedCategory = localStorage.getItem('downloadCategory');
                 const savedSymlink = localStorage.getItem('downloadSymlink');
                 const savedDownloadUncached = localStorage.getItem('downloadUncached');
-                document.getElementById('category').value = savedCategory || '';
+                document.getElementById('arr').value = savedCategory || '';
                 document.getElementById('isSymlink').checked = savedSymlink === 'true';
                 document.getElementById('downloadUncached').checked = savedDownloadUncached === 'true';
+                document.getElementById('downloadFolder').value = localStorage.getItem('downloadFolder') || downloadFolder || '';
             };
 
             const saveCurrentDownloadOptions = () => {
-                const category = document.getElementById('category').value;
+                const arr = document.getElementById('arr').value;
                 const isSymlink = document.getElementById('isSymlink').checked;
                 const downloadUncached = document.getElementById('downloadUncached').checked;
-                localStorage.setItem('downloadCategory', category);
+                const downloadFolder = document.getElementById('downloadFolder').value;
+                localStorage.setItem('downloadCategory', arr);
                 localStorage.setItem('downloadSymlink', isSymlink.toString());
                 localStorage.setItem('downloadUncached', downloadUncached.toString());
+                localStorage.setItem('downloadFolder', downloadFolder);
             };
 
             // Load the last used download options from local storage
@@ -108,9 +134,11 @@
                         return;
                     }
 
-                    formData.append('arr', document.getElementById('category').value);
+                    formData.append('arr', document.getElementById('arr').value);
+                    formData.append('downloadFolder', document.getElementById('downloadFolder').value);
                     formData.append('notSymlink', document.getElementById('isSymlink').checked);
                     formData.append('downloadUncached', document.getElementById('downloadUncached').checked);
+                    formData.append('debrid', document.getElementById('debrid') ? document.getElementById('debrid').value : '');
 
                     const response = await fetcher('/api/add', {
                         method: 'POST',
@@ -139,7 +167,7 @@
             });
 
             // Save the download options to local storage when they change
-            document.getElementById('category').addEventListener('change', saveCurrentDownloadOptions);
+            document.getElementById('arr').addEventListener('change', saveCurrentDownloadOptions);
             document.getElementById('isSymlink').addEventListener('change', saveCurrentDownloadOptions);
 
             // Read the URL parameters for a magnet link and add it to the download queue if found

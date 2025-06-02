@@ -3,6 +3,8 @@ package webdav
 import (
 	"context"
 	"fmt"
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"golang.org/x/net/webdav"
 	"io"
 	"mime"
 	"net/http"
@@ -15,21 +17,19 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/debrid/debrid"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"github.com/sirrobot01/decypharr/pkg/debrid/store"
 	"github.com/sirrobot01/decypharr/pkg/version"
-	"golang.org/x/net/webdav"
 )
 
 type Handler struct {
 	Name     string
 	logger   zerolog.Logger
-	cache    *debrid.Cache
+	cache    *store.Cache
 	URLBase  string
 	RootPath string
 }
 
-func NewHandler(name, urlBase string, cache *debrid.Cache, logger zerolog.Logger) *Handler {
+func NewHandler(name, urlBase string, cache *store.Cache, logger zerolog.Logger) *Handler {
 	h := &Handler{
 		Name:     name,
 		cache:    cache,
@@ -191,7 +191,7 @@ func (h *Handler) OpenFile(ctx context.Context, name string, flag int, perm os.F
 	}
 	name = utils.PathUnescape(path.Clean(name))
 	rootDir := path.Clean(h.RootPath)
-	metadataOnly := ctx.Value("metadataOnly") != nil
+	metadataOnly := ctx.Value(metadataOnlyKey) != nil
 	now := time.Now()
 
 	// 1) special case version.txt
@@ -490,7 +490,7 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			io.Copy(w, fRaw)
+			_, _ = io.Copy(w, fRaw)
 		}()
 		select {
 		case <-ctx.Done():

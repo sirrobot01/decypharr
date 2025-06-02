@@ -6,7 +6,7 @@ import (
 	"github.com/gorilla/sessions"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/pkg/qbit"
+	"github.com/sirrobot01/decypharr/pkg/store"
 	"html/template"
 	"os"
 )
@@ -50,26 +50,15 @@ type RepairRequest struct {
 //go:embed templates/*
 var content embed.FS
 
-type Handler struct {
-	qbit   *qbit.QBit
-	logger zerolog.Logger
-}
-
-func New(qbit *qbit.QBit) *Handler {
-	return &Handler{
-		qbit:   qbit,
-		logger: logger.New("ui"),
-	}
-}
-
-var (
-	secretKey = cmp.Or(os.Getenv("DECYPHARR_SECRET_KEY"), "\"wqj(v%lj*!-+kf@4&i95rhh_!5_px5qnuwqbr%cjrvrozz_r*(\"")
-	store     = sessions.NewCookieStore([]byte(secretKey))
+type Web struct {
+	logger    zerolog.Logger
+	cookie    *sessions.CookieStore
 	templates *template.Template
-)
+	torrents  *store.TorrentStorage
+}
 
-func init() {
-	templates = template.Must(template.ParseFS(
+func New() *Web {
+	templates := template.Must(template.ParseFS(
 		content,
 		"templates/layout.html",
 		"templates/index.html",
@@ -79,10 +68,17 @@ func init() {
 		"templates/login.html",
 		"templates/register.html",
 	))
-
-	store.Options = &sessions.Options{
+	secretKey := cmp.Or(os.Getenv("DECYPHARR_SECRET_KEY"), "\"wqj(v%lj*!-+kf@4&i95rhh_!5_px5qnuwqbr%cjrvrozz_r*(\"")
+	cookieStore := sessions.NewCookieStore([]byte(secretKey))
+	cookieStore.Options = &sessions.Options{
 		Path:     "/",
 		MaxAge:   86400 * 7,
 		HttpOnly: false,
+	}
+	return &Web{
+		logger:    logger.New("ui"),
+		templates: templates,
+		cookie:    cookieStore,
+		torrents:  store.GetStore().GetTorrentStorage(),
 	}
 }

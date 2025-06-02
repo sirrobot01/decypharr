@@ -245,43 +245,48 @@
                 <!-- Step 5: Repair Configuration -->
                 <div class="setup-step d-none" id="step5">
                     <div class="section mb-5">
-                        <div class="row mb-2">
+                        <div class="row mb-3">
                             <div class="col">
                                 <div class="form-check me-3 d-inline-block">
                                     <input type="checkbox" class="form-check-input" name="repair.enabled" id="repair.enabled">
-                                    <label class="form-check-label" for="repair.enabled">Enable Repair</label>
+                                    <label class="form-check-label" for="repair.enabled">Enable Scheduled Repair</label>
                                 </div>
                             </div>
                         </div>
-                        <div id="repairCol" class="d-none">
+                        <div>
                             <div class="row">
                                 <div class="col-md-4 mb-3">
-                                    <label class="form-label" for="repair.interval">Interval</label>
+                                    <label class="form-label" for="repair.interval">Scheduled Interval</label>
                                     <input type="text" class="form-control" name="repair.interval" id="repair.interval" placeholder="e.g., 24h">
                                     <small class="form-text text-muted">Interval for the repair process(e.g., 24h, 1d, 03:00, or a crontab)</small>
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label class="form-label" for="repair.workers">Workers</label>
+                                    <input type="text" class="form-control" name="repair.workers" id="repair.workers">
+                                    <small class="form-text text-muted">Number of workers to use for the repair process</small>
                                 </div>
                                 <div class="col-md-5 mb-3">
                                     <label class="form-label" for="repair.zurg_url">Zurg URL</label>
                                     <input type="text" class="form-control" name="repair.zurg_url" id="repair.zurg_url" placeholder="http://zurg:9999">
-                                    <small class="form-text text-muted">Speeds up the repair process by using Zurg</small>
+                                    <small class="form-text text-muted">If you have Zurg running, you can use it to speed up the repair process</small>
                                 </div>
                             </div>
                             <div class="row">
-                                <div class="col-md-3 mb-3">
+                                <div class="col-md-4 mb-3">
                                     <div class="form-check">
                                         <input type="checkbox" class="form-check-input" name="repair.use_webdav" id="repair.use_webdav">
                                         <label class="form-check-label" for="repair.use_webdav">Use Webdav</label>
                                     </div>
                                     <small class="form-text text-muted">Use Internal Webdav for repair(make sure webdav is enabled in the debrid section</small>
                                 </div>
-                                <div class="col-md-3 mb-3">
+                                <div class="col-md-4 mb-3">
                                     <div class="form-check">
                                         <input type="checkbox" class="form-check-input" name="repair.run_on_start" id="repair.run_on_start">
                                         <label class="form-check-label" for="repair.run_on_start">Run on Start</label>
                                     </div>
                                     <small class="form-text text-muted">Run repair on startup</small>
                                 </div>
-                                <div class="col-md-3 mb-3">
+                                <div class="col-md-4 mb-3">
                                     <div class="form-check">
                                         <input type="checkbox" class="form-check-input" name="repair.auto_process" id="repair.auto_process">
                                         <label class="form-check-label" for="repair.auto_process">Auto Process</label>
@@ -340,20 +345,20 @@
             <small class="form-text text-muted">Rate limit for the debrid service. Confirm your debrid service rate limit</small>
         </div>
     </div>
-    <div class="row">
+    <div class="row mb-3">
+        <div class="col-md-3">
+            <div class="form-check me-3">
+                <input type="checkbox" class="form-check-input useWebdav" name="debrid[${index}].use_webdav" id="debrid[${index}].use_webdav">
+                <label class="form-check-label" for="debrid[${index}].use_webdav">Enable WebDav Server</label>
+            </div>
+            <small class="form-text text-muted">Create an internal webdav for this debrid</small>
+        </div>
         <div class="col-md-3">
              <div class="form-check me-3">
                 <input type="checkbox" class="form-check-input" name="debrid[${index}].download_uncached" id="debrid[${index}].download_uncached">
                 <label class="form-check-label" for="debrid[${index}].download_uncached">Download Uncached</label>
             </div>
             <small class="form-text text-muted">Download uncached files from the debrid service</small>
-        </div>
-        <div class="col-md-3">
-            <div class="form-check me-3">
-                <input type="checkbox" class="form-check-input" name="debrid[${index}].check_cached" id="debrid[${index}].check_cached">
-                <label class="form-check-label" for="debrid[${index}].check_cached" disabled>Check Cached</label>
-            </div>
-            <small class="form-text text-muted">Check if the file is cached before downloading(Disabled)</small>
         </div>
         <div class="col-md-3">
             <div class="form-check me-3">
@@ -369,16 +374,10 @@
             </div>
             <small class="form-text text-muted">Preprocess RARed torrents to allow reading the files inside</small>
         </div>
-        <div class="col-md-4">
-            <div class="form-check me-3">
-                <input type="checkbox" class="form-check-input useWebdav" name="debrid[${index}].use_webdav" id="debrid[${index}].use_webdav">
-                <label class="form-check-label" for="debrid[${index}].use_webdav">Enable WebDav Server</label>
-            </div>
-            <small class="form-text text-muted">Create an internal webdav for this debrid</small>
-        </div>
     </div>
-    <div class="webdav d-none">
-        <h6 class="pb-2">Webdav</h6>
+    <div class="webdav d-none mt-1">
+        <hr/>
+        <h6 class="pb-2">Webdav Settings</h6>
         <div class="row mt-3">
             <div class="col-md-3 mb-3">
                 <label class="form-label" for="debrid[${index}].torrents_refresh_interval">Torrents Refresh Interval</label>
@@ -441,12 +440,12 @@
             </div>
         </div>
         <div class="row mt-3">
-            <div class="col mt-3">
-                <h6 class="pb-2">Custom Folders</h6>
+            <div class="col">
+                <h6 class="pb-2">Virtual Folders</h6>
                 <div class="col-12">
                     <p class="text-muted small">Create virtual directories with filters to organize your content</p>
                     <div class="directories-container" id="debrid[${index}].directories">
-                        <!-- Dynamic directories will be added here -->
+
                     </div>
                     <button type="button" class="btn btn-secondary mt-2 webdav-field" onclick="addDirectory(${index});">
                         <i class="bi bi-plus"></i> Add Directory
@@ -842,9 +841,6 @@
 
                 // Load Repair config
                 if (config.repair) {
-                    if (config.repair.enabled) {
-                        document.getElementById('repairCol').classList.remove('d-none');
-                    }
                     Object.entries(config.repair).forEach(([key, value]) => {
                         const input = document.querySelector(`[name="repair.${key}"]`);
                         if (input) {
@@ -918,14 +914,6 @@
                 webdavConfig.addClass('d-none');
                 // Remove required attribute from all fields
                 webdavFields.prop('required', false);
-            }
-        });
-
-        $(document).on('change', 'input[name="repair.enabled"]', function() {
-            if (this.checked) {
-                $('#repairCol').removeClass('d-none');
-            } else {
-                $('#repairCol').addClass('d-none');
             }
         });
 
@@ -1072,7 +1060,7 @@
                 debrids: [],
                 qbittorrent: {
                     download_folder: document.querySelector('[name="qbit.download_folder"]').value,
-                    refresh_interval: parseInt(document.querySelector('[name="qbit.refresh_interval"]').value || '0', 10),
+                    refresh_interval: parseInt(document.querySelector('[name="qbit.refresh_interval"]').value, 10),
                     max_downloads: parseInt(document.querySelector('[name="qbit.max_downloads"]').value || '0', 5),
                     skip_pre_cache: document.querySelector('[name="qbit.skip_pre_cache"]').checked
                 },
@@ -1082,6 +1070,7 @@
                     interval: document.querySelector('[name="repair.interval"]').value,
                     run_on_start: document.querySelector('[name="repair.run_on_start"]').checked,
                     zurg_url: document.querySelector('[name="repair.zurg_url"]').value,
+                    workers: parseInt(document.querySelector('[name="repair.workers"]').value),
                     use_webdav: document.querySelector('[name="repair.use_webdav"]').checked,
                     auto_process: document.querySelector('[name="repair.auto_process"]').checked
                 }
@@ -1098,7 +1087,6 @@
                     folder: document.querySelector(`[name="debrid[${i}].folder"]`).value,
                     rate_limit: document.querySelector(`[name="debrid[${i}].rate_limit"]`).value,
                     download_uncached: document.querySelector(`[name="debrid[${i}].download_uncached"]`).checked,
-                    check_cached: document.querySelector(`[name="debrid[${i}].check_cached"]`).checked,
                     unpack_rar: document.querySelector(`[name="debrid[${i}].unpack_rar"]`).checked,
                     add_samples: document.querySelector(`[name="debrid[${i}].add_samples"]`).checked,
                     use_webdav: document.querySelector(`[name="debrid[${i}].use_webdav"]`).checked

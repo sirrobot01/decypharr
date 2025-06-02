@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sirrobot01/decypharr/pkg/debrid/debrid"
+	"github.com/sirrobot01/decypharr/pkg/debrid/store"
 )
 
 var sharedClient = &http.Client{
@@ -28,7 +28,7 @@ var sharedClient = &http.Client{
 }
 
 type File struct {
-	cache       *debrid.Cache
+	cache       *store.Cache
 	fileId      string
 	torrentName string
 
@@ -128,7 +128,7 @@ func (f *File) stream() (*http.Response, error) {
 
 		cleanupResp := func() {
 			if resp.Body != nil {
-				io.Copy(io.Discard, resp.Body)
+				_, _ = io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
 			}
 		}
@@ -192,7 +192,7 @@ func (f *File) stream() (*http.Response, error) {
 			if newResp.StatusCode != http.StatusOK && newResp.StatusCode != http.StatusPartialContent {
 				cleanupBody := func() {
 					if newResp.Body != nil {
-						io.Copy(io.Discard, newResp.Body)
+						_, _ = io.Copy(io.Discard, newResp.Body)
 						newResp.Body.Close()
 					}
 				}

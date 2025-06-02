@@ -1,4 +1,4 @@
-package debrid
+package store
 
 import (
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"

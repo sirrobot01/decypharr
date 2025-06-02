@@ -1,14 +1,14 @@
-package debrid
+package store
 
 import (
 	"errors"
 	"fmt"
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 
 	"sync"
 	"time"
 
 	"github.com/sirrobot01/decypharr/internal/request"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 )
 
 type linkCache struct {

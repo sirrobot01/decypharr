@@ -1,4 +1,4 @@
-package debrid
+package store
 
 import (
 	"fmt"

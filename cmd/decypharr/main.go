@@ -7,11 +7,10 @@ import (
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/pkg/qbit"
 	"github.com/sirrobot01/decypharr/pkg/server"
-	"github.com/sirrobot01/decypharr/pkg/service"
+	"github.com/sirrobot01/decypharr/pkg/store"
 	"github.com/sirrobot01/decypharr/pkg/version"
 	"github.com/sirrobot01/decypharr/pkg/web"
 	"github.com/sirrobot01/decypharr/pkg/webdav"
-	"github.com/sirrobot01/decypharr/pkg/worker"
 	"net/http"
 	"os"
 	"runtime"
@@ -62,7 +61,7 @@ func Start(ctx context.Context) error {
 		qb := qbit.New()
 		wd := webdav.New()
 
-		ui := web.New(qb).Routes()
+		ui := web.New().Routes()
 		webdavRoutes := wd.Routes()
 		qbitRoutes := qb.Routes()
 
@@ -95,14 +94,14 @@ func Start(ctx context.Context) error {
 			_log.Info().Msg("Restarting Decypharr...")
 			<-done // wait for them to finish
 			qb.Reset()
-			service.Reset()
+			store.Reset()
 
 			// rebuild svcCtx off the original parent
 			svcCtx, cancelSvc = context.WithCancel(ctx)
 			runtime.GC()
 
 			config.Reload()
-			service.Reset()
+			store.Reset()
 			// loop will restart services automatically
 		}
 	}
@@ -146,11 +145,7 @@ func startServices(ctx context.Context, wd *webdav.WebDav, srv *server.Server) e
 	})
 
 	safeGo(func() error {
-		return worker.Start(ctx)
-	})
-
-	safeGo(func() error {
-		arr := service.GetService().Arr
+		arr := store.GetStore().GetArr()
 		if arr == nil {
 			return nil
 		}
@@ -159,9 +154,9 @@ func startServices(ctx context.Context, wd *webdav.WebDav, srv *server.Server) e
 
 	if cfg := config.Get(); cfg.Repair.Enabled {
 		safeGo(func() error {
-			r := service.GetService().Repair
-			if r != nil {
-				if err := r.Start(ctx); err != nil {
+			repair := store.GetStore().GetRepair()
+			if repair != nil {
+				if err := repair.Start(ctx); err != nil {
 					_log.Error().Err(err).Msg("repair failed")
 				}
 			}

@@ -205,5 +205,4 @@ func (a *Arr) Import(path string, seriesId int, seasons []int) (io.ReadCloser, e
 	}
 	defer resp.Body.Close()
 	return resp.Body, nil
-
 }

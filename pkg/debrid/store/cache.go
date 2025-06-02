@@ -1,4 +1,4 @@
-package debrid
+package store
 
 import (
 	"bufio"
@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"os"
 	"path"
 	"path/filepath"
@@ -22,7 +23,6 @@ import (
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	_ "time/tzdata"
 )
 
@@ -108,7 +108,7 @@ type Cache struct {
 	customFolders []string
 }
 
-func New(dc config.Debrid, client types.Client) *Cache {
+func NewDebridCache(dc config.Debrid, client types.Client) *Cache {
 	cfg := config.Get()
 	cetSc, err := gocron.NewScheduler(gocron.WithLocation(time.UTC))
 	if err != nil {
@@ -691,7 +691,7 @@ func (c *Cache) ProcessTorrent(t *types.Torrent) error {
 	return nil
 }
 
-func (c *Cache) AddTorrent(t *types.Torrent) error {
+func (c *Cache) Add(t *types.Torrent) error {
 	if len(t.Files) == 0 {
 		if err := c.client.UpdateTorrent(t); err != nil {
 			return fmt.Errorf("failed to update torrent: %w", err)

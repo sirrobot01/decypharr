@@ -145,5 +145,8 @@ func checkWebDAV(ctx context.Context, baseUrl, port, path string) bool {
 	}
 	defer resp.Body.Close()
 
-	return resp.StatusCode == 207 || resp.StatusCode == http.StatusOK
+	return resp.StatusCode == http.StatusMultiStatus ||
+		resp.StatusCode == http.StatusOK ||
+		resp.StatusCode == http.StatusServiceUnavailable // It's still indexing
+
 }

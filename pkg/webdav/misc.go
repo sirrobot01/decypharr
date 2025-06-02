@@ -84,9 +84,7 @@ func filesToXML(urlPath string, fi os.FileInfo, children []os.FileInfo) stringbu
 		})
 	}
 
-	sb := builderPool.Get().(stringbuf.StringBuf)
-	sb.Reset()
-	defer builderPool.Put(sb)
+	sb := stringbuf.New("")
 
 	// XML header and main element
 	_, _ = sb.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)

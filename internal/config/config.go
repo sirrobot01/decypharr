@@ -98,6 +98,10 @@ func (c *Config) AuthFile() string {
 	return filepath.Join(c.Path, "auth.json")
 }
 
+func (c *Config) TorrentsFile() string {
+	return filepath.Join(c.Path, "torrents.json")
+}
+
 func (c *Config) loadConfig() error {
 	// Load the config file
 	if configPath == "" {

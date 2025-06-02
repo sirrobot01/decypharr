@@ -7,7 +7,7 @@ import (
 	"net/http"
 )
 
-func (ui *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
+func (wb *Web) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
 	if cfg.NeedsAuth() {
 		http.Redirect(w, r, "/register", http.StatusSeeOther)
@@ -19,7 +19,7 @@ func (ui *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 			"Page":    "login",
 			"Title":   "Login",
 		}
-		_ = templates.ExecuteTemplate(w, "layout", data)
+		_ = wb.templates.ExecuteTemplate(w, "layout", data)
 		return
 	}
 
@@ -33,8 +33,8 @@ func (ui *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if ui.verifyAuth(credentials.Username, credentials.Password) {
-		session, _ := store.Get(r, "auth-session")
+	if wb.verifyAuth(credentials.Username, credentials.Password) {
+		session, _ := wb.cookie.Get(r, "auth-session")
 		session.Values["authenticated"] = true
 		session.Values["username"] = credentials.Username
 		if err := session.Save(r, w); err != nil {
@@ -48,8 +48,8 @@ func (ui *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 }
 
-func (ui *Handler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
-	session, _ := store.Get(r, "auth-session")
+func (wb *Web) LogoutHandler(w http.ResponseWriter, r *http.Request) {
+	session, _ := wb.cookie.Get(r, "auth-session")
 	session.Values["authenticated"] = false
 	session.Options.MaxAge = -1
 	err := session.Save(r, w)
@@ -59,7 +59,7 @@ func (ui *Handler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
-func (ui *Handler) RegisterHandler(w http.ResponseWriter, r *http.Request) {
+func (wb *Web) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
 	authCfg := cfg.GetAuth()
 
@@ -69,7 +69,7 @@ func (ui *Handler) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 			"Page":    "register",
 			"Title":   "Register",
 		}
-		_ = templates.ExecuteTemplate(w, "layout", data)
+		_ = wb.templates.ExecuteTemplate(w, "layout", data)
 		return
 	}
 
@@ -99,7 +99,7 @@ func (ui *Handler) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create a session
-	session, _ := store.Get(r, "auth-session")
+	session, _ := wb.cookie.Get(r, "auth-session")
 	session.Values["authenticated"] = true
 	session.Values["username"] = username
 	if err := session.Save(r, w); err != nil {
@@ -110,42 +110,49 @@ func (ui *Handler) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-func (ui *Handler) IndexHandler(w http.ResponseWriter, r *http.Request) {
+func (wb *Web) IndexHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
 	data := map[string]interface{}{
 		"URLBase": cfg.URLBase,
 		"Page":    "index",
 		"Title":   "Torrents",
 	}
-	_ = templates.ExecuteTemplate(w, "layout", data)
+	_ = wb.templates.ExecuteTemplate(w, "layout", data)
 }
 
-func (ui *Handler) DownloadHandler(w http.ResponseWriter, r *http.Request) {
+func (wb *Web) DownloadHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
-	data := map[string]interface{}{
-		"URLBase": cfg.URLBase,
-		"Page":    "download",
-		"Title":   "Download",
+	debrids := make([]string, 0)
+	for _, d := range cfg.Debrids {
+		debrids = append(debrids, d.Name)
 	}
-	_ = templates.ExecuteTemplate(w, "layout", data)
+	data := map[string]interface{}{
+		"URLBase":        cfg.URLBase,
+		"Page":           "download",
+		"Title":          "Download",
+		"Debrids":        debrids,
+		"HasMultiDebrid": len(debrids) > 1,
+		"DownloadFolder": cfg.QBitTorrent.DownloadFolder,
+	}
+	_ = wb.templates.ExecuteTemplate(w, "layout", data)
 }
 
-func (ui *Handler) RepairHandler(w http.ResponseWriter, r *http.Request) {
+func (wb *Web) RepairHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
 	data := map[string]interface{}{
 		"URLBase": cfg.URLBase,
 		"Page":    "repair",
 		"Title":   "Repair",
 	}
-	_ = templates.ExecuteTemplate(w, "layout", data)
+	_ = wb.templates.ExecuteTemplate(w, "layout", data)
 }
 
-func (ui *Handler) ConfigHandler(w http.ResponseWriter, r *http.Request) {
+func (wb *Web) ConfigHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
 	data := map[string]interface{}{
 		"URLBase": cfg.URLBase,
 		"Page":    "config",
 		"Title":   "Config",
 	}
-	_ = templates.ExecuteTemplate(w, "layout", data)
+	_ = wb.templates.ExecuteTemplate(w, "layout", data)
 }

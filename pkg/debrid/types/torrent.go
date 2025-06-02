@@ -34,10 +34,12 @@ type Torrent struct {
 
 	Debrid string `json:"debrid"`
 
-	Arr              *arr.Arr   `json:"arr"`
-	Mu               sync.Mutex `json:"-"`
-	SizeDownloaded   int64      `json:"-"` // This is used for local download
-	DownloadUncached bool       `json:"-"`
+	Arr *arr.Arr `json:"arr"`
+
+	SizeDownloaded   int64 `json:"-"` // This is used for local download
+	DownloadUncached bool  `json:"-"`
+
+	sync.Mutex
 }
 
 type DownloadLink struct {

@@ -7,7 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/pkg/service"
+	"github.com/sirrobot01/decypharr/pkg/store"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -90,13 +90,12 @@ type WebDav struct {
 }
 
 func New() *WebDav {
-	svc := service.GetService()
 	urlBase := config.Get().URLBase
 	w := &WebDav{
 		Handlers: make([]*Handler, 0),
 		URLBase:  urlBase,
 	}
-	for name, c := range svc.Debrid.Caches {
+	for name, c := range store.GetStore().GetDebrid().GetCaches() {
 		h := NewHandler(name, urlBase, c, c.GetLogger())
 		w.Handlers = append(w.Handlers, h)
 	}

@@ -5,19 +5,20 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/sirrobot01/decypharr/internal/request"
 	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"github.com/sirrobot01/decypharr/pkg/service"
+	"github.com/sirrobot01/decypharr/pkg/store"
 	"net/http"
 	"runtime"
 )
 
 func (s *Server) handleIngests(w http.ResponseWriter, r *http.Request) {
 	ingests := make([]debridTypes.IngestData, 0)
-	svc := service.GetService()
-	if svc.Debrid == nil {
+	_store := store.GetStore()
+	debrids := _store.GetDebrid()
+	if debrids == nil {
 		http.Error(w, "Debrid service is not enabled", http.StatusInternalServerError)
 		return
 	}
-	for _, cache := range svc.Debrid.Caches {
+	for _, cache := range debrids.GetCaches() {
 		if cache == nil {
 			s.logger.Error().Msg("Debrid cache is nil, skipping")
 			continue
@@ -41,13 +42,17 @@ func (s *Server) handleIngestsByDebrid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	svc := service.GetService()
-	if svc.Debrid == nil {
+	_store := store.GetStore()
+	debrids := _store.GetDebrid()
+
+	if debrids == nil {
 		http.Error(w, "Debrid service is not enabled", http.StatusInternalServerError)
 		return
 	}
 
-	cache, exists := svc.Debrid.Caches[debridName]
+	caches := debrids.GetCaches()
+
+	cache, exists := caches[debridName]
 	if !exists {
 		http.Error(w, "Debrid cache not found: "+debridName, http.StatusNotFound)
 		return
@@ -87,12 +92,13 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		"go_version": runtime.Version(),
 	}
 
-	svc := service.GetService()
-	if svc.Debrid == nil {
+	debrids := store.GetStore().GetDebrid()
+	if debrids == nil {
 		request.JSONResponse(w, stats, http.StatusOK)
 		return
 	}
-	clients := svc.Debrid.GetDebrids()
+	clients := debrids.GetClients()
+	caches := debrids.GetCaches()
 	profiles := make([]*debridTypes.Profile, 0)
 	for debridName, client := range clients {
 		profile, err := client.GetProfile()
@@ -101,7 +107,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 			s.logger.Error().Err(err).Msg("Failed to get debrid profile")
 			continue
 		}
-		cache, ok := svc.Debrid.Caches[debridName]
+		cache, ok := caches[debridName]
 		if ok {
 			// Get torrent data
 			profile.LibrarySize = len(cache.GetTorrents())

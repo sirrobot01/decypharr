@@ -143,6 +143,9 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                     <button type="button" class="btn btn-primary" id="processJobBtn">Process Items</button>
+                    <button type="button" class="btn btn-warning d-none" id="stopJobBtn">
+                        <i class="bi bi-stop-fill me-1"></i>Stop Job
+                    </button>
                 </div>
             </div>
         </div>
@@ -218,6 +221,27 @@
             }
         }
 
+        // Return status text and class based on job status
+        function getStatus(status) {
+            switch (status) {
+                case 'started':
+                    return {text: 'In Progress', class: 'text-primary'};
+                case 'failed':
+                    return {text: 'Failed', class: 'text-danger'};
+                case 'completed':
+                    return {text: 'Completed', class: 'text-success'};
+                case 'pending':
+                    return {text: 'Pending', class: 'text-warning'};
+                case 'cancelled':
+                    return {text: 'Cancelled', class: 'text-secondary'};
+                case 'processing':
+                    return {text: 'Processing', class: 'text-info'};
+                default:
+                    // Return status in title case if unknown
+                    return {text: status.charAt(0).toUpperCase() + status.slice(1), class: 'text-secondary'};
+            }
+        }
+
         // Render jobs table with pagination
         function renderJobsTable(page) {
             const tableBody = document.getElementById('jobsTableBody');
@@ -254,24 +278,10 @@
                 const formattedDate = startedDate.toLocaleString();
 
                 // Determine status
-                let status = 'In Progress';
-                let statusClass = 'text-primary';
+                let status = getStatus(job.status);
                 let canDelete = job.status !== "started";
                 let totalItems = job.broken_items ? Object.values(job.broken_items).reduce((sum, arr) => sum + arr.length, 0) : 0;
 
-                if (job.status === 'failed') {
-                    status = 'Failed';
-                    statusClass = 'text-danger';
-                } else if (job.status === 'completed') {
-                    status = 'Completed';
-                    statusClass = 'text-success';
-                } else if (job.status === 'pending') {
-                    status = 'Pending';
-                    statusClass = 'text-warning';
-                } else if (job.status === "processing") {
-                    status = 'Processing';
-                    statusClass = 'text-info';
-                }
 
                 row.innerHTML = `
                     <td>
@@ -283,25 +293,31 @@
                     <td><a href="#" class="text-link view-job" data-id="${job.id}"><small>${job.id.substring(0, 8)}</small></a></td>
                     <td>${job.arrs.join(', ')}</td>
                     <td><small>${formattedDate}</small></td>
-                    <td><span class="${statusClass}">${status}</span></td>
+                    <td><span class="${status.class}">${status.text}</span></td>
                     <td>${totalItems}</td>
                     <td>
                         ${job.status === "pending" ?
-                            `<button class="btn btn-sm btn-primary process-job" data-id="${job.id}">
-                                        <i class="bi bi-play-fill"></i> Process
+                                        `<button class="btn btn-sm btn-primary process-job" data-id="${job.id}">
+                                <i class="bi bi-play-fill"></i> Process
                             </button>` :
-                            `<button class="btn btn-sm btn-primary" disabled>
-                                        <i class="bi bi-eye"></i> Process
+                                        `<button class="btn btn-sm btn-primary" disabled>
+                                <i class="bi bi-eye"></i> Process
                             </button>`
-                        }
+                                    }
+                        ${(job.status === "started" || job.status === "processing") ?
+                                        `<button class="btn btn-sm btn-warning stop-job" data-id="${job.id}">
+                                <i class="bi bi-stop-fill"></i> Stop
+                            </button>` :
+                                        ''
+                                    }
                         ${canDelete ?
-                            `<button class="btn btn-sm btn-danger delete-job" data-id="${job.id}">
-                                        <i class="bi bi-trash"></i>
-                                    </button>` :
-                            `<button class="btn btn-sm btn-danger" disabled>
-                                        <i class="bi bi-trash"></i>
-                                    </button>`
-                        }
+                                        `<button class="btn btn-sm btn-danger delete-job" data-id="${job.id}">
+                                <i class="bi bi-trash"></i>
+                            </button>` :
+                                        `<button class="btn btn-sm btn-danger" disabled>
+                                <i class="bi bi-trash"></i>
+                            </button>`
+                                    }
                     </td>
                 `;
 
@@ -368,6 +384,13 @@
                 button.addEventListener('click', (e) => {
                     const jobId = e.currentTarget.dataset.id;
                     viewJobDetails(jobId);
+                });
+            });
+
+            document.querySelectorAll('.stop-job').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const jobId = e.currentTarget.dataset.id;
+                    stopJob(jobId);
                 });
             });
         }
@@ -456,6 +479,25 @@
             }
         }
 
+        async function stopJob(jobId) {
+            if (confirm('Are you sure you want to stop this job?')) {
+                try {
+                    const response = await fetcher(`/api/repair/jobs/${jobId}/stop`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                    });
+
+                    if (!response.ok) throw new Error(await response.text());
+                    createToast('Job stop requested successfully');
+                    await loadJobs(currentPage); // Refresh the jobs list
+                } catch (error) {
+                    createToast(`Error stopping job: ${error.message}`, 'error');
+                }
+            }
+        }
+
         // View job details function
         function viewJobDetails(jobId) {
             // Find the job
@@ -477,24 +519,9 @@
             }
 
             // Set status with color
-            let status = 'In Progress';
-            let statusClass = 'text-primary';
+            let status = getStatus(job.status);
 
-            if (job.status === 'failed') {
-                status = 'Failed';
-                statusClass = 'text-danger';
-            } else if (job.status === 'completed') {
-                status = 'Completed';
-                statusClass = 'text-success';
-            } else if (job.status === 'pending') {
-                status = 'Pending';
-                statusClass = 'text-warning';
-            } else if (job.status === "processing") {
-                status = 'Processing';
-                statusClass = 'text-info';
-            }
-
-            document.getElementById('modalJobStatus').innerHTML = `<span class="${statusClass}">${status}</span>`;
+            document.getElementById('modalJobStatus').innerHTML = `<span class="${status.class}">${status.text}</span>`;
 
             // Set other job details
             document.getElementById('modalJobArrs').textContent = job.arrs.join(', ');
@@ -522,6 +549,19 @@
                 };
             } else {
                 processBtn.classList.add('d-none');
+            }
+
+            // Stop button visibility
+            const stopBtn = document.getElementById('stopJobBtn'); // You'll need to add this button to the HTML
+            if (job.status === 'started' || job.status === 'processing') {
+                stopBtn.classList.remove('d-none');
+                stopBtn.onclick = () => {
+                    stopJob(job.id);
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('jobDetailsModal'));
+                    modal.hide();
+                };
+            } else {
+                stopBtn.classList.add('d-none');
             }
 
             // Populate broken items table

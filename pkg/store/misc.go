@@ -1,18 +1,21 @@
-package qbit
+package store
 
 import (
-	"github.com/sirrobot01/decypharr/internal/utils"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
-func createTorrentFromMagnet(magnet *utils.Magnet, category, source string) *Torrent {
+func createTorrentFromMagnet(req *ImportRequest) *Torrent {
+	magnet := req.Magnet
+	arrName := req.Arr.Name
 	torrent := &Torrent{
 		ID:        "",
 		Hash:      strings.ToLower(magnet.InfoHash),
 		Name:      magnet.Name,
 		Size:      magnet.Size,
-		Category:  category,
-		Source:    source,
+		Category:  arrName,
+		Source:    string(req.Type),
 		State:     "downloading",
 		MagnetUri: magnet.Link,
 
@@ -22,6 +25,7 @@ func createTorrentFromMagnet(magnet *utils.Magnet, category, source string) *Tor
 		AutoTmm:    false,
 		Ratio:      1,
 		RatioLimit: 1,
+		SavePath:   filepath.Join(req.DownloadFolder, arrName) + string(os.PathSeparator),
 	}
 	return torrent
 }

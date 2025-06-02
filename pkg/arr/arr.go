@@ -11,7 +11,6 @@ import (
 	"github.com/sirrobot01/decypharr/internal/request"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -121,10 +120,10 @@ type Storage struct {
 	logger zerolog.Logger
 }
 
-func (as *Storage) Cleanup() {
-	as.mu.Lock()
-	defer as.mu.Unlock()
-	as.Arrs = make(map[string]*Arr)
+func (s *Storage) Cleanup() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Arrs = make(map[string]*Arr)
 }
 
 func InferType(host, name string) Type {
@@ -154,26 +153,26 @@ func NewStorage() *Storage {
 	}
 }
 
-func (as *Storage) AddOrUpdate(arr *Arr) {
-	as.mu.Lock()
-	defer as.mu.Unlock()
+func (s *Storage) AddOrUpdate(arr *Arr) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if arr.Name == "" {
 		return
 	}
-	as.Arrs[arr.Name] = arr
+	s.Arrs[arr.Name] = arr
 }
 
-func (as *Storage) Get(name string) *Arr {
-	as.mu.Lock()
-	defer as.mu.Unlock()
-	return as.Arrs[name]
+func (s *Storage) Get(name string) *Arr {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Arrs[name]
 }
 
-func (as *Storage) GetAll() []*Arr {
-	as.mu.Lock()
-	defer as.mu.Unlock()
-	arrs := make([]*Arr, 0, len(as.Arrs))
-	for _, arr := range as.Arrs {
+func (s *Storage) GetAll() []*Arr {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	arrs := make([]*Arr, 0, len(s.Arrs))
+	for _, arr := range s.Arrs {
 		if arr.Host != "" && arr.Token != "" {
 			arrs = append(arrs, arr)
 		}
@@ -181,19 +180,19 @@ func (as *Storage) GetAll() []*Arr {
 	return arrs
 }
 
-func (as *Storage) Clear() {
-	as.mu.Lock()
-	defer as.mu.Unlock()
-	as.Arrs = make(map[string]*Arr)
+func (s *Storage) Clear() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Arrs = make(map[string]*Arr)
 }
 
-func (as *Storage) StartSchedule(ctx context.Context) error {
+func (s *Storage) StartSchedule(ctx context.Context) error {
 
 	ticker := time.NewTicker(10 * time.Second)
 
 	select {
 	case <-ticker.C:
-		as.cleanupArrsQueue()
+		s.cleanupArrsQueue()
 	case <-ctx.Done():
 		ticker.Stop()
 		return nil
@@ -201,9 +200,9 @@ func (as *Storage) StartSchedule(ctx context.Context) error {
 	return nil
 }
 
-func (as *Storage) cleanupArrsQueue() {
+func (s *Storage) cleanupArrsQueue() {
 	arrs := make([]*Arr, 0)
-	for _, arr := range as.Arrs {
+	for _, arr := range s.Arrs {
 		if !arr.Cleanup {
 			continue
 		}
@@ -212,26 +211,18 @@ func (as *Storage) cleanupArrsQueue() {
 	if len(arrs) > 0 {
 		for _, arr := range arrs {
 			if err := arr.CleanupQueue(); err != nil {
-				as.logger.Error().Err(err).Msgf("Failed to cleanup arr %s", arr.Name)
+				s.logger.Error().Err(err).Msgf("Failed to cleanup arr %s", arr.Name)
 			}
 		}
 	}
 }
 
-func (a *Arr) Refresh() error {
+func (a *Arr) Refresh() {
 	payload := struct {
 		Name string `json:"name"`
 	}{
 		Name: "RefreshMonitoredDownloads",
 	}
 
-	resp, err := a.Request(http.MethodPost, "api/v3/command", payload)
-	if err == nil && resp != nil {
-		statusOk := strconv.Itoa(resp.StatusCode)[0] == '2'
-		if statusOk {
-			return nil
-		}
-	}
-
-	return fmt.Errorf("failed to refresh: %v", err)
+	_, _ = a.Request(http.MethodPost, "api/v3/command", payload)
 }

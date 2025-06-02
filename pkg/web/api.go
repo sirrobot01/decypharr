@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"github.com/sirrobot01/decypharr/pkg/store"
 	"net/http"
 	"strings"
 	"time"
@@ -12,34 +13,37 @@ import (
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/arr"
-	"github.com/sirrobot01/decypharr/pkg/qbit"
-	"github.com/sirrobot01/decypharr/pkg/service"
 	"github.com/sirrobot01/decypharr/pkg/version"
 )
 
-func (ui *Handler) handleGetArrs(w http.ResponseWriter, r *http.Request) {
-	svc := service.GetService()
-	request.JSONResponse(w, svc.Arr.GetAll(), http.StatusOK)
+func (wb *Web) handleGetArrs(w http.ResponseWriter, r *http.Request) {
+	_store := store.GetStore()
+	request.JSONResponse(w, _store.GetArr().GetAll(), http.StatusOK)
 }
 
-func (ui *Handler) handleAddContent(w http.ResponseWriter, r *http.Request) {
+func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	svc := service.GetService()
+	_store := store.GetStore()
 
-	results := make([]*qbit.ImportRequest, 0)
+	results := make([]*store.ImportRequest, 0)
 	errs := make([]string, 0)
 
 	arrName := r.FormValue("arr")
 	notSymlink := r.FormValue("notSymlink") == "true"
-	downloadUncached := r.FormValue("downloadUncached") == "true"
-	if arrName == "" {
-		arrName = "uncategorized"
+	debridName := r.FormValue("debrid")
+	callbackUrl := r.FormValue("callbackUrl")
+	downloadFolder := r.FormValue("downloadFolder")
+	if downloadFolder == "" {
+		downloadFolder = config.Get().QBitTorrent.DownloadFolder
 	}
 
-	_arr := svc.Arr.Get(arrName)
+	downloadUncached := r.FormValue("downloadUncached") == "true"
+
+	_arr := _store.GetArr().Get(arrName)
 	if _arr == nil {
 		_arr = arr.New(arrName, "", "", false, false, &downloadUncached)
 	}
@@ -59,8 +63,9 @@ func (ui *Handler) handleAddContent(w http.ResponseWriter, r *http.Request) {
 				errs = append(errs, fmt.Sprintf("Failed to parse URL %s: %v", url, err))
 				continue
 			}
-			importReq := qbit.NewImportRequest(magnet, _arr, !notSymlink, downloadUncached)
-			if err := importReq.Process(ui.qbit); err != nil {
+
+			importReq := store.NewImportRequest(debridName, downloadFolder, magnet, _arr, !notSymlink, downloadUncached, callbackUrl, store.ImportTypeAPI)
+			if err := _store.AddTorrent(ctx, importReq); err != nil {
 				errs = append(errs, fmt.Sprintf("URL %s: %v", url, err))
 				continue
 			}
@@ -83,8 +88,8 @@ func (ui *Handler) handleAddContent(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			importReq := qbit.NewImportRequest(magnet, _arr, !notSymlink, downloadUncached)
-			err = importReq.Process(ui.qbit)
+			importReq := store.NewImportRequest(debridName, downloadFolder, magnet, _arr, !notSymlink, downloadUncached, callbackUrl, store.ImportTypeAPI)
+			err = _store.AddTorrent(ctx, importReq)
 			if err != nil {
 				errs = append(errs, fmt.Sprintf("File %s: %v", fileHeader.Filename, err))
 				continue
@@ -94,27 +99,27 @@ func (ui *Handler) handleAddContent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	request.JSONResponse(w, struct {
-		Results []*qbit.ImportRequest `json:"results"`
-		Errors  []string              `json:"errors,omitempty"`
+		Results []*store.ImportRequest `json:"results"`
+		Errors  []string               `json:"errors,omitempty"`
 	}{
 		Results: results,
 		Errors:  errs,
 	}, http.StatusOK)
 }
 
-func (ui *Handler) handleRepairMedia(w http.ResponseWriter, r *http.Request) {
+func (wb *Web) handleRepairMedia(w http.ResponseWriter, r *http.Request) {
 	var req RepairRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	svc := service.GetService()
+	_store := store.GetStore()
 
 	var arrs []string
 
 	if req.ArrName != "" {
-		_arr := svc.Arr.Get(req.ArrName)
+		_arr := _store.GetArr().Get(req.ArrName)
 		if _arr == nil {
 			http.Error(w, "No Arrs found to repair", http.StatusNotFound)
 			return
@@ -124,15 +129,15 @@ func (ui *Handler) handleRepairMedia(w http.ResponseWriter, r *http.Request) {
 
 	if req.Async {
 		go func() {
-			if err := svc.Repair.AddJob(arrs, req.MediaIds, req.AutoProcess, false); err != nil {
-				ui.logger.Error().Err(err).Msg("Failed to repair media")
+			if err := _store.GetRepair().AddJob(arrs, req.MediaIds, req.AutoProcess, false); err != nil {
+				wb.logger.Error().Err(err).Msg("Failed to repair media")
 			}
 		}()
 		request.JSONResponse(w, "Repair process started", http.StatusOK)
 		return
 	}
 
-	if err := svc.Repair.AddJob([]string{req.ArrName}, req.MediaIds, req.AutoProcess, false); err != nil {
+	if err := _store.GetRepair().AddJob([]string{req.ArrName}, req.MediaIds, req.AutoProcess, false); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to repair: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -140,16 +145,16 @@ func (ui *Handler) handleRepairMedia(w http.ResponseWriter, r *http.Request) {
 	request.JSONResponse(w, "Repair completed", http.StatusOK)
 }
 
-func (ui *Handler) handleGetVersion(w http.ResponseWriter, r *http.Request) {
+func (wb *Web) handleGetVersion(w http.ResponseWriter, r *http.Request) {
 	v := version.GetInfo()
 	request.JSONResponse(w, v, http.StatusOK)
 }
 
-func (ui *Handler) handleGetTorrents(w http.ResponseWriter, r *http.Request) {
-	request.JSONResponse(w, ui.qbit.Storage.GetAllSorted("", "", nil, "added_on", false), http.StatusOK)
+func (wb *Web) handleGetTorrents(w http.ResponseWriter, r *http.Request) {
+	request.JSONResponse(w, wb.torrents.GetAllSorted("", "", nil, "added_on", false), http.StatusOK)
 }
 
-func (ui *Handler) handleDeleteTorrent(w http.ResponseWriter, r *http.Request) {
+func (wb *Web) handleDeleteTorrent(w http.ResponseWriter, r *http.Request) {
 	hash := chi.URLParam(r, "hash")
 	category := chi.URLParam(r, "category")
 	removeFromDebrid := r.URL.Query().Get("removeFromDebrid") == "true"
@@ -157,11 +162,11 @@ func (ui *Handler) handleDeleteTorrent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "No hash provided", http.StatusBadRequest)
 		return
 	}
-	ui.qbit.Storage.Delete(hash, category, removeFromDebrid)
+	wb.torrents.Delete(hash, category, removeFromDebrid)
 	w.WriteHeader(http.StatusOK)
 }
 
-func (ui *Handler) handleDeleteTorrents(w http.ResponseWriter, r *http.Request) {
+func (wb *Web) handleDeleteTorrents(w http.ResponseWriter, r *http.Request) {
 	hashesStr := r.URL.Query().Get("hashes")
 	removeFromDebrid := r.URL.Query().Get("removeFromDebrid") == "true"
 	if hashesStr == "" {
@@ -169,15 +174,15 @@ func (ui *Handler) handleDeleteTorrents(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	hashes := strings.Split(hashesStr, ",")
-	ui.qbit.Storage.DeleteMultiple(hashes, removeFromDebrid)
+	wb.torrents.DeleteMultiple(hashes, removeFromDebrid)
 	w.WriteHeader(http.StatusOK)
 }
 
-func (ui *Handler) handleGetConfig(w http.ResponseWriter, r *http.Request) {
+func (wb *Web) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
 	arrCfgs := make([]config.Arr, 0)
-	svc := service.GetService()
-	for _, a := range svc.Arr.GetAll() {
+	_store := store.GetStore()
+	for _, a := range _store.GetArr().GetAll() {
 		arrCfgs = append(arrCfgs, config.Arr{
 			Host:             a.Host,
 			Name:             a.Name,
@@ -191,11 +196,11 @@ func (ui *Handler) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	request.JSONResponse(w, cfg, http.StatusOK)
 }
 
-func (ui *Handler) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
+func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	// Decode the JSON body
 	var updatedConfig config.Config
 	if err := json.NewDecoder(r.Body).Decode(&updatedConfig); err != nil {
-		ui.logger.Error().Err(err).Msg("Failed to decode config update request")
+		wb.logger.Error().Err(err).Msg("Failed to decode config update request")
 		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -232,11 +237,12 @@ func (ui *Handler) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update Arrs through the service
-	svc := service.GetService()
-	svc.Arr.Clear() // Clear existing arrs
+	_store := store.GetStore()
+	_arr := _store.GetArr()
+	_arr.Clear() // Clear existing arrs
 
 	for _, a := range updatedConfig.Arrs {
-		svc.Arr.AddOrUpdate(&arr.Arr{
+		_arr.AddOrUpdate(&arr.Arr{
 			Name:             a.Name,
 			Host:             a.Host,
 			Token:            a.Token,
@@ -263,25 +269,25 @@ func (ui *Handler) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	request.JSONResponse(w, map[string]string{"status": "success"}, http.StatusOK)
 }
 
-func (ui *Handler) handleGetRepairJobs(w http.ResponseWriter, r *http.Request) {
-	svc := service.GetService()
-	request.JSONResponse(w, svc.Repair.GetJobs(), http.StatusOK)
+func (wb *Web) handleGetRepairJobs(w http.ResponseWriter, r *http.Request) {
+	_store := store.GetStore()
+	request.JSONResponse(w, _store.GetRepair().GetJobs(), http.StatusOK)
 }
 
-func (ui *Handler) handleProcessRepairJob(w http.ResponseWriter, r *http.Request) {
+func (wb *Web) handleProcessRepairJob(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		http.Error(w, "No job ID provided", http.StatusBadRequest)
 		return
 	}
-	svc := service.GetService()
-	if err := svc.Repair.ProcessJob(id); err != nil {
-		ui.logger.Error().Err(err).Msg("Failed to process repair job")
+	_store := store.GetStore()
+	if err := _store.GetRepair().ProcessJob(id); err != nil {
+		wb.logger.Error().Err(err).Msg("Failed to process repair job")
 	}
 	w.WriteHeader(http.StatusOK)
 }
 
-func (ui *Handler) handleDeleteRepairJob(w http.ResponseWriter, r *http.Request) {
+func (wb *Web) handleDeleteRepairJob(w http.ResponseWriter, r *http.Request) {
 	// Read ids from body
 	var req struct {
 		IDs []string `json:"ids"`
@@ -295,7 +301,22 @@ func (ui *Handler) handleDeleteRepairJob(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	svc := service.GetService()
-	svc.Repair.DeleteJobs(req.IDs)
+	_store := store.GetStore()
+	_store.GetRepair().DeleteJobs(req.IDs)
+	w.WriteHeader(http.StatusOK)
+}
+
+func (wb *Web) handleStopRepairJob(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		http.Error(w, "No job ID provided", http.StatusBadRequest)
+		return
+	}
+	_store := store.GetStore()
+	if err := _store.GetRepair().StopJob(id); err != nil {
+		wb.logger.Error().Err(err).Msg("Failed to stop repair job")
+		http.Error(w, "Failed to stop job: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 }
