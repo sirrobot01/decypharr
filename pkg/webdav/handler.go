@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -459,8 +460,21 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 		}
 		file.downloadLink = link
 		if h.cache.StreamWithRclone() {
-			// Redirect to the download link
-			http.Redirect(w, r, file.downloadLink, http.StatusTemporaryRedirect)
+			redirectURL := file.downloadLink
+
+			rangeHeader := r.Header.Get("Range")
+			cacheBuster := fmt.Sprintf("t=%d&r=%s", time.Now().UnixNano(), url.QueryEscape(rangeHeader))
+
+			if strings.Contains(redirectURL, "?") {
+				redirectURL += "&" + cacheBuster
+			} else {
+				redirectURL += "?" + cacheBuster
+			}
+
+			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+			w.Header().Set("Pragma", "no-cache")
+
+			http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 			return
 		}
 	}
