@@ -8,7 +8,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -460,21 +459,16 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 		}
 		file.downloadLink = link
 		if h.cache.StreamWithRclone() {
-			redirectURL := file.downloadLink
-
-			rangeHeader := r.Header.Get("Range")
-			cacheBuster := fmt.Sprintf("t=%d&r=%s", time.Now().UnixNano(), url.QueryEscape(rangeHeader))
-
-			if strings.Contains(redirectURL, "?") {
-				redirectURL += "&" + cacheBuster
-			} else {
-				redirectURL += "?" + cacheBuster
-			}
-
-			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 			w.Header().Set("Pragma", "no-cache")
-
-			http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+			w.Header().Set("Expires", "0")
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", fi.Name()))
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", fi.Size()))
+			w.Header().Set("Last-Modified", fi.ModTime().UTC().Format(http.TimeFormat))
+			w.Header().Set("Accept-Ranges", "bytes")
+			w.Header().Set("X-Accel-Redirect", file.downloadLink)
+			w.Header().Set("X-Accel-Buffering", "no")
+			http.Redirect(w, r, file.downloadLink, http.StatusFound)
 			return
 		}
 	}
