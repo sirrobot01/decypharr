@@ -41,7 +41,7 @@ func GetStore() *Store {
 			arr:               arrs,
 			debrid:            deb,
 			torrents:          newTorrentStorage(cfg.TorrentsFile()),
-			logger:            logger.New("store"),
+			logger:            logger.Default(), // Use default logger [decypharr]
 			refreshInterval:   time.Duration(cmp.Or(qbitCfg.RefreshInterval, 10)) * time.Minute,
 			skipPreCache:      qbitCfg.SkipPreCache,
 			downloadSemaphore: make(chan struct{}, cmp.Or(qbitCfg.MaxDownloads, 5)),

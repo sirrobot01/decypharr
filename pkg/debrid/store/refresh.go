@@ -261,7 +261,4 @@ func (c *Cache) refreshDownloadLinks(ctx context.Context) {
 			c.downloadLinks.Delete(k)
 		}
 	}
-
-	c.logger.Trace().Msgf("Refreshed %d download links", len(downloadLinks))
-
 }

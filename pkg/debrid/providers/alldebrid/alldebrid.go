@@ -190,7 +190,7 @@ func (ad *AllDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 	var res TorrentInfoResponse
 	err = json.Unmarshal(resp, &res)
 	if err != nil {
-		ad.logger.Info().Msgf("Error unmarshalling torrent info: %s", err)
+		ad.logger.Error().Err(err).Msgf("Error unmarshalling torrent info")
 		return nil, err
 	}
 	data := res.Data.Magnets
@@ -232,7 +232,7 @@ func (ad *AllDebrid) UpdateTorrent(t *types.Torrent) error {
 	var res TorrentInfoResponse
 	err = json.Unmarshal(resp, &res)
 	if err != nil {
-		ad.logger.Info().Msgf("Error unmarshalling torrent info: %s", err)
+		ad.logger.Error().Err(err).Msgf("Error unmarshalling torrent info")
 		return err
 	}
 	data := res.Data.Magnets
@@ -393,7 +393,7 @@ func (ad *AllDebrid) GetTorrents() ([]*types.Torrent, error) {
 	var res TorrentsListResponse
 	err = json.Unmarshal(resp, &res)
 	if err != nil {
-		ad.logger.Info().Msgf("Error unmarshalling torrent info: %s", err)
+		ad.logger.Error().Err(err).Msgf("Error unmarshalling torrent info")
 		return torrents, err
 	}
 	for _, magnet := range res.Data.Magnets {

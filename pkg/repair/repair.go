@@ -440,7 +440,7 @@ func (r *Repair) repairArr(job *Job, _arr string, tmdbId string) ([]arr.ContentF
 	}
 	// Check first media to confirm mounts are accessible
 	if !r.isMediaAccessible(media) {
-		r.logger.Info().Msgf("Skipping repair. Parent directory not accessible for. Check your mounts")
+		r.logger.Info().Msgf("Skipping repair. Parent directory not accessible. Check your mounts")
 		return brokenItems, nil
 	}
 
@@ -520,19 +520,18 @@ func (r *Repair) isMediaAccessible(media []arr.Content) bool {
 	firstFile := files[0]
 	symlinkPath := getSymlinkTarget(firstFile.Path)
 
+	if symlinkPath == "" {
+		r.logger.Debug().Msgf("No symlink target found for %s", firstFile.Path)
+		return false
+	}
 	r.logger.Debug().Msgf("Checking symlink parent directory for %s", symlinkPath)
-	parentSymlink := ""
 
-	if symlinkPath != "" {
-		parentSymlink = filepath.Dir(filepath.Dir(symlinkPath)) // /mnt/zurg/torrents/movie/movie.mkv -> /mnt/zurg/torrents
+	parentSymlink := filepath.Dir(filepath.Dir(symlinkPath)) // /mnt/zurg/torrents/movie/movie.mkv -> /mnt/zurg/torrents
+	if _, err := os.Stat(parentSymlink); os.IsNotExist(err) {
+		r.logger.Debug().Msgf("Cannot access parent directory %s for %s", parentSymlink, firstFile.Path)
+		return false
 	}
-	if parentSymlink != "" {
-		if _, err := os.Stat(parentSymlink); os.IsNotExist(err) {
-			return false
-		}
-		return true
-	}
-	return false
+	return true
 }
 
 func (r *Repair) getBrokenFiles(job *Job, media arr.Content) []arr.ContentFile {

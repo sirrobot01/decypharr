@@ -81,7 +81,7 @@ func New(dc config.Debrid) (*RealDebrid, error) {
 			request.WithHeaders(headers),
 			request.WithRateLimiter(rl),
 			request.WithLogger(_log),
-			request.WithMaxRetries(5),
+			request.WithMaxRetries(10),
 			request.WithRetryableStatus(429, 502),
 			request.WithProxy(dc.Proxy),
 		),
@@ -302,13 +302,13 @@ func (r *RealDebrid) IsAvailable(hashes []string) map[string]bool {
 		req, _ := http.NewRequest(http.MethodGet, url, nil)
 		resp, err := r.client.MakeRequest(req)
 		if err != nil {
-			r.logger.Info().Msgf("Error checking availability: %v", err)
+			r.logger.Error().Err(err).Msgf("Error checking availability")
 			return result
 		}
 		var data AvailabilityResponse
 		err = json.Unmarshal(resp, &data)
 		if err != nil {
-			r.logger.Info().Msgf("Error marshalling availability: %v", err)
+			r.logger.Error().Err(err).Msgf("Error marshalling availability")
 			return result
 		}
 		for _, h := range hashes[i:end] {

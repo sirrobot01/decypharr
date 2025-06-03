@@ -231,6 +231,8 @@ func (c *Cache) Start(ctx context.Context) error {
 	if err := c.Sync(ctx); err != nil {
 		return fmt.Errorf("failed to sync cache: %w", err)
 	}
+	// Fire the ready channel
+	close(c.ready)
 
 	// initial download links
 	go c.refreshDownloadLinks(ctx)
@@ -242,8 +244,6 @@ func (c *Cache) Start(ctx context.Context) error {
 	c.repairChan = make(chan RepairRequest, 100)
 	go c.repairWorker(ctx)
 
-	// Fire the ready channel
-	close(c.ready)
 	cfg := config.Get()
 	name := c.client.GetName()
 	addr := cfg.BindAddress + ":" + cfg.Port + cfg.URLBase + "webdav/" + name + "/"

@@ -70,7 +70,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			s.logger.Info().Msgf("Error starting server: %v", err)
+			s.logger.Error().Err(err).Msgf("Error starting server")
 		}
 	}()
 

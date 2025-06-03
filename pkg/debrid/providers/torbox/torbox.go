@@ -117,13 +117,13 @@ func (tb *Torbox) IsAvailable(hashes []string) map[string]bool {
 		req, _ := http.NewRequest(http.MethodGet, url, nil)
 		resp, err := tb.client.MakeRequest(req)
 		if err != nil {
-			tb.logger.Info().Msgf("Error checking availability: %v", err)
+			tb.logger.Error().Err(err).Msgf("Error checking availability")
 			return result
 		}
 		var res AvailableResponse
 		err = json.Unmarshal(resp, &res)
 		if err != nil {
-			tb.logger.Info().Msgf("Error marshalling availability: %v", err)
+			tb.logger.Error().Err(err).Msgf("Error marshalling availability")
 			return result
 		}
 		if res.Data == nil {

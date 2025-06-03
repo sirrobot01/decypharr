@@ -17,7 +17,7 @@ func (q *QBit) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := _arr.Validate(); err != nil {
-		q.logger.Info().Msgf("Error validating arr: %v", err)
+		q.logger.Error().Err(err).Msgf("Error validating arr")
 	}
 	_, _ = w.Write([]byte("Ok."))
 }
@@ -73,13 +73,13 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 	contentType := r.Header.Get("Content-Type")
 	if strings.Contains(contentType, "multipart/form-data") {
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
-			q.logger.Info().Msgf("Error parsing multipart form: %v", err)
+			q.logger.Error().Err(err).Msgf("Error parsing multipart form")
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 	} else if strings.Contains(contentType, "application/x-www-form-urlencoded") {
 		if err := r.ParseForm(); err != nil {
-			q.logger.Info().Msgf("Error parsing form: %v", err)
+			q.logger.Error().Err(err).Msgf("Error parsing form")
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -105,7 +105,7 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, url := range urlList {
 			if err := q.addMagnet(ctx, url, _arr, debridName, isSymlink); err != nil {
-				q.logger.Info().Msgf("Error adding magnet: %v", err)
+				q.logger.Error().Err(err).Msgf("Error adding magnet")
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -118,7 +118,7 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 		if files := r.MultipartForm.File["torrents"]; len(files) > 0 {
 			for _, fileHeader := range files {
 				if err := q.addTorrent(ctx, fileHeader, _arr, debridName, isSymlink); err != nil {
-					q.logger.Info().Msgf("Error adding torrent: %v", err)
+					q.logger.Error().Err(err).Msgf("Error adding torrent")
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
 				}

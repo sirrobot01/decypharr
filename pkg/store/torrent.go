@@ -101,7 +101,7 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 		go func() {
 			_ = client.DeleteTorrent(debridTorrent.Id)
 		}()
-		s.logger.Info().Msgf("Error: %v", err)
+		s.logger.Error().Err(err).Msgf("Error occured while processing torrent %s", debridTorrent.Name)
 		importReq.markAsFailed(err, torrent, debridTorrent)
 		return
 	}
