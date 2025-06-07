@@ -2,13 +2,14 @@ package types
 
 import (
 	"fmt"
-	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/arr"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/sirrobot01/decypharr/internal/logger"
+	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/arr"
 )
 
 type Torrent struct {
@@ -37,6 +38,10 @@ type Torrent struct {
 	Mu               sync.Mutex `json:"-"`
 	SizeDownloaded   int64      `json:"-"` // This is used for local download
 	DownloadUncached bool       `json:"-"`
+
+	// Concurrency control fields
+	UncachedSlotAcquired bool   `json:"-"` // Whether this torrent has acquired an uncached slot
+	UncachedSlotProvider string `json:"-"` // Which provider the slot was acquired for
 }
 
 type DownloadLink struct {

@@ -4,18 +4,19 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"github.com/sirrobot01/decypharr/internal/request"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/arr"
-	"github.com/sirrobot01/decypharr/pkg/debrid/debrid"
-	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"github.com/sirrobot01/decypharr/pkg/service"
 	"io"
 	"mime/multipart"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sirrobot01/decypharr/internal/request"
+	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/arr"
+	"github.com/sirrobot01/decypharr/pkg/debrid/debrid"
+	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"github.com/sirrobot01/decypharr/pkg/service"
 )
 
 // All torrent related helpers goes here
@@ -72,6 +73,25 @@ func (q *QBit) ProcessFiles(torrent *Torrent, debridTorrent *debridTypes.Torrent
 	svc := service.GetService()
 	client := svc.Debrid.GetClient(debridTorrent.Debrid)
 	downloadingStatuses := client.GetDownloadingStatus()
+
+	// Check if this torrent already has a slot acquired from ProcessTorrent
+	var slotAcquired bool = debridTorrent.UncachedSlotAcquired
+	if slotAcquired {
+		q.logger.Info().Msgf("Using existing uncached slot for %s (provider: %s)", debridTorrent.Name, debridTorrent.UncachedSlotProvider)
+	} else if debridTorrent.DownloadUncached {
+		q.logger.Info().Msgf("Torrent %s is uncached but no slot acquired, this shouldn't happen", debridTorrent.Name)
+	} else {
+		q.logger.Info().Msgf("Torrent %s is cached, no slot needed", debridTorrent.Name)
+	}
+
+	// Ensure slot is released when function exits
+	defer func() {
+		if slotAcquired {
+			q.logger.Info().Msgf("Releasing uncached slot for %s", debridTorrent.UncachedSlotProvider)
+			svc.Debrid.ReleaseUncachedSlot(debridTorrent.UncachedSlotProvider)
+		}
+	}()
+
 	for debridTorrent.Status != "downloaded" {
 		q.logger.Debug().Msgf("%s <- (%s) Download Progress: %.2f%%", debridTorrent.Debrid, debridTorrent.Name, debridTorrent.Progress)
 		dbT, err := client.CheckStatus(debridTorrent, isSymlink)
