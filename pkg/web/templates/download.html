@@ -35,6 +35,12 @@
                                 <label class="form-check-label" for="downloadUncached">Download Uncached</label>
                             </div>
                         </div>
+                        <div class="col-md-2 mb-3">
+                            <div class="form-check d-inline-block">
+                                <input type="checkbox" class="form-check-input" name="skipExisting" id="skipExisting">
+                                <label class="form-check-label" for="skipExisting" title="Skip torrents that already exist in debrid provider">Skip Existing</label>
+                            </div>
+                        </div>
 
 
                     </div>
@@ -53,18 +59,22 @@
                 const savedCategory = localStorage.getItem('downloadCategory');
                 const savedSymlink = localStorage.getItem('downloadSymlink');
                 const savedDownloadUncached = localStorage.getItem('downloadUncached');
+                const savedSkipExisting = localStorage.getItem('skipExisting');
                 document.getElementById('category').value = savedCategory || '';
                 document.getElementById('isSymlink').checked = savedSymlink === 'true';
                 document.getElementById('downloadUncached').checked = savedDownloadUncached === 'true';
+                document.getElementById('skipExisting').checked = savedSkipExisting === 'true';
             };
 
             const saveCurrentDownloadOptions = () => {
                 const category = document.getElementById('category').value;
                 const isSymlink = document.getElementById('isSymlink').checked;
                 const downloadUncached = document.getElementById('downloadUncached').checked;
+                const skipExisting = document.getElementById('skipExisting').checked;
                 localStorage.setItem('downloadCategory', category);
                 localStorage.setItem('downloadSymlink', isSymlink.toString());
                 localStorage.setItem('downloadUncached', downloadUncached.toString());
+                localStorage.setItem('skipExisting', skipExisting.toString());
             };
 
             // Load the last used download options from local storage
@@ -111,6 +121,7 @@
                     formData.append('arr', document.getElementById('category').value);
                     formData.append('notSymlink', document.getElementById('isSymlink').checked);
                     formData.append('downloadUncached', document.getElementById('downloadUncached').checked);
+                    formData.append('skipExisting', document.getElementById('skipExisting').checked);
 
                     const response = await fetcher('/api/add', {
                         method: 'POST',
@@ -141,6 +152,7 @@
             // Save the download options to local storage when they change
             document.getElementById('category').addEventListener('change', saveCurrentDownloadOptions);
             document.getElementById('isSymlink').addEventListener('change', saveCurrentDownloadOptions);
+            document.getElementById('skipExisting').addEventListener('change', saveCurrentDownloadOptions);
 
             // Read the URL parameters for a magnet link and add it to the download queue if found
             const urlParams = new URLSearchParams(window.location.search);
