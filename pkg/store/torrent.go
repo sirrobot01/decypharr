@@ -16,7 +16,7 @@ import (
 
 func (s *Store) AddTorrent(ctx context.Context, importReq *ImportRequest) error {
 	torrent := createTorrentFromMagnet(importReq)
-	debridTorrent, err := debridTypes.ProcessTorrent(ctx, s.debrid, importReq.SelectedDebrid, importReq.Magnet, importReq.Arr, importReq.IsSymlink, importReq.DownloadUncached)
+	debridTorrent, err := debridTypes.Process(ctx, s.debrid, importReq.SelectedDebrid, importReq.Magnet, importReq.Arr, importReq.IsSymlink, importReq.DownloadUncached)
 
 	if err != nil {
 		var httpErr *utils.HTTPError
@@ -97,8 +97,8 @@ func (s *Store) trackAvailableSlots(ctx context.Context) {
 	// This function tracks the available slots for each debrid client
 	availableSlots := make(map[string]int)
 
-	for name, deb := range s.debrid.GetDebrids() {
-		slots, err := deb.Client.GetAvailableSlots()
+	for name, deb := range s.debrid.Debrids() {
+		slots, err := deb.Client().GetAvailableSlots()
 		if err != nil {
 			continue
 		}
@@ -133,8 +133,8 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 		return
 	}
 
-	deb := s.debrid.GetDebrid(debridTorrent.Debrid)
-	client := deb.Client
+	deb := s.debrid.Debrid(debridTorrent.Debrid)
+	client := deb.Client()
 	downloadingStatuses := client.GetDownloadingStatus()
 	_arr := importReq.Arr
 	for debridTorrent.Status != "downloaded" {
@@ -175,19 +175,20 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 	// Check if debrid supports webdav by checking cache
 	timer := time.Now()
 	if importReq.IsSymlink {
-		if deb.Cache != nil {
+		cache := deb.Cache()
+		if cache != nil {
 			s.logger.Info().Msgf("Using internal webdav for %s", debridTorrent.Debrid)
 
 			// Use webdav to download the file
 
-			if err := deb.Cache.Add(debridTorrent); err != nil {
+			if err := cache.Add(debridTorrent); err != nil {
 				s.logger.Error().Msgf("Error adding torrent to cache: %v", err)
 				s.markTorrentAsFailed(torrent)
 				importReq.markAsFailed(err, torrent, debridTorrent)
 				return
 			}
 
-			rclonePath := filepath.Join(debridTorrent.MountPath, deb.Cache.GetTorrentFolder(debridTorrent)) // /mnt/remote/realdebrid/MyTVShow
+			rclonePath := filepath.Join(debridTorrent.MountPath, cache.GetTorrentFolder(debridTorrent)) // /mnt/remote/realdebrid/MyTVShow
 			torrentFolderNoExt := utils.RemoveExtension(debridTorrent.Name)
 			torrentSymlinkPath, err = s.createSymlinksWebdav(torrent, debridTorrent, rclonePath, torrentFolderNoExt) // /mnt/symlinks/{category}/MyTVShow/
 
@@ -277,7 +278,7 @@ func (s *Store) updateTorrent(t *Torrent, debridTorrent *types.Torrent) *Torrent
 		return t
 	}
 
-	if debridClient := s.debrid.GetClients()[debridTorrent.Debrid]; debridClient != nil {
+	if debridClient := s.debrid.Clients()[debridTorrent.Debrid]; debridClient != nil {
 		if debridTorrent.Status != "downloaded" {
 			_ = debridClient.UpdateTorrent(debridTorrent)
 		}

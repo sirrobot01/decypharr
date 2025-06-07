@@ -184,7 +184,7 @@ func (ts *TorrentStorage) Delete(hash, category string, removeFromDebrid bool) {
 		return
 	}
 	if removeFromDebrid && torrent.ID != "" && torrent.Debrid != "" {
-		dbClient := GetStore().debrid.GetClient(torrent.Debrid)
+		dbClient := Get().debrid.Client(torrent.Debrid)
 		if dbClient != nil {
 			_ = dbClient.DeleteTorrent(torrent.ID)
 		}
@@ -238,7 +238,7 @@ func (ts *TorrentStorage) DeleteMultiple(hashes []string, removeFromDebrid bool)
 		}
 	}()
 
-	clients := GetStore().debrid.GetClients()
+	clients := Get().debrid.Clients()
 
 	go func() {
 		for id, debrid := range toDelete {

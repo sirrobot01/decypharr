@@ -30,8 +30,8 @@ var (
 	once     sync.Once
 )
 
-// GetStore returns the singleton instance
-func GetStore() *Store {
+// Get returns the singleton instance
+func Get() *Store {
 	once.Do(func() {
 		arrs := arr.NewStorage()
 		deb := debrid.NewStorage()
@@ -69,15 +69,15 @@ func Reset() {
 	instance = nil
 }
 
-func (s *Store) GetArr() *arr.Storage {
+func (s *Store) Arr() *arr.Storage {
 	return s.arr
 }
-func (s *Store) GetDebrid() *debrid.Storage {
+func (s *Store) Debrid() *debrid.Storage {
 	return s.debrid
 }
-func (s *Store) GetRepair() *repair.Repair {
+func (s *Store) Repair() *repair.Repair {
 	return s.repair
 }
-func (s *Store) GetTorrentStorage() *TorrentStorage {
+func (s *Store) Torrents() *TorrentStorage {
 	return s.torrents
 }

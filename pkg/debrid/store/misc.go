@@ -28,7 +28,7 @@ func mergeFiles(torrents ...CachedTorrent) map[string]types.File {
 
 func (c *Cache) GetIngests() ([]types.IngestData, error) {
 	torrents := c.GetTorrents()
-	debridName := c.client.GetName()
+	debridName := c.client.Name()
 	var ingests []types.IngestData
 	for _, torrent := range torrents {
 		ingests = append(ingests, types.IngestData{

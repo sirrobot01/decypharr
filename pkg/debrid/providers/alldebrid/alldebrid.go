@@ -18,7 +18,7 @@ import (
 )
 
 type AllDebrid struct {
-	Name             string
+	name             string
 	Host             string `json:"host"`
 	APIKey           string
 	accounts         map[string]types.Account
@@ -60,7 +60,7 @@ func New(dc config.Debrid) (*AllDebrid, error) {
 		}
 	}
 	return &AllDebrid{
-		Name:             "alldebrid",
+		name:             "alldebrid",
 		Host:             "http://api.alldebrid.com/v4.1",
 		APIKey:           dc.APIKey,
 		accounts:         accounts,
@@ -74,11 +74,11 @@ func New(dc config.Debrid) (*AllDebrid, error) {
 	}, nil
 }
 
-func (ad *AllDebrid) GetName() string {
-	return ad.Name
+func (ad *AllDebrid) Name() string {
+	return ad.name
 }
 
-func (ad *AllDebrid) GetLogger() zerolog.Logger {
+func (ad *AllDebrid) Logger() zerolog.Logger {
 	return ad.logger
 }
 
@@ -206,7 +206,7 @@ func (ad *AllDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 		OriginalFilename: name,
 		Files:            make(map[string]types.File),
 		InfoHash:         data.Hash,
-		Debrid:           ad.Name,
+		Debrid:           ad.name,
 		MountPath:        ad.MountPath,
 		Added:            time.Unix(data.CompletionDate, 0).Format(time.RFC3339),
 	}
@@ -246,7 +246,7 @@ func (ad *AllDebrid) UpdateTorrent(t *types.Torrent) error {
 	t.OriginalFilename = name
 	t.Folder = name
 	t.MountPath = ad.MountPath
-	t.Debrid = ad.Name
+	t.Debrid = ad.name
 	t.Bytes = data.Size
 	t.Seeders = data.Seeders
 	t.Added = time.Unix(data.CompletionDate, 0).Format(time.RFC3339)
@@ -408,7 +408,7 @@ func (ad *AllDebrid) GetTorrents() ([]*types.Torrent, error) {
 			OriginalFilename: magnet.Filename,
 			Files:            make(map[string]types.File),
 			InfoHash:         magnet.Hash,
-			Debrid:           ad.Name,
+			Debrid:           ad.name,
 			MountPath:        ad.MountPath,
 			Added:            time.Unix(magnet.CompletionDate, 0).Format(time.RFC3339),
 		})

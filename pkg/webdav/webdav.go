@@ -95,8 +95,8 @@ func New() *WebDav {
 		Handlers: make([]*Handler, 0),
 		URLBase:  urlBase,
 	}
-	for name, c := range store.GetStore().GetDebrid().GetCaches() {
-		h := NewHandler(name, urlBase, c, c.GetLogger())
+	for name, c := range store.Get().Debrid().Caches() {
+		h := NewHandler(name, urlBase, c, c.Logger())
 		w.Handlers = append(w.Handlers, h)
 	}
 	return w

@@ -25,7 +25,7 @@ func New() *QBit {
 		Password:       cfg.Password,
 		DownloadFolder: cfg.DownloadFolder,
 		Categories:     cfg.Categories,
-		storage:        store.GetStore().GetTorrentStorage(),
+		storage:        store.Get().Torrents(),
 		logger:         logger.New("qbit"),
 	}
 }

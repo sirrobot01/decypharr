@@ -82,7 +82,7 @@ func (q *QBit) authContext(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, token, err := decodeAuthHeader(r.Header.Get("Authorization"))
 		category := getCategory(r.Context())
-		arrs := store.GetStore().GetArr()
+		arrs := store.Get().Arr()
 		// Check if arr exists
 		a := arrs.Get(category)
 		if a == nil {

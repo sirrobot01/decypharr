@@ -18,8 +18,16 @@ import (
 )
 
 type Debrid struct {
-	Cache  *store.Cache // Could be nil if not using WebDAV
-	Client types.Client // HTTP client for making requests to the debrid service
+	cache  *store.Cache // Could be nil if not using WebDAV
+	client types.Client // HTTP client for making requests to the debrid service
+}
+
+func (de *Debrid) Client() types.Client {
+	return de.client
+}
+
+func (de *Debrid) Cache() *store.Cache {
+	return de.cache
 }
 
 type Storage struct {
@@ -42,7 +50,7 @@ func NewStorage() *Storage {
 			continue
 		}
 		var cache *store.Cache
-		_log := client.GetLogger()
+		_log := client.Logger()
 		if dc.UseWebDav {
 			cache = store.NewDebridCache(dc, client)
 			_log.Info().Msg("Debrid Service started with WebDAV")
@@ -50,8 +58,8 @@ func NewStorage() *Storage {
 			_log.Info().Msg("Debrid Service started")
 		}
 		debrids[dc.Name] = &Debrid{
-			Cache:  cache,
-			Client: client,
+			cache:  cache,
+			client: client,
 		}
 	}
 
@@ -62,7 +70,7 @@ func NewStorage() *Storage {
 	return d
 }
 
-func (d *Storage) GetDebrid(name string) *Debrid {
+func (d *Storage) Debrid(name string) *Debrid {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	if debrid, exists := d.debrids[name]; exists {
@@ -71,7 +79,7 @@ func (d *Storage) GetDebrid(name string) *Debrid {
 	return nil
 }
 
-func (d *Storage) GetDebrids() map[string]*Debrid {
+func (d *Storage) Debrids() map[string]*Debrid {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	debridsCopy := make(map[string]*Debrid)
@@ -83,11 +91,11 @@ func (d *Storage) GetDebrids() map[string]*Debrid {
 	return debridsCopy
 }
 
-func (d *Storage) GetClient(name string) types.Client {
+func (d *Storage) Client(name string) types.Client {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	if client, exists := d.debrids[name]; exists {
-		return client.Client
+		return client.client
 	}
 	return nil
 }
@@ -99,25 +107,25 @@ func (d *Storage) Reset() {
 	d.lastUsed = ""
 }
 
-func (d *Storage) GetClients() map[string]types.Client {
+func (d *Storage) Clients() map[string]types.Client {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	clientsCopy := make(map[string]types.Client)
 	for name, debrid := range d.debrids {
-		if debrid != nil && debrid.Client != nil {
-			clientsCopy[name] = debrid.Client
+		if debrid != nil && debrid.client != nil {
+			clientsCopy[name] = debrid.client
 		}
 	}
 	return clientsCopy
 }
 
-func (d *Storage) GetCaches() map[string]*store.Cache {
+func (d *Storage) Caches() map[string]*store.Cache {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	cachesCopy := make(map[string]*store.Cache)
 	for name, debrid := range d.debrids {
-		if debrid != nil && debrid.Cache != nil {
-			cachesCopy[name] = debrid.Cache
+		if debrid != nil && debrid.cache != nil {
+			cachesCopy[name] = debrid.cache
 		}
 	}
 	return cachesCopy
@@ -128,8 +136,8 @@ func (d *Storage) FilterClients(filter func(types.Client) bool) map[string]types
 	defer d.mu.Unlock()
 	filteredClients := make(map[string]types.Client)
 	for name, client := range d.debrids {
-		if client != nil && filter(client.Client) {
-			filteredClients[name] = client.Client
+		if client != nil && filter(client.client) {
+			filteredClients[name] = client.client
 		}
 	}
 	return filteredClients
@@ -150,7 +158,7 @@ func createDebridClient(dc config.Debrid) (types.Client, error) {
 	}
 }
 
-func ProcessTorrent(ctx context.Context, store *Storage, selectedDebrid string, magnet *utils.Magnet, a *arr.Arr, isSymlink, overrideDownloadUncached bool) (*types.Torrent, error) {
+func Process(ctx context.Context, store *Storage, selectedDebrid string, magnet *utils.Magnet, a *arr.Arr, isSymlink, overrideDownloadUncached bool) (*types.Torrent, error) {
 
 	debridTorrent := &types.Torrent{
 		InfoHash: magnet.InfoHash,
@@ -162,7 +170,7 @@ func ProcessTorrent(ctx context.Context, store *Storage, selectedDebrid string, 
 	}
 
 	clients := store.FilterClients(func(c types.Client) bool {
-		if selectedDebrid != "" && c.GetName() != selectedDebrid {
+		if selectedDebrid != "" && c.Name() != selectedDebrid {
 			return false
 		}
 		return true
@@ -186,9 +194,9 @@ func ProcessTorrent(ctx context.Context, store *Storage, selectedDebrid string, 
 	}
 
 	for index, db := range clients {
-		_logger := db.GetLogger()
+		_logger := db.Logger()
 		_logger.Info().
-			Str("Debrid", db.GetName()).
+			Str("Debrid", db.Name()).
 			Str("Arr", a.Name).
 			Str("Hash", debridTorrent.InfoHash).
 			Str("Name", debridTorrent.Name).
@@ -204,7 +212,7 @@ func ProcessTorrent(ctx context.Context, store *Storage, selectedDebrid string, 
 			continue
 		}
 		dbt.Arr = a
-		_logger.Info().Str("id", dbt.Id).Msgf("Torrent: %s submitted to %s", dbt.Name, db.GetName())
+		_logger.Info().Str("id", dbt.Id).Msgf("Torrent: %s submitted to %s", dbt.Name, db.Name())
 		store.lastUsed = index
 
 		torrent, err := db.CheckStatus(dbt, isSymlink)

@@ -79,6 +79,6 @@ func New() *Web {
 		logger:    logger.New("ui"),
 		templates: templates,
 		cookie:    cookieStore,
-		torrents:  store.GetStore().GetTorrentStorage(),
+		torrents:  store.Get().Torrents(),
 	}
 }

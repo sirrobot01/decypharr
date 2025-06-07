@@ -25,7 +25,7 @@ import (
 )
 
 type RealDebrid struct {
-	Name string
+	name string
 	Host string `json:"host"`
 
 	APIKey             string
@@ -73,7 +73,7 @@ func New(dc config.Debrid) (*RealDebrid, error) {
 	}
 
 	r := &RealDebrid{
-		Name:             "realdebrid",
+		name:             "realdebrid",
 		Host:             "https://api.real-debrid.com/rest/1.0",
 		APIKey:           dc.APIKey,
 		accounts:         accounts,
@@ -110,11 +110,11 @@ func New(dc config.Debrid) (*RealDebrid, error) {
 	}
 }
 
-func (r *RealDebrid) GetName() string {
-	return r.Name
+func (r *RealDebrid) Name() string {
+	return r.name
 }
 
-func (r *RealDebrid) GetLogger() zerolog.Logger {
+func (r *RealDebrid) Logger() zerolog.Logger {
 	return r.logger
 }
 
@@ -363,7 +363,7 @@ func (r *RealDebrid) addTorrent(t *types.Torrent) (*types.Torrent, error) {
 		return nil, err
 	}
 	t.Id = data.Id
-	t.Debrid = r.Name
+	t.Debrid = r.name
 	t.MountPath = r.MountPath
 	return t, nil
 }
@@ -398,7 +398,7 @@ func (r *RealDebrid) addMagnet(t *types.Torrent) (*types.Torrent, error) {
 		return nil, err
 	}
 	t.Id = data.Id
-	t.Debrid = r.Name
+	t.Debrid = r.name
 	t.MountPath = r.MountPath
 	return t, nil
 }
@@ -439,7 +439,7 @@ func (r *RealDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 		Filename:         data.Filename,
 		OriginalFilename: data.OriginalFilename,
 		Links:            data.Links,
-		Debrid:           r.Name,
+		Debrid:           r.name,
 		MountPath:        r.MountPath,
 	}
 	t.Files = r.getTorrentFiles(t, data) // Get selected files
@@ -480,7 +480,7 @@ func (r *RealDebrid) UpdateTorrent(t *types.Torrent) error {
 	t.OriginalFilename = data.OriginalFilename
 	t.Links = data.Links
 	t.MountPath = r.MountPath
-	t.Debrid = r.Name
+	t.Debrid = r.name
 	t.Added = data.Added
 	t.Files, _ = r.getSelectedFiles(t, data) // Get selected files
 
@@ -511,7 +511,7 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent, isSymlink bool) (*types.Torre
 		t.Seeders = data.Seeders
 		t.Links = data.Links
 		t.Status = status
-		t.Debrid = r.Name
+		t.Debrid = r.name
 		t.MountPath = r.MountPath
 		if status == "waiting_files_selection" {
 			t.Files = r.getTorrentFiles(t, data)
@@ -786,7 +786,7 @@ func (r *RealDebrid) getTorrents(offset int, limit int) (int, []*types.Torrent, 
 			Links:            t.Links,
 			Files:            make(map[string]types.File),
 			InfoHash:         t.Hash,
-			Debrid:           r.Name,
+			Debrid:           r.name,
 			MountPath:        r.MountPath,
 			Added:            t.Added.Format(time.RFC3339),
 		})

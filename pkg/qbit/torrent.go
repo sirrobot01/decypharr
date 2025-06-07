@@ -18,7 +18,7 @@ func (q *QBit) addMagnet(ctx context.Context, url string, arr *arr.Arr, debrid s
 	if err != nil {
 		return fmt.Errorf("error parsing magnet link: %w", err)
 	}
-	_store := store.GetStore()
+	_store := store.Get()
 
 	importReq := store.NewImportRequest(debrid, q.DownloadFolder, magnet, arr, isSymlink, false, "", store.ImportTypeQBitTorrent)
 
@@ -37,7 +37,7 @@ func (q *QBit) addTorrent(ctx context.Context, fileHeader *multipart.FileHeader,
 	if err != nil {
 		return fmt.Errorf("error reading file: %s \n %w", fileHeader.Filename, err)
 	}
-	_store := store.GetStore()
+	_store := store.Get()
 	importReq := store.NewImportRequest(debrid, q.DownloadFolder, magnet, arr, isSymlink, false, "", store.ImportTypeQBitTorrent)
 	err = _store.AddTorrent(ctx, importReq)
 	if err != nil {

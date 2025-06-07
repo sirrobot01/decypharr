@@ -159,7 +159,7 @@ func (r *Repair) findDebridForPath(dir string, clients map[string]types.Client) 
 		}
 
 		if filepath.Clean(mountPath) == filepath.Clean(dir) {
-			debridName := client.GetName()
+			debridName := client.Name()
 
 			// Cache the result
 			r.cacheMutex.Lock()
