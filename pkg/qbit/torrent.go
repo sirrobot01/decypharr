@@ -94,6 +94,7 @@ func (q *QBit) ProcessFiles(torrent *Torrent, debridTorrent *debridTypes.Torrent
 
 	startTime := time.Now()
 	deadCheckGracePeriod := 1 * time.Minute // Wait 1 minute before checking for dead torrents
+	maxProgressSeen := float64(0)           // Track the highest progress we've seen
 
 	for debridTorrent.Status != "downloaded" {
 		q.logger.Debug().Msgf("%s <- (%s) Download Progress: %.2f%%", debridTorrent.Debrid, debridTorrent.Name, debridTorrent.Progress)
@@ -118,14 +119,24 @@ func (q *QBit) ProcessFiles(torrent *Torrent, debridTorrent *debridTypes.Torrent
 		debridTorrent = dbT
 		torrent = q.UpdateTorrentMin(torrent, debridTorrent)
 
+		// Track the maximum progress we've seen for this torrent
+		if debridTorrent.Progress > maxProgressSeen {
+			maxProgressSeen = debridTorrent.Progress
+		}
+
 		// Check for dead torrents (0% progress, 0 seeders, 0 speed) after grace period
 		if debridTorrent.DownloadUncached && utils.Contains(downloadingStatuses, debridTorrent.Status) {
 			// Only check for dead torrents after the grace period
 			if time.Since(startTime) >= deadCheckGracePeriod {
-				if debridTorrent.Progress == 0 && debridTorrent.Seeders == 0 && debridTorrent.Speed == 0 {
+				// Don't consider a torrent dead if:
+				// 1. It has already made significant progress (>= 5%) OR
+				// 2. The status indicates it's downloaded/completed
+				// 3. Current progress is 0, seeders is 0, and speed is 0
+				if debridTorrent.Progress == 0 && debridTorrent.Seeders == 0 && debridTorrent.Speed == 0 &&
+					maxProgressSeen < 5.0 && debridTorrent.Status != "downloaded" {
 					elapsed := time.Since(startTime)
-					q.logger.Warn().Msgf("Dead torrent detected for %s after %v: 0%% progress, 0 seeders, 0 speed",
-						debridTorrent.Name, elapsed)
+					q.logger.Warn().Msgf("Dead torrent detected for %s after %v: 0%% progress, 0 seeders, 0 speed (max progress seen: %.2f%%)",
+						debridTorrent.Name, elapsed, maxProgressSeen)
 
 					q.logger.Info().Msgf("Removing dead torrent %s (no activity after %v)", debridTorrent.Name, elapsed)
 					// Delete the dead torrent from debrid service
@@ -148,8 +159,8 @@ func (q *QBit) ProcessFiles(torrent *Torrent, debridTorrent *debridTypes.Torrent
 							**Hash:** %s
 							**MagnetURI:** %s
 							**Debrid:** %s
-							**Reason:** Dead torrent (0%% progress, 0 seeders, 0 speed after %v)
-						`, torrent.Name, torrent.Category, torrent.Hash, torrent.MagnetUri, torrent.Debrid, elapsed)
+							**Reason:** Dead torrent (0%% progress, 0 seeders, 0 speed after %v, max progress: %.2f%%)
+						`, torrent.Name, torrent.Category, torrent.Hash, torrent.MagnetUri, torrent.Debrid, elapsed, maxProgressSeen)
 
 						if err := request.SendDiscordMessage("download_failed", "error", deadTorrentContext); err != nil {
 							q.logger.Error().Msgf("Error sending discord message: %v", err)
