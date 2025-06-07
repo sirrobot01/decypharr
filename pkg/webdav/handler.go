@@ -245,6 +245,7 @@ func (h *Handler) OpenFile(ctx context.Context, name string, flag int, perm os.F
 						size:         file.Size,
 						link:         file.Link,
 						metadataOnly: metadataOnly,
+						isRar:        file.IsRar,
 						modTime:      cached.AddedOn,
 					}, nil
 				}
@@ -409,6 +410,8 @@ func (h *Handler) serveDirectory(w http.ResponseWriter, r *http.Request, file we
 	}
 }
 
+// Handlers
+
 func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 	fRaw, err := h.OpenFile(r.Context(), r.URL.Path, os.O_RDONLY, 0)
 	if err != nil {
@@ -458,7 +461,8 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		file.downloadLink = link
-		if h.cache.StreamWithRclone() {
+		// If the torrent file is not a RAR file and users enabled proxy streaming
+		if !file.isRar && h.cache.StreamWithRclone() {
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 			w.Header().Set("Pragma", "no-cache")
 			w.Header().Set("Expires", "0")

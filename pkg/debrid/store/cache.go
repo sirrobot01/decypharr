@@ -228,11 +228,14 @@ func (c *Cache) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
+	c.logger.Info().Msgf("Started indexing...")
+
 	if err := c.Sync(ctx); err != nil {
 		return fmt.Errorf("failed to sync cache: %w", err)
 	}
 	// Fire the ready channel
 	close(c.ready)
+	c.logger.Info().Msgf("Indexing complete, %d torrents loaded", len(c.torrents.getAll()))
 
 	// initial download links
 	go c.refreshDownloadLinks(ctx)
@@ -241,7 +244,7 @@ func (c *Cache) Start(ctx context.Context) error {
 		c.logger.Error().Err(err).Msg("Failed to start cache worker")
 	}
 
-	c.repairChan = make(chan RepairRequest, 100)
+	c.repairChan = make(chan RepairRequest, 100) // Initialize the repair channel, max 100 requests buffered
 	go c.repairWorker(ctx)
 
 	cfg := config.Get()
@@ -398,9 +401,11 @@ func (c *Cache) Sync(ctx context.Context) error {
 	if len(deletedTorrents) > 0 {
 		c.logger.Info().Msgf("Found %d deleted torrents", len(deletedTorrents))
 		for _, id := range deletedTorrents {
-			if _, ok := cachedTorrents[id]; ok {
-				c.deleteTorrent(id, false) // delete from cache
-			}
+			// Remove from cache and debrid service
+			delete(cachedTorrents, id)
+			// Remove the json file from disk
+			c.removeFile(id, false)
+
 		}
 	}
 
@@ -752,13 +757,13 @@ func (c *Cache) deleteTorrent(id string, removeFromDebrid bool) bool {
 	if torrent, ok := c.torrents.getByID(id); ok {
 		c.torrents.removeId(id) // Delete id from cache
 		defer func() {
-			c.removeFromDB(id)
+			c.removeFile(id, false)
 			if removeFromDebrid {
 				_ = c.client.DeleteTorrent(id) // Skip error handling, we don't care if it fails
 			}
 		}() // defer delete from debrid
 
-		torrentName := torrent.Name
+		torrentName := c.GetTorrentFolder(torrent.Torrent)
 
 		if t, ok := c.torrents.getByName(torrentName); ok {
 
@@ -795,7 +800,7 @@ func (c *Cache) DeleteTorrents(ids []string) {
 	c.listingDebouncer.Call(true)
 }
 
-func (c *Cache) removeFromDB(torrentId string) {
+func (c *Cache) removeFile(torrentId string, moveToTrash bool) {
 	// Moves the torrent file to the trash
 	filePath := filepath.Join(c.dir, torrentId+".json")
 
@@ -804,6 +809,14 @@ func (c *Cache) removeFromDB(torrentId string) {
 		return
 	}
 
+	if !moveToTrash {
+		// If not moving to trash, delete the file directly
+		if err := os.Remove(filePath); err != nil {
+			c.logger.Error().Err(err).Msgf("Failed to remove file: %s", filePath)
+			return
+		}
+		return
+	}
 	// Move the file to the trash
 	trashPath := filepath.Join(c.dir, "trash", torrentId+".json")
 	if err := os.MkdirAll(filepath.Dir(trashPath), 0755); err != nil {

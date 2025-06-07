@@ -211,7 +211,7 @@ func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, select
 	fileMap := make(map[string]*types.File)
 	for i := range selectedFiles {
 		// RD converts special chars to '_' for RAR file paths
-		// TOOD: there might be more special chars to replace
+		// @TODO: there might be more special chars to replace
 		safeName := strings.NewReplacer("|", "_", "\"", "_", "\\", "_", "?", "_", "*", "_", ":", "_", "<", "_", ">", "_").Replace(selectedFiles[i].Name)
 		fileMap[safeName] = &selectedFiles[i]
 	}

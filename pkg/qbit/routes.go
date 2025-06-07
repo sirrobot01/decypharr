@@ -20,7 +20,7 @@ func (q *QBit) Routes() http.Handler {
 			r.Post("/createCategory", q.handleCreateCategory)
 			r.Post("/setCategory", q.handleSetCategory)
 			r.Post("/addTags", q.handleAddTorrentTags)
-			r.Post("/removeTags", q.handleremoveTorrentTags)
+			r.Post("/removeTags", q.handleRemoveTorrentTags)
 			r.Post("/createTags", q.handleCreateTags)
 			r.Get("/tags", q.handleGetTags)
 			r.Get("/pause", q.handleTorrentsPause)

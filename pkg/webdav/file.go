@@ -41,6 +41,7 @@ type File struct {
 	reader       io.ReadCloser
 	seekPending  bool
 	content      []byte
+	isRar        bool
 	name         string
 	metadataOnly bool
 

@@ -439,9 +439,9 @@ func (r *Repair) repairArr(job *Job, _arr string, tmdbId string) ([]arr.ContentF
 		return brokenItems, nil
 	}
 	// Check first media to confirm mounts are accessible
-	if !r.isMediaAccessible(media) {
-		r.logger.Info().Msgf("Skipping repair. Parent directory not accessible. Check your mounts")
-		return brokenItems, nil
+	if err := r.checkMountUp(media); err != nil {
+		r.logger.Error().Err(err).Msgf("Mount check failed for %s", a.Name)
+		return brokenItems, fmt.Errorf("mount check failed: %w", err)
 	}
 
 	// Mutex for brokenItems
@@ -504,8 +504,8 @@ func (r *Repair) repairArr(job *Job, _arr string, tmdbId string) ([]arr.ContentF
 	return brokenItems, nil
 }
 
-// isMediaAccessible checks if the mounts are accessible
-func (r *Repair) isMediaAccessible(media []arr.Content) bool {
+// checkMountUp checks if the mounts are accessible
+func (r *Repair) checkMountUp(media []arr.Content) error {
 	firstMedia := media[0]
 	for _, m := range media {
 		if len(m.Files) > 0 {
@@ -515,23 +515,21 @@ func (r *Repair) isMediaAccessible(media []arr.Content) bool {
 	}
 	files := firstMedia.Files
 	if len(files) == 0 {
-		return false
+		return fmt.Errorf("no files found in media %s", firstMedia.Title)
 	}
 	firstFile := files[0]
 	symlinkPath := getSymlinkTarget(firstFile.Path)
 
 	if symlinkPath == "" {
-		r.logger.Debug().Msgf("No symlink target found for %s", firstFile.Path)
-		return false
+		return fmt.Errorf("no symlink target found for %s", firstFile.Path)
 	}
 	r.logger.Debug().Msgf("Checking symlink parent directory for %s", symlinkPath)
 
 	parentSymlink := filepath.Dir(filepath.Dir(symlinkPath)) // /mnt/zurg/torrents/movie/movie.mkv -> /mnt/zurg/torrents
 	if _, err := os.Stat(parentSymlink); os.IsNotExist(err) {
-		r.logger.Debug().Msgf("Cannot access parent directory %s for %s", parentSymlink, firstFile.Path)
-		return false
+		return fmt.Errorf("parent directory %s not accessible for %s", parentSymlink, firstFile.Path)
 	}
-	return true
+	return nil
 }
 
 func (r *Repair) getBrokenFiles(job *Job, media arr.Content) []arr.ContentFile {

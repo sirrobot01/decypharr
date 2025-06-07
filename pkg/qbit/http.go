@@ -276,7 +276,7 @@ func (q *QBit) handleAddTorrentTags(w http.ResponseWriter, r *http.Request) {
 	request.JSONResponse(w, nil, http.StatusOK)
 }
 
-func (q *QBit) handleremoveTorrentTags(w http.ResponseWriter, r *http.Request) {
+func (q *QBit) handleRemoveTorrentTags(w http.ResponseWriter, r *http.Request) {
 	err := r.ParseForm()
 	if err != nil {
 		http.Error(w, "Failed to parse form data", http.StatusBadRequest)

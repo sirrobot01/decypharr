@@ -135,8 +135,3 @@ func (q *QBit) addTags(tags []string) bool {
 	}
 	return true
 }
-
-func (q *QBit) removeTags(tags []string) bool {
-	q.Tags = utils.RemoveItem(q.Tags, tags...)
-	return true
-}
