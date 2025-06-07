@@ -19,15 +19,16 @@ var (
 )
 
 type Debrid struct {
-	Name             string   `json:"name,omitempty"`
-	APIKey           string   `json:"api_key,omitempty"`
-	DownloadAPIKeys  []string `json:"download_api_keys,omitempty"`
-	Folder           string   `json:"folder,omitempty"`
-	DownloadUncached bool     `json:"download_uncached,omitempty"`
-	CheckCached      bool     `json:"check_cached,omitempty"`
-	RateLimit        string   `json:"rate_limit,omitempty"` // 200/minute or 10/second
-	Proxy            string   `json:"proxy,omitempty"`
-	AddSamples       bool     `json:"add_samples,omitempty"`
+	Name                  string   `json:"name,omitempty"`
+	APIKey                string   `json:"api_key,omitempty"`
+	DownloadAPIKeys       []string `json:"download_api_keys,omitempty"`
+	Folder                string   `json:"folder,omitempty"`
+	DownloadUncached      bool     `json:"download_uncached,omitempty"`
+	CheckCached           bool     `json:"check_cached,omitempty"`
+	RateLimit             string   `json:"rate_limit,omitempty"` // 200/minute or 10/second
+	Proxy                 string   `json:"proxy,omitempty"`
+	AddSamples            bool     `json:"add_samples,omitempty"`
+	MaxConcurrentUncached int      `json:"max_concurrent_uncached,omitempty"` // Maximum concurrent uncached downloads
 
 	UseWebDav bool `json:"use_webdav,omitempty"`
 	WebDav
@@ -293,6 +294,9 @@ func (c *Config) updateDebrid(d Debrid) Debrid {
 	}
 	if d.AutoExpireLinksAfter == "" {
 		d.AutoExpireLinksAfter = cmp.Or(c.WebDav.AutoExpireLinksAfter, "3d") // 2 days
+	}
+	if d.MaxConcurrentUncached == 0 {
+		d.MaxConcurrentUncached = 8 // Default to 8 concurrent uncached downloads
 	}
 
 	// Merge debrid specified directories with global directories

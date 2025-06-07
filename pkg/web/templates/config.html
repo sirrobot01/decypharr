@@ -339,6 +339,11 @@
             <input type="text" class="form-control" name="debrid[${index}].rate_limit" id="debrid[${index}].rate_limit" placeholder="e.g., 200/minute" value="250/minute">
             <small class="form-text text-muted">Rate limit for the debrid service. Confirm your debrid service rate limit</small>
         </div>
+        <div class="col-md-6 mb-3">
+            <label class="form-label" for="debrid[${index}].max_concurrent_uncached">Max Concurrent Uncached</label>
+            <input type="number" class="form-control" name="debrid[${index}].max_concurrent_uncached" id="debrid[${index}].max_concurrent_uncached" placeholder="8" value="8" min="1">
+            <small class="form-text text-muted">Maximum number of concurrent uncached downloads for this provider</small>
+        </div>
     </div>
     <div class="row">
         <div class="col-md-3">
@@ -989,6 +994,8 @@
                     if (input) {
                         if (input.type === 'checkbox') {
                             input.checked = value;
+                        } else if (input.type === 'number') {
+                            input.value = value || input.getAttribute('value') || '';
                         } else {
                             input.value = value;
                         }
@@ -1093,7 +1100,8 @@
                     download_uncached: document.querySelector(`[name="debrid[${i}].download_uncached"]`).checked,
                     check_cached: document.querySelector(`[name="debrid[${i}].check_cached"]`).checked,
                     add_samples: document.querySelector(`[name="debrid[${i}].add_samples"]`).checked,
-                    use_webdav: document.querySelector(`[name="debrid[${i}].use_webdav"]`).checked
+                    use_webdav: document.querySelector(`[name="debrid[${i}].use_webdav"]`).checked,
+                    max_concurrent_uncached: parseInt(document.querySelector(`[name="debrid[${i}].max_concurrent_uncached"]`).value) || 8
                 };
 
                 // Add WebDAV specific properties if enabled
