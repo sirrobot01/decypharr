@@ -3,12 +3,11 @@ package store
 import (
 	"errors"
 	"fmt"
+	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 
 	"sync"
 	"time"
-
-	"github.com/sirrobot01/decypharr/internal/request"
 )
 
 type linkCache struct {
@@ -146,7 +145,7 @@ func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (strin
 	c.logger.Trace().Msgf("Getting download link for %s(%s)", filename, file.Link)
 	downloadLink, err := c.client.GetDownloadLink(ct.Torrent, &file)
 	if err != nil {
-		if errors.Is(err, request.HosterUnavailableError) {
+		if errors.Is(err, utils.HosterUnavailableError) {
 			newCt, err := c.reInsertTorrent(ct)
 			if err != nil {
 				return "", fmt.Errorf("failed to reinsert torrent: %w", err)
@@ -166,7 +165,7 @@ func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (strin
 			}
 			c.updateDownloadLink(downloadLink)
 			return "", nil
-		} else if errors.Is(err, request.TrafficExceededError) {
+		} else if errors.Is(err, utils.TrafficExceededError) {
 			// This is likely a fair usage limit error
 			return "", err
 		} else {

@@ -25,10 +25,11 @@ type AllDebrid struct {
 	DownloadUncached bool
 	client           *request.Client
 
-	MountPath   string
-	logger      zerolog.Logger
-	checkCached bool
-	addSamples  bool
+	MountPath       string
+	logger          zerolog.Logger
+	checkCached     bool
+	addSamples      bool
+	minimumFreeSlot int
 }
 
 func (ad *AllDebrid) GetProfile() (*types.Profile, error) {
@@ -69,6 +70,7 @@ func New(dc config.Debrid) (*AllDebrid, error) {
 		logger:           logger.New(dc.Name),
 		checkCached:      dc.CheckCached,
 		addSamples:       dc.AddSamples,
+		minimumFreeSlot:  dc.MinimumFreeSlot,
 	}, nil
 }
 
@@ -443,4 +445,10 @@ func (ad *AllDebrid) ResetActiveDownloadKeys() {
 }
 func (ad *AllDebrid) DeleteDownloadLink(linkId string) error {
 	return nil
+}
+
+func (ad *AllDebrid) GetAvailableSlots() int {
+	// This function is a placeholder for AllDebrid
+	//TODO: Implement the logic to check available slots for AllDebrid
+	return config.DefaultFreeSlot()
 }

@@ -13,7 +13,7 @@ import (
 	"github.com/sirrobot01/decypharr/internal/utils"
 )
 
-func Download(client *grab.Client, url, filename string, byterange *[2]int64, progressCallback func(int64, int64)) error {
+func grabber(client *grab.Client, url, filename string, byterange *[2]int64, progressCallback func(int64, int64)) error {
 	req, err := grab.NewRequest(filename, url)
 	if err != nil {
 		return err
@@ -56,7 +56,7 @@ Loop:
 	return resp.Err()
 }
 
-func (s *Store) ProcessManualFile(torrent *Torrent) (string, error) {
+func (s *Store) processDownload(torrent *Torrent) (string, error) {
 	debridTorrent := torrent.DebridTorrent
 	s.logger.Info().Msgf("Downloading %d files...", len(debridTorrent.Files))
 	torrentPath := filepath.Join(torrent.SavePath, utils.RemoveExtension(debridTorrent.OriginalFilename))
@@ -96,7 +96,7 @@ func (s *Store) downloadFiles(torrent *Torrent, parent string) {
 		if totalSize > 0 {
 			debridTorrent.Progress = float64(debridTorrent.SizeDownloaded) / float64(totalSize) * 100
 		}
-		s.UpdateTorrentMin(torrent, debridTorrent)
+		s.partialTorrentUpdate(torrent, debridTorrent)
 	}
 	client := &grab.Client{
 		UserAgent: "Decypharr[QBitTorrent]",
@@ -119,7 +119,7 @@ func (s *Store) downloadFiles(torrent *Torrent, parent string) {
 			defer func() { <-s.downloadSemaphore }()
 			filename := file.Name
 
-			err := Download(
+			err := grabber(
 				client,
 				file.DownloadLink.DownloadLink,
 				filepath.Join(parent, filename),
@@ -151,7 +151,7 @@ func (s *Store) downloadFiles(torrent *Torrent, parent string) {
 	s.logger.Info().Msgf("Downloaded all files for %s", debridTorrent.Name)
 }
 
-func (s *Store) ProcessSymlink(torrent *Torrent) (string, error) {
+func (s *Store) processSymlink(torrent *Torrent) (string, error) {
 	debridTorrent := torrent.DebridTorrent
 	files := debridTorrent.Files
 	if len(files) == 0 {

@@ -470,3 +470,8 @@ func (tb *Torbox) ResetActiveDownloadKeys() {
 func (tb *Torbox) DeleteDownloadLink(linkId string) error {
 	return nil
 }
+
+func (tb *Torbox) GetAvailableSlots() int {
+	//TODO: Implement the logic to check available slots for Torbox
+	return config.DefaultFreeSlot()
+}

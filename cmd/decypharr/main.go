@@ -164,6 +164,10 @@ func startServices(ctx context.Context, wd *webdav.WebDav, srv *server.Server) e
 		})
 	}
 
+	safeGo(func() error {
+		return store.GetStore().StartQueueSchedule(ctx)
+	})
+
 	go func() {
 		wg.Wait()
 		close(errChan)

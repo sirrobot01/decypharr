@@ -66,6 +66,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 
 			importReq := store.NewImportRequest(debridName, downloadFolder, magnet, _arr, !notSymlink, downloadUncached, callbackUrl, store.ImportTypeAPI)
 			if err := _store.AddTorrent(ctx, importReq); err != nil {
+				wb.logger.Error().Err(err).Str("url", url).Msg("Failed to add torrent")
 				errs = append(errs, fmt.Sprintf("URL %s: %v", url, err))
 				continue
 			}
@@ -91,6 +92,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 			importReq := store.NewImportRequest(debridName, downloadFolder, magnet, _arr, !notSymlink, downloadUncached, callbackUrl, store.ImportTypeAPI)
 			err = _store.AddTorrent(ctx, importReq)
 			if err != nil {
+				wb.logger.Error().Err(err).Str("file", fileHeader.Filename).Msg("Failed to add torrent")
 				errs = append(errs, fmt.Sprintf("File %s: %v", fileHeader.Filename, err))
 				continue
 			}

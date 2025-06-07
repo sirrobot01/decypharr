@@ -476,3 +476,8 @@ func (dl *DebridLink) ResetActiveDownloadKeys() {
 func (dl *DebridLink) DeleteDownloadLink(linkId string) error {
 	return nil
 }
+
+func (dl *DebridLink) GetAvailableSlots() int {
+	//TODO: Implement the logic to check available slots for DebridLink
+	return config.DefaultFreeSlot()
+}

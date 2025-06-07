@@ -1,4 +1,6 @@
-package request
+package utils
+
+import "errors"
 
 type HTTPError struct {
 	StatusCode int
@@ -32,4 +34,14 @@ var TorrentNotFoundError = &HTTPError{
 	StatusCode: 404,
 	Message:    "Torrent not found",
 	Code:       "torrent_not_found",
+}
+
+var TooManyActiveDownloadsError = &HTTPError{
+	StatusCode: 509,
+	Message:    "Too many active downloads",
+	Code:       "too_many_active_downloads",
+}
+
+func IsTooManyActiveDownloadsError(err error) bool {
+	return errors.As(err, &TooManyActiveDownloadsError)
 }

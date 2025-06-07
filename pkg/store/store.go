@@ -2,6 +2,7 @@ package store
 
 import (
 	"cmp"
+	"context"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
@@ -16,6 +17,7 @@ type Store struct {
 	repair            *repair.Repair
 	arr               *arr.Storage
 	debrid            *debrid.Storage
+	importsQueue      *ImportQueue // Queued import requests(probably from too_many_active_downloads)
 	torrents          *TorrentStorage
 	logger            zerolog.Logger
 	refreshInterval   time.Duration
@@ -45,6 +47,7 @@ func GetStore() *Store {
 			refreshInterval:   time.Duration(cmp.Or(qbitCfg.RefreshInterval, 10)) * time.Minute,
 			skipPreCache:      qbitCfg.SkipPreCache,
 			downloadSemaphore: make(chan struct{}, cmp.Or(qbitCfg.MaxDownloads, 5)),
+			importsQueue:      NewImportQueue(context.Background(), 1000),
 		}
 	})
 	return instance
@@ -55,6 +58,11 @@ func Reset() {
 		if instance.debrid != nil {
 			instance.debrid.Reset()
 		}
+
+		if instance.importsQueue != nil {
+			instance.importsQueue.Close()
+		}
+
 		close(instance.downloadSemaphore)
 	}
 	once = sync.Once{}
