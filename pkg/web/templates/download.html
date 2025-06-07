@@ -113,11 +113,6 @@
                         return;
                     }
 
-                    if (urls.length + fileInput.files.length > 100) {
-                        createToast('Please submit up to 100 torrents at a time', 'warning');
-                        return;
-                    }
-
                     formData.append('arr', document.getElementById('category').value);
                     formData.append('notSymlink', document.getElementById('isSymlink').checked);
                     formData.append('downloadUncached', document.getElementById('downloadUncached').checked);
