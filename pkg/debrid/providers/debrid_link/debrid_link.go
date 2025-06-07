@@ -477,7 +477,7 @@ func (dl *DebridLink) DeleteDownloadLink(linkId string) error {
 	return nil
 }
 
-func (dl *DebridLink) GetAvailableSlots() int {
+func (dl *DebridLink) GetAvailableSlots() (int, error) {
 	//TODO: Implement the logic to check available slots for DebridLink
-	return config.DefaultFreeSlot()
+	return 0, fmt.Errorf("GetAvailableSlots not implemented for DebridLink")
 }

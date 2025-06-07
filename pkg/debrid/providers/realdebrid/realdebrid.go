@@ -978,16 +978,16 @@ func (r *RealDebrid) GetProfile() (*types.Profile, error) {
 	return profile, nil
 }
 
-func (r *RealDebrid) GetAvailableSlots() int {
+func (r *RealDebrid) GetAvailableSlots() (int, error) {
 	url := fmt.Sprintf("%s/torrents/activeCount", r.Host)
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
 	resp, err := r.client.MakeRequest(req)
 	if err != nil {
-		return config.DefaultFreeSlot()
+		return 0, nil
 	}
 	var data AvailableSlotsResponse
 	if json.Unmarshal(resp, &data) != nil {
-		return config.DefaultFreeSlot()
+		return 0, fmt.Errorf("error unmarshalling available slots response: %w", err)
 	}
-	return data.TotalSlots - data.ActiveSlots - r.minimumFreeSlot // Ensure we maintain minimum active pots
+	return data.TotalSlots - data.ActiveSlots - r.minimumFreeSlot, nil // Ensure we maintain minimum active pots
 }

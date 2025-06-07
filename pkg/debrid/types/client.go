@@ -26,5 +26,5 @@ type Client interface {
 	ResetActiveDownloadKeys()
 	DeleteDownloadLink(linkId string) error
 	GetProfile() (*Profile, error)
-	GetAvailableSlots() int
+	GetAvailableSlots() (int, error)
 }

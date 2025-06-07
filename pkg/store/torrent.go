@@ -98,7 +98,11 @@ func (s *Store) trackAvailableSlots(ctx context.Context) {
 	availableSlots := make(map[string]int)
 
 	for name, deb := range s.debrid.GetDebrids() {
-		availableSlots[name] = deb.Client.GetAvailableSlots()
+		slots, err := deb.Client.GetAvailableSlots()
+		if err != nil {
+			continue
+		}
+		availableSlots[name] = slots
 	}
 
 	for name, slots := range availableSlots {

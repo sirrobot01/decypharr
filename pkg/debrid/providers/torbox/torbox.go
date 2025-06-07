@@ -471,7 +471,7 @@ func (tb *Torbox) DeleteDownloadLink(linkId string) error {
 	return nil
 }
 
-func (tb *Torbox) GetAvailableSlots() int {
+func (tb *Torbox) GetAvailableSlots() (int, error) {
 	//TODO: Implement the logic to check available slots for Torbox
-	return config.DefaultFreeSlot()
+	return 0, fmt.Errorf("not implemented")
 }
