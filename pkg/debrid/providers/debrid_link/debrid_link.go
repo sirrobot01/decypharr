@@ -18,7 +18,7 @@ import (
 )
 
 type DebridLink struct {
-	Name             string
+	name             string
 	Host             string `json:"host"`
 	APIKey           string
 	accounts         map[string]types.Account
@@ -56,7 +56,7 @@ func New(dc config.Debrid) (*DebridLink, error) {
 		}
 	}
 	return &DebridLink{
-		Name:             "debridlink",
+		name:             "debridlink",
 		Host:             "https://debrid-link.com/api/v2",
 		APIKey:           dc.APIKey,
 		accounts:         accounts,
@@ -73,11 +73,11 @@ func (dl *DebridLink) GetProfile() (*types.Profile, error) {
 	return nil, nil
 }
 
-func (dl *DebridLink) GetName() string {
-	return dl.Name
+func (dl *DebridLink) Name() string {
+	return dl.name
 }
 
-func (dl *DebridLink) GetLogger() zerolog.Logger {
+func (dl *DebridLink) Logger() zerolog.Logger {
 	return dl.logger
 }
 
@@ -163,7 +163,7 @@ func (dl *DebridLink) GetTorrent(torrentId string) (*types.Torrent, error) {
 		Filename:         name,
 		OriginalFilename: name,
 		MountPath:        dl.MountPath,
-		Debrid:           dl.Name,
+		Debrid:           dl.name,
 		Added:            time.Unix(t.Created, 0).Format(time.RFC3339),
 	}
 	cfg := config.Get()
@@ -288,7 +288,7 @@ func (dl *DebridLink) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
 	t.Filename = name
 	t.OriginalFilename = name
 	t.MountPath = dl.MountPath
-	t.Debrid = dl.Name
+	t.Debrid = dl.name
 	t.Added = time.Unix(data.Created, 0).Format(time.RFC3339)
 	for _, f := range data.Files {
 		file := types.File{
@@ -428,7 +428,7 @@ func (dl *DebridLink) getTorrents(page, perPage int) ([]*types.Torrent, error) {
 			OriginalFilename: t.Name,
 			InfoHash:         t.HashString,
 			Files:            make(map[string]types.File),
-			Debrid:           dl.Name,
+			Debrid:           dl.name,
 			MountPath:        dl.MountPath,
 			Added:            time.Unix(t.Created, 0).Format(time.RFC3339),
 		}
@@ -475,4 +475,9 @@ func (dl *DebridLink) ResetActiveDownloadKeys() {
 
 func (dl *DebridLink) DeleteDownloadLink(linkId string) error {
 	return nil
+}
+
+func (dl *DebridLink) GetAvailableSlots() (int, error) {
+	//TODO: Implement the logic to check available slots for DebridLink
+	return 0, fmt.Errorf("GetAvailableSlots not implemented for DebridLink")
 }

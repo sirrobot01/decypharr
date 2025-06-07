@@ -2,6 +2,7 @@ package debrid
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
@@ -13,25 +14,34 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/debrid/providers/torbox"
 	"github.com/sirrobot01/decypharr/pkg/debrid/store"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"strings"
 	"sync"
 )
 
+type Debrid struct {
+	cache  *store.Cache // Could be nil if not using WebDAV
+	client types.Client // HTTP client for making requests to the debrid service
+}
+
+func (de *Debrid) Client() types.Client {
+	return de.client
+}
+
+func (de *Debrid) Cache() *store.Cache {
+	return de.cache
+}
+
 type Storage struct {
-	clients     map[string]types.Client
-	clientsLock sync.Mutex
-	caches      map[string]*store.Cache
-	cachesLock  sync.Mutex
-	LastUsed    string
+	debrids  map[string]*Debrid
+	mu       sync.RWMutex
+	lastUsed string
 }
 
 func NewStorage() *Storage {
 	cfg := config.Get()
-	clients := make(map[string]types.Client)
 
 	_logger := logger.Default()
 
-	caches := make(map[string]*store.Cache)
+	debrids := make(map[string]*Debrid)
 
 	for _, dc := range cfg.Debrids {
 		client, err := createDebridClient(dc)
@@ -39,87 +49,98 @@ func NewStorage() *Storage {
 			_logger.Error().Err(err).Str("Debrid", dc.Name).Msg("failed to connect to debrid client")
 			continue
 		}
-		_log := client.GetLogger()
+		var cache *store.Cache
+		_log := client.Logger()
 		if dc.UseWebDav {
-			caches[dc.Name] = store.NewDebridCache(dc, client)
+			cache = store.NewDebridCache(dc, client)
 			_log.Info().Msg("Debrid Service started with WebDAV")
 		} else {
 			_log.Info().Msg("Debrid Service started")
 		}
-		clients[dc.Name] = client
+		debrids[dc.Name] = &Debrid{
+			cache:  cache,
+			client: client,
+		}
 	}
 
 	d := &Storage{
-		clients:  clients,
-		LastUsed: "",
-		caches:   caches,
+		debrids:  debrids,
+		lastUsed: "",
 	}
 	return d
 }
 
-func (d *Storage) GetClient(name string) types.Client {
-	d.clientsLock.Lock()
-	defer d.clientsLock.Unlock()
-	client, exists := d.clients[name]
-	if !exists {
-		return nil
+func (d *Storage) Debrid(name string) *Debrid {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if debrid, exists := d.debrids[name]; exists {
+		return debrid
 	}
-	return client
+	return nil
+}
+
+func (d *Storage) Debrids() map[string]*Debrid {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	debridsCopy := make(map[string]*Debrid)
+	for name, debrid := range d.debrids {
+		if debrid != nil {
+			debridsCopy[name] = debrid
+		}
+	}
+	return debridsCopy
+}
+
+func (d *Storage) Client(name string) types.Client {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if client, exists := d.debrids[name]; exists {
+		return client.client
+	}
+	return nil
 }
 
 func (d *Storage) Reset() {
-	d.clientsLock.Lock()
-	d.clients = make(map[string]types.Client)
-	d.clientsLock.Unlock()
-
-	d.cachesLock.Lock()
-	d.caches = make(map[string]*store.Cache)
-	d.cachesLock.Unlock()
-	d.LastUsed = ""
+	d.mu.Lock()
+	d.debrids = make(map[string]*Debrid)
+	d.mu.Unlock()
+	d.lastUsed = ""
 }
 
-func (d *Storage) GetClients() map[string]types.Client {
-	d.clientsLock.Lock()
-	defer d.clientsLock.Unlock()
+func (d *Storage) Clients() map[string]types.Client {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	clientsCopy := make(map[string]types.Client)
-	for name, client := range d.clients {
-		clientsCopy[name] = client
+	for name, debrid := range d.debrids {
+		if debrid != nil && debrid.client != nil {
+			clientsCopy[name] = debrid.client
+		}
 	}
 	return clientsCopy
 }
 
-func (d *Storage) GetCaches() map[string]*store.Cache {
-	d.clientsLock.Lock()
-	defer d.clientsLock.Unlock()
+func (d *Storage) Caches() map[string]*store.Cache {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	cachesCopy := make(map[string]*store.Cache)
-	for name, cache := range d.caches {
-		cachesCopy[name] = cache
+	for name, debrid := range d.debrids {
+		if debrid != nil && debrid.cache != nil {
+			cachesCopy[name] = debrid.cache
+		}
 	}
 	return cachesCopy
 }
 
 func (d *Storage) FilterClients(filter func(types.Client) bool) map[string]types.Client {
-	d.clientsLock.Lock()
-	defer d.clientsLock.Unlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	filteredClients := make(map[string]types.Client)
-	for name, client := range d.clients {
-		if filter(client) {
-			filteredClients[name] = client
+	for name, client := range d.debrids {
+		if client != nil && filter(client.client) {
+			filteredClients[name] = client.client
 		}
 	}
 	return filteredClients
-}
-
-func (d *Storage) FilterCaches(filter func(*store.Cache) bool) map[string]*store.Cache {
-	d.cachesLock.Lock()
-	defer d.cachesLock.Unlock()
-	filteredCaches := make(map[string]*store.Cache)
-	for name, cache := range d.caches {
-		if filter(cache) {
-			filteredCaches[name] = cache
-		}
-	}
-	return filteredCaches
 }
 
 func createDebridClient(dc config.Debrid) (types.Client, error) {
@@ -137,7 +158,7 @@ func createDebridClient(dc config.Debrid) (types.Client, error) {
 	}
 }
 
-func ProcessTorrent(ctx context.Context, store *Storage, selectedDebrid string, magnet *utils.Magnet, a *arr.Arr, isSymlink, overrideDownloadUncached bool) (*types.Torrent, error) {
+func Process(ctx context.Context, store *Storage, selectedDebrid string, magnet *utils.Magnet, a *arr.Arr, isSymlink, overrideDownloadUncached bool) (*types.Torrent, error) {
 
 	debridTorrent := &types.Torrent{
 		InfoHash: magnet.InfoHash,
@@ -149,7 +170,7 @@ func ProcessTorrent(ctx context.Context, store *Storage, selectedDebrid string, 
 	}
 
 	clients := store.FilterClients(func(c types.Client) bool {
-		if selectedDebrid != "" && c.GetName() != selectedDebrid {
+		if selectedDebrid != "" && c.Name() != selectedDebrid {
 			return false
 		}
 		return true
@@ -173,9 +194,9 @@ func ProcessTorrent(ctx context.Context, store *Storage, selectedDebrid string, 
 	}
 
 	for index, db := range clients {
-		_logger := db.GetLogger()
+		_logger := db.Logger()
 		_logger.Info().
-			Str("Debrid", db.GetName()).
+			Str("Debrid", db.Name()).
 			Str("Arr", a.Name).
 			Str("Hash", debridTorrent.InfoHash).
 			Str("Name", debridTorrent.Name).
@@ -191,8 +212,8 @@ func ProcessTorrent(ctx context.Context, store *Storage, selectedDebrid string, 
 			continue
 		}
 		dbt.Arr = a
-		_logger.Info().Str("id", dbt.Id).Msgf("Torrent: %s submitted to %s", dbt.Name, db.GetName())
-		store.LastUsed = index
+		_logger.Info().Str("id", dbt.Id).Msgf("Torrent: %s submitted to %s", dbt.Name, db.Name())
+		store.lastUsed = index
 
 		torrent, err := db.CheckStatus(dbt, isSymlink)
 		if err != nil && torrent != nil && torrent.Id != "" {
@@ -201,18 +222,19 @@ func ProcessTorrent(ctx context.Context, store *Storage, selectedDebrid string, 
 				_ = db.DeleteTorrent(id)
 			}(torrent.Id)
 		}
-		return torrent, err
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if torrent == nil {
+			errs = append(errs, fmt.Errorf("torrent %s returned nil after checking status", dbt.Name))
+			continue
+		}
+		return torrent, nil
 	}
 	if len(errs) == 0 {
 		return nil, fmt.Errorf("failed to process torrent: no clients available")
 	}
-	if len(errs) == 1 {
-		return nil, fmt.Errorf("failed to process torrent: %w", errs[0])
-	} else {
-		errStrings := make([]string, 0, len(errs))
-		for _, err := range errs {
-			errStrings = append(errStrings, err.Error())
-		}
-		return nil, fmt.Errorf("failed to process torrent: %s", strings.Join(errStrings, ", "))
-	}
+	joinedErrors := errors.Join(errs...)
+	return nil, fmt.Errorf("failed to process torrent: %w", joinedErrors)
 }

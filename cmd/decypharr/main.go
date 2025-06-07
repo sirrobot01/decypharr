@@ -145,7 +145,7 @@ func startServices(ctx context.Context, wd *webdav.WebDav, srv *server.Server) e
 	})
 
 	safeGo(func() error {
-		arr := store.GetStore().GetArr()
+		arr := store.Get().Arr()
 		if arr == nil {
 			return nil
 		}
@@ -154,7 +154,7 @@ func startServices(ctx context.Context, wd *webdav.WebDav, srv *server.Server) e
 
 	if cfg := config.Get(); cfg.Repair.Enabled {
 		safeGo(func() error {
-			repair := store.GetStore().GetRepair()
+			repair := store.Get().Repair()
 			if repair != nil {
 				if err := repair.Start(ctx); err != nil {
 					_log.Error().Err(err).Msg("repair failed")
@@ -163,6 +163,10 @@ func startServices(ctx context.Context, wd *webdav.WebDav, srv *server.Server) e
 			return nil
 		})
 	}
+
+	safeGo(func() error {
+		return store.Get().StartQueueSchedule(ctx)
+	})
 
 	go func() {
 		wg.Wait()

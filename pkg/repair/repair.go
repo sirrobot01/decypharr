@@ -228,7 +228,7 @@ func (r *Repair) newJob(arrsNames []string, mediaIDs []string) *Job {
 func (r *Repair) preRunChecks() error {
 
 	if r.useWebdav {
-		caches := r.deb.GetCaches()
+		caches := r.deb.Caches()
 		if len(caches) == 0 {
 			return fmt.Errorf("no caches found")
 		}
@@ -639,13 +639,13 @@ func (r *Repair) getZurgBrokenFiles(job *Job, media arr.Content) []arr.ContentFi
 func (r *Repair) getWebdavBrokenFiles(job *Job, media arr.Content) []arr.ContentFile {
 	// Use internal webdav setup to check file availability
 
-	caches := r.deb.GetCaches()
+	caches := r.deb.Caches()
 	if len(caches) == 0 {
 		r.logger.Info().Msg("No caches found. Can't use webdav")
 		return nil
 	}
 
-	clients := r.deb.GetClients()
+	clients := r.deb.Clients()
 	if len(clients) == 0 {
 		r.logger.Info().Msg("No clients found. Can't use webdav")
 		return nil

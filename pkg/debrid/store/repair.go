@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"sync"
@@ -98,7 +97,7 @@ func (c *Cache) GetBrokenFiles(t *CachedTorrent, filenames []string) []string {
 		} else {
 			// Check if file.Link not in the downloadLink Cache
 			if err := c.client.CheckLink(f.Link); err != nil {
-				if errors.Is(err, request.HosterUnavailableError) {
+				if errors.Is(err, utils.HosterUnavailableError) {
 					brokenFiles = append(brokenFiles, f.Name)
 				}
 			}

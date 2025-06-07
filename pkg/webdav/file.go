@@ -86,7 +86,7 @@ func (f *File) getDownloadByteRange() (*[2]int64, error) {
 
 func (f *File) stream() (*http.Response, error) {
 	client := sharedClient
-	_log := f.cache.GetLogger()
+	_log := f.cache.Logger()
 
 	downloadLink, err := f.getDownloadLink()
 	if err != nil {

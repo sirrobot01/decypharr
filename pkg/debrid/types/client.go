@@ -16,8 +16,8 @@ type Client interface {
 	UpdateTorrent(torrent *Torrent) error
 	GetTorrent(torrentId string) (*Torrent, error)
 	GetTorrents() ([]*Torrent, error)
-	GetName() string
-	GetLogger() zerolog.Logger
+	Name() string
+	Logger() zerolog.Logger
 	GetDownloadingStatus() []string
 	GetDownloads() (map[string]DownloadLink, error)
 	CheckLink(link string) error
@@ -26,4 +26,5 @@ type Client interface {
 	ResetActiveDownloadKeys()
 	DeleteDownloadLink(linkId string) error
 	GetProfile() (*Profile, error)
+	GetAvailableSlots() (int, error)
 }

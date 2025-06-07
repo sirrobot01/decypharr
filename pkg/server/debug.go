@@ -12,13 +12,13 @@ import (
 
 func (s *Server) handleIngests(w http.ResponseWriter, r *http.Request) {
 	ingests := make([]debridTypes.IngestData, 0)
-	_store := store.GetStore()
-	debrids := _store.GetDebrid()
+	_store := store.Get()
+	debrids := _store.Debrid()
 	if debrids == nil {
 		http.Error(w, "Debrid service is not enabled", http.StatusInternalServerError)
 		return
 	}
-	for _, cache := range debrids.GetCaches() {
+	for _, cache := range debrids.Caches() {
 		if cache == nil {
 			s.logger.Error().Msg("Debrid cache is nil, skipping")
 			continue
@@ -42,15 +42,15 @@ func (s *Server) handleIngestsByDebrid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_store := store.GetStore()
-	debrids := _store.GetDebrid()
+	_store := store.Get()
+	debrids := _store.Debrid()
 
 	if debrids == nil {
 		http.Error(w, "Debrid service is not enabled", http.StatusInternalServerError)
 		return
 	}
 
-	caches := debrids.GetCaches()
+	caches := debrids.Caches()
 
 	cache, exists := caches[debridName]
 	if !exists {
@@ -92,13 +92,13 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		"go_version": runtime.Version(),
 	}
 
-	debrids := store.GetStore().GetDebrid()
+	debrids := store.Get().Debrid()
 	if debrids == nil {
 		request.JSONResponse(w, stats, http.StatusOK)
 		return
 	}
-	clients := debrids.GetClients()
-	caches := debrids.GetCaches()
+	clients := debrids.Clients()
+	caches := debrids.Caches()
 	profiles := make([]*debridTypes.Profile, 0)
 	for debridName, client := range clients {
 		profile, err := client.GetProfile()

@@ -151,3 +151,8 @@ type profileResponse struct {
 	Premium    int       `json:"premium"`
 	Expiration time.Time `json:"expiration"`
 }
+
+type AvailableSlotsResponse struct {
+	ActiveSlots int `json:"nb"`
+	TotalSlots  int `json:"limit"`
+}

@@ -17,8 +17,8 @@ import (
 )
 
 func (wb *Web) handleGetArrs(w http.ResponseWriter, r *http.Request) {
-	_store := store.GetStore()
-	request.JSONResponse(w, _store.GetArr().GetAll(), http.StatusOK)
+	_store := store.Get()
+	request.JSONResponse(w, _store.Arr().GetAll(), http.StatusOK)
 }
 
 func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
@@ -27,7 +27,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	_store := store.GetStore()
+	_store := store.Get()
 
 	results := make([]*store.ImportRequest, 0)
 	errs := make([]string, 0)
@@ -43,7 +43,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 
 	downloadUncached := r.FormValue("downloadUncached") == "true"
 
-	_arr := _store.GetArr().Get(arrName)
+	_arr := _store.Arr().Get(arrName)
 	if _arr == nil {
 		_arr = arr.New(arrName, "", "", false, false, &downloadUncached)
 	}
@@ -66,6 +66,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 
 			importReq := store.NewImportRequest(debridName, downloadFolder, magnet, _arr, !notSymlink, downloadUncached, callbackUrl, store.ImportTypeAPI)
 			if err := _store.AddTorrent(ctx, importReq); err != nil {
+				wb.logger.Error().Err(err).Str("url", url).Msg("Failed to add torrent")
 				errs = append(errs, fmt.Sprintf("URL %s: %v", url, err))
 				continue
 			}
@@ -91,6 +92,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 			importReq := store.NewImportRequest(debridName, downloadFolder, magnet, _arr, !notSymlink, downloadUncached, callbackUrl, store.ImportTypeAPI)
 			err = _store.AddTorrent(ctx, importReq)
 			if err != nil {
+				wb.logger.Error().Err(err).Str("file", fileHeader.Filename).Msg("Failed to add torrent")
 				errs = append(errs, fmt.Sprintf("File %s: %v", fileHeader.Filename, err))
 				continue
 			}
@@ -114,12 +116,12 @@ func (wb *Web) handleRepairMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_store := store.GetStore()
+	_store := store.Get()
 
 	var arrs []string
 
 	if req.ArrName != "" {
-		_arr := _store.GetArr().Get(req.ArrName)
+		_arr := _store.Arr().Get(req.ArrName)
 		if _arr == nil {
 			http.Error(w, "No Arrs found to repair", http.StatusNotFound)
 			return
@@ -129,7 +131,7 @@ func (wb *Web) handleRepairMedia(w http.ResponseWriter, r *http.Request) {
 
 	if req.Async {
 		go func() {
-			if err := _store.GetRepair().AddJob(arrs, req.MediaIds, req.AutoProcess, false); err != nil {
+			if err := _store.Repair().AddJob(arrs, req.MediaIds, req.AutoProcess, false); err != nil {
 				wb.logger.Error().Err(err).Msg("Failed to repair media")
 			}
 		}()
@@ -137,7 +139,7 @@ func (wb *Web) handleRepairMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := _store.GetRepair().AddJob([]string{req.ArrName}, req.MediaIds, req.AutoProcess, false); err != nil {
+	if err := _store.Repair().AddJob([]string{req.ArrName}, req.MediaIds, req.AutoProcess, false); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to repair: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -181,8 +183,8 @@ func (wb *Web) handleDeleteTorrents(w http.ResponseWriter, r *http.Request) {
 func (wb *Web) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
 	arrCfgs := make([]config.Arr, 0)
-	_store := store.GetStore()
-	for _, a := range _store.GetArr().GetAll() {
+	_store := store.Get()
+	for _, a := range _store.Arr().GetAll() {
 		arrCfgs = append(arrCfgs, config.Arr{
 			Host:             a.Host,
 			Name:             a.Name,
@@ -237,8 +239,8 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update Arrs through the service
-	_store := store.GetStore()
-	_arr := _store.GetArr()
+	_store := store.Get()
+	_arr := _store.Arr()
 	_arr.Clear() // Clear existing arrs
 
 	for _, a := range updatedConfig.Arrs {
@@ -270,8 +272,8 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (wb *Web) handleGetRepairJobs(w http.ResponseWriter, r *http.Request) {
-	_store := store.GetStore()
-	request.JSONResponse(w, _store.GetRepair().GetJobs(), http.StatusOK)
+	_store := store.Get()
+	request.JSONResponse(w, _store.Repair().GetJobs(), http.StatusOK)
 }
 
 func (wb *Web) handleProcessRepairJob(w http.ResponseWriter, r *http.Request) {
@@ -280,8 +282,8 @@ func (wb *Web) handleProcessRepairJob(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "No job ID provided", http.StatusBadRequest)
 		return
 	}
-	_store := store.GetStore()
-	if err := _store.GetRepair().ProcessJob(id); err != nil {
+	_store := store.Get()
+	if err := _store.Repair().ProcessJob(id); err != nil {
 		wb.logger.Error().Err(err).Msg("Failed to process repair job")
 	}
 	w.WriteHeader(http.StatusOK)
@@ -301,8 +303,8 @@ func (wb *Web) handleDeleteRepairJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_store := store.GetStore()
-	_store.GetRepair().DeleteJobs(req.IDs)
+	_store := store.Get()
+	_store.Repair().DeleteJobs(req.IDs)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -312,8 +314,8 @@ func (wb *Web) handleStopRepairJob(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "No job ID provided", http.StatusBadRequest)
 		return
 	}
-	_store := store.GetStore()
-	if err := _store.GetRepair().StopJob(id); err != nil {
+	_store := store.Get()
+	if err := _store.Repair().StopJob(id); err != nil {
 		wb.logger.Error().Err(err).Msg("Failed to stop repair job")
 		http.Error(w, "Failed to stop job: "+err.Error(), http.StatusInternalServerError)
 		return

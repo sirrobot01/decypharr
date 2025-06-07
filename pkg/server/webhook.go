@@ -38,7 +38,7 @@ func (s *Server) handleTautulli(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid ID", http.StatusBadRequest)
 		return
 	}
-	repair := store.GetStore().GetRepair()
+	repair := store.Get().Repair()
 
 	mediaId := cmp.Or(payload.TmdbID, payload.TvdbID)
 

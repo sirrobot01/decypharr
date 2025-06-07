@@ -29,6 +29,7 @@ type Debrid struct {
 	Proxy            string   `json:"proxy,omitempty"`
 	UnpackRar        bool     `json:"unpack_rar,omitempty"`
 	AddSamples       bool     `json:"add_samples,omitempty"`
+	MinimumFreeSlot  int      `json:"minimum_free_slot,omitempty"` // Minimum active pots to use this debrid
 
 	UseWebDav bool `json:"use_webdav,omitempty"`
 	WebDav
@@ -383,4 +384,8 @@ func (c *Config) createConfig(path string) error {
 func Reload() {
 	instance = nil
 	once = sync.Once{}
+}
+
+func DefaultFreeSlot() int {
+	return 10
 }

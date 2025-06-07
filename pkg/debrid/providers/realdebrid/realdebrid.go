@@ -25,7 +25,7 @@ import (
 )
 
 type RealDebrid struct {
-	Name string
+	name string
 	Host string `json:"host"`
 
 	APIKey             string
@@ -41,10 +41,12 @@ type RealDebrid struct {
 	logger    zerolog.Logger
 	UnpackRar bool
 
-	rarSemaphore chan struct{}
-	checkCached  bool
-	addSamples   bool
-	Profile      *types.Profile
+	rarSemaphore    chan struct{}
+	checkCached     bool
+	addSamples      bool
+	Profile         *types.Profile
+	minimumFreeSlot int // Minimum number of active pots to maintain (used for cached stuffs, etc.)
+
 }
 
 func New(dc config.Debrid) (*RealDebrid, error) {
@@ -71,7 +73,7 @@ func New(dc config.Debrid) (*RealDebrid, error) {
 	}
 
 	r := &RealDebrid{
-		Name:             "realdebrid",
+		name:             "realdebrid",
 		Host:             "https://api.real-debrid.com/rest/1.0",
 		APIKey:           dc.APIKey,
 		accounts:         accounts,
@@ -98,6 +100,7 @@ func New(dc config.Debrid) (*RealDebrid, error) {
 		rarSemaphore:       make(chan struct{}, 2),
 		checkCached:        dc.CheckCached,
 		addSamples:         dc.AddSamples,
+		minimumFreeSlot:    dc.MinimumFreeSlot,
 	}
 
 	if _, err := r.GetProfile(); err != nil {
@@ -107,11 +110,11 @@ func New(dc config.Debrid) (*RealDebrid, error) {
 	}
 }
 
-func (r *RealDebrid) GetName() string {
-	return r.Name
+func (r *RealDebrid) Name() string {
+	return r.name
 }
 
-func (r *RealDebrid) GetLogger() zerolog.Logger {
+func (r *RealDebrid) Logger() zerolog.Logger {
 	return r.logger
 }
 
@@ -337,15 +340,30 @@ func (r *RealDebrid) addTorrent(t *types.Torrent) (*types.Torrent, error) {
 		return nil, err
 	}
 	req.Header.Add("Content-Type", "application/x-bittorrent")
-	resp, err := r.client.MakeRequest(req)
+	resp, err := r.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	if err = json.Unmarshal(resp, &data); err != nil {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		// Handle multiple_downloads
+
+		if resp.StatusCode == 509 {
+			return nil, utils.TooManyActiveDownloadsError
+		}
+
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("realdebrid API error: Status: %d || Body: %s", resp.StatusCode, string(bodyBytes))
+	}
+	defer resp.Body.Close()
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response body: %w", err)
+	}
+	if err = json.Unmarshal(bodyBytes, &data); err != nil {
 		return nil, err
 	}
 	t.Id = data.Id
-	t.Debrid = r.Name
+	t.Debrid = r.name
 	t.MountPath = r.MountPath
 	return t, nil
 }
@@ -357,15 +375,30 @@ func (r *RealDebrid) addMagnet(t *types.Torrent) (*types.Torrent, error) {
 	}
 	var data AddMagnetSchema
 	req, _ := http.NewRequest(http.MethodPost, url, strings.NewReader(payload.Encode()))
-	resp, err := r.client.MakeRequest(req)
+	resp, err := r.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	if err = json.Unmarshal(resp, &data); err != nil {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		// Handle multiple_downloads
+
+		if resp.StatusCode == 509 {
+			return nil, utils.TooManyActiveDownloadsError
+		}
+
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("realdebrid API error: Status: %d || Body: %s", resp.StatusCode, string(bodyBytes))
+	}
+	defer resp.Body.Close()
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response body: %w", err)
+	}
+	if err = json.Unmarshal(bodyBytes, &data); err != nil {
 		return nil, err
 	}
 	t.Id = data.Id
-	t.Debrid = r.Name
+	t.Debrid = r.name
 	t.MountPath = r.MountPath
 	return t, nil
 }
@@ -384,7 +417,7 @@ func (r *RealDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusNotFound {
-			return nil, request.TorrentNotFoundError
+			return nil, utils.TorrentNotFoundError
 		}
 		return nil, fmt.Errorf("realdebrid API error: Status: %d || Body: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -406,7 +439,7 @@ func (r *RealDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 		Filename:         data.Filename,
 		OriginalFilename: data.OriginalFilename,
 		Links:            data.Links,
-		Debrid:           r.Name,
+		Debrid:           r.name,
 		MountPath:        r.MountPath,
 	}
 	t.Files = r.getTorrentFiles(t, data) // Get selected files
@@ -427,7 +460,7 @@ func (r *RealDebrid) UpdateTorrent(t *types.Torrent) error {
 	}
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusNotFound {
-			return request.TorrentNotFoundError
+			return utils.TorrentNotFoundError
 		}
 		return fmt.Errorf("realdebrid API error: Status: %d || Body: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -447,7 +480,7 @@ func (r *RealDebrid) UpdateTorrent(t *types.Torrent) error {
 	t.OriginalFilename = data.OriginalFilename
 	t.Links = data.Links
 	t.MountPath = r.MountPath
-	t.Debrid = r.Name
+	t.Debrid = r.name
 	t.Added = data.Added
 	t.Files, _ = r.getSelectedFiles(t, data) // Get selected files
 
@@ -478,7 +511,7 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent, isSymlink bool) (*types.Torre
 		t.Seeders = data.Seeders
 		t.Links = data.Links
 		t.Status = status
-		t.Debrid = r.Name
+		t.Debrid = r.name
 		t.MountPath = r.MountPath
 		if status == "waiting_files_selection" {
 			t.Files = r.getTorrentFiles(t, data)
@@ -499,6 +532,9 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent, isSymlink bool) (*types.Torre
 				return t, err
 			}
 			if res.StatusCode != http.StatusNoContent {
+				if res.StatusCode == 509 {
+					return nil, utils.TooManyActiveDownloadsError
+				}
 				return t, fmt.Errorf("realdebrid API error: Status: %d", res.StatusCode)
 			}
 		} else if status == "downloaded" {
@@ -593,7 +629,7 @@ func (r *RealDebrid) CheckLink(link string) error {
 		return err
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		return request.HosterUnavailableError // File has been removed
+		return utils.HosterUnavailableError // File has been removed
 	}
 	return nil
 }
@@ -622,17 +658,17 @@ func (r *RealDebrid) _getDownloadLink(file *types.File) (*types.DownloadLink, er
 		}
 		switch data.ErrorCode {
 		case 19:
-			return nil, request.HosterUnavailableError // File has been removed
+			return nil, utils.HosterUnavailableError // File has been removed
 		case 23:
-			return nil, request.TrafficExceededError
+			return nil, utils.TrafficExceededError
 		case 24:
-			return nil, request.HosterUnavailableError // Link has been nerfed
+			return nil, utils.HosterUnavailableError // Link has been nerfed
 		case 34:
-			return nil, request.TrafficExceededError // traffic exceeded
+			return nil, utils.TrafficExceededError // traffic exceeded
 		case 35:
-			return nil, request.HosterUnavailableError
+			return nil, utils.HosterUnavailableError
 		case 36:
-			return nil, request.TrafficExceededError // traffic exceeded
+			return nil, utils.TrafficExceededError // traffic exceeded
 		default:
 			return nil, fmt.Errorf("realdebrid API error: Status: %d || Code: %d", resp.StatusCode, data.ErrorCode)
 		}
@@ -674,7 +710,7 @@ func (r *RealDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types
 	downloadLink, err := r._getDownloadLink(file)
 	retries := 0
 	if err != nil {
-		if errors.Is(err, request.TrafficExceededError) {
+		if errors.Is(err, utils.TrafficExceededError) {
 			// Retries generating
 			retries = 5
 		} else {
@@ -688,7 +724,7 @@ func (r *RealDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types
 		if err == nil {
 			return downloadLink, nil
 		}
-		if !errors.Is(err, request.TrafficExceededError) {
+		if !errors.Is(err, utils.TrafficExceededError) {
 			return nil, err
 		}
 		// Add a delay before retrying
@@ -750,7 +786,7 @@ func (r *RealDebrid) getTorrents(offset int, limit int) (int, []*types.Torrent, 
 			Links:            t.Links,
 			Files:            make(map[string]types.File),
 			InfoHash:         t.Hash,
-			Debrid:           r.Name,
+			Debrid:           r.name,
 			MountPath:        r.MountPath,
 			Added:            t.Added.Format(time.RFC3339),
 		})
@@ -940,4 +976,18 @@ func (r *RealDebrid) GetProfile() (*types.Profile, error) {
 		Type:       data.Type,
 	}
 	return profile, nil
+}
+
+func (r *RealDebrid) GetAvailableSlots() (int, error) {
+	url := fmt.Sprintf("%s/torrents/activeCount", r.Host)
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	resp, err := r.client.MakeRequest(req)
+	if err != nil {
+		return 0, nil
+	}
+	var data AvailableSlotsResponse
+	if json.Unmarshal(resp, &data) != nil {
+		return 0, fmt.Errorf("error unmarshalling available slots response: %w", err)
+	}
+	return data.TotalSlots - data.ActiveSlots - r.minimumFreeSlot, nil // Ensure we maintain minimum active pots
 }

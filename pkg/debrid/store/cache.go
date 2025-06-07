@@ -143,7 +143,7 @@ func NewDebridCache(dc config.Debrid, client types.Client) *Cache {
 		customFolders = append(customFolders, name)
 
 	}
-	_log := logger.New(fmt.Sprintf("%s-webdav", client.GetName()))
+	_log := logger.New(fmt.Sprintf("%s-webdav", client.Name()))
 	c := &Cache{
 		dir: filepath.Join(cfg.Path, "cache", dc.Name), // path to save cache files
 
@@ -248,7 +248,7 @@ func (c *Cache) Start(ctx context.Context) error {
 	go c.repairWorker(ctx)
 
 	cfg := config.Get()
-	name := c.client.GetName()
+	name := c.client.Name()
 	addr := cfg.BindAddress + ":" + cfg.Port + cfg.URLBase + "webdav/" + name + "/"
 	c.logger.Info().Msgf("%s WebDav server running at %s", name, addr)
 
@@ -379,7 +379,7 @@ func (c *Cache) Sync(ctx context.Context) error {
 
 	totalTorrents := len(torrents)
 
-	c.logger.Info().Msgf("%d torrents found from %s", totalTorrents, c.client.GetName())
+	c.logger.Info().Msgf("%d torrents found from %s", totalTorrents, c.client.Name())
 
 	newTorrents := make([]*types.Torrent, 0)
 	idStore := make(map[string]struct{}, totalTorrents)
@@ -719,7 +719,7 @@ func (c *Cache) Add(t *types.Torrent) error {
 
 }
 
-func (c *Cache) GetClient() types.Client {
+func (c *Cache) Client() types.Client {
 	return c.client
 }
 
@@ -866,6 +866,6 @@ func (c *Cache) RemoveFile(torrentId string, filename string) error {
 	return nil
 }
 
-func (c *Cache) GetLogger() zerolog.Logger {
+func (c *Cache) Logger() zerolog.Logger {
 	return c.logger
 }

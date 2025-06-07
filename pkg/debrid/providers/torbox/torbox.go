@@ -24,7 +24,7 @@ import (
 )
 
 type Torbox struct {
-	Name             string
+	name             string
 	Host             string `json:"host"`
 	APIKey           string
 	accounts         map[string]types.Account
@@ -67,7 +67,7 @@ func New(dc config.Debrid) (*Torbox, error) {
 	}
 
 	return &Torbox{
-		Name:             "torbox",
+		name:             "torbox",
 		Host:             "https://api.torbox.app/v1",
 		APIKey:           dc.APIKey,
 		accounts:         accounts,
@@ -80,11 +80,11 @@ func New(dc config.Debrid) (*Torbox, error) {
 	}, nil
 }
 
-func (tb *Torbox) GetName() string {
-	return tb.Name
+func (tb *Torbox) Name() string {
+	return tb.name
 }
 
-func (tb *Torbox) GetLogger() zerolog.Logger {
+func (tb *Torbox) Logger() zerolog.Logger {
 	return tb.logger
 }
 
@@ -166,7 +166,7 @@ func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
 	torrentId := strconv.Itoa(dt.Id)
 	torrent.Id = torrentId
 	torrent.MountPath = tb.MountPath
-	torrent.Debrid = tb.Name
+	torrent.Debrid = tb.name
 
 	return torrent, nil
 }
@@ -215,7 +215,7 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 		Filename:         data.Name,
 		OriginalFilename: data.Name,
 		MountPath:        tb.MountPath,
-		Debrid:           tb.Name,
+		Debrid:           tb.name,
 		Files:            make(map[string]types.File),
 		Added:            data.CreatedAt.Format(time.RFC3339),
 	}
@@ -250,7 +250,7 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 	}
 
 	t.OriginalFilename = strings.Split(cleanPath, "/")[0]
-	t.Debrid = tb.Name
+	t.Debrid = tb.name
 
 	return t, nil
 }
@@ -279,7 +279,7 @@ func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
 	t.Filename = name
 	t.OriginalFilename = name
 	t.MountPath = tb.MountPath
-	t.Debrid = tb.Name
+	t.Debrid = tb.name
 	cfg := config.Get()
 	for _, f := range data.Files {
 		fileName := filepath.Base(f.Name)
@@ -311,7 +311,7 @@ func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
 	}
 
 	t.OriginalFilename = strings.Split(cleanPath, "/")[0]
-	t.Debrid = tb.Name
+	t.Debrid = tb.name
 	return nil
 }
 
@@ -469,4 +469,9 @@ func (tb *Torbox) ResetActiveDownloadKeys() {
 
 func (tb *Torbox) DeleteDownloadLink(linkId string) error {
 	return nil
+}
+
+func (tb *Torbox) GetAvailableSlots() (int, error) {
+	//TODO: Implement the logic to check available slots for Torbox
+	return 0, fmt.Errorf("not implemented")
 }
