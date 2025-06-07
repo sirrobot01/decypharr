@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"encoding/json"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/request"
@@ -35,6 +36,7 @@ func (ui *Handler) handleAddContent(w http.ResponseWriter, r *http.Request) {
 	arrName := r.FormValue("arr")
 	notSymlink := r.FormValue("notSymlink") == "true"
 	downloadUncached := r.FormValue("downloadUncached") == "true"
+	skipExisting := r.FormValue("skipExisting") == "true"
 	if arrName == "" {
 		arrName = "uncategorized"
 	}
@@ -59,10 +61,14 @@ func (ui *Handler) handleAddContent(w http.ResponseWriter, r *http.Request) {
 				errs = append(errs, fmt.Sprintf("Failed to parse URL %s: %v", url, err))
 				continue
 			}
-			importReq := qbit.NewImportRequest(magnet, _arr, !notSymlink, downloadUncached)
+			importReq := qbit.NewImportRequest(magnet, _arr, !notSymlink, downloadUncached, skipExisting)
 			if err := importReq.Process(ui.qbit); err != nil {
 				errs = append(errs, fmt.Sprintf("URL %s: %v", url, err))
 				continue
+			}
+			// Check if torrent was skipped
+			if importReq.Reason != "" {
+				errs = append(errs, fmt.Sprintf("URL %s: %s", url, importReq.Reason))
 			}
 			results = append(results, importReq)
 		}
@@ -83,11 +89,15 @@ func (ui *Handler) handleAddContent(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			importReq := qbit.NewImportRequest(magnet, _arr, !notSymlink, downloadUncached)
+			importReq := qbit.NewImportRequest(magnet, _arr, !notSymlink, downloadUncached, skipExisting)
 			err = importReq.Process(ui.qbit)
 			if err != nil {
 				errs = append(errs, fmt.Sprintf("File %s: %v", fileHeader.Filename, err))
 				continue
+			}
+			// Check if torrent was skipped
+			if importReq.Reason != "" {
+				errs = append(errs, fmt.Sprintf("File %s: %s", fileHeader.Filename, importReq.Reason))
 			}
 			results = append(results, importReq)
 		}

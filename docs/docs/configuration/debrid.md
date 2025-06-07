@@ -41,6 +41,7 @@ Each Debrid provider accepts the following configuration options:
 - `check_cached`: Whether to check if torrents are cached (disabled by default)
 - `use_webdav`: Whether to create a WebDAV server for this Debrid provider (disabled by default)
 - `proxy`: Proxy URL for the Debrid provider (optional)
+- `max_concurrent_uncached`: Maximum number of concurrent uncached downloads (default: 8). This helps respect provider limits and prevents overwhelming the service during uncached downloads.
 
 #### WebDAV and Rclone Options
 - `torrents_refresh_interval`: Interval for refreshing torrent data (e.g., `15s`, `1m`, `1h`).
@@ -87,7 +88,8 @@ Each Debrid provider accepts the following configuration options:
   "folder": "/mnt/remote/realdebrid/__all__/",
   "rate_limit": null,
   "download_uncached": false,
-  "use_webdav": true
+  "use_webdav": true,
+  "max_concurrent_uncached": 2
 }
 ```
 
@@ -100,7 +102,8 @@ Each Debrid provider accepts the following configuration options:
   "folder": "/mnt/remote/alldebrid/torrents/",
   "rate_limit": null,
   "download_uncached": false,
-  "use_webdav": true
+  "use_webdav": true,
+  "max_concurrent_uncached": 2
 }
 ```
 
@@ -113,7 +116,8 @@ Each Debrid provider accepts the following configuration options:
   "folder": "/mnt/remote/debridlink/torrents/",
   "rate_limit": null,
   "download_uncached": false,
-  "use_webdav": true
+  "use_webdav": true,
+  "max_concurrent_uncached": 2
 }
 ```
 
@@ -126,6 +130,7 @@ Each Debrid provider accepts the following configuration options:
   "folder": "/mnt/remote/torbox/torrents/",
   "rate_limit": null,
   "download_uncached": false,
-  "use_webdav": true
+  "use_webdav": true,
+  "max_concurrent_uncached": 2
 }
 ```

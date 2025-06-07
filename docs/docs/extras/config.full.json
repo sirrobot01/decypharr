@@ -14,7 +14,8 @@
       "auto_expire_links_after": "3d",
       "rc_url": "http://your-ip-address:9990",
       "rc_user": "your_rclone_rc_user",
-      "rc_pass": "your_rclone_rc_pass"
+      "rc_pass": "your_rclone_rc_pass",
+      "max_concurrent_uncached": 8
     },
     {
       "name": "torbox",
@@ -22,6 +23,7 @@
       "folder": "/mnt/remote/torbox/torrents/",
       "rate_limit": "250/minute",
       "download_uncached": false,
+      "max_concurrent_uncached": 8
     },
     {
       "name": "debridlink",
@@ -29,6 +31,7 @@
       "folder": "/mnt/remote/debridlink/torrents/",
       "rate_limit": "250/minute",
       "download_uncached": false,
+      "max_concurrent_uncached": 8
     },
     {
       "name": "alldebrid",
@@ -36,6 +39,7 @@
       "folder": "/mnt/remote/alldebrid/magnet/",
       "rate_limit": "600/minute",
       "download_uncached": false,
+      "max_concurrent_uncached": 8
     }
   ],
   "max_cache_size": 1000,

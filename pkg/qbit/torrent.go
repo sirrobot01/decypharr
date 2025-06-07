@@ -4,18 +4,19 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"github.com/sirrobot01/decypharr/internal/request"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/arr"
-	"github.com/sirrobot01/decypharr/pkg/debrid/debrid"
-	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"github.com/sirrobot01/decypharr/pkg/service"
 	"io"
 	"mime/multipart"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sirrobot01/decypharr/internal/request"
+	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/arr"
+	"github.com/sirrobot01/decypharr/pkg/debrid/debrid"
+	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"github.com/sirrobot01/decypharr/pkg/service"
 )
 
 // All torrent related helpers goes here
@@ -72,6 +73,28 @@ func (q *QBit) ProcessFiles(torrent *Torrent, debridTorrent *debridTypes.Torrent
 	svc := service.GetService()
 	client := svc.Debrid.GetClient(debridTorrent.Debrid)
 	downloadingStatuses := client.GetDownloadingStatus()
+
+	// Check if this torrent already has a slot acquired from ProcessTorrent
+	var slotAcquired bool = debridTorrent.UncachedSlotAcquired
+	if slotAcquired {
+		q.logger.Info().Msgf("Using existing uncached slot for %s (provider: %s)", debridTorrent.Name, debridTorrent.UncachedSlotProvider)
+	} else if debridTorrent.DownloadUncached {
+		q.logger.Info().Msgf("Torrent %s is uncached but no slot acquired, this shouldn't happen", debridTorrent.Name)
+	} else {
+		q.logger.Info().Msgf("Torrent %s is cached, no slot needed", debridTorrent.Name)
+	}
+
+	// Ensure slot is released when function exits
+	defer func() {
+		if slotAcquired {
+			q.logger.Info().Msgf("Releasing uncached slot for %s", debridTorrent.UncachedSlotProvider)
+			svc.Debrid.ReleaseUncachedSlot(debridTorrent.UncachedSlotProvider)
+		}
+	}()
+
+	startTime := time.Now()
+	deadCheckGracePeriod := 1 * time.Minute // Wait 1 minute before checking for dead torrents
+
 	for debridTorrent.Status != "downloaded" {
 		q.logger.Debug().Msgf("%s <- (%s) Download Progress: %.2f%%", debridTorrent.Debrid, debridTorrent.Name, debridTorrent.Progress)
 		dbT, err := client.CheckStatus(debridTorrent, isSymlink)
@@ -94,6 +117,57 @@ func (q *QBit) ProcessFiles(torrent *Torrent, debridTorrent *debridTypes.Torrent
 
 		debridTorrent = dbT
 		torrent = q.UpdateTorrentMin(torrent, debridTorrent)
+
+		// Check for dead torrents (0% progress, 0 seeders, 0 speed) after grace period
+		if debridTorrent.DownloadUncached && utils.Contains(downloadingStatuses, debridTorrent.Status) {
+			// Only check for dead torrents after the grace period
+			if time.Since(startTime) >= deadCheckGracePeriod {
+				if debridTorrent.Progress == 0 && debridTorrent.Seeders == 0 && debridTorrent.Speed == 0 {
+					elapsed := time.Since(startTime)
+					q.logger.Warn().Msgf("Dead torrent detected for %s after %v: 0%% progress, 0 seeders, 0 speed",
+						debridTorrent.Name, elapsed)
+
+					q.logger.Info().Msgf("Removing dead torrent %s (no activity after %v)", debridTorrent.Name, elapsed)
+					// Delete the dead torrent from debrid service
+					go func() {
+						if err := client.DeleteTorrent(debridTorrent.Id); err != nil {
+							q.logger.Error().Msgf("Error deleting dead torrent %s: %v", debridTorrent.Id, err)
+						}
+					}()
+
+					// Mark torrent as failed with specific reason
+					torrent.State = "error"
+					q.Storage.AddOrUpdate(torrent)
+					q.logger.Info().Msgf("Marked dead torrent %s as failed", debridTorrent.Name)
+
+					// Send failure notification
+					go func() {
+						deadTorrentContext := fmt.Sprintf(`
+							**Name:** %s
+							**Arr:** %s
+							**Hash:** %s
+							**MagnetURI:** %s
+							**Debrid:** %s
+							**Reason:** Dead torrent (0%% progress, 0 seeders, 0 speed after %v)
+						`, torrent.Name, torrent.Category, torrent.Hash, torrent.MagnetUri, torrent.Debrid, elapsed)
+
+						if err := request.SendDiscordMessage("download_failed", "error", deadTorrentContext); err != nil {
+							q.logger.Error().Msgf("Error sending discord message: %v", err)
+						}
+					}()
+
+					// Refresh arr
+					go func() {
+						if err := arr.Refresh(); err != nil {
+							q.logger.Error().Msgf("Error refreshing arr: %v", err)
+						}
+					}()
+
+					// Exit the function - slot will be freed by defer
+					return
+				}
+			}
+		}
 
 		// Exit the loop for downloading statuses to prevent memory buildup
 		if debridTorrent.Status == "downloaded" || !utils.Contains(downloadingStatuses, debridTorrent.Status) {
