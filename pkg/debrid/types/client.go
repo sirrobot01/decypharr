@@ -7,11 +7,10 @@ import (
 type Client interface {
 	SubmitMagnet(tr *Torrent) (*Torrent, error)
 	CheckStatus(tr *Torrent, isSymlink bool) (*Torrent, error)
-	GenerateDownloadLinks(tr *Torrent) error
+	GetFileDownloadLinks(tr *Torrent) error
 	GetDownloadLink(tr *Torrent, file *File) (*DownloadLink, error)
 	DeleteTorrent(torrentId string) error
 	IsAvailable(infohashes []string) map[string]bool
-	GetCheckCached() bool
 	GetDownloadUncached() bool
 	UpdateTorrent(torrent *Torrent) error
 	GetTorrent(torrentId string) (*Torrent, error)
@@ -19,11 +18,10 @@ type Client interface {
 	Name() string
 	Logger() zerolog.Logger
 	GetDownloadingStatus() []string
-	GetDownloads() (map[string]DownloadLink, error)
+	GetDownloadLinks() (map[string]*DownloadLink, error)
 	CheckLink(link string) error
 	GetMountPath() string
-	DisableAccount(string)
-	ResetActiveDownloadKeys()
+	Accounts() *Accounts // Returns the active download account/token
 	DeleteDownloadLink(linkId string) error
 	GetProfile() (*Profile, error)
 	GetAvailableSlots() (int, error)

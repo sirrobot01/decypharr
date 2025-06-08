@@ -18,12 +18,13 @@ import (
 )
 
 type AllDebrid struct {
-	name             string
-	Host             string `json:"host"`
-	APIKey           string
-	accounts         map[string]types.Account
-	DownloadUncached bool
-	client           *request.Client
+	name                  string
+	Host                  string `json:"host"`
+	APIKey                string
+	accounts              *types.Accounts
+	autoExpiresLinksAfter time.Duration
+	DownloadUncached      bool
+	client                *request.Client
 
 	MountPath       string
 	logger          zerolog.Logger
@@ -50,27 +51,23 @@ func New(dc config.Debrid) (*AllDebrid, error) {
 		request.WithProxy(dc.Proxy),
 	)
 
-	accounts := make(map[string]types.Account)
-	for idx, key := range dc.DownloadAPIKeys {
-		id := strconv.Itoa(idx)
-		accounts[id] = types.Account{
-			Name:  key,
-			ID:    id,
-			Token: key,
-		}
+	autoExpiresLinksAfter, err := time.ParseDuration(dc.AutoExpireLinksAfter)
+	if autoExpiresLinksAfter == 0 || err != nil {
+		autoExpiresLinksAfter = 48 * time.Hour
 	}
 	return &AllDebrid{
-		name:             "alldebrid",
-		Host:             "http://api.alldebrid.com/v4.1",
-		APIKey:           dc.APIKey,
-		accounts:         accounts,
-		DownloadUncached: dc.DownloadUncached,
-		client:           client,
-		MountPath:        dc.Folder,
-		logger:           logger.New(dc.Name),
-		checkCached:      dc.CheckCached,
-		addSamples:       dc.AddSamples,
-		minimumFreeSlot:  dc.MinimumFreeSlot,
+		name:                  "alldebrid",
+		Host:                  "http://api.alldebrid.com/v4.1",
+		APIKey:                dc.APIKey,
+		accounts:              types.NewAccounts(dc),
+		DownloadUncached:      dc.DownloadUncached,
+		autoExpiresLinksAfter: autoExpiresLinksAfter,
+		client:                client,
+		MountPath:             dc.Folder,
+		logger:                logger.New(dc.Name),
+		checkCached:           dc.CheckCached,
+		addSamples:            dc.AddSamples,
+		minimumFreeSlot:       dc.MinimumFreeSlot,
 	}, nil
 }
 
@@ -273,8 +270,8 @@ func (ad *AllDebrid) CheckStatus(torrent *types.Torrent, isSymlink bool) (*types
 		if status == "downloaded" {
 			ad.logger.Info().Msgf("Torrent: %s downloaded", torrent.Name)
 			if !isSymlink {
-				err = ad.GenerateDownloadLinks(torrent)
-				if err != nil {
+
+				if err = ad.GetFileDownloadLinks(torrent); err != nil {
 					return torrent, err
 				}
 			}
@@ -304,8 +301,9 @@ func (ad *AllDebrid) DeleteTorrent(torrentId string) error {
 	return nil
 }
 
-func (ad *AllDebrid) GenerateDownloadLinks(t *types.Torrent) error {
+func (ad *AllDebrid) GetFileDownloadLinks(t *types.Torrent) error {
 	filesCh := make(chan types.File, len(t.Files))
+	linksCh := make(chan *types.DownloadLink, len(t.Files))
 	errCh := make(chan error, len(t.Files))
 
 	var wg sync.WaitGroup
@@ -318,17 +316,19 @@ func (ad *AllDebrid) GenerateDownloadLinks(t *types.Torrent) error {
 				errCh <- err
 				return
 			}
-			file.DownloadLink = link
 			if link != nil {
 				errCh <- fmt.Errorf("download link is empty")
 				return
 			}
+			linksCh <- link
+			file.DownloadLink = link
 			filesCh <- file
 		}(file)
 	}
 	go func() {
 		wg.Wait()
 		close(filesCh)
+		close(linksCh)
 		close(errCh)
 	}()
 	files := make(map[string]types.File, len(t.Files))
@@ -336,10 +336,22 @@ func (ad *AllDebrid) GenerateDownloadLinks(t *types.Torrent) error {
 		files[file.Name] = file
 	}
 
+	// Collect download links
+	links := make(map[string]*types.DownloadLink, len(t.Files))
+
+	for link := range linksCh {
+		if link == nil {
+			continue
+		}
+		links[link.Link] = link
+	}
+	// Update the files with download links
+	ad.accounts.SetDownloadLinks(links)
+
 	// Check for errors
 	for err := range errCh {
 		if err != nil {
-			return err // Return the first error encountered
+			return err
 		}
 	}
 
@@ -369,19 +381,16 @@ func (ad *AllDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types
 	if link == "" {
 		return nil, fmt.Errorf("download link is empty")
 	}
+	now := time.Now()
 	return &types.DownloadLink{
 		Link:         file.Link,
 		DownloadLink: link,
 		Id:           data.Data.Id,
 		Size:         file.Size,
 		Filename:     file.Name,
-		Generated:    time.Now(),
-		AccountId:    "0",
+		Generated:    now,
+		ExpiresAt:    now.Add(ad.autoExpiresLinksAfter),
 	}, nil
-}
-
-func (ad *AllDebrid) GetCheckCached() bool {
-	return ad.checkCached
 }
 
 func (ad *AllDebrid) GetTorrents() ([]*types.Torrent, error) {
@@ -417,7 +426,7 @@ func (ad *AllDebrid) GetTorrents() ([]*types.Torrent, error) {
 	return torrents, nil
 }
 
-func (ad *AllDebrid) GetDownloads() (map[string]types.DownloadLink, error) {
+func (ad *AllDebrid) GetDownloadLinks() (map[string]*types.DownloadLink, error) {
 	return nil, nil
 }
 
@@ -437,12 +446,6 @@ func (ad *AllDebrid) GetMountPath() string {
 	return ad.MountPath
 }
 
-func (ad *AllDebrid) DisableAccount(accountId string) {
-}
-
-func (ad *AllDebrid) ResetActiveDownloadKeys() {
-
-}
 func (ad *AllDebrid) DeleteDownloadLink(linkId string) error {
 	return nil
 }
@@ -451,4 +454,8 @@ func (ad *AllDebrid) GetAvailableSlots() (int, error) {
 	// This function is a placeholder for AllDebrid
 	//TODO: Implement the logic to check available slots for AllDebrid
 	return 0, fmt.Errorf("GetAvailableSlots not implemented for AllDebrid")
+}
+
+func (ad *AllDebrid) Accounts() *types.Accounts {
+	return ad.accounts
 }

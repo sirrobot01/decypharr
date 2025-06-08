@@ -241,24 +241,14 @@ func (c *Cache) refreshDownloadLinks(ctx context.Context) {
 	}
 	defer c.downloadLinksRefreshMu.Unlock()
 
-	downloadLinks, err := c.client.GetDownloads()
+	links, err := c.client.GetDownloadLinks()
 
 	if err != nil {
 		c.logger.Error().Err(err).Msg("Failed to get download links")
 		return
 	}
-	for k, v := range downloadLinks {
-		// if link is generated in the last 24 hours, add it to cache
-		timeSince := time.Since(v.Generated)
-		if timeSince < c.autoExpiresLinksAfterDuration {
-			c.downloadLinks.Store(k, linkCache{
-				Id:        v.Id,
-				accountId: v.AccountId,
-				link:      v.DownloadLink,
-				expiresAt: v.Generated.Add(c.autoExpiresLinksAfterDuration - timeSince),
-			})
-		} else {
-			c.downloadLinks.Delete(k)
-		}
-	}
+
+	c.client.Accounts().SetDownloadLinks(links)
+
+	c.logger.Debug().Msgf("Refreshed download %d links", c.client.Accounts().GetLinksCount())
 }

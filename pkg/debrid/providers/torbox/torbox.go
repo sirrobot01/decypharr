@@ -24,10 +24,12 @@ import (
 )
 
 type Torbox struct {
-	name             string
-	Host             string `json:"host"`
-	APIKey           string
-	accounts         map[string]types.Account
+	name                  string
+	Host                  string `json:"host"`
+	APIKey                string
+	accounts              *types.Accounts
+	autoExpiresLinksAfter time.Duration
+
 	DownloadUncached bool
 	client           *request.Client
 
@@ -55,28 +57,23 @@ func New(dc config.Debrid) (*Torbox, error) {
 		request.WithLogger(_log),
 		request.WithProxy(dc.Proxy),
 	)
-
-	accounts := make(map[string]types.Account)
-	for idx, key := range dc.DownloadAPIKeys {
-		id := strconv.Itoa(idx)
-		accounts[id] = types.Account{
-			Name:  key,
-			ID:    id,
-			Token: key,
-		}
+	autoExpiresLinksAfter, err := time.ParseDuration(dc.AutoExpireLinksAfter)
+	if autoExpiresLinksAfter == 0 || err != nil {
+		autoExpiresLinksAfter = 48 * time.Hour
 	}
 
 	return &Torbox{
-		name:             "torbox",
-		Host:             "https://api.torbox.app/v1",
-		APIKey:           dc.APIKey,
-		accounts:         accounts,
-		DownloadUncached: dc.DownloadUncached,
-		client:           client,
-		MountPath:        dc.Folder,
-		logger:           _log,
-		checkCached:      dc.CheckCached,
-		addSamples:       dc.AddSamples,
+		name:                  "torbox",
+		Host:                  "https://api.torbox.app/v1",
+		APIKey:                dc.APIKey,
+		accounts:              types.NewAccounts(dc),
+		DownloadUncached:      dc.DownloadUncached,
+		autoExpiresLinksAfter: autoExpiresLinksAfter,
+		client:                client,
+		MountPath:             dc.Folder,
+		logger:                _log,
+		checkCached:           dc.CheckCached,
+		addSamples:            dc.AddSamples,
 	}, nil
 }
 
@@ -326,8 +323,7 @@ func (tb *Torbox) CheckStatus(torrent *types.Torrent, isSymlink bool) (*types.To
 		if status == "downloaded" {
 			tb.logger.Info().Msgf("Torrent: %s downloaded", torrent.Name)
 			if !isSymlink {
-				err = tb.GenerateDownloadLinks(torrent)
-				if err != nil {
+				if err = tb.GetFileDownloadLinks(torrent); err != nil {
 					return torrent, err
 				}
 			}
@@ -359,8 +355,9 @@ func (tb *Torbox) DeleteTorrent(torrentId string) error {
 	return nil
 }
 
-func (tb *Torbox) GenerateDownloadLinks(t *types.Torrent) error {
+func (tb *Torbox) GetFileDownloadLinks(t *types.Torrent) error {
 	filesCh := make(chan types.File, len(t.Files))
+	linkCh := make(chan *types.DownloadLink)
 	errCh := make(chan error, len(t.Files))
 
 	var wg sync.WaitGroup
@@ -373,13 +370,17 @@ func (tb *Torbox) GenerateDownloadLinks(t *types.Torrent) error {
 				errCh <- err
 				return
 			}
-			file.DownloadLink = link
+			if link != nil {
+				linkCh <- link
+				file.DownloadLink = link
+			}
 			filesCh <- file
 		}()
 	}
 	go func() {
 		wg.Wait()
 		close(filesCh)
+		close(linkCh)
 		close(errCh)
 	}()
 
@@ -387,6 +388,13 @@ func (tb *Torbox) GenerateDownloadLinks(t *types.Torrent) error {
 	files := make(map[string]types.File, len(t.Files))
 	for file := range filesCh {
 		files[file.Name] = file
+	}
+
+	// Collect download links
+	for link := range linkCh {
+		if link != nil {
+			tb.accounts.SetDownloadLink(link.Link, link)
+		}
 	}
 
 	// Check for errors
@@ -423,21 +431,18 @@ func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (*types.Do
 	if link == "" {
 		return nil, fmt.Errorf("error getting download links")
 	}
+	now := time.Now()
 	return &types.DownloadLink{
 		Link:         file.Link,
 		DownloadLink: link,
 		Id:           file.Id,
-		AccountId:    "0",
-		Generated:    time.Now(),
+		Generated:    now,
+		ExpiresAt:    now.Add(tb.autoExpiresLinksAfter),
 	}, nil
 }
 
 func (tb *Torbox) GetDownloadingStatus() []string {
 	return []string{"downloading"}
-}
-
-func (tb *Torbox) GetCheckCached() bool {
-	return tb.checkCached
 }
 
 func (tb *Torbox) GetTorrents() ([]*types.Torrent, error) {
@@ -448,7 +453,7 @@ func (tb *Torbox) GetDownloadUncached() bool {
 	return tb.DownloadUncached
 }
 
-func (tb *Torbox) GetDownloads() (map[string]types.DownloadLink, error) {
+func (tb *Torbox) GetDownloadLinks() (map[string]*types.DownloadLink, error) {
 	return nil, nil
 }
 
@@ -460,13 +465,6 @@ func (tb *Torbox) GetMountPath() string {
 	return tb.MountPath
 }
 
-func (tb *Torbox) DisableAccount(accountId string) {
-}
-
-func (tb *Torbox) ResetActiveDownloadKeys() {
-
-}
-
 func (tb *Torbox) DeleteDownloadLink(linkId string) error {
 	return nil
 }
@@ -474,4 +472,8 @@ func (tb *Torbox) DeleteDownloadLink(linkId string) error {
 func (tb *Torbox) GetAvailableSlots() (int, error) {
 	//TODO: Implement the logic to check available slots for Torbox
 	return 0, fmt.Errorf("not implemented")
+}
+
+func (tb *Torbox) Accounts() *types.Accounts {
+	return tb.accounts
 }

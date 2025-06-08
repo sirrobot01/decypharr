@@ -10,7 +10,6 @@ import (
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"strconv"
 	"time"
 
 	"net/http"
@@ -21,9 +20,11 @@ type DebridLink struct {
 	name             string
 	Host             string `json:"host"`
 	APIKey           string
-	accounts         map[string]types.Account
+	accounts         *types.Accounts
 	DownloadUncached bool
 	client           *request.Client
+
+	autoExpiresLinksAfter time.Duration
 
 	MountPath   string
 	logger      zerolog.Logger
@@ -46,26 +47,22 @@ func New(dc config.Debrid) (*DebridLink, error) {
 		request.WithProxy(dc.Proxy),
 	)
 
-	accounts := make(map[string]types.Account)
-	for idx, key := range dc.DownloadAPIKeys {
-		id := strconv.Itoa(idx)
-		accounts[id] = types.Account{
-			Name:  key,
-			ID:    id,
-			Token: key,
-		}
+	autoExpiresLinksAfter, err := time.ParseDuration(dc.AutoExpireLinksAfter)
+	if autoExpiresLinksAfter == 0 || err != nil {
+		autoExpiresLinksAfter = 48 * time.Hour
 	}
 	return &DebridLink{
-		name:             "debridlink",
-		Host:             "https://debrid-link.com/api/v2",
-		APIKey:           dc.APIKey,
-		accounts:         accounts,
-		DownloadUncached: dc.DownloadUncached,
-		client:           client,
-		MountPath:        dc.Folder,
-		logger:           logger.New(dc.Name),
-		checkCached:      dc.CheckCached,
-		addSamples:       dc.AddSamples,
+		name:                  "debridlink",
+		Host:                  "https://debrid-link.com/api/v2",
+		APIKey:                dc.APIKey,
+		accounts:              types.NewAccounts(dc),
+		DownloadUncached:      dc.DownloadUncached,
+		autoExpiresLinksAfter: autoExpiresLinksAfter,
+		client:                client,
+		MountPath:             dc.Folder,
+		logger:                logger.New(dc.Name),
+		checkCached:           dc.CheckCached,
+		addSamples:            dc.AddSamples,
 	}, nil
 }
 
@@ -177,14 +174,7 @@ func (dl *DebridLink) GetTorrent(torrentId string) (*types.Torrent, error) {
 			Name:      f.Name,
 			Size:      f.Size,
 			Path:      f.Name,
-			DownloadLink: &types.DownloadLink{
-				Filename:     f.Name,
-				Link:         f.DownloadURL,
-				DownloadLink: f.DownloadURL,
-				Generated:    time.Now(),
-				AccountId:    "0",
-			},
-			Link: f.DownloadURL,
+			Link:      f.DownloadURL,
 		}
 		torrent.Files[file.Name] = file
 	}
@@ -233,6 +223,8 @@ func (dl *DebridLink) UpdateTorrent(t *types.Torrent) error {
 	t.OriginalFilename = name
 	t.Added = time.Unix(data.Created, 0).Format(time.RFC3339)
 	cfg := config.Get()
+	links := make(map[string]*types.DownloadLink)
+	now := time.Now()
 	for _, f := range data.Files {
 		if !cfg.IsSizeAllowed(f.Size) {
 			continue
@@ -243,17 +235,21 @@ func (dl *DebridLink) UpdateTorrent(t *types.Torrent) error {
 			Name:      f.Name,
 			Size:      f.Size,
 			Path:      f.Name,
-			DownloadLink: &types.DownloadLink{
-				Filename:     f.Name,
-				Link:         f.DownloadURL,
-				DownloadLink: f.DownloadURL,
-				Generated:    time.Now(),
-				AccountId:    "0",
-			},
-			Link: f.DownloadURL,
+			Link:      f.DownloadURL,
 		}
+		link := &types.DownloadLink{
+			Filename:     f.Name,
+			Link:         f.DownloadURL,
+			DownloadLink: f.DownloadURL,
+			Generated:    now,
+			ExpiresAt:    now.Add(dl.autoExpiresLinksAfter),
+		}
+		links[file.Link] = link
+		file.DownloadLink = link
 		t.Files[f.Name] = file
 	}
+
+	dl.accounts.SetDownloadLinks(links)
 	return nil
 }
 
@@ -290,6 +286,9 @@ func (dl *DebridLink) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
 	t.MountPath = dl.MountPath
 	t.Debrid = dl.name
 	t.Added = time.Unix(data.Created, 0).Format(time.RFC3339)
+
+	links := make(map[string]*types.DownloadLink)
+	now := time.Now()
 	for _, f := range data.Files {
 		file := types.File{
 			TorrentId: t.Id,
@@ -298,17 +297,21 @@ func (dl *DebridLink) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
 			Size:      f.Size,
 			Path:      f.Name,
 			Link:      f.DownloadURL,
-			DownloadLink: &types.DownloadLink{
-				Filename:     f.Name,
-				Link:         f.DownloadURL,
-				DownloadLink: f.DownloadURL,
-				Generated:    time.Now(),
-				AccountId:    "0",
-			},
-			Generated: time.Now(),
+			Generated: now,
 		}
+		link := &types.DownloadLink{
+			Filename:     f.Name,
+			Link:         f.DownloadURL,
+			DownloadLink: f.DownloadURL,
+			Generated:    now,
+			ExpiresAt:    now.Add(dl.autoExpiresLinksAfter),
+		}
+		links[file.Link] = link
+		file.DownloadLink = link
 		t.Files[f.Name] = file
 	}
+
+	dl.accounts.SetDownloadLinks(links)
 
 	return t, nil
 }
@@ -322,8 +325,8 @@ func (dl *DebridLink) CheckStatus(torrent *types.Torrent, isSymlink bool) (*type
 		status := torrent.Status
 		if status == "downloaded" {
 			dl.logger.Info().Msgf("Torrent: %s downloaded", torrent.Name)
-			err = dl.GenerateDownloadLinks(torrent)
-			if err != nil {
+
+			if err = dl.GetFileDownloadLinks(torrent); err != nil {
 				return torrent, err
 			}
 			break
@@ -352,25 +355,21 @@ func (dl *DebridLink) DeleteTorrent(torrentId string) error {
 	return nil
 }
 
-func (dl *DebridLink) GenerateDownloadLinks(t *types.Torrent) error {
+func (dl *DebridLink) GetFileDownloadLinks(t *types.Torrent) error {
 	// Download links are already generated
 	return nil
 }
 
-func (dl *DebridLink) GetDownloads() (map[string]types.DownloadLink, error) {
+func (dl *DebridLink) GetDownloadLinks() (map[string]*types.DownloadLink, error) {
 	return nil, nil
 }
 
 func (dl *DebridLink) GetDownloadLink(t *types.Torrent, file *types.File) (*types.DownloadLink, error) {
-	return file.DownloadLink, nil
+	return dl.accounts.GetDownloadLink(file.Link)
 }
 
 func (dl *DebridLink) GetDownloadingStatus() []string {
 	return []string{"downloading"}
-}
-
-func (dl *DebridLink) GetCheckCached() bool {
-	return dl.checkCached
 }
 
 func (dl *DebridLink) GetDownloadUncached() bool {
@@ -411,6 +410,7 @@ func (dl *DebridLink) getTorrents(page, perPage int) ([]*types.Torrent, error) {
 	}
 
 	data := *res.Value
+	links := make(map[string]*types.DownloadLink)
 
 	if len(data) == 0 {
 		return torrents, nil
@@ -433,6 +433,7 @@ func (dl *DebridLink) getTorrents(page, perPage int) ([]*types.Torrent, error) {
 			Added:            time.Unix(t.Created, 0).Format(time.RFC3339),
 		}
 		cfg := config.Get()
+		now := time.Now()
 		for _, f := range t.Files {
 			if !cfg.IsSizeAllowed(f.Size) {
 				continue
@@ -443,19 +444,23 @@ func (dl *DebridLink) getTorrents(page, perPage int) ([]*types.Torrent, error) {
 				Name:      f.Name,
 				Size:      f.Size,
 				Path:      f.Name,
-				DownloadLink: &types.DownloadLink{
-					Filename:     f.Name,
-					Link:         f.DownloadURL,
-					DownloadLink: f.DownloadURL,
-					Generated:    time.Now(),
-					AccountId:    "0",
-				},
-				Link: f.DownloadURL,
+				Link:      f.DownloadURL,
 			}
+			link := &types.DownloadLink{
+				Filename:     f.Name,
+				Link:         f.DownloadURL,
+				DownloadLink: f.DownloadURL,
+				Generated:    now,
+				ExpiresAt:    now.Add(dl.autoExpiresLinksAfter),
+			}
+			links[file.Link] = link
+			file.DownloadLink = link
 			torrent.Files[f.Name] = file
 		}
 		torrents = append(torrents, torrent)
 	}
+	dl.accounts.SetDownloadLinks(links)
+
 	return torrents, nil
 }
 
@@ -467,12 +472,6 @@ func (dl *DebridLink) GetMountPath() string {
 	return dl.MountPath
 }
 
-func (dl *DebridLink) DisableAccount(accountId string) {
-}
-
-func (dl *DebridLink) ResetActiveDownloadKeys() {
-}
-
 func (dl *DebridLink) DeleteDownloadLink(linkId string) error {
 	return nil
 }
@@ -480,4 +479,8 @@ func (dl *DebridLink) DeleteDownloadLink(linkId string) error {
 func (dl *DebridLink) GetAvailableSlots() (int, error) {
 	//TODO: Implement the logic to check available slots for DebridLink
 	return 0, fmt.Errorf("GetAvailableSlots not implemented for DebridLink")
+}
+
+func (dl *DebridLink) Accounts() *types.Accounts {
+	return dl.accounts
 }

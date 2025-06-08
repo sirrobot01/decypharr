@@ -73,7 +73,6 @@ type Cache struct {
 	logger zerolog.Logger
 
 	torrents             *torrentCache
-	downloadLinks        *downloadLinkCache
 	invalidDownloadLinks sync.Map
 	folderNaming         WebDavFolderNaming
 
@@ -90,10 +89,9 @@ type Cache struct {
 	ready chan struct{}
 
 	// config
-	workers                       int
-	torrentRefreshInterval        string
-	downloadLinksRefreshInterval  string
-	autoExpiresLinksAfterDuration time.Duration
+	workers                      int
+	torrentRefreshInterval       string
+	downloadLinksRefreshInterval string
 
 	// refresh mutex
 	downloadLinksRefreshMu sync.RWMutex // for refreshing download links
@@ -121,10 +119,6 @@ func NewDebridCache(dc config.Debrid, client types.Client) *Cache {
 		scheduler = cetSc
 	}
 
-	autoExpiresLinksAfter, err := time.ParseDuration(dc.AutoExpireLinksAfter)
-	if autoExpiresLinksAfter == 0 || err != nil {
-		autoExpiresLinksAfter = 48 * time.Hour
-	}
 	var customFolders []string
 	dirFilters := map[string][]directoryFilter{}
 	for name, value := range dc.Directories {
@@ -147,18 +141,16 @@ func NewDebridCache(dc config.Debrid, client types.Client) *Cache {
 	c := &Cache{
 		dir: filepath.Join(cfg.Path, "cache", dc.Name), // path to save cache files
 
-		torrents:                      newTorrentCache(dirFilters),
-		client:                        client,
-		logger:                        _log,
-		workers:                       dc.Workers,
-		downloadLinks:                 newDownloadLinkCache(),
-		torrentRefreshInterval:        dc.TorrentsRefreshInterval,
-		downloadLinksRefreshInterval:  dc.DownloadLinksRefreshInterval,
-		folderNaming:                  WebDavFolderNaming(dc.FolderNaming),
-		autoExpiresLinksAfterDuration: autoExpiresLinksAfter,
-		saveSemaphore:                 make(chan struct{}, 50),
-		cetScheduler:                  cetSc,
-		scheduler:                     scheduler,
+		torrents:                     newTorrentCache(dirFilters),
+		client:                       client,
+		logger:                       _log,
+		workers:                      dc.Workers,
+		torrentRefreshInterval:       dc.TorrentsRefreshInterval,
+		downloadLinksRefreshInterval: dc.DownloadLinksRefreshInterval,
+		folderNaming:                 WebDavFolderNaming(dc.FolderNaming),
+		saveSemaphore:                make(chan struct{}, 50),
+		cetScheduler:                 cetSc,
+		scheduler:                    scheduler,
 
 		config:        dc,
 		customFolders: customFolders,
@@ -201,9 +193,6 @@ func (c *Cache) Reset() {
 
 	// 1. Reset torrent storage
 	c.torrents.reset()
-
-	// 2. Reset download-link cache
-	c.downloadLinks.reset()
 
 	// 3. Clear any sync.Maps
 	c.invalidDownloadLinks = sync.Map{}
@@ -714,7 +703,7 @@ func (c *Cache) Add(t *types.Torrent) error {
 	c.setTorrent(ct, func(tor CachedTorrent) {
 		c.RefreshListings(true)
 	})
-	go c.GenerateDownloadLinks(ct)
+	go c.GetFileDownloadLinks(ct)
 	return nil
 
 }
