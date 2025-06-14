@@ -316,7 +316,7 @@ func (dl *DebridLink) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
 	return t, nil
 }
 
-func (dl *DebridLink) CheckStatus(torrent *types.Torrent, isSymlink bool) (*types.Torrent, error) {
+func (dl *DebridLink) CheckStatus(torrent *types.Torrent) (*types.Torrent, error) {
 	for {
 		err := dl.UpdateTorrent(torrent)
 		if err != nil || torrent == nil {
@@ -325,11 +325,7 @@ func (dl *DebridLink) CheckStatus(torrent *types.Torrent, isSymlink bool) (*type
 		status := torrent.Status
 		if status == "downloaded" {
 			dl.logger.Info().Msgf("Torrent: %s downloaded", torrent.Name)
-
-			if err = dl.GetFileDownloadLinks(torrent); err != nil {
-				return torrent, err
-			}
-			break
+			return torrent, nil
 		} else if utils.Contains(dl.GetDownloadingStatus(), status) {
 			if !torrent.DownloadUncached {
 				return torrent, fmt.Errorf("torrent: %s not cached", torrent.Name)
@@ -342,7 +338,6 @@ func (dl *DebridLink) CheckStatus(torrent *types.Torrent, isSymlink bool) (*type
 		}
 
 	}
-	return torrent, nil
 }
 
 func (dl *DebridLink) DeleteTorrent(torrentId string) error {

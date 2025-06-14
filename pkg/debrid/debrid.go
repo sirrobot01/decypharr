@@ -158,7 +158,7 @@ func createDebridClient(dc config.Debrid) (types.Client, error) {
 	}
 }
 
-func Process(ctx context.Context, store *Storage, selectedDebrid string, magnet *utils.Magnet, a *arr.Arr, isSymlink, overrideDownloadUncached bool) (*types.Torrent, error) {
+func Process(ctx context.Context, store *Storage, selectedDebrid string, magnet *utils.Magnet, a *arr.Arr, action string, overrideDownloadUncached bool) (*types.Torrent, error) {
 
 	debridTorrent := &types.Torrent{
 		InfoHash: magnet.InfoHash,
@@ -200,6 +200,7 @@ func Process(ctx context.Context, store *Storage, selectedDebrid string, magnet 
 			Str("Arr", a.Name).
 			Str("Hash", debridTorrent.InfoHash).
 			Str("Name", debridTorrent.Name).
+			Str("Action", action).
 			Msg("Processing torrent")
 
 		if !overrideDownloadUncached && a.DownloadUncached == nil {
@@ -215,7 +216,7 @@ func Process(ctx context.Context, store *Storage, selectedDebrid string, magnet 
 		_logger.Info().Str("id", dbt.Id).Msgf("Torrent: %s submitted to %s", dbt.Name, db.Name())
 		store.lastUsed = index
 
-		torrent, err := db.CheckStatus(dbt, isSymlink)
+		torrent, err := db.CheckStatus(dbt)
 		if err != nil && torrent != nil && torrent.Id != "" {
 			// Delete the torrent if it was not downloaded
 			go func(id string) {

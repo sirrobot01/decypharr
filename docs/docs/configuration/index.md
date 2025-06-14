@@ -23,8 +23,7 @@ Here's a minimal configuration to get started:
   },
   "repair": {
     "enabled": false,
-    "interval": "12h",
-    "run_on_start": false
+    "interval": "12h"
   },
   "use_auth": false,
   "log_level": "info"

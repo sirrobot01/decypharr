@@ -87,7 +87,7 @@ func (q *QBit) authContext(next http.Handler) http.Handler {
 		a := arrs.Get(category)
 		if a == nil {
 			downloadUncached := false
-			a = arr.New(category, "", "", false, false, &downloadUncached)
+			a = arr.New(category, "", "", false, false, &downloadUncached, "")
 		}
 		if err == nil {
 			host = strings.TrimSpace(host)

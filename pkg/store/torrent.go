@@ -16,7 +16,7 @@ import (
 
 func (s *Store) AddTorrent(ctx context.Context, importReq *ImportRequest) error {
 	torrent := createTorrentFromMagnet(importReq)
-	debridTorrent, err := debridTypes.Process(ctx, s.debrid, importReq.SelectedDebrid, importReq.Magnet, importReq.Arr, importReq.IsSymlink, importReq.DownloadUncached)
+	debridTorrent, err := debridTypes.Process(ctx, s.debrid, importReq.SelectedDebrid, importReq.Magnet, importReq.Arr, importReq.Action, importReq.DownloadUncached)
 
 	if err != nil {
 		var httpErr *utils.HTTPError
@@ -25,8 +25,8 @@ func (s *Store) AddTorrent(ctx context.Context, importReq *ImportRequest) error 
 			case "too_many_active_downloads":
 				// Handle too much active downloads error
 				s.logger.Warn().Msgf("Too many active downloads for %s, adding to queue", importReq.Magnet.Name)
-				err := s.addToQueue(importReq)
-				if err != nil {
+
+				if err := s.addToQueue(importReq); err != nil {
 					s.logger.Error().Err(err).Msgf("Failed to add %s to queue", importReq.Magnet.Name)
 					return err
 				}
@@ -65,9 +65,9 @@ func (s *Store) addToQueue(importReq *ImportRequest) error {
 	return nil
 }
 
-func (s *Store) processFromQueue(ctx context.Context, selectedDebrid string) error {
+func (s *Store) processFromQueue(ctx context.Context) error {
 	// Pop the next import request from the queue
-	importReq, err := s.importsQueue.TryPop(selectedDebrid)
+	importReq, err := s.importsQueue.Pop()
 	if err != nil {
 		return err
 	}
@@ -105,10 +105,13 @@ func (s *Store) trackAvailableSlots(ctx context.Context) {
 		availableSlots[name] = slots
 	}
 
+	if s.importsQueue.Size() <= 0 {
+		// Queue is empty, no need to process
+		return
+	}
+
 	for name, slots := range availableSlots {
-		if s.importsQueue.Size(name) <= 0 {
-			continue
-		}
+
 		s.logger.Debug().Msgf("Available slots for %s: %d", name, slots)
 		// If slots are available, process the next import request from the queue
 		for slots > 0 {
@@ -116,7 +119,7 @@ func (s *Store) trackAvailableSlots(ctx context.Context) {
 			case <-ctx.Done():
 				return // Exit if context is done
 			default:
-				if err := s.processFromQueue(ctx, name); err != nil {
+				if err := s.processFromQueue(ctx); err != nil {
 					s.logger.Error().Err(err).Msg("Error processing from queue")
 					return // Exit on error
 				}
@@ -139,7 +142,7 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 	_arr := importReq.Arr
 	for debridTorrent.Status != "downloaded" {
 		s.logger.Debug().Msgf("%s <- (%s) Download Progress: %.2f%%", debridTorrent.Debrid, debridTorrent.Name, debridTorrent.Progress)
-		dbT, err := client.CheckStatus(debridTorrent, importReq.IsSymlink)
+		dbT, err := client.CheckStatus(debridTorrent)
 		if err != nil {
 			if dbT != nil && dbT.Id != "" {
 				// Delete the torrent if it was not downloaded
@@ -174,17 +177,43 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 
 	// Check if debrid supports webdav by checking cache
 	timer := time.Now()
-	if importReq.IsSymlink {
+
+	onFailed := func(err error) {
+		if err != nil {
+			s.markTorrentAsFailed(torrent)
+			go func() {
+				_ = client.DeleteTorrent(debridTorrent.Id)
+			}()
+			s.logger.Error().Err(err).Msgf("Error occured while processing torrent %s", debridTorrent.Name)
+			importReq.markAsFailed(err, torrent, debridTorrent)
+			return
+		}
+	}
+
+	onSuccess := func(torrentSymlinkPath string) {
+		torrent.TorrentPath = torrentSymlinkPath
+		s.updateTorrent(torrent, debridTorrent)
+		s.logger.Info().Msgf("Adding %s took %s", debridTorrent.Name, time.Since(timer))
+
+		go importReq.markAsCompleted(torrent, debridTorrent) // Mark the import request as completed, send callback if needed
+		go func() {
+			if err := request.SendDiscordMessage("download_complete", "success", torrent.discordContext()); err != nil {
+				s.logger.Error().Msgf("Error sending discord message: %v", err)
+			}
+		}()
+		_arr.Refresh()
+	}
+
+	switch importReq.Action {
+	case "symlink":
+		// Symlink action, we will create a symlink to the torrent
+		s.logger.Debug().Msgf("Post-Download Action: Symlink")
 		cache := deb.Cache()
 		if cache != nil {
 			s.logger.Info().Msgf("Using internal webdav for %s", debridTorrent.Debrid)
-
 			// Use webdav to download the file
-
 			if err := cache.Add(debridTorrent); err != nil {
-				s.logger.Error().Msgf("Error adding torrent to cache: %v", err)
-				s.markTorrentAsFailed(torrent)
-				importReq.markAsFailed(err, torrent, debridTorrent)
+				onFailed(err)
 				return
 			}
 
@@ -194,31 +223,45 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 
 		} else {
 			// User is using either zurg or debrid webdav
-			torrentSymlinkPath, err = s.processSymlink(torrent) // /mnt/symlinks/{category}/MyTVShow/
+			torrentSymlinkPath, err = s.processSymlink(torrent, debridTorrent) // /mnt/symlinks/{category}/MyTVShow/
 		}
-	} else {
-		torrentSymlinkPath, err = s.processDownload(torrent)
-	}
-	if err != nil {
-		s.markTorrentAsFailed(torrent)
-		go func() {
-			_ = client.DeleteTorrent(debridTorrent.Id)
-		}()
-		s.logger.Error().Err(err).Msgf("Error occured while processing torrent %s", debridTorrent.Name)
-		importReq.markAsFailed(err, torrent, debridTorrent)
+		if err != nil {
+			onFailed(err)
+			return
+		}
+		if torrentSymlinkPath == "" {
+			err = fmt.Errorf("symlink path is empty for %s", debridTorrent.Name)
+			onFailed(err)
+		}
+		onSuccess(torrentSymlinkPath)
 		return
-	}
-	torrent.TorrentPath = torrentSymlinkPath
-	s.updateTorrent(torrent, debridTorrent)
-	s.logger.Info().Msgf("Adding %s took %s", debridTorrent.Name, time.Since(timer))
-
-	go importReq.markAsCompleted(torrent, debridTorrent) // Mark the import request as completed, send callback if needed
-	go func() {
-		if err := request.SendDiscordMessage("download_complete", "success", torrent.discordContext()); err != nil {
-			s.logger.Error().Msgf("Error sending discord message: %v", err)
+	case "download":
+		// Download action, we will download the torrent to the specified folder
+		// Generate download links
+		s.logger.Debug().Msgf("Post-Download Action: Download")
+		if err := client.GetFileDownloadLinks(debridTorrent); err != nil {
+			onFailed(err)
+			return
 		}
-	}()
-	_arr.Refresh()
+		s.logger.Debug().Msgf("Download Post-Download Action")
+		torrentSymlinkPath, err = s.processDownload(torrent, debridTorrent)
+		if err != nil {
+			onFailed(err)
+			return
+		}
+		if torrentSymlinkPath == "" {
+			err = fmt.Errorf("download path is empty for %s", debridTorrent.Name)
+			onFailed(err)
+			return
+		}
+		onSuccess(torrentSymlinkPath)
+	case "none":
+		s.logger.Debug().Msgf("Post-Download Action: None")
+		// No action, just update the torrent and mark it as completed
+		onSuccess(torrent.TorrentPath)
+	default:
+		// Action is none, do nothing, fallthrough
+	}
 }
 
 func (s *Store) markTorrentAsFailed(t *Torrent) *Torrent {
@@ -253,10 +296,18 @@ func (s *Store) partialTorrentUpdate(t *Torrent, debridTorrent *types.Torrent) *
 	if speed != 0 {
 		eta = int((totalSize - sizeCompleted) / speed)
 	}
-	t.ID = debridTorrent.Id
+	files := make([]*File, 0, len(debridTorrent.Files))
+	for index, file := range debridTorrent.GetFiles() {
+		files = append(files, &File{
+			Index: index,
+			Name:  file.Path,
+			Size:  file.Size,
+		})
+	}
+	t.DebridID = debridTorrent.Id
 	t.Name = debridTorrent.Name
 	t.AddedOn = addedOn.Unix()
-	t.DebridTorrent = debridTorrent
+	t.Files = files
 	t.Debrid = debridTorrent.Debrid
 	t.Size = totalSize
 	t.Completed = sizeCompleted

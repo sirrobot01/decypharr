@@ -468,7 +468,7 @@ func (r *RealDebrid) UpdateTorrent(t *types.Torrent) error {
 	return nil
 }
 
-func (r *RealDebrid) CheckStatus(t *types.Torrent, isSymlink bool) (*types.Torrent, error) {
+func (r *RealDebrid) CheckStatus(t *types.Torrent) (*types.Torrent, error) {
 	url := fmt.Sprintf("%s/torrents/info/%s", r.Host, t.Id)
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
 	for {
@@ -525,12 +525,7 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent, isSymlink bool) (*types.Torre
 			}
 
 			r.logger.Info().Msgf("Torrent: %s downloaded to RD", t.Name)
-			if !isSymlink {
-				if err = r.GetFileDownloadLinks(t); err != nil {
-					return t, err
-				}
-			}
-			break
+			return t, nil
 		} else if utils.Contains(r.GetDownloadingStatus(), status) {
 			if !t.DownloadUncached {
 				return t, fmt.Errorf("torrent: %s not cached", t.Name)
@@ -541,7 +536,6 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent, isSymlink bool) (*types.Torre
 		}
 
 	}
-	return t, nil
 }
 
 func (r *RealDebrid) DeleteTorrent(torrentId string) error {
@@ -555,63 +549,55 @@ func (r *RealDebrid) DeleteTorrent(torrentId string) error {
 }
 
 func (r *RealDebrid) GetFileDownloadLinks(t *types.Torrent) error {
-	filesCh := make(chan types.File, len(t.Files))
-	errCh := make(chan error, len(t.Files))
-	linksCh := make(chan *types.DownloadLink)
-
 	var wg sync.WaitGroup
-	wg.Add(len(t.Files))
-	for _, f := range t.Files {
+	var mu sync.Mutex
+	var firstErr error
+
+	files := make(map[string]types.File)
+	links := make(map[string]*types.DownloadLink)
+
+	_files := t.GetFiles()
+	wg.Add(len(_files))
+
+	for _, f := range _files {
 		go func(file types.File) {
 			defer wg.Done()
 
 			link, err := r.GetDownloadLink(t, &file)
 			if err != nil {
-				errCh <- err
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
 				return
 			}
 			if link == nil {
-				errCh <- fmt.Errorf("realdebrid API error: download link not found for file %s", file.Name)
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("realdebrid API error: download link not found for file %s", file.Name)
+				}
+				mu.Unlock()
 				return
 			}
-			linksCh <- link
+
 			file.DownloadLink = link
-			filesCh <- file
+
+			mu.Lock()
+			files[file.Name] = file
+			links[link.Link] = link
+			mu.Unlock()
 		}(f)
 	}
 
-	go func() {
-		wg.Wait()
-		close(filesCh)
-		close(linksCh)
-		close(errCh)
-	}()
+	wg.Wait()
 
-	// Collect results
-	files := make(map[string]types.File, len(t.Files))
-	for file := range filesCh {
-		files[file.Name] = file
-	}
-
-	// Collect download links
-	links := make(map[string]*types.DownloadLink)
-	for link := range linksCh {
-		if link == nil {
-			continue
-		}
-		links[link.Link] = link
+	if firstErr != nil {
+		return firstErr
 	}
 
 	// Add links to cache
 	r.accounts.SetDownloadLinks(links)
-
-	// Check for errors
-	for err := range errCh {
-		if err != nil {
-			return err // Return the first error encountered
-		}
-	}
-
 	t.Files = files
 	return nil
 }

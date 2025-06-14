@@ -13,14 +13,14 @@ import (
 )
 
 // All torrent-related helpers goes here
-func (q *QBit) addMagnet(ctx context.Context, url string, arr *arr.Arr, debrid string, isSymlink bool) error {
+func (q *QBit) addMagnet(ctx context.Context, url string, arr *arr.Arr, debrid string, action string) error {
 	magnet, err := utils.GetMagnetFromUrl(url)
 	if err != nil {
 		return fmt.Errorf("error parsing magnet link: %w", err)
 	}
 	_store := store.Get()
 
-	importReq := store.NewImportRequest(debrid, q.DownloadFolder, magnet, arr, isSymlink, false, "", store.ImportTypeQBitTorrent)
+	importReq := store.NewImportRequest(debrid, q.DownloadFolder, magnet, arr, action, false, "", store.ImportTypeQBitTorrent)
 
 	err = _store.AddTorrent(ctx, importReq)
 	if err != nil {
@@ -29,7 +29,7 @@ func (q *QBit) addMagnet(ctx context.Context, url string, arr *arr.Arr, debrid s
 	return nil
 }
 
-func (q *QBit) addTorrent(ctx context.Context, fileHeader *multipart.FileHeader, arr *arr.Arr, debrid string, isSymlink bool) error {
+func (q *QBit) addTorrent(ctx context.Context, fileHeader *multipart.FileHeader, arr *arr.Arr, debrid string, action string) error {
 	file, _ := fileHeader.Open()
 	defer file.Close()
 	var reader io.Reader = file
@@ -38,7 +38,7 @@ func (q *QBit) addTorrent(ctx context.Context, fileHeader *multipart.FileHeader,
 		return fmt.Errorf("error reading file: %s \n %w", fileHeader.Filename, err)
 	}
 	_store := store.Get()
-	importReq := store.NewImportRequest(debrid, q.DownloadFolder, magnet, arr, isSymlink, false, "", store.ImportTypeQBitTorrent)
+	importReq := store.NewImportRequest(debrid, q.DownloadFolder, magnet, arr, action, false, "", store.ImportTypeQBitTorrent)
 	err = _store.AddTorrent(ctx, importReq)
 	if err != nil {
 		return fmt.Errorf("failed to process torrent: %w", err)
@@ -81,20 +81,6 @@ func (q *QBit) GetTorrentProperties(t *store.Torrent) *TorrentProperties {
 		Seeds:                  100,
 		ShareRatio:             100,
 	}
-}
-
-func (q *QBit) getTorrentFiles(t *store.Torrent) []*TorrentFile {
-	files := make([]*TorrentFile, 0)
-	if t.DebridTorrent == nil {
-		return files
-	}
-	for _, file := range t.DebridTorrent.GetFiles() {
-		files = append(files, &TorrentFile{
-			Name: file.Path,
-			Size: file.Size,
-		})
-	}
-	return files
 }
 
 func (q *QBit) setTorrentTags(t *store.Torrent, tags []string) bool {

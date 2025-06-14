@@ -127,7 +127,7 @@ func (f *File) stream() (*http.Response, error) {
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		f.downloadLink = ""
 
-		cleanupResp := func() {
+		cleanupResp := func(resp *http.Response) {
 			if resp.Body != nil {
 				_, _ = io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
@@ -138,7 +138,7 @@ func (f *File) stream() (*http.Response, error) {
 		case http.StatusServiceUnavailable:
 			// Read the body to check for specific error messages
 			body, readErr := io.ReadAll(resp.Body)
-			resp.Body.Close()
+			cleanupResp(resp)
 
 			if readErr != nil {
 				_log.Trace().Msgf("Failed to read response body: %v", readErr)
@@ -156,10 +156,10 @@ func (f *File) stream() (*http.Response, error) {
 			return nil, fmt.Errorf("service unavailable: %s", bodyStr)
 
 		case http.StatusNotFound:
-			cleanupResp()
+			cleanupResp(resp)
 			// Mark download link as not found
 			// Regenerate a new download link
-			_log.Trace().Msgf("File not found (404) for %s. Marking link as invalid and regenerating", f.name)
+			_log.Trace().Msgf("Link not found (404) for %s. Marking link as invalid and regenerating", f.name)
 			f.cache.MarkDownloadLinkAsInvalid(f.link, downloadLink, "link_not_found")
 			// Generate a new download link
 			downloadLink, err := f.getDownloadLink()
@@ -191,16 +191,9 @@ func (f *File) stream() (*http.Response, error) {
 			}
 
 			if newResp.StatusCode != http.StatusOK && newResp.StatusCode != http.StatusPartialContent {
-				cleanupBody := func() {
-					if newResp.Body != nil {
-						_, _ = io.Copy(io.Discard, newResp.Body)
-						newResp.Body.Close()
-					}
-				}
-
-				cleanupBody()
+				cleanupResp(newResp)
 				_log.Trace().Msgf("Regenerated link also failed with status %d", newResp.StatusCode)
-				f.cache.MarkDownloadLinkAsInvalid(f.link, downloadLink, "link_not_found")
+				f.cache.MarkDownloadLinkAsInvalid(f.link, downloadLink, newResp.Status)
 				return nil, fmt.Errorf("failed with status code %d even after link regeneration", newResp.StatusCode)
 			}
 
@@ -208,7 +201,7 @@ func (f *File) stream() (*http.Response, error) {
 
 		default:
 			body, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
+			cleanupResp(resp)
 
 			_log.Trace().Msgf("Unexpected status code %d for %s: %s", resp.StatusCode, f.name, string(body))
 			return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))

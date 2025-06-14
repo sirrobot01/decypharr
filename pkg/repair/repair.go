@@ -32,7 +32,6 @@ type Repair struct {
 	arrs        *arr.Storage
 	deb         *debrid.Storage
 	interval    string
-	runOnStart  bool
 	ZurgURL     string
 	IsZurg      bool
 	useWebdav   bool
@@ -86,7 +85,6 @@ func New(arrs *arr.Storage, engine *debrid.Storage) *Repair {
 		arrs:        arrs,
 		logger:      logger.New("repair"),
 		interval:    cfg.Repair.Interval,
-		runOnStart:  cfg.Repair.RunOnStart,
 		ZurgURL:     cfg.Repair.ZurgURL,
 		useWebdav:   cfg.Repair.UseWebDav,
 		autoProcess: cfg.Repair.AutoProcess,
@@ -121,15 +119,6 @@ func (r *Repair) Reset() {
 }
 
 func (r *Repair) Start(ctx context.Context) error {
-	//r.ctx = ctx
-	if r.runOnStart {
-		r.logger.Info().Msgf("Running initial repair")
-		go func() {
-			if err := r.AddJob([]string{}, []string{}, r.autoProcess, true); err != nil {
-				r.logger.Error().Err(err).Msg("Error running initial repair")
-			}
-		}()
-	}
 
 	r.scheduler, _ = gocron.NewScheduler(gocron.WithLocation(time.Local))
 

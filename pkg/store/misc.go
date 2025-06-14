@@ -10,7 +10,7 @@ func createTorrentFromMagnet(req *ImportRequest) *Torrent {
 	magnet := req.Magnet
 	arrName := req.Arr.Name
 	torrent := &Torrent{
-		ID:        "",
+		ID:        req.Id,
 		Hash:      strings.ToLower(magnet.InfoHash),
 		Name:      magnet.Name,
 		Size:      magnet.Size,

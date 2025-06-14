@@ -56,8 +56,7 @@ Loop:
 	return resp.Err()
 }
 
-func (s *Store) processDownload(torrent *Torrent) (string, error) {
-	debridTorrent := torrent.DebridTorrent
+func (s *Store) processDownload(torrent *Torrent, debridTorrent *types.Torrent) (string, error) {
 	s.logger.Info().Msgf("Downloading %d files...", len(debridTorrent.Files))
 	torrentPath := filepath.Join(torrent.SavePath, utils.RemoveExtension(debridTorrent.OriginalFilename))
 	torrentPath = utils.RemoveInvalidChars(torrentPath)
@@ -66,12 +65,11 @@ func (s *Store) processDownload(torrent *Torrent) (string, error) {
 		// add the previous error to the error and return
 		return "", fmt.Errorf("failed to create directory: %s: %v", torrentPath, err)
 	}
-	s.downloadFiles(torrent, torrentPath)
+	s.downloadFiles(torrent, debridTorrent, torrentPath)
 	return torrentPath, nil
 }
 
-func (s *Store) downloadFiles(torrent *Torrent, parent string) {
-	debridTorrent := torrent.DebridTorrent
+func (s *Store) downloadFiles(torrent *Torrent, debridTorrent *types.Torrent, parent string) {
 	var wg sync.WaitGroup
 
 	totalSize := int64(0)
@@ -151,8 +149,7 @@ func (s *Store) downloadFiles(torrent *Torrent, parent string) {
 	s.logger.Info().Msgf("Downloaded all files for %s", debridTorrent.Name)
 }
 
-func (s *Store) processSymlink(torrent *Torrent) (string, error) {
-	debridTorrent := torrent.DebridTorrent
+func (s *Store) processSymlink(torrent *Torrent, debridTorrent *types.Torrent) (string, error) {
 	files := debridTorrent.Files
 	if len(files) == 0 {
 		return "", fmt.Errorf("no video files found")

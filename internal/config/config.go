@@ -53,12 +53,12 @@ type Arr struct {
 	Cleanup          bool   `json:"cleanup,omitempty"`
 	SkipRepair       bool   `json:"skip_repair,omitempty"`
 	DownloadUncached *bool  `json:"download_uncached,omitempty"`
+	SelectedDebrid   string `json:"selected_debrid,omitempty"`
 }
 
 type Repair struct {
 	Enabled     bool   `json:"enabled,omitempty"`
 	Interval    string `json:"interval,omitempty"`
-	RunOnStart  bool   `json:"run_on_start,omitempty"`
 	ZurgURL     string `json:"zurg_url,omitempty"`
 	AutoProcess bool   `json:"auto_process,omitempty"`
 	UseWebDav   bool   `json:"use_webdav,omitempty"`

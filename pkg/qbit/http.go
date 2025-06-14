@@ -88,12 +88,15 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isSymlink := strings.ToLower(r.FormValue("sequentialDownload")) != "true"
+	action := "symlink"
+	if strings.ToLower(r.FormValue("sequentialDownload")) != "true" {
+		action = "download"
+	}
 	debridName := r.FormValue("debrid")
 	category := r.FormValue("category")
 	_arr := getArr(ctx)
 	if _arr == nil {
-		_arr = arr.New(category, "", "", false, false, nil)
+		_arr = arr.New(category, "", "", false, false, nil, "")
 	}
 	atleastOne := false
 
@@ -104,7 +107,7 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 			urlList = append(urlList, strings.TrimSpace(u))
 		}
 		for _, url := range urlList {
-			if err := q.addMagnet(ctx, url, _arr, debridName, isSymlink); err != nil {
+			if err := q.addMagnet(ctx, url, _arr, debridName, action); err != nil {
 				q.logger.Error().Err(err).Msgf("Error adding magnet")
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
@@ -117,7 +120,7 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 	if r.MultipartForm != nil && r.MultipartForm.File != nil {
 		if files := r.MultipartForm.File["torrents"]; len(files) > 0 {
 			for _, fileHeader := range files {
-				if err := q.addTorrent(ctx, fileHeader, _arr, debridName, isSymlink); err != nil {
+				if err := q.addTorrent(ctx, fileHeader, _arr, debridName, action); err != nil {
 					q.logger.Error().Err(err).Msgf("Error adding torrent")
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
@@ -241,8 +244,7 @@ func (q *QBit) handleTorrentFiles(w http.ResponseWriter, r *http.Request) {
 	if torrent == nil {
 		return
 	}
-	files := q.getTorrentFiles(torrent)
-	request.JSONResponse(w, files, http.StatusOK)
+	request.JSONResponse(w, torrent.Files, http.StatusOK)
 }
 
 func (q *QBit) handleSetCategory(w http.ResponseWriter, r *http.Request) {

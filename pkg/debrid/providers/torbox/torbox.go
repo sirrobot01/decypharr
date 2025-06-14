@@ -312,7 +312,7 @@ func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
 	return nil
 }
 
-func (tb *Torbox) CheckStatus(torrent *types.Torrent, isSymlink bool) (*types.Torrent, error) {
+func (tb *Torbox) CheckStatus(torrent *types.Torrent) (*types.Torrent, error) {
 	for {
 		err := tb.UpdateTorrent(torrent)
 
@@ -322,12 +322,7 @@ func (tb *Torbox) CheckStatus(torrent *types.Torrent, isSymlink bool) (*types.To
 		status := torrent.Status
 		if status == "downloaded" {
 			tb.logger.Info().Msgf("Torrent: %s downloaded", torrent.Name)
-			if !isSymlink {
-				if err = tb.GetFileDownloadLinks(torrent); err != nil {
-					return torrent, err
-				}
-			}
-			break
+			return torrent, nil
 		} else if utils.Contains(tb.GetDownloadingStatus(), status) {
 			if !torrent.DownloadUncached {
 				return torrent, fmt.Errorf("torrent: %s not cached", torrent.Name)
@@ -340,7 +335,6 @@ func (tb *Torbox) CheckStatus(torrent *types.Torrent, isSymlink bool) (*types.To
 		}
 
 	}
-	return torrent, nil
 }
 
 func (tb *Torbox) DeleteTorrent(torrentId string) error {

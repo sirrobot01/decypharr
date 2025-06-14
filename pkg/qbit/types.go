@@ -202,17 +202,6 @@ type TorrentProperties struct {
 	UpSpeedAvg             int    `json:"up_speed_avg,omitempty"`
 }
 
-type TorrentFile struct {
-	Index        int     `json:"index,omitempty"`
-	Name         string  `json:"name,omitempty"`
-	Size         int64   `json:"size,omitempty"`
-	Progress     int     `json:"progress,omitempty"`
-	Priority     int     `json:"priority,omitempty"`
-	IsSeed       bool    `json:"is_seed,omitempty"`
-	PieceRange   []int   `json:"piece_range,omitempty"`
-	Availability float64 `json:"availability,omitempty"`
-}
-
 func getAppPreferences() *AppPreferences {
 	preferences := &AppPreferences{
 		AddTrackers:                        "",

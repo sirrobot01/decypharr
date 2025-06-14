@@ -34,10 +34,11 @@ type Arr struct {
 	Cleanup          bool   `json:"cleanup"`
 	SkipRepair       bool   `json:"skip_repair"`
 	DownloadUncached *bool  `json:"download_uncached"`
+	SelectedDebrid   string `json:"selected_debrid,omitempty"` // The debrid service selected for this arr
 	client           *request.Client
 }
 
-func New(name, host, token string, cleanup, skipRepair bool, downloadUncached *bool) *Arr {
+func New(name, host, token string, cleanup, skipRepair bool, downloadUncached *bool, selectedDebrid string) *Arr {
 	return &Arr{
 		Name:             name,
 		Host:             host,
@@ -47,6 +48,7 @@ func New(name, host, token string, cleanup, skipRepair bool, downloadUncached *b
 		SkipRepair:       skipRepair,
 		DownloadUncached: downloadUncached,
 		client:           request.New(),
+		SelectedDebrid:   selectedDebrid,
 	}
 }
 
@@ -145,7 +147,7 @@ func NewStorage() *Storage {
 	arrs := make(map[string]*Arr)
 	for _, a := range config.Get().Arrs {
 		name := a.Name
-		arrs[name] = New(name, a.Host, a.Token, a.Cleanup, a.SkipRepair, a.DownloadUncached)
+		arrs[name] = New(name, a.Host, a.Token, a.Cleanup, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid)
 	}
 	return &Storage{
 		Arrs:   arrs,

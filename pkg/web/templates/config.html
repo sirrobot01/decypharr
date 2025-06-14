@@ -281,13 +281,6 @@
                                 </div>
                                 <div class="col-md-4 mb-3">
                                     <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" name="repair.run_on_start" id="repair.run_on_start">
-                                        <label class="form-check-label" for="repair.run_on_start">Run on Start</label>
-                                    </div>
-                                    <small class="form-text text-muted">Run repair on startup</small>
-                                </div>
-                                <div class="col-md-4 mb-3">
-                                    <div class="form-check">
                                         <input type="checkbox" class="form-check-input" name="repair.auto_process" id="repair.auto_process">
                                         <label class="form-check-label" for="repair.auto_process">Auto Process</label>
                                     </div>
@@ -650,6 +643,15 @@
             </div>
         </div>
         <div class="row">
+            <div class="col-md-4 mb-3">
+                <select class="form-select" name="arr[${index}].selected_debrid" id="arr[${index}].selected_debrid">
+                    <option value="" selected disabled>Select Arr Debrid</option>
+                    <option value="realdebrid">Real Debrid</option>
+                    <option value="alldebrid">AllDebrid</option>
+                    <option value="debrid_link">Debrid Link</option>
+                    <option value="torbox">Torbox</option>
+                </select>
+            </div>
             <div class="col-md-2 mb-3">
                 <div class="form-check">
                     <label for="arr[${index}].cleanup" class="form-check-label">Cleanup Queue</label>
@@ -1068,7 +1070,6 @@
                 repair: {
                     enabled: document.querySelector('[name="repair.enabled"]').checked,
                     interval: document.querySelector('[name="repair.interval"]').value,
-                    run_on_start: document.querySelector('[name="repair.run_on_start"]').checked,
                     zurg_url: document.querySelector('[name="repair.zurg_url"]').value,
                     workers: parseInt(document.querySelector('[name="repair.workers"]').value),
                     use_webdav: document.querySelector('[name="repair.use_webdav"]').checked,
@@ -1149,7 +1150,8 @@
                     token: document.querySelector(`[name="arr[${i}].token"]`).value,
                     cleanup: document.querySelector(`[name="arr[${i}].cleanup"]`).checked,
                     skip_repair: document.querySelector(`[name="arr[${i}].skip_repair"]`).checked,
-                    download_uncached: document.querySelector(`[name="arr[${i}].download_uncached"]`).checked
+                    download_uncached: document.querySelector(`[name="arr[${i}].download_uncached"]`).checked,
+                    selectedDebrid: document.querySelector(`[name="arr[${i}].selected_debrid"]`).value
                 };
 
                 if (arr.name && arr.host) {

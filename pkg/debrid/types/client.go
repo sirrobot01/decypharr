@@ -6,7 +6,7 @@ import (
 
 type Client interface {
 	SubmitMagnet(tr *Torrent) (*Torrent, error)
-	CheckStatus(tr *Torrent, isSymlink bool) (*Torrent, error)
+	CheckStatus(tr *Torrent) (*Torrent, error)
 	GetFileDownloadLinks(tr *Torrent) error
 	GetDownloadLink(tr *Torrent, file *File) (*DownloadLink, error)
 	DeleteTorrent(torrentId string) error

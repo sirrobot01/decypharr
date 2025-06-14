@@ -259,7 +259,7 @@ func (ad *AllDebrid) UpdateTorrent(t *types.Torrent) error {
 	return nil
 }
 
-func (ad *AllDebrid) CheckStatus(torrent *types.Torrent, isSymlink bool) (*types.Torrent, error) {
+func (ad *AllDebrid) CheckStatus(torrent *types.Torrent) (*types.Torrent, error) {
 	for {
 		err := ad.UpdateTorrent(torrent)
 
@@ -269,13 +269,7 @@ func (ad *AllDebrid) CheckStatus(torrent *types.Torrent, isSymlink bool) (*types
 		status := torrent.Status
 		if status == "downloaded" {
 			ad.logger.Info().Msgf("Torrent: %s downloaded", torrent.Name)
-			if !isSymlink {
-
-				if err = ad.GetFileDownloadLinks(torrent); err != nil {
-					return torrent, err
-				}
-			}
-			break
+			return torrent, nil
 		} else if utils.Contains(ad.GetDownloadingStatus(), status) {
 			if !torrent.DownloadUncached {
 				return torrent, fmt.Errorf("torrent: %s not cached", torrent.Name)
@@ -288,7 +282,6 @@ func (ad *AllDebrid) CheckStatus(torrent *types.Torrent, isSymlink bool) (*types
 		}
 
 	}
-	return torrent, nil
 }
 
 func (ad *AllDebrid) DeleteTorrent(torrentId string) error {

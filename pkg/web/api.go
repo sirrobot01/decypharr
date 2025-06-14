@@ -33,7 +33,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 	errs := make([]string, 0)
 
 	arrName := r.FormValue("arr")
-	notSymlink := r.FormValue("notSymlink") == "true"
+	action := r.FormValue("action")
 	debridName := r.FormValue("debrid")
 	callbackUrl := r.FormValue("callbackUrl")
 	downloadFolder := r.FormValue("downloadFolder")
@@ -45,7 +45,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 
 	_arr := _store.Arr().Get(arrName)
 	if _arr == nil {
-		_arr = arr.New(arrName, "", "", false, false, &downloadUncached)
+		_arr = arr.New(arrName, "", "", false, false, &downloadUncached, "")
 	}
 
 	// Handle URLs
@@ -64,7 +64,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			importReq := store.NewImportRequest(debridName, downloadFolder, magnet, _arr, !notSymlink, downloadUncached, callbackUrl, store.ImportTypeAPI)
+			importReq := store.NewImportRequest(debridName, downloadFolder, magnet, _arr, action, downloadUncached, callbackUrl, store.ImportTypeAPI)
 			if err := _store.AddTorrent(ctx, importReq); err != nil {
 				wb.logger.Error().Err(err).Str("url", url).Msg("Failed to add torrent")
 				errs = append(errs, fmt.Sprintf("URL %s: %v", url, err))
@@ -89,7 +89,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			importReq := store.NewImportRequest(debridName, downloadFolder, magnet, _arr, !notSymlink, downloadUncached, callbackUrl, store.ImportTypeAPI)
+			importReq := store.NewImportRequest(debridName, downloadFolder, magnet, _arr, action, downloadUncached, callbackUrl, store.ImportTypeAPI)
 			err = _store.AddTorrent(ctx, importReq)
 			if err != nil {
 				wb.logger.Error().Err(err).Str("file", fileHeader.Filename).Msg("Failed to add torrent")
@@ -251,6 +251,7 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 			Cleanup:          a.Cleanup,
 			SkipRepair:       a.SkipRepair,
 			DownloadUncached: a.DownloadUncached,
+			SelectedDebrid:   a.SelectedDebrid,
 		})
 	}
 	currentConfig.Arrs = updatedConfig.Arrs

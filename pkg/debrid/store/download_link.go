@@ -34,8 +34,6 @@ func (c *Cache) GetDownloadLink(torrentName, filename, fileLink string) (string,
 	// Check link cache
 	if dl, err := c.checkDownloadLink(fileLink); dl != "" && err == nil {
 		return dl, nil
-	} else {
-		c.logger.Trace().Msgf("Download link check failed: %v", err)
 	}
 
 	if req, inFlight := c.downloadLinkRequests.Load(fileLink); inFlight {
@@ -50,6 +48,13 @@ func (c *Cache) GetDownloadLink(torrentName, filename, fileLink string) (string,
 
 	dl, err := c.fetchDownloadLink(torrentName, filename, fileLink)
 	if err != nil {
+		req.Complete("", err)
+		c.downloadLinkRequests.Delete(fileLink)
+		return "", err
+	}
+
+	if dl == nil || dl.DownloadLink == "" {
+		err = fmt.Errorf("download link is empty for %s in torrent %s", filename, torrentName)
 		req.Complete("", err)
 		c.downloadLinkRequests.Delete(fileLink)
 		return "", err

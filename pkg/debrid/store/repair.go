@@ -90,18 +90,25 @@ func (c *Cache) GetBrokenFiles(t *CachedTorrent, filenames []string) []string {
 
 	files = t.Files
 
+	var wg sync.WaitGroup
+
+	wg.Add(len(files))
+
 	for _, f := range files {
 		// Check if file link is still missing
-		if f.Link == "" {
-			brokenFiles = append(brokenFiles, f.Name)
-		} else {
-			// Check if file.Link not in the downloadLink Cache
-			if err := c.client.CheckLink(f.Link); err != nil {
-				if errors.Is(err, utils.HosterUnavailableError) {
-					brokenFiles = append(brokenFiles, f.Name)
+		go func(f types.File) {
+			defer wg.Done()
+			if f.Link == "" {
+				brokenFiles = append(brokenFiles, f.Name)
+			} else {
+				// Check if file.Link not in the downloadLink Cache
+				if err := c.client.CheckLink(f.Link); err != nil {
+					if errors.Is(err, utils.HosterUnavailableError) {
+						brokenFiles = append(brokenFiles, f.Name)
+					}
 				}
 			}
-		}
+		}(f)
 	}
 
 	// Try to reinsert the torrent if it's broken
@@ -202,7 +209,7 @@ func (c *Cache) reInsertTorrent(ct *CachedTorrent) (*CachedTorrent, error) {
 		return ct, fmt.Errorf("failed to submit magnet: empty torrent")
 	}
 	newTorrent.DownloadUncached = false // Set to false, avoid re-downloading
-	newTorrent, err = c.client.CheckStatus(newTorrent, true)
+	newTorrent, err = c.client.CheckStatus(newTorrent)
 	if err != nil {
 		if newTorrent != nil && newTorrent.Id != "" {
 			// Delete the torrent if it was not downloaded
