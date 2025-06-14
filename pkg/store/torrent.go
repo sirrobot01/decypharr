@@ -243,7 +243,6 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 			onFailed(err)
 			return
 		}
-		s.logger.Debug().Msgf("Download Post-Download Action")
 		torrentSymlinkPath, err = s.processDownload(torrent, debridTorrent)
 		if err != nil {
 			onFailed(err)

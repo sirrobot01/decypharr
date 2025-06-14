@@ -89,7 +89,7 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 	}
 
 	action := "symlink"
-	if strings.ToLower(r.FormValue("sequentialDownload")) != "true" {
+	if strings.ToLower(r.FormValue("sequentialDownload")) == "true" {
 		action = "download"
 	}
 	debridName := r.FormValue("debrid")
