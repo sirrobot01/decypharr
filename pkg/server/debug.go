@@ -110,7 +110,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		cache, ok := caches[debridName]
 		if ok {
 			// Get torrent data
-			profile.LibrarySize = len(cache.GetTorrents())
+			profile.LibrarySize = cache.TotalTorrents()
 			profile.BadTorrents = len(cache.GetListing("__bad__"))
 			profile.ActiveLinks = cache.GetTotalActiveDownloadLinks()
 

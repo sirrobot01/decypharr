@@ -552,6 +552,10 @@ func (c *Cache) GetTorrents() map[string]CachedTorrent {
 	return c.torrents.getAll()
 }
 
+func (c *Cache) TotalTorrents() int {
+	return c.torrents.getAllCount()
+}
+
 func (c *Cache) GetTorrentByName(name string) *CachedTorrent {
 	if torrent, ok := c.torrents.getByName(name); ok {
 		return &torrent

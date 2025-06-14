@@ -293,6 +293,8 @@ func (r *Repair) StopJob(id string) error {
 		go func() {
 			if job.Status == JobStarted || job.Status == JobProcessing {
 				job.Status = JobCancelled
+				job.BrokenItems = nil
+				job.ctx = nil // Clear context to prevent further processing
 				job.CompletedAt = time.Now()
 				job.Error = "Job was cancelled by user"
 				r.saveToFile()

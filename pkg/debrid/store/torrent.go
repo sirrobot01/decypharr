@@ -40,13 +40,22 @@ type directoryFilter struct {
 	ageThreshold  time.Duration  // only for last_added
 }
 
+type torrents struct {
+	sync.RWMutex
+	byID   map[string]CachedTorrent
+	byName map[string]CachedTorrent
+}
+
+type folders struct {
+	sync.RWMutex
+	listing map[string][]os.FileInfo // folder name to file listing
+}
+
 type torrentCache struct {
-	mu                 sync.Mutex
-	byID               map[string]CachedTorrent
-	byName             map[string]CachedTorrent
+	torrents torrents
+
 	listing            atomic.Value
-	folderListing      map[string][]os.FileInfo
-	folderListingMu    sync.RWMutex
+	folders            folders
 	directoriesFilters map[string][]directoryFilter
 	sortNeeded         atomic.Bool
 }
@@ -62,9 +71,13 @@ type sortableFile struct {
 func newTorrentCache(dirFilters map[string][]directoryFilter) *torrentCache {
 
 	tc := &torrentCache{
-		byID:               make(map[string]CachedTorrent),
-		byName:             make(map[string]CachedTorrent),
-		folderListing:      make(map[string][]os.FileInfo),
+		torrents: torrents{
+			byID:   make(map[string]CachedTorrent),
+			byName: make(map[string]CachedTorrent),
+		},
+		folders: folders{
+			listing: make(map[string][]os.FileInfo),
+		},
 		directoriesFilters: dirFilters,
 	}
 
@@ -74,41 +87,42 @@ func newTorrentCache(dirFilters map[string][]directoryFilter) *torrentCache {
 }
 
 func (tc *torrentCache) reset() {
-	tc.mu.Lock()
-	tc.byID = make(map[string]CachedTorrent)
-	tc.byName = make(map[string]CachedTorrent)
-	tc.mu.Unlock()
+	tc.torrents.Lock()
+	tc.torrents.byID = make(map[string]CachedTorrent)
+	tc.torrents.byName = make(map[string]CachedTorrent)
+	tc.torrents.Unlock()
 
 	// reset the sorted listing
 	tc.sortNeeded.Store(false)
 	tc.listing.Store(make([]os.FileInfo, 0))
 
 	// reset any per-folder views
-	tc.folderListingMu.Lock()
-	tc.folderListing = make(map[string][]os.FileInfo)
-	tc.folderListingMu.Unlock()
+	tc.folders.Lock()
+	tc.folders.listing = make(map[string][]os.FileInfo)
+	tc.folders.Unlock()
 }
 
 func (tc *torrentCache) getByID(id string) (CachedTorrent, bool) {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-	torrent, exists := tc.byID[id]
+	tc.torrents.RLock()
+	defer tc.torrents.RUnlock()
+	torrent, exists := tc.torrents.byID[id]
 	return torrent, exists
 }
 
 func (tc *torrentCache) getByName(name string) (CachedTorrent, bool) {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-	torrent, exists := tc.byName[name]
+	tc.torrents.RLock()
+	defer tc.torrents.RUnlock()
+	torrent, exists := tc.torrents.byName[name]
 	return torrent, exists
 }
 
 func (tc *torrentCache) set(name string, torrent, newTorrent CachedTorrent) {
-	tc.mu.Lock()
+	tc.torrents.Lock()
 	// Set the id first
-	tc.byID[newTorrent.Id] = torrent // This is the unadulterated torrent
-	tc.byName[name] = newTorrent     // This is likely the modified torrent
-	tc.mu.Unlock()
+
+	tc.torrents.byName[name] = torrent
+	tc.torrents.byID[torrent.Id] = torrent // This is the unadulterated torrent
+	tc.torrents.Unlock()
 	tc.sortNeeded.Store(true)
 }
 
@@ -124,12 +138,12 @@ func (tc *torrentCache) getListing() []os.FileInfo {
 }
 
 func (tc *torrentCache) getFolderListing(folderName string) []os.FileInfo {
-	tc.folderListingMu.RLock()
-	defer tc.folderListingMu.RUnlock()
+	tc.folders.RLock()
+	defer tc.folders.RUnlock()
 	if folderName == "" {
 		return tc.getListing()
 	}
-	if folder, ok := tc.folderListing[folderName]; ok {
+	if folder, ok := tc.folders.listing[folderName]; ok {
 		return folder
 	}
 	// If folder not found, return empty slice
@@ -138,13 +152,13 @@ func (tc *torrentCache) getFolderListing(folderName string) []os.FileInfo {
 
 func (tc *torrentCache) refreshListing() {
 
-	tc.mu.Lock()
-	all := make([]sortableFile, 0, len(tc.byName))
-	for name, t := range tc.byName {
+	tc.torrents.RLock()
+	all := make([]sortableFile, 0, len(tc.torrents.byName))
+	for name, t := range tc.torrents.byName {
 		all = append(all, sortableFile{t.Id, name, t.AddedOn, t.Bytes, t.Bad})
 	}
 	tc.sortNeeded.Store(false)
-	tc.mu.Unlock()
+	tc.torrents.RUnlock()
 
 	sort.Slice(all, func(i, j int) bool {
 		if all[i].name != all[j].name {
@@ -181,13 +195,13 @@ func (tc *torrentCache) refreshListing() {
 				})
 			}
 		}
-		tc.folderListingMu.Lock()
+		tc.folders.Lock()
 		if len(listing) > 0 {
-			tc.folderListing["__bad__"] = listing
+			tc.folders.listing["__bad__"] = listing
 		} else {
-			delete(tc.folderListing, "__bad__")
+			delete(tc.folders.listing, "__bad__")
 		}
-		tc.folderListingMu.Unlock()
+		tc.folders.Unlock()
 	}()
 	wg.Done()
 
@@ -207,13 +221,13 @@ func (tc *torrentCache) refreshListing() {
 				}
 			}
 
-			tc.folderListingMu.Lock()
+			tc.folders.Lock()
 			if len(matched) > 0 {
-				tc.folderListing[dir] = matched
+				tc.folders.listing[dir] = matched
 			} else {
-				delete(tc.folderListing, dir)
+				delete(tc.folders.listing, dir)
 			}
-			tc.folderListingMu.Unlock()
+			tc.folders.Unlock()
 		}(dir, filters)
 	}
 
@@ -264,35 +278,41 @@ func (tc *torrentCache) torrentMatchDirectory(filters []directoryFilter, file so
 }
 
 func (tc *torrentCache) getAll() map[string]CachedTorrent {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-	result := make(map[string]CachedTorrent)
-	for name, torrent := range tc.byID {
+	tc.torrents.RLock()
+	defer tc.torrents.RUnlock()
+	result := make(map[string]CachedTorrent, len(tc.torrents.byID))
+	for name, torrent := range tc.torrents.byID {
 		result[name] = torrent
 	}
 	return result
 }
 
+func (tc *torrentCache) getAllCount() int {
+	tc.torrents.RLock()
+	defer tc.torrents.RUnlock()
+	return len(tc.torrents.byID)
+}
+
 func (tc *torrentCache) getIdMaps() map[string]struct{} {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-	res := make(map[string]struct{}, len(tc.byID))
-	for id := range tc.byID {
+	tc.torrents.RLock()
+	defer tc.torrents.RUnlock()
+	res := make(map[string]struct{}, len(tc.torrents.byID))
+	for id := range tc.torrents.byID {
 		res[id] = struct{}{}
 	}
 	return res
 }
 
 func (tc *torrentCache) removeId(id string) {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-	delete(tc.byID, id)
+	tc.torrents.Lock()
+	defer tc.torrents.Unlock()
+	delete(tc.torrents.byID, id)
 	tc.sortNeeded.Store(true)
 }
 
 func (tc *torrentCache) remove(name string) {
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-	delete(tc.byName, name)
+	tc.torrents.Lock()
+	defer tc.torrents.Unlock()
+	delete(tc.torrents.byName, name)
 	tc.sortNeeded.Store(true)
 }
