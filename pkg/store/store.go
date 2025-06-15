@@ -14,15 +14,16 @@ import (
 )
 
 type Store struct {
-	repair            *repair.Repair
-	arr               *arr.Storage
-	debrid            *debrid.Storage
-	importsQueue      *ImportQueue // Queued import requests(probably from too_many_active_downloads)
-	torrents          *TorrentStorage
-	logger            zerolog.Logger
-	refreshInterval   time.Duration
-	skipPreCache      bool
-	downloadSemaphore chan struct{}
+	repair             *repair.Repair
+	arr                *arr.Storage
+	debrid             *debrid.Storage
+	importsQueue       *ImportQueue // Queued import requests(probably from too_many_active_downloads)
+	torrents           *TorrentStorage
+	logger             zerolog.Logger
+	refreshInterval    time.Duration
+	skipPreCache       bool
+	downloadSemaphore  chan struct{}
+	removeStalledAfter time.Duration // Duration after which stalled torrents are removed
 }
 
 var (
@@ -39,15 +40,16 @@ func Get() *Store {
 		qbitCfg := cfg.QBitTorrent
 
 		instance = &Store{
-			repair:            repair.New(arrs, deb),
-			arr:               arrs,
-			debrid:            deb,
-			torrents:          newTorrentStorage(cfg.TorrentsFile()),
-			logger:            logger.Default(), // Use default logger [decypharr]
-			refreshInterval:   time.Duration(cmp.Or(qbitCfg.RefreshInterval, 10)) * time.Minute,
-			skipPreCache:      qbitCfg.SkipPreCache,
-			downloadSemaphore: make(chan struct{}, cmp.Or(qbitCfg.MaxDownloads, 5)),
-			importsQueue:      NewImportQueue(context.Background(), 1000),
+			repair:             repair.New(arrs, deb),
+			arr:                arrs,
+			debrid:             deb,
+			torrents:           newTorrentStorage(cfg.TorrentsFile()),
+			logger:             logger.Default(), // Use default logger [decypharr]
+			refreshInterval:    time.Duration(cmp.Or(qbitCfg.RefreshInterval, 10)) * time.Minute,
+			skipPreCache:       qbitCfg.SkipPreCache,
+			downloadSemaphore:  make(chan struct{}, cmp.Or(qbitCfg.MaxDownloads, 5)),
+			importsQueue:       NewImportQueue(context.Background(), 1000),
+			removeStalledAfter: cfg.RemoveStalledAfter,
 		}
 	})
 	return instance

@@ -142,7 +142,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-6 mt-3">
+                            <div class="col-md-4 mt-3">
                                 <div class="form-group">
                                     <label for="minFileSize">Minimum File Size</label>
                                     <input type="text"
@@ -153,7 +153,7 @@
                                     <small class="form-text text-muted">Minimum file size to download (Empty for no limit)</small>
                                 </div>
                             </div>
-                            <div class="col-md-6 mt-3">
+                            <div class="col-md-4 mt-3">
                                 <div class="form-group">
                                     <label for="maxFileSize">Maximum File Size</label>
                                     <input type="text"
@@ -162,6 +162,17 @@
                                            name="max_file_size"
                                            placeholder="e.g., 50GB, 100MB">
                                     <small class="form-text text-muted">Maximum file size to download (Empty for no limit)</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4 mt-3">
+                                <div class="form-group">
+                                    <label for="removeStalledAfter">Remove Stalled Torrents After</label>
+                                    <input type="text"
+                                           class="form-control"
+                                           id="removeStalledAfter"
+                                           name="remove_stalled_after"
+                                           placeholder="e.g., 1m, 30s, 1h">
+                                    <small class="form-text text-muted">Remove torrents that have been stalled for this duration</small>
                                 </div>
                             </div>
                         </div>
@@ -1056,6 +1067,7 @@
                 allowed_file_types: document.getElementById('allowedExtensions').value.split(',').map(ext => ext.trim()).filter(Boolean),
                 min_file_size: document.getElementById('minFileSize').value,
                 max_file_size: document.getElementById('maxFileSize').value,
+                remove_stalled_after: document.getElementById('removeStalledAfter').value,
                 url_base: document.getElementById('urlBase').value,
                 bind_address: document.getElementById('bindAddress').value,
                 port: document.getElementById('port').value,

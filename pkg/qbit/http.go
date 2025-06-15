@@ -108,7 +108,7 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, url := range urlList {
 			if err := q.addMagnet(ctx, url, _arr, debridName, action); err != nil {
-				q.logger.Error().Err(err).Msgf("Error adding magnet")
+				q.logger.Debug().Err(err).Msgf("Error adding magnet")
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -121,7 +121,7 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 		if files := r.MultipartForm.File["torrents"]; len(files) > 0 {
 			for _, fileHeader := range files {
 				if err := q.addTorrent(ctx, fileHeader, _arr, debridName, action); err != nil {
-					q.logger.Error().Err(err).Msgf("Error adding torrent")
+					q.logger.Debug().Err(err).Msgf("Error adding torrent")
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
 				}

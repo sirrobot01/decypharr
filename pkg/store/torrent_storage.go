@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"sync"
+	"time"
 )
 
 func keyPair(hash, category string) string {
@@ -287,4 +288,23 @@ func (ts *TorrentStorage) Reset() {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
 	ts.torrents = make(Torrents)
+}
+
+// GetStalledTorrents returns a list of torrents that are stalled
+// A torrent is considered stalled if it has no seeds, no progress, and has been downloading for longer than removeStalledAfter
+// The torrent must have a DebridID and be in the "downloading" state
+func (ts *TorrentStorage) GetStalledTorrents(removeAfter time.Duration) []*Torrent {
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+	stalled := make([]*Torrent, 0)
+	currentTime := time.Now()
+	for _, torrent := range ts.torrents {
+		if torrent.DebridID != "" && torrent.State == "downloading" && torrent.NumSeeds == 0 && torrent.Progress == 0 {
+			addedOn := time.Unix(torrent.AddedOn, 0)
+			if currentTime.Sub(addedOn) > removeAfter {
+				stalled = append(stalled, torrent)
+			}
+		}
+	}
+	return stalled
 }

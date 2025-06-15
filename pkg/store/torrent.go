@@ -46,89 +46,6 @@ func (s *Store) AddTorrent(ctx context.Context, importReq *ImportRequest) error 
 	return nil
 }
 
-func (s *Store) addToQueue(importReq *ImportRequest) error {
-	if importReq.Magnet == nil {
-		return fmt.Errorf("magnet is required")
-	}
-
-	if importReq.Arr == nil {
-		return fmt.Errorf("arr is required")
-	}
-
-	importReq.Status = "queued"
-	importReq.CompletedAt = time.Time{}
-	importReq.Error = nil
-	err := s.importsQueue.Push(importReq)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (s *Store) processFromQueue(ctx context.Context) error {
-	// Pop the next import request from the queue
-	importReq, err := s.importsQueue.Pop()
-	if err != nil {
-		return err
-	}
-	if importReq == nil {
-		return nil
-	}
-	return s.AddTorrent(ctx, importReq)
-}
-
-func (s *Store) StartQueueSchedule(ctx context.Context) error {
-
-	s.trackAvailableSlots(ctx) // Initial tracking of available slots
-
-	ticker := time.NewTicker(time.Minute)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-			s.trackAvailableSlots(ctx)
-		}
-	}
-}
-
-func (s *Store) trackAvailableSlots(ctx context.Context) {
-	// This function tracks the available slots for each debrid client
-	availableSlots := make(map[string]int)
-
-	for name, deb := range s.debrid.Debrids() {
-		slots, err := deb.Client().GetAvailableSlots()
-		if err != nil {
-			continue
-		}
-		availableSlots[name] = slots
-	}
-
-	if s.importsQueue.Size() <= 0 {
-		// Queue is empty, no need to process
-		return
-	}
-
-	for name, slots := range availableSlots {
-
-		s.logger.Debug().Msgf("Available slots for %s: %d", name, slots)
-		// If slots are available, process the next import request from the queue
-		for slots > 0 {
-			select {
-			case <-ctx.Done():
-				return // Exit if context is done
-			default:
-				if err := s.processFromQueue(ctx); err != nil {
-					s.logger.Error().Err(err).Msg("Error processing from queue")
-					return // Exit on error
-				}
-				slots-- // Decrease the available slots after processing
-			}
-		}
-	}
-}
-
 func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, importReq *ImportRequest) {
 
 	if debridTorrent == nil {
@@ -310,6 +227,7 @@ func (s *Store) partialTorrentUpdate(t *Torrent, debridTorrent *types.Torrent) *
 	t.Debrid = debridTorrent.Debrid
 	t.Size = totalSize
 	t.Completed = sizeCompleted
+	t.NumSeeds = debridTorrent.Seeders
 	t.Downloaded = sizeCompleted
 	t.DownloadedSession = sizeCompleted
 	t.Uploaded = sizeCompleted
