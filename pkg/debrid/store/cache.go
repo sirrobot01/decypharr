@@ -108,7 +108,14 @@ type Cache struct {
 
 func NewDebridCache(dc config.Debrid, client types.Client) *Cache {
 	cfg := config.Get()
-	cetSc, err := gocron.NewScheduler(gocron.WithLocation(time.UTC))
+	cet, err := time.LoadLocation("CET")
+	if err != nil {
+		cet, err = time.LoadLocation("Europe/Berlin") // Fallback to Berlin if CET fails
+		if err != nil {
+			cet = time.FixedZone("CET", 1*60*60) // Fallback to a fixed CET zone
+		}
+	}
+	cetSc, err := gocron.NewScheduler(gocron.WithLocation(cet))
 	if err != nil {
 		// If we can't create a CET scheduler, fallback to local time
 		cetSc, _ = gocron.NewScheduler(gocron.WithLocation(time.Local))
