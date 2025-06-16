@@ -40,16 +40,21 @@ func Get() *Store {
 		qbitCfg := cfg.QBitTorrent
 
 		instance = &Store{
-			repair:             repair.New(arrs, deb),
-			arr:                arrs,
-			debrid:             deb,
-			torrents:           newTorrentStorage(cfg.TorrentsFile()),
-			logger:             logger.Default(), // Use default logger [decypharr]
-			refreshInterval:    time.Duration(cmp.Or(qbitCfg.RefreshInterval, 10)) * time.Minute,
-			skipPreCache:       qbitCfg.SkipPreCache,
-			downloadSemaphore:  make(chan struct{}, cmp.Or(qbitCfg.MaxDownloads, 5)),
-			importsQueue:       NewImportQueue(context.Background(), 1000),
-			removeStalledAfter: cfg.RemoveStalledAfter,
+			repair:            repair.New(arrs, deb),
+			arr:               arrs,
+			debrid:            deb,
+			torrents:          newTorrentStorage(cfg.TorrentsFile()),
+			logger:            logger.Default(), // Use default logger [decypharr]
+			refreshInterval:   time.Duration(cmp.Or(qbitCfg.RefreshInterval, 10)) * time.Minute,
+			skipPreCache:      qbitCfg.SkipPreCache,
+			downloadSemaphore: make(chan struct{}, cmp.Or(qbitCfg.MaxDownloads, 5)),
+			importsQueue:      NewImportQueue(context.Background(), 1000),
+		}
+		if cfg.RemoveStalledAfter != "" {
+			removeStalledAfter, err := time.ParseDuration(cfg.RemoveStalledAfter)
+			if err == nil {
+				instance.removeStalledAfter = removeStalledAfter
+			}
 		}
 	})
 	return instance

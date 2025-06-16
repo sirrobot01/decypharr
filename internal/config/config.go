@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"time"
 )
 
 var (
@@ -78,20 +77,20 @@ type Config struct {
 	URLBase     string `json:"url_base,omitempty"`
 	Port        string `json:"port,omitempty"`
 
-	LogLevel           string        `json:"log_level,omitempty"`
-	Debrids            []Debrid      `json:"debrids,omitempty"`
-	QBitTorrent        QBitTorrent   `json:"qbittorrent,omitempty"`
-	Arrs               []Arr         `json:"arrs,omitempty"`
-	Repair             Repair        `json:"repair,omitempty"`
-	WebDav             WebDav        `json:"webdav,omitempty"`
-	AllowedExt         []string      `json:"allowed_file_types,omitempty"`
-	MinFileSize        string        `json:"min_file_size,omitempty"` // Minimum file size to download, 10MB, 1GB, etc
-	MaxFileSize        string        `json:"max_file_size,omitempty"` // Maximum file size to download (0 means no limit)
-	Path               string        `json:"-"`                       // Path to save the config file
-	UseAuth            bool          `json:"use_auth,omitempty"`
-	Auth               *Auth         `json:"-"`
-	DiscordWebhook     string        `json:"discord_webhook_url,omitempty"`
-	RemoveStalledAfter time.Duration `json:"remove_stalled_after,omitempty"`
+	LogLevel           string      `json:"log_level,omitempty"`
+	Debrids            []Debrid    `json:"debrids,omitempty"`
+	QBitTorrent        QBitTorrent `json:"qbittorrent,omitempty"`
+	Arrs               []Arr       `json:"arrs,omitempty"`
+	Repair             Repair      `json:"repair,omitempty"`
+	WebDav             WebDav      `json:"webdav,omitempty"`
+	AllowedExt         []string    `json:"allowed_file_types,omitempty"`
+	MinFileSize        string      `json:"min_file_size,omitempty"` // Minimum file size to download, 10MB, 1GB, etc
+	MaxFileSize        string      `json:"max_file_size,omitempty"` // Maximum file size to download (0 means no limit)
+	Path               string      `json:"-"`                       // Path to save the config file
+	UseAuth            bool        `json:"use_auth,omitempty"`
+	Auth               *Auth       `json:"-"`
+	DiscordWebhook     string      `json:"discord_webhook_url,omitempty"`
+	RemoveStalledAfter string      `json:"remove_stalled_after,omitzero"`
 }
 
 func (c *Config) JsonFile() string {

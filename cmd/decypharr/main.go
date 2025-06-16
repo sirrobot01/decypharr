@@ -75,7 +75,7 @@ func Start(ctx context.Context) error {
 
 		done := make(chan struct{})
 		go func(ctx context.Context) {
-			if err := startServices(ctx, wd, srv); err != nil {
+			if err := startServices(ctx, cancelSvc, wd, srv); err != nil {
 				_log.Error().Err(err).Msg("Error starting services")
 				cancelSvc()
 			}
@@ -107,7 +107,7 @@ func Start(ctx context.Context) error {
 	}
 }
 
-func startServices(ctx context.Context, wd *webdav.WebDav, srv *server.Server) error {
+func startServices(ctx context.Context, cancelSvc context.CancelFunc, wd *webdav.WebDav, srv *server.Server) error {
 	var wg sync.WaitGroup
 	errChan := make(chan error)
 
@@ -177,7 +177,11 @@ func startServices(ctx context.Context, wd *webdav.WebDav, srv *server.Server) e
 		for err := range errChan {
 			if err != nil {
 				_log.Error().Err(err).Msg("Service error detected")
-				// Don't shut down the whole app
+				// If the error is critical, return it to stop the main loop
+				if ctx.Err() == nil {
+					_log.Error().Msg("Stopping services due to error")
+					cancelSvc() // Cancel the service context to stop all services
+				}
 			}
 		}
 	}()
