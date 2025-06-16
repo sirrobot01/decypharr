@@ -45,7 +45,7 @@ func (c *Cache) StartSchedule(ctx context.Context) error {
 	} else {
 		// Schedule the job
 		if _, err := c.cetScheduler.NewJob(jd, gocron.NewTask(func() {
-			c.resetInvalidLinks()
+			c.resetInvalidLinks(ctx)
 		}), gocron.WithContext(ctx)); err != nil {
 			c.logger.Error().Err(err).Msg("Failed to create link reset job")
 		} else {
