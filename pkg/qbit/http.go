@@ -108,7 +108,7 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, url := range urlList {
 			if err := q.addMagnet(ctx, url, _arr, debridName, action); err != nil {
-				q.logger.Debug().Err(err).Msgf("Error adding magnet")
+				q.logger.Debug().Msgf("Error adding magnet: %s", err.Error())
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}

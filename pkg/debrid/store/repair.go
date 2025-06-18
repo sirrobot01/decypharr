@@ -111,6 +111,8 @@ func (c *Cache) GetBrokenFiles(t *CachedTorrent, filenames []string) []string {
 		}(f)
 	}
 
+	wg.Wait()
+
 	// Try to reinsert the torrent if it's broken
 	if len(brokenFiles) > 0 && t.Torrent != nil {
 		// Check if the torrent is already in progress

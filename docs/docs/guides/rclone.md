@@ -51,7 +51,7 @@ Create a `config.json` file in `/opt/decypharr/` with your Decypharr configurati
       "folder": "/mnt/remote/realdebrid/__all__/",
       "rate_limit": "250/minute",
       "use_webdav": true,
-      "rc_url": "http://your-ip-address:5572" // Rclone RC URL
+      "rc_url": "http://your-ip-address:5572"
     }
   ],
   "qbittorrent": {
@@ -99,7 +99,7 @@ services:
       decypharr:
         condition: service_healthy
         restart: true
-    command: "mount decypharr: /data --allow-non-empty --allow-other --dir-cache-time 10s --rc --rc-addr :5572 --rc-no-auth "
+    command: "mount decypharr: /data --allow-non-empty --allow-other --dir-cache-time 10s --rc --rc-addr :5572 --rc-no-auth"
 ```
 
 #### Docker Notes
