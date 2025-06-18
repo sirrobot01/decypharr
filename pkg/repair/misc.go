@@ -103,11 +103,17 @@ func (r *Repair) checkTorrentFiles(torrentPath string, files []arr.ContentFile, 
 		r.logger.Debug().Msgf("No cache found for %s. Skipping", debridName)
 		return files // Return all files as broken if no cache found
 	}
+	tor, ok := r.torrentsMap.Load(debridName)
+	if !ok {
+		r.logger.Debug().Msgf("Could not find torrents for %s. Skipping", debridName)
+	}
+
+	torrentsMap := tor.(map[string]store.CachedTorrent)
 
 	// Check if torrent exists
 	torrentName := filepath.Clean(filepath.Base(torrentPath))
-	torrent := cache.GetTorrentByName(torrentName)
-	if torrent == nil {
+	torrent, ok := torrentsMap[torrentName]
+	if !ok {
 		r.logger.Debug().Msgf("No torrent found for %s. Skipping", torrentName)
 		return files // Return all files as broken if torrent not found
 	}
@@ -118,7 +124,7 @@ func (r *Repair) checkTorrentFiles(torrentPath string, files []arr.ContentFile, 
 		filePaths[i] = file.TargetPath
 	}
 
-	brokenFilePaths := cache.GetBrokenFiles(torrent, filePaths)
+	brokenFilePaths := cache.GetBrokenFiles(&torrent, filePaths)
 	if len(brokenFilePaths) > 0 {
 		r.logger.Debug().Msgf("%d broken files found in %s", len(brokenFilePaths), torrentName)
 
@@ -141,15 +147,9 @@ func (r *Repair) checkTorrentFiles(torrentPath string, files []arr.ContentFile, 
 
 func (r *Repair) findDebridForPath(dir string, clients map[string]types.Client) string {
 	// Check cache first
-	r.cacheMutex.RLock()
-	if r.debridPathCache == nil {
-		r.debridPathCache = make(map[string]string)
+	if debridName, exists := r.debridPathCache.Load(dir); exists {
+		return debridName.(string)
 	}
-	if debridName, exists := r.debridPathCache[dir]; exists {
-		r.cacheMutex.RUnlock()
-		return debridName
-	}
-	r.cacheMutex.RUnlock()
 
 	// Find debrid client
 	for _, client := range clients {
@@ -162,18 +162,14 @@ func (r *Repair) findDebridForPath(dir string, clients map[string]types.Client) 
 			debridName := client.Name()
 
 			// Cache the result
-			r.cacheMutex.Lock()
-			r.debridPathCache[dir] = debridName
-			r.cacheMutex.Unlock()
+			r.debridPathCache.Store(dir, debridName)
 
 			return debridName
 		}
 	}
 
 	// Cache empty result to avoid repeated lookups
-	r.cacheMutex.Lock()
-	r.debridPathCache[dir] = ""
-	r.cacheMutex.Unlock()
+	r.debridPathCache.Store(dir, "")
 
 	return ""
 }

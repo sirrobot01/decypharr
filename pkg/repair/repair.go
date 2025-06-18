@@ -41,8 +41,8 @@ type Repair struct {
 	workers     int
 	scheduler   gocron.Scheduler
 
-	debridPathCache map[string]string // Cache for path -> debrid name mapping
-	cacheMutex      sync.RWMutex
+	debridPathCache sync.Map // debridPath:debridName cache.Emptied after each run
+	torrentsMap     sync.Map //debridName: map[string]*store.CacheTorrent. Emptied after each run
 	ctx             context.Context
 }
 
@@ -214,6 +214,27 @@ func (r *Repair) newJob(arrsNames []string, mediaIDs []string) *Job {
 	}
 }
 
+// initRun initializes the repair run, setting up necessary configurations, checks and caches
+func (r *Repair) initRun(ctx context.Context) {
+	if r.useWebdav {
+		// Webdav use is enabled, initialize debrid torrent caches
+		caches := r.deb.Caches()
+		if len(caches) == 0 {
+			return
+		}
+		for name, cache := range caches {
+			r.torrentsMap.Store(name, cache.GetTorrentsName())
+		}
+	}
+}
+
+// // onComplete is called when the repair job is completed
+func (r *Repair) onComplete() {
+	// Set the cache maps to nil
+	r.torrentsMap = sync.Map{} // Clear the torrent map
+	r.debridPathCache = sync.Map{}
+}
+
 func (r *Repair) preRunChecks() error {
 
 	if r.useWebdav {
@@ -271,6 +292,7 @@ func (r *Repair) AddJob(arrsNames []string, mediaIDs []string, autoProcess, recu
 				job.CompletedAt = time.Now()
 			}
 		}
+		r.onComplete() // Clear caches and maps after job completion
 	}()
 	return nil
 }
@@ -312,6 +334,9 @@ func (r *Repair) repair(job *Job) error {
 	if err := r.preRunChecks(); err != nil {
 		return err
 	}
+
+	// Initialize the run
+	r.initRun(job.ctx)
 
 	// Use a mutex to protect concurrent access to brokenItems
 	var mu sync.Mutex
@@ -475,16 +500,17 @@ func (r *Repair) repairArr(job *Job, _arr string, tmdbId string) ([]arr.ContentF
 		}()
 	}
 
-	for _, m := range media {
-		select {
-		case <-job.ctx.Done():
-			break
-		default:
-			workerChan <- m
+	go func() {
+		defer close(workerChan)
+		for _, m := range media {
+			select {
+			case <-job.ctx.Done():
+				return
+			case workerChan <- m:
+			}
 		}
-	}
+	}()
 
-	close(workerChan)
 	wg.Wait()
 	if len(brokenItems) == 0 {
 		r.logger.Info().Msgf("No broken items found for %s", a.Name)

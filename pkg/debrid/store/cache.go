@@ -570,6 +570,10 @@ func (c *Cache) GetTorrentByName(name string) *CachedTorrent {
 	return nil
 }
 
+func (c *Cache) GetTorrentsName() map[string]CachedTorrent {
+	return c.torrents.getAllByName()
+}
+
 func (c *Cache) GetTorrent(torrentId string) *CachedTorrent {
 	if torrent, ok := c.torrents.getByID(torrentId); ok {
 		return &torrent

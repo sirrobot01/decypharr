@@ -919,6 +919,7 @@ func (r *RealDebrid) GetProfile() (*types.Profile, error) {
 		Expiration: data.Expiration,
 		Type:       data.Type,
 	}
+	r.Profile = profile
 	return profile, nil
 }
 

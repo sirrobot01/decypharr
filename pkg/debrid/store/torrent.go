@@ -293,6 +293,16 @@ func (tc *torrentCache) getAllCount() int {
 	return len(tc.torrents.byID)
 }
 
+func (tc *torrentCache) getAllByName() map[string]CachedTorrent {
+	tc.torrents.RLock()
+	defer tc.torrents.RUnlock()
+	results := make(map[string]CachedTorrent, len(tc.torrents.byName))
+	for name, torrent := range tc.torrents.byName {
+		results[name] = torrent
+	}
+	return results
+}
+
 func (tc *torrentCache) getIdMaps() map[string]struct{} {
 	tc.torrents.RLock()
 	defer tc.torrents.RUnlock()
