@@ -105,6 +105,7 @@ func (a *Arr) GetMedia(mediaId string) ([]Content, error) {
 				Id:           d.Id,
 				EpisodeId:    eId,
 				SeasonNumber: file.SeasonNumber,
+				Size:         file.Size,
 			})
 		}
 		if len(files) == 0 {
@@ -148,6 +149,7 @@ func GetMovies(a *Arr, tvId string) ([]Content, error) {
 			FileId: movie.MovieFile.Id,
 			Id:     movie.Id,
 			Path:   movie.MovieFile.Path,
+			Size:   movie.MovieFile.Size,
 		})
 		ct.Files = files
 		contents = append(contents, ct)
