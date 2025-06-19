@@ -97,14 +97,15 @@
 
     <!-- Job Details Modal -->
     <div class="modal fade" id="jobDetailsModal" tabindex="-1" aria-labelledby="jobDetailsModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-xl">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="jobDetailsModalLabel">Job Details</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="row mb-3">
+                    <!-- Job Info -->
+                    <div class="row mb-4">
                         <div class="col-md-6">
                             <p><strong>Job ID:</strong> <span id="modalJobId"></span></p>
                             <p><strong>Status:</strong> <span id="modalJobStatus"></span></p>
@@ -122,27 +123,94 @@
                         <strong>Error:</strong> <span id="modalJobError"></span>
                     </div>
 
-                    <h6>Broken Items</h6>
-                    <div class="table-responsive">
-                        <table class="table table-sm table-striped">
-                            <thead>
-                            <tr>
-                                <th>Arr</th>
-                                <th>Path</th>
-                            </tr>
-                            </thead>
-                            <tbody id="brokenItemsTableBody">
-                            <!-- Broken items will be loaded here -->
-                            </tbody>
-                        </table>
-                    </div>
-                    <div id="noBrokenItemsMessage" class="text-center py-2 d-none">
-                        <p class="text-muted">No broken items found</p>
+                    <!-- Broken Items Section -->
+                    <div class="row">
+                        <div class="col-12">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6 class="mb-0">
+                                    Broken Items
+                                    <span class="badge bg-secondary" id="totalItemsCount">0</span>
+                                    <span class="badge bg-primary" id="selectedItemsCount">0 selected</span>
+                                </h6>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-sm btn-primary" id="processSelectedItemsBtn" disabled>
+                                        <i class="bi bi-play-fill me-1"></i>Process Selected
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Filters and Search -->
+                            <div class="row mb-3">
+                                <div class="col-md-4">
+                                    <input type="text" class="form-control form-control-sm"
+                                           id="itemSearchInput"
+                                           placeholder="Search by path...">
+                                </div>
+                                <div class="col-md-3">
+                                    <select class="form-select form-select-sm" id="arrFilterSelect">
+                                        <option value="">All Arrs</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <select class="form-select form-select-sm" id="pathFilterSelect">
+                                        <option value="">All Types</option>
+                                        <option value="movie">Movies</option>
+                                        <option value="tv">TV Shows</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <button class="btn btn-sm btn-outline-secondary w-100" id="clearFiltersBtn">
+                                        <i class="bi bi-x-circle me-1"></i>Clear
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Items Table -->
+                            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                                <table class="table table-sm table-striped table-hover">
+                                    <thead class="sticky-top">
+                                    <tr>
+                                        <th style="width: 40px;">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="selectAllItemsTable">
+                                            </div>
+                                        </th>
+                                        <th>Arr</th>
+                                        <th>Path</th>
+                                        <th style="width: 100px;">Type</th>
+                                        <th style="width: 80px;">Size</th>
+                                    </tr>
+                                    </thead>
+                                    <tbody id="brokenItemsTableBody">
+                                    <!-- Broken items will be loaded here -->
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Items Pagination -->
+                            <nav aria-label="Items pagination" class="mt-2">
+                                <ul class="pagination pagination-sm justify-content-center" id="itemsPagination">
+                                    <!-- Pagination will be generated here -->
+                                </ul>
+                            </nav>
+
+                            <div id="noBrokenItemsMessage" class="text-center py-3 d-none">
+                                <p class="text-muted">No broken items found</p>
+                            </div>
+
+                            <div id="noFilteredItemsMessage" class="text-center py-3 d-none">
+                                <p class="text-muted">No items match the current filters</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
+                    <div class="me-auto">
+                        <small class="text-muted" id="modalFooterStats"></small>
+                    </div>
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    <button type="button" class="btn btn-primary" id="processJobBtn">Process Items</button>
+                    <button type="button" class="btn btn-primary" id="processJobBtn">Process All Items</button>
                     <button type="button" class="btn btn-warning d-none" id="stopJobBtn">
                         <i class="bi bi-stop-fill me-1"></i>Stop Job
                     </button>
@@ -151,6 +219,39 @@
         </div>
     </div>
 </div>
+
+<style>
+    .sticky-top {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+
+    .table-hover tbody tr:hover {
+        background-color: var(--bs-gray-100);
+    }
+
+    [data-bs-theme="dark"] .table-hover tbody tr:hover {
+        background-color: var(--bs-gray-800);
+    }
+
+    .item-row.selected {
+        background-color: var(--bs-primary-bg-subtle) !important;
+    }
+
+    .badge {
+        font-size: 0.75em;
+    }
+
+    #brokenItemsTableBody tr {
+        cursor: pointer;
+    }
+
+    .form-check-input:checked {
+        background-color: var(--bs-primary);
+        border-color: var(--bs-primary);
+    }
+</style>
 
 <script>
     document.addEventListener('DOMContentLoaded', () => {
@@ -207,11 +308,19 @@
         const itemsPerPage = 10;
         let allJobs = [];
 
+        // Modal state variables
+        let currentJob = null;
+        let allBrokenItems = [];
+        let filteredItems = [];
+        let selectedItems = new Set();
+        let currentItemsPage = 1;
+        const itemsPerModalPage = 20;
+
         // Load jobs function
         async function loadJobs(page) {
             try {
                 const response = await fetcher('/api/repair/jobs');
-                if (!response.ok) throw new Error('Failed to fetcher jobs');
+                if (!response.ok) throw new Error('Failed to fetch jobs');
 
                 allJobs = await response.json();
                 renderJobsTable(page);
@@ -237,12 +346,11 @@
                 case 'processing':
                     return {text: 'Processing', class: 'text-info'};
                 default:
-                    // Return status in title case if unknown
                     return {text: status.charAt(0).toUpperCase() + status.slice(1), class: 'text-secondary'};
             }
         }
 
-        // Render jobs table with pagination
+        // Render jobs table with pagination (keeping existing implementation)
         function renderJobsTable(page) {
             const tableBody = document.getElementById('jobsTableBody');
             const paginationElement = document.getElementById('jobsPagination');
@@ -282,7 +390,6 @@
                 let canDelete = job.status !== "started";
                 let totalItems = job.broken_items ? Object.values(job.broken_items).reduce((sum, arr) => sum + arr.length, 0) : 0;
 
-
                 row.innerHTML = `
                     <td>
                         <div class="form-check">
@@ -297,36 +404,35 @@
                     <td>${totalItems}</td>
                     <td>
                         ${job.status === "pending" ?
-                                        `<button class="btn btn-sm btn-primary process-job" data-id="${job.id}">
+                    `<button class="btn btn-sm btn-primary process-job" data-id="${job.id}">
                                 <i class="bi bi-play-fill"></i> Process
                             </button>` :
-                                        `<button class="btn btn-sm btn-primary" disabled>
+                    `<button class="btn btn-sm btn-primary" disabled>
                                 <i class="bi bi-eye"></i> Process
                             </button>`
-                                    }
+                }
                         ${(job.status === "started" || job.status === "processing") ?
-                                        `<button class="btn btn-sm btn-warning stop-job" data-id="${job.id}">
+                    `<button class="btn btn-sm btn-warning stop-job" data-id="${job.id}">
                                 <i class="bi bi-stop-fill"></i> Stop
                             </button>` :
-                                        ''
-                                    }
+                    ''
+                }
                         ${canDelete ?
-                                        `<button class="btn btn-sm btn-danger delete-job" data-id="${job.id}">
+                    `<button class="btn btn-sm btn-danger delete-job" data-id="${job.id}">
                                 <i class="bi bi-trash"></i>
                             </button>` :
-                                        `<button class="btn btn-sm btn-danger" disabled>
+                    `<button class="btn btn-sm btn-danger" disabled>
                                 <i class="bi bi-trash"></i>
                             </button>`
-                                    }
+                }
                     </td>
                 `;
 
                 tableBody.appendChild(row);
             }
 
-            // Create pagination
+            // Create pagination (keeping existing implementation)
             if (totalPages > 1) {
-                // Previous button
                 const prevLi = document.createElement('li');
                 prevLi.className = `page-item ${page === 1 ? 'disabled' : ''}`;
                 prevLi.innerHTML = `<a class="page-link" href="#" aria-label="Previous" ${page !== 1 ? `data-page="${page - 1}"` : ''}>
@@ -334,7 +440,6 @@
                 </a>`;
                 paginationElement.appendChild(prevLi);
 
-                // Page numbers
                 for (let i = 1; i <= totalPages; i++) {
                     const pageLi = document.createElement('li');
                     pageLi.className = `page-item ${i === page ? 'active' : ''}`;
@@ -342,7 +447,6 @@
                     paginationElement.appendChild(pageLi);
                 }
 
-                // Next button
                 const nextLi = document.createElement('li');
                 nextLi.className = `page-item ${page === totalPages ? 'disabled' : ''}`;
                 nextLi.innerHTML = `<a class="page-link" href="#" aria-label="Next" ${page !== totalPages ? `data-page="${page + 1}"` : ''}>
@@ -351,7 +455,7 @@
                 paginationElement.appendChild(nextLi);
             }
 
-            // Add event listeners to pagination
+            // Add event listeners (keeping existing implementation)
             document.querySelectorAll('#jobsPagination a[data-page]').forEach(link => {
                 link.addEventListener('click', (e) => {
                     e.preventDefault();
@@ -372,7 +476,6 @@
                 });
             });
 
-            // Add event listeners to action buttons
             document.querySelectorAll('.process-job').forEach(button => {
                 button.addEventListener('click', (e) => {
                     const jobId = e.currentTarget.dataset.id;
@@ -395,114 +498,312 @@
             });
         }
 
-        document.getElementById('selectAllJobs').addEventListener('change', function() {
-            const isChecked = this.checked;
-            document.querySelectorAll('.job-checkbox:not(:disabled)').forEach(checkbox => {
-                checkbox.checked = isChecked;
-            });
-            updateDeleteButtonState();
-        });
+        // Helper functions to determine file type and format size
+        function getFileType(path) {
+            const movieExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm'];
+            const tvIndicators = ['/TV/', '/Television/', '/Series/', '/Shows/'];
 
-        // Function to update delete button state
-        function updateDeleteButtonState() {
-            const deleteBtn = document.getElementById('deleteSelectedJobs');
-            const selectedCheckboxes = document.querySelectorAll('.job-checkbox:checked');
-            deleteBtn.disabled = selectedCheckboxes.length === 0;
+            const pathLower = path.toLowerCase();
+
+            if (tvIndicators.some(indicator => pathLower.includes(indicator.toLowerCase()))) {
+                return 'tv';
+            }
+
+            if (movieExtensions.some(ext => pathLower.endsWith(ext))) {
+                return pathLower.includes('/movies/') || pathLower.includes('/film') ? 'movie' : 'tv';
+            }
+
+            return 'other';
         }
 
-        // Delete selected jobs
-        document.getElementById('deleteSelectedJobs').addEventListener('click', async () => {
-            const selectedIds = Array.from(
-                document.querySelectorAll('.job-checkbox:checked')
-            ).map(checkbox => checkbox.value);
+        function formatFileSize(bytes) {
+            if (!bytes || bytes === 0) return 'Unknown';
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(1024));
+            return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+        }
 
-            if (!selectedIds.length) return;
+        // modal functions
+        function processItemsData(brokenItems) {
+            const items = [];
+            let itemId = 0;
 
-            if (confirm(`Are you sure you want to delete ${selectedIds.length} job(s)?`)) {
-                await deleteMultipleJobs(selectedIds);
-            }
-        });
-
-        async function deleteJob(jobId) {
-            if (confirm('Are you sure you want to delete this job?')) {
-                try {
-                    const response = await fetcher(`/api/repair/jobs`, {
-                        method: 'DELETE',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ ids: [jobId] })
+            for (const [arrName, itemsArray] of Object.entries(brokenItems)) {
+                if (itemsArray && itemsArray.length > 0) {
+                    itemsArray.forEach(item => {
+                        items.push({
+                            id: item.fileId,
+                            arr: arrName,
+                            path: item.path,
+                            size: item.size || 0,
+                            type: getFileType(item.path),
+                            selected: false
+                        });
                     });
-
-                    if (!response.ok) throw new Error(await response.text());
-                    createToast('Job deleted successfully');
-                    await loadJobs(currentPage); // Refresh the jobs list
-                } catch (error) {
-                    createToast(`Error deleting job: ${error.message}`, 'error');
                 }
             }
+
+            return items;
         }
 
-        async function deleteMultipleJobs(jobIds) {
-            try {
-                const response = await fetcher(`/api/repair/jobs`, {
-                    method: 'DELETE',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ ids: jobIds })
+        function applyFilters() {
+            const searchTerm = document.getElementById('itemSearchInput').value.toLowerCase();
+            const arrFilter = document.getElementById('arrFilterSelect').value;
+            const pathFilter = document.getElementById('pathFilterSelect').value;
+
+            filteredItems = allBrokenItems.filter(item => {
+                const matchesSearch = !searchTerm || item.path.toLowerCase().includes(searchTerm);
+                const matchesArr = !arrFilter || item.arr === arrFilter;
+                const matchesPath = !pathFilter || item.type === pathFilter;
+
+                return matchesSearch && matchesArr && matchesPath;
+            });
+
+            currentItemsPage = 1;
+            renderBrokenItemsTable();
+            updateItemsStats();
+        }
+
+        function renderBrokenItemsTable() {
+            const tableBody = document.getElementById('brokenItemsTableBody');
+            const paginationElement = document.getElementById('itemsPagination');
+            const noItemsMessage = document.getElementById('noBrokenItemsMessage');
+            const noFilteredMessage = document.getElementById('noFilteredItemsMessage');
+
+            tableBody.innerHTML = '';
+            paginationElement.innerHTML = '';
+
+            if (allBrokenItems.length === 0) {
+                noItemsMessage.classList.remove('d-none');
+                noFilteredMessage.classList.add('d-none');
+                return;
+            }
+
+            if (filteredItems.length === 0) {
+                noItemsMessage.classList.add('d-none');
+                noFilteredMessage.classList.remove('d-none');
+                return;
+            }
+
+            noItemsMessage.classList.add('d-none');
+            noFilteredMessage.classList.add('d-none');
+
+            // Calculate pagination
+            const totalPages = Math.ceil(filteredItems.length / itemsPerModalPage);
+            const startIndex = (currentItemsPage - 1) * itemsPerModalPage;
+            const endIndex = Math.min(startIndex + itemsPerModalPage, filteredItems.length);
+
+            // Display items for current page
+            for (let i = startIndex; i < endIndex; i++) {
+                const item = filteredItems[i];
+                const row = document.createElement('tr');
+                row.className = `item-row ${selectedItems.has(item.id) ? 'selected' : ''}`;
+                row.dataset.itemId = item.id;
+
+                row.innerHTML = `
+                    <td>
+                        <div class="form-check">
+                            <input class="form-check-input item-checkbox"
+                                   type="checkbox"
+                                   value="${item.id}"
+                                   ${selectedItems.has(item.id) ? 'checked' : ''}>
+                        </div>
+                    </td>
+                    <td><span class="badge bg-info">${item.arr}</span></td>
+                    <td><small class="text-muted" title="${item.path}">${item.path}</small></td>
+                    <td><span class="badge ${item.type === 'movie' ? 'bg-primary' : item.type === 'tv' ? 'bg-success' : 'bg-secondary'}">${item.type}</span></td>
+                    <td><small>${formatFileSize(item.size)}</small></td>
+                `;
+
+                // Make row clickable to toggle selection
+                row.addEventListener('click', (e) => {
+                    if (e.target.type !== 'checkbox') {
+                        const checkbox = row.querySelector('.item-checkbox');
+                        checkbox.checked = !checkbox.checked;
+                        checkbox.dispatchEvent(new Event('change'));
+                    }
                 });
 
-                if (!response.ok) throw new Error(await response.text());
-                createToast(`${jobIds.length} job(s) deleted successfully`);
-                await loadJobs(currentPage); // Refresh the jobs list
-            } catch (error) {
-                createToast(`Error deleting jobs: ${error.message}`, 'error');
+                tableBody.appendChild(row);
+            }
+
+            // Add event listeners to checkboxes
+            document.querySelectorAll('.item-checkbox').forEach(checkbox => {
+                checkbox.addEventListener('change', (e) => {
+                    const itemId = parseInt(e.target.value);
+                    const row = e.target.closest('tr');
+
+                    if (e.target.checked) {
+                        selectedItems.add(itemId);
+                        row.classList.add('selected');
+                    } else {
+                        selectedItems.delete(itemId);
+                        row.classList.remove('selected');
+                    }
+
+                    updateItemsStats();
+                    updateSelectAllStates();
+                });
+            });
+
+            // Create pagination
+            if (totalPages > 1) {
+                const prevLi = document.createElement('li');
+                prevLi.className = `page-item ${currentItemsPage === 1 ? 'disabled' : ''}`;
+                prevLi.innerHTML = `<a class="page-link" href="#" aria-label="Previous" ${currentItemsPage !== 1 ? `data-items-page="${currentItemsPage - 1}"` : ''}>
+                    <span aria-hidden="true">&laquo;</span>
+                </a>`;
+                paginationElement.appendChild(prevLi);
+
+                for (let i = 1; i <= totalPages; i++) {
+                    const pageLi = document.createElement('li');
+                    pageLi.className = `page-item ${i === currentItemsPage ? 'active' : ''}`;
+                    pageLi.innerHTML = `<a class="page-link" href="#" data-items-page="${i}">${i}</a>`;
+                    paginationElement.appendChild(pageLi);
+                }
+
+                const nextLi = document.createElement('li');
+                nextLi.className = `page-item ${currentItemsPage === totalPages ? 'disabled' : ''}`;
+                nextLi.innerHTML = `<a class="page-link" href="#" aria-label="Next" ${currentItemsPage !== totalPages ? `data-items-page="${currentItemsPage + 1}"` : ''}>
+                    <span aria-hidden="true">&raquo;</span>
+                </a>`;
+                paginationElement.appendChild(nextLi);
+            }
+
+            // Add pagination event listeners
+            document.querySelectorAll('#itemsPagination a[data-items-page]').forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const newPage = parseInt(e.currentTarget.dataset.itemsPage);
+                    currentItemsPage = newPage;
+                    renderBrokenItemsTable();
+                });
+            });
+
+            updateSelectAllStates();
+        }
+
+        function updateItemsStats() {
+            document.getElementById('totalItemsCount').textContent = allBrokenItems.length;
+            document.getElementById('selectedItemsCount').textContent = `${selectedItems.size} selected`;
+
+            const processSelectedBtn = document.getElementById('processSelectedItemsBtn');
+            processSelectedBtn.disabled = selectedItems.size === 0;
+
+            // Update footer stats
+            const footerStats = document.getElementById('modalFooterStats');
+            footerStats.textContent = `Total: ${allBrokenItems.length} | Filtered: ${filteredItems.length} | Selected: ${selectedItems.size}`;
+        }
+
+        function updateSelectAllStates() {
+            const selectAllTableCheckbox = document.getElementById('selectAllItemsTable');
+            const visibleCheckboxes = document.querySelectorAll('.item-checkbox');
+            const checkedVisible = document.querySelectorAll('.item-checkbox:checked');
+
+            if (visibleCheckboxes.length === 0) {
+                selectAllTableCheckbox.indeterminate = false;
+                selectAllTableCheckbox.checked = false;
+            } else if (checkedVisible.length === visibleCheckboxes.length) {
+                selectAllTableCheckbox.indeterminate = false;
+                selectAllTableCheckbox.checked = true;
+            } else if (checkedVisible.length > 0) {
+                selectAllTableCheckbox.indeterminate = true;
+                selectAllTableCheckbox.checked = false;
+            } else {
+                selectAllTableCheckbox.indeterminate = false;
+                selectAllTableCheckbox.checked = false;
             }
         }
 
-        // Process job function
-        async function processJob(jobId) {
+        function populateArrFilter() {
+            const arrFilter = document.getElementById('arrFilterSelect');
+            arrFilter.innerHTML = '<option value="">All Arrs</option>';
+
+            const uniqueArrs = [...new Set(allBrokenItems.map(item => item.arr))];
+            uniqueArrs.forEach(arr => {
+                const option = document.createElement('option');
+                option.value = arr;
+                option.textContent = arr;
+                arrFilter.appendChild(option);
+            });
+        }
+
+        document.getElementById('selectAllItemsTable').addEventListener('change', (e) => {
+            const visibleCheckboxes = document.querySelectorAll('.item-checkbox');
+            visibleCheckboxes.forEach(checkbox => {
+                const itemId = parseInt(checkbox.value);
+                const row = checkbox.closest('tr');
+
+                if (e.target.checked) {
+                    selectedItems.add(itemId);
+                    checkbox.checked = true;
+                    row.classList.add('selected');
+                } else {
+                    selectedItems.delete(itemId);
+                    checkbox.checked = false;
+                    row.classList.remove('selected');
+                }
+            });
+            updateItemsStats();
+        });
+
+        document.getElementById('processSelectedItemsBtn').addEventListener('click', async () => {
+            if (selectedItems.size === 0) return;
+
+            const selectedItemsData = allBrokenItems.filter(item => selectedItems.has(item.id));
+
+            // Group by arr
+            const itemsByArr = {};
+            selectedItemsData.forEach(item => {
+                if (!itemsByArr[item.arr]) {
+                    itemsByArr[item.arr] = [];
+                }
+                itemsByArr[item.arr].push(item.id);
+            });
+
+            console.log(itemsByArr);
+
             try {
-                const response = await fetcher(`/api/repair/jobs/${jobId}/process`, {
+                const response = await fetcher(`/api/repair/jobs/${currentJob.id}/process-items`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
+                    body: JSON.stringify({ items: itemsByArr })
                 });
 
                 if (!response.ok) throw new Error(await response.text());
-                createToast('Job processing started successfully');
-                await loadJobs(currentPage); // Refresh the jobs list
+                createToast(`Processing ${selectedItems.size} selected items`);
+
+                // Close modal and refresh jobs
+                const modal = bootstrap.Modal.getInstance(document.getElementById('jobDetailsModal'));
+                modal.hide();
+                loadJobs(currentPage);
             } catch (error) {
-                createToast(`Error processing job: ${error.message}`, 'error');
+                createToast(`Error processing selected items: ${error.message}`, 'error');
             }
-        }
+        });
 
-        async function stopJob(jobId) {
-            if (confirm('Are you sure you want to stop this job?')) {
-                try {
-                    const response = await fetcher(`/api/repair/jobs/${jobId}/stop`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                    });
+        // Filter event listeners
+        document.getElementById('itemSearchInput').addEventListener('input', applyFilters);
+        document.getElementById('arrFilterSelect').addEventListener('change', applyFilters);
+        document.getElementById('pathFilterSelect').addEventListener('change', applyFilters);
 
-                    if (!response.ok) throw new Error(await response.text());
-                    createToast('Job stop requested successfully');
-                    await loadJobs(currentPage); // Refresh the jobs list
-                } catch (error) {
-                    createToast(`Error stopping job: ${error.message}`, 'error');
-                }
-            }
-        }
+        document.getElementById('clearFiltersBtn').addEventListener('click', () => {
+            document.getElementById('itemSearchInput').value = '';
+            document.getElementById('arrFilterSelect').value = '';
+            document.getElementById('pathFilterSelect').value = '';
+            applyFilters();
+        });
 
-        // View job details function
         function viewJobDetails(jobId) {
             // Find the job
             const job = allJobs.find(j => j.id === jobId);
             if (!job) return;
+
+            currentJob = job;
+            selectedItems.clear();
+            currentItemsPage = 1;
 
             // Prepare modal data
             document.getElementById('modalJobId').textContent = job.id.substring(0, 8);
@@ -520,7 +821,6 @@
 
             // Set status with color
             let status = getStatus(job.status);
-
             document.getElementById('modalJobStatus').innerHTML = `<span class="${status.class}">${status.text}</span>`;
 
             // Set other job details
@@ -552,7 +852,7 @@
             }
 
             // Stop button visibility
-            const stopBtn = document.getElementById('stopJobBtn'); // You'll need to add this button to the HTML
+            const stopBtn = document.getElementById('stopJobBtn');
             if (job.status === 'started' || job.status === 'processing') {
                 stopBtn.classList.remove('d-none');
                 stopBtn.onclick = () => {
@@ -564,46 +864,126 @@
                 stopBtn.classList.add('d-none');
             }
 
-            // Populate broken items table
-            const brokenItemsTableBody = document.getElementById('brokenItemsTableBody');
-            const noBrokenItemsMessage = document.getElementById('noBrokenItemsMessage');
-            brokenItemsTableBody.innerHTML = '';
-
-            let hasBrokenItems = false;
-
-            // Check if broken_items exists and has entries
+            // Process broken items data
             if (job.broken_items && Object.entries(job.broken_items).length > 0) {
-                hasBrokenItems = true;
-
-                // Loop through each Arr's broken items
-                for (const [arrName, items] of Object.entries(job.broken_items)) {
-                    if (items && items.length > 0) {
-                        // Add each item to the table
-                        items.forEach(item => {
-                            const row = document.createElement('tr');
-                            row.innerHTML = `
-                        <td>${arrName}</td>
-                        <td><small class="text-muted">${item.path}</small></td>
-                    `;
-                            brokenItemsTableBody.appendChild(row);
-                        });
-                    }
-                }
-            }
-
-            // Show/hide no items message
-            if (hasBrokenItems) {
-                noBrokenItemsMessage.classList.add('d-none');
+                allBrokenItems = processItemsData(job.broken_items);
+                filteredItems = [...allBrokenItems];
+                populateArrFilter();
+                renderBrokenItemsTable();
             } else {
-                noBrokenItemsMessage.classList.remove('d-none');
+                allBrokenItems = [];
+                filteredItems = [];
+                renderBrokenItemsTable();
             }
+
+            updateItemsStats();
 
             // Show the modal
             const modal = new bootstrap.Modal(document.getElementById('jobDetailsModal'));
             modal.show();
         }
 
-        // Add event listener for refresh button
+        // Keep existing functions (selectAllJobs, updateDeleteButtonState, deleteJob, etc.)
+        document.getElementById('selectAllJobs').addEventListener('change', function() {
+            const isChecked = this.checked;
+            document.querySelectorAll('.job-checkbox:not(:disabled)').forEach(checkbox => {
+                checkbox.checked = isChecked;
+            });
+            updateDeleteButtonState();
+        });
+
+        function updateDeleteButtonState() {
+            const deleteBtn = document.getElementById('deleteSelectedJobs');
+            const selectedCheckboxes = document.querySelectorAll('.job-checkbox:checked');
+            deleteBtn.disabled = selectedCheckboxes.length === 0;
+        }
+
+        document.getElementById('deleteSelectedJobs').addEventListener('click', async () => {
+            const selectedIds = Array.from(
+                document.querySelectorAll('.job-checkbox:checked')
+            ).map(checkbox => checkbox.value);
+
+            if (!selectedIds.length) return;
+
+            if (confirm(`Are you sure you want to delete ${selectedIds.length} job(s)?`)) {
+                await deleteMultipleJobs(selectedIds);
+            }
+        });
+
+        async function deleteJob(jobId) {
+            if (confirm('Are you sure you want to delete this job?')) {
+                try {
+                    const response = await fetcher(`/api/repair/jobs`, {
+                        method: 'DELETE',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ ids: [jobId] })
+                    });
+
+                    if (!response.ok) throw new Error(await response.text());
+                    createToast('Job deleted successfully');
+                    await loadJobs(currentPage);
+                } catch (error) {
+                    createToast(`Error deleting job: ${error.message}`, 'error');
+                }
+            }
+        }
+
+        async function deleteMultipleJobs(jobIds) {
+            try {
+                const response = await fetcher(`/api/repair/jobs`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ ids: jobIds })
+                });
+
+                if (!response.ok) throw new Error(await response.text());
+                createToast(`${jobIds.length} job(s) deleted successfully`);
+                await loadJobs(currentPage);
+            } catch (error) {
+                createToast(`Error deleting jobs: ${error.message}`, 'error');
+            }
+        }
+
+        async function processJob(jobId) {
+            try {
+                const response = await fetcher(`/api/repair/jobs/${jobId}/process`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                });
+
+                if (!response.ok) throw new Error(await response.text());
+                createToast('Job processing started successfully');
+                await loadJobs(currentPage);
+            } catch (error) {
+                createToast(`Error processing job: ${error.message}`, 'error');
+            }
+        }
+
+        async function stopJob(jobId) {
+            if (confirm('Are you sure you want to stop this job?')) {
+                try {
+                    const response = await fetcher(`/api/repair/jobs/${jobId}/stop`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                    });
+
+                    if (!response.ok) throw new Error(await response.text());
+                    createToast('Job stop requested successfully');
+                    await loadJobs(currentPage);
+                } catch (error) {
+                    createToast(`Error stopping job: ${error.message}`, 'error');
+                }
+            }
+        }
+
         document.getElementById('refreshJobs').addEventListener('click', () => {
             loadJobs(currentPage);
         });

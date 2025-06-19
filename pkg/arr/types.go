@@ -25,6 +25,7 @@ type ContentFile struct {
 	IsSymlink    bool   `json:"isSymlink"`
 	IsBroken     bool   `json:"isBroken"`
 	SeasonNumber int    `json:"seasonNumber"`
+	Processed    bool   `json:"processed"`
 }
 
 func (file *ContentFile) Delete() {

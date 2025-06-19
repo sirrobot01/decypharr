@@ -326,6 +326,28 @@ func (wb *Web) handleProcessRepairJob(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func (wb *Web) handleProcessRepairJobItems(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		http.Error(w, "No job ID provided", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		Items map[string][]int `json:"items"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	_store := store.Get()
+	if err := _store.Repair().ProcessJobItems(id, req.Items); err != nil {
+		wb.logger.Error().Err(err).Msg("Failed to process repair job items")
+		http.Error(w, "Failed to process job items: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 func (wb *Web) handleDeleteRepairJob(w http.ResponseWriter, r *http.Request) {
 	// Read ids from body
 	var req struct {
