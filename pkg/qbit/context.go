@@ -148,6 +148,7 @@ func (q *QBit) authContext(next http.Handler) http.Handler {
 		a.Source = "auto"
 		if err := validateServiceURL(a.Host); err != nil {
 			// Return silently, no need to raise a problem. Just do not add the Arr to the context/config.json
+			next.ServeHTTP(w, r)
 			return
 		}
 		arrs.AddOrUpdate(a)
