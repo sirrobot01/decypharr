@@ -45,7 +45,8 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 
 	_arr := _store.Arr().Get(arrName)
 	if _arr == nil {
-		_arr = arr.New(arrName, "", "", false, false, &downloadUncached, "")
+		// These are not found in the config. They are throwaway arrs.
+		_arr = arr.New(arrName, "", "", false, false, &downloadUncached, "", "")
 	}
 
 	// Handle URLs
@@ -181,20 +182,38 @@ func (wb *Web) handleDeleteTorrents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (wb *Web) handleGetConfig(w http.ResponseWriter, r *http.Request) {
+	// Merge config arrs, with arr Storage
+	unique := map[string]config.Arr{}
 	cfg := config.Get()
-	arrCfgs := make([]config.Arr, 0)
-	_store := store.Get()
-	for _, a := range _store.Arr().GetAll() {
-		arrCfgs = append(arrCfgs, config.Arr{
-			Host:             a.Host,
-			Name:             a.Name,
-			Token:            a.Token,
-			Cleanup:          a.Cleanup,
-			SkipRepair:       a.SkipRepair,
-			DownloadUncached: a.DownloadUncached,
-		})
+	arrStorage := store.Get().Arr()
+
+	// Add existing Arrs from storage
+	for _, a := range arrStorage.GetAll() {
+		if _, ok := unique[a.Name]; !ok {
+			// Only add if not already in the unique map
+			unique[a.Name] = config.Arr{
+				Name:             a.Name,
+				Host:             a.Host,
+				Token:            a.Token,
+				Cleanup:          a.Cleanup,
+				SkipRepair:       a.SkipRepair,
+				DownloadUncached: a.DownloadUncached,
+				SelectedDebrid:   a.SelectedDebrid,
+				Source:           a.Source,
+			}
+		}
 	}
-	cfg.Arrs = arrCfgs
+
+	for _, a := range cfg.Arrs {
+		if a.Host == "" || a.Token == "" {
+			continue // Skip empty arrs
+		}
+		unique[a.Name] = a
+	}
+	cfg.Arrs = make([]config.Arr, 0, len(unique))
+	for _, a := range unique {
+		cfg.Arrs = append(cfg.Arrs, a)
+	}
 	request.JSONResponse(w, cfg, http.StatusOK)
 }
 
@@ -235,27 +254,43 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		// Clear legacy single debrid if using array
 	}
 
-	if len(updatedConfig.Arrs) > 0 {
-		currentConfig.Arrs = updatedConfig.Arrs
-	}
-
 	// Update Arrs through the service
-	_store := store.Get()
-	_arr := _store.Arr()
-	_arr.Clear() // Clear existing arrs
+	storage := store.Get()
+	arrStorage := storage.Arr()
 
+	newConfigArrs := make([]config.Arr, 0)
 	for _, a := range updatedConfig.Arrs {
-		_arr.AddOrUpdate(&arr.Arr{
-			Name:             a.Name,
-			Host:             a.Host,
-			Token:            a.Token,
-			Cleanup:          a.Cleanup,
-			SkipRepair:       a.SkipRepair,
-			DownloadUncached: a.DownloadUncached,
-			SelectedDebrid:   a.SelectedDebrid,
-		})
+		if a.Name == "" || a.Host == "" || a.Token == "" {
+			// Skip empty or auto-generated arrs
+			continue
+		}
+		newConfigArrs = append(newConfigArrs, a)
 	}
-	currentConfig.Arrs = updatedConfig.Arrs
+	currentConfig.Arrs = newConfigArrs
+
+	// Add config arr into the config
+	for _, a := range currentConfig.Arrs {
+		if a.Host == "" || a.Token == "" {
+			continue // Skip empty arrs
+		}
+		existingArr := arrStorage.Get(a.Name)
+		if existingArr != nil {
+			// Update existing Arr
+			existingArr.Host = a.Host
+			existingArr.Token = a.Token
+			existingArr.Cleanup = a.Cleanup
+			existingArr.SkipRepair = a.SkipRepair
+			existingArr.DownloadUncached = a.DownloadUncached
+			existingArr.SelectedDebrid = a.SelectedDebrid
+			existingArr.Source = a.Source
+			arrStorage.AddOrUpdate(existingArr)
+		} else {
+			// Create new Arr if it doesn't exist
+			newArr := arr.New(a.Name, a.Host, a.Token, a.Cleanup, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid, a.Source)
+			arrStorage.AddOrUpdate(newArr)
+		}
+	}
+
 	if err := currentConfig.Save(); err != nil {
 		http.Error(w, "Error saving config: "+err.Error(), http.StatusInternalServerError)
 		return

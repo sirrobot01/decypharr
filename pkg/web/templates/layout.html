@@ -121,6 +121,45 @@
         .theme-toggle:hover {
             background-color: rgba(128, 128, 128, 0.2);
         }
+        .password-toggle-container {
+            position: relative;
+        }
+
+        .password-toggle-btn {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: #6c757d;
+            cursor: pointer;
+            padding: 0;
+            z-index: 10;
+        }
+
+        .password-toggle-btn:hover {
+            color: #495057;
+        }
+
+        .form-control.has-toggle {
+            padding-right: 35px;
+        }
+        textarea.has-toggle {
+            -webkit-text-security: disc;
+            text-security: disc;
+            font-family: monospace !important;
+        }
+
+        textarea.has-toggle[data-password-visible="true"] {
+            -webkit-text-security: none;
+            text-security: none;
+        }
+
+        /* Adjust toggle button position for textareas */
+        .password-toggle-container textarea.has-toggle ~ .password-toggle-btn {
+            top: 20px;
+        }
     </style>
     <script>
         (function() {
@@ -296,6 +335,57 @@
             toastElement.remove();
         });
     };
+
+    function createPasswordField(name, id, placeholder = "", required = false) {
+        return `
+        <div class="password-toggle-container">
+            <input type="password"
+                   class="form-control has-toggle"
+                   name="${name}"
+                   id="${id}"
+                   placeholder="${placeholder}"
+                   ${required ? 'required' : ''}>
+            <button type="button"
+                    class="password-toggle-btn"
+                    onclick="togglePassword('${id}');">
+                <i class="bi bi-eye" id="${id}_icon"></i>
+            </button>
+        </div>
+    `;
+    }
+
+    function togglePassword(fieldId) {
+        const field = document.getElementById(fieldId);
+        const icon = document.getElementById(fieldId + '_icon');
+
+        if (field.type === 'password') {
+            field.type = 'text';
+            icon.className = 'bi bi-eye-slash';
+        } else {
+            field.type = 'password';
+            icon.className = 'bi bi-eye';
+        }
+    }
+
+    // Add this function to handle textarea password toggling
+    function togglePasswordTextarea(fieldId) {
+        const field = document.getElementById(fieldId);
+        const icon = document.getElementById(fieldId + '_icon');
+
+        if (field.style.webkitTextSecurity === 'disc' || field.style.webkitTextSecurity === '') {
+            // Show text
+            field.style.webkitTextSecurity = 'none';
+            field.style.textSecurity = 'none'; // For other browsers
+            field.setAttribute('data-password-visible', 'true');
+            icon.className = 'bi bi-eye-slash';
+        } else {
+            // Hide text
+            field.style.webkitTextSecurity = 'disc';
+            field.style.textSecurity = 'disc'; // For other browsers
+            field.setAttribute('data-password-visible', 'false');
+            icon.className = 'bi bi-eye';
+        }
+    }
 
     // Theme management
     const themeToggle = document.getElementById('themeToggle');

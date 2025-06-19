@@ -3,6 +3,7 @@ package arr
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"github.com/rs/zerolog"
@@ -18,6 +19,13 @@ import (
 
 // Type is a type of arr
 type Type string
+
+var sharedClient = &http.Client{
+	Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	},
+	Timeout: 60 * time.Second,
+}
 
 const (
 	Sonarr  Type = "sonarr"
@@ -35,10 +43,10 @@ type Arr struct {
 	SkipRepair       bool   `json:"skip_repair"`
 	DownloadUncached *bool  `json:"download_uncached"`
 	SelectedDebrid   string `json:"selected_debrid,omitempty"` // The debrid service selected for this arr
-	client           *request.Client
+	Source           string `json:"source,omitempty"`          // The source of the arr, e.g. "auto", "manual". Auto means it was automatically detected from the arr
 }
 
-func New(name, host, token string, cleanup, skipRepair bool, downloadUncached *bool, selectedDebrid string) *Arr {
+func New(name, host, token string, cleanup, skipRepair bool, downloadUncached *bool, selectedDebrid, source string) *Arr {
 	return &Arr{
 		Name:             name,
 		Host:             host,
@@ -47,8 +55,8 @@ func New(name, host, token string, cleanup, skipRepair bool, downloadUncached *b
 		Cleanup:          cleanup,
 		SkipRepair:       skipRepair,
 		DownloadUncached: downloadUncached,
-		client:           request.New(),
 		SelectedDebrid:   selectedDebrid,
+		Source:           source,
 	}
 }
 
@@ -75,14 +83,11 @@ func (a *Arr) Request(method, endpoint string, payload interface{}) (*http.Respo
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Api-Key", a.Token)
-	if a.client == nil {
-		a.client = request.New()
-	}
 
 	var resp *http.Response
 
 	for attempts := 0; attempts < 5; attempts++ {
-		resp, err = a.client.Do(req)
+		resp, err = sharedClient.Do(req)
 		if err != nil {
 			return nil, err
 		}
@@ -104,7 +109,7 @@ func (a *Arr) Request(method, endpoint string, payload interface{}) (*http.Respo
 
 func (a *Arr) Validate() error {
 	if a.Token == "" || a.Host == "" {
-		return nil
+		return fmt.Errorf("arr not configured: %s", a.Name)
 	}
 	resp, err := a.Request("GET", "/api/v3/health", nil)
 	if err != nil {
@@ -146,8 +151,11 @@ func InferType(host, name string) Type {
 func NewStorage() *Storage {
 	arrs := make(map[string]*Arr)
 	for _, a := range config.Get().Arrs {
+		if a.Host == "" || a.Token == "" || a.Name == "" {
+			continue // Skip if host or token is not set
+		}
 		name := a.Name
-		arrs[name] = New(name, a.Host, a.Token, a.Cleanup, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid)
+		arrs[name] = New(name, a.Host, a.Token, a.Cleanup, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid, a.Source)
 	}
 	return &Storage{
 		Arrs:   arrs,
@@ -158,7 +166,7 @@ func NewStorage() *Storage {
 func (s *Storage) AddOrUpdate(arr *Arr) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if arr.Name == "" {
+	if arr.Host == "" || arr.Token == "" || arr.Name == "" {
 		return
 	}
 	s.Arrs[arr.Name] = arr
@@ -175,17 +183,9 @@ func (s *Storage) GetAll() []*Arr {
 	defer s.mu.Unlock()
 	arrs := make([]*Arr, 0, len(s.Arrs))
 	for _, arr := range s.Arrs {
-		if arr.Host != "" && arr.Token != "" {
-			arrs = append(arrs, arr)
-		}
+		arrs = append(arrs, arr)
 	}
 	return arrs
-}
-
-func (s *Storage) Clear() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.Arrs = make(map[string]*Arr)
 }
 
 func (s *Storage) StartSchedule(ctx context.Context) error {

@@ -10,14 +10,15 @@ import (
 
 func (q *QBit) handleLogin(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	_arr := getArr(ctx)
+	_arr := getArrFromContext(ctx)
 	if _arr == nil {
-		// No arr
+		// Arr not in context, return OK
 		_, _ = w.Write([]byte("Ok."))
 		return
 	}
 	if err := _arr.Validate(); err != nil {
 		q.logger.Error().Err(err).Msgf("Error validating arr")
+		http.Error(w, "Invalid arr configuration", http.StatusBadRequest)
 	}
 	_, _ = w.Write([]byte("Ok."))
 }
@@ -94,9 +95,10 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	debridName := r.FormValue("debrid")
 	category := r.FormValue("category")
-	_arr := getArr(ctx)
+	_arr := getArrFromContext(ctx)
 	if _arr == nil {
-		_arr = arr.New(category, "", "", false, false, nil, "")
+		// Arr is not in context
+		_arr = arr.New(category, "", "", false, false, nil, "", "")
 	}
 	atleastOne := false
 
