@@ -3,7 +3,7 @@ package server
 import (
 	"cmp"
 	"encoding/json"
-	"github.com/sirrobot01/decypharr/pkg/service"
+	"github.com/sirrobot01/decypharr/pkg/store"
 	"net/http"
 )
 
@@ -38,8 +38,7 @@ func (s *Server) handleTautulli(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid ID", http.StatusBadRequest)
 		return
 	}
-	svc := service.GetService()
-	repair := svc.Repair
+	repair := store.Get().Repair()
 
 	mediaId := cmp.Or(payload.TmdbID, payload.TvdbID)
 

@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-func (ui *Handler) verifyAuth(username, password string) bool {
+func (wb *Web) verifyAuth(username, password string) bool {
 	// If you're storing hashed password, use bcrypt to compare
 	if username == "" {
 		return false
@@ -22,11 +22,11 @@ func (ui *Handler) verifyAuth(username, password string) bool {
 	return err == nil
 }
 
-func (ui *Handler) skipAuthHandler(w http.ResponseWriter, r *http.Request) {
+func (wb *Web) skipAuthHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
 	cfg.UseAuth = false
 	if err := cfg.Save(); err != nil {
-		ui.logger.Error().Err(err).Msg("failed to save config")
+		wb.logger.Error().Err(err).Msg("failed to save config")
 		http.Error(w, "failed to save config", http.StatusInternalServerError)
 		return
 	}

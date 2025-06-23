@@ -9,12 +9,10 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/internal/request"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
-	"runtime"
 )
 
 type Server struct {
@@ -45,8 +43,12 @@ func New(handlers map[string]http.Handler) *Server {
 		//logs
 		r.Get("/logs", s.getLogs)
 
-		//stats
-		r.Get("/stats", s.getStats)
+		//debugs
+		r.Route("/debug", func(r chi.Router) {
+			r.Get("/stats", s.handleStats)
+			r.Get("/ingests", s.handleIngests)
+			r.Get("/ingests/{debrid}", s.handleIngestsByDebrid)
+		})
 
 		//webhooks
 		r.Post("/webhooks/tautulli", s.handleTautulli)
@@ -68,7 +70,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			s.logger.Info().Msgf("Error starting server: %v", err)
+			s.logger.Error().Err(err).Msgf("Error starting server")
 		}
 	}()
 
@@ -107,30 +109,4 @@ func (s *Server) getLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Error streaming log file", http.StatusInternalServerError)
 		return
 	}
-}
-
-func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
-	var memStats runtime.MemStats
-	runtime.ReadMemStats(&memStats)
-
-	stats := map[string]interface{}{
-		// Memory stats
-		"heap_alloc_mb":  fmt.Sprintf("%.2fMB", float64(memStats.HeapAlloc)/1024/1024),
-		"total_alloc_mb": fmt.Sprintf("%.2fMB", float64(memStats.TotalAlloc)/1024/1024),
-		"memory_used":    fmt.Sprintf("%.2fMB", float64(memStats.Sys)/1024/1024),
-
-		// GC stats
-		"gc_cycles": memStats.NumGC,
-		// Goroutine stats
-		"goroutines": runtime.NumGoroutine(),
-
-		// System info
-		"num_cpu": runtime.NumCPU(),
-
-		// OS info
-		"os":         runtime.GOOS,
-		"arch":       runtime.GOARCH,
-		"go_version": runtime.Version(),
-	}
-	request.JSONResponse(w, stats, http.StatusOK)
 }

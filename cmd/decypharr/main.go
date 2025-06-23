@@ -7,11 +7,10 @@ import (
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/pkg/qbit"
 	"github.com/sirrobot01/decypharr/pkg/server"
-	"github.com/sirrobot01/decypharr/pkg/service"
+	"github.com/sirrobot01/decypharr/pkg/store"
 	"github.com/sirrobot01/decypharr/pkg/version"
 	"github.com/sirrobot01/decypharr/pkg/web"
 	"github.com/sirrobot01/decypharr/pkg/webdav"
-	"github.com/sirrobot01/decypharr/pkg/worker"
 	"net/http"
 	"os"
 	"runtime"
@@ -62,7 +61,7 @@ func Start(ctx context.Context) error {
 		qb := qbit.New()
 		wd := webdav.New()
 
-		ui := web.New(qb).Routes()
+		ui := web.New().Routes()
 		webdavRoutes := wd.Routes()
 		qbitRoutes := qb.Routes()
 
@@ -76,7 +75,7 @@ func Start(ctx context.Context) error {
 
 		done := make(chan struct{})
 		go func(ctx context.Context) {
-			if err := startServices(ctx, wd, srv); err != nil {
+			if err := startServices(ctx, cancelSvc, wd, srv); err != nil {
 				_log.Error().Err(err).Msg("Error starting services")
 				cancelSvc()
 			}
@@ -95,20 +94,20 @@ func Start(ctx context.Context) error {
 			_log.Info().Msg("Restarting Decypharr...")
 			<-done // wait for them to finish
 			qb.Reset()
-			service.Reset()
+			store.Reset()
 
 			// rebuild svcCtx off the original parent
 			svcCtx, cancelSvc = context.WithCancel(ctx)
 			runtime.GC()
 
 			config.Reload()
-			service.Reset()
+			store.Reset()
 			// loop will restart services automatically
 		}
 	}
 }
 
-func startServices(ctx context.Context, wd *webdav.WebDav, srv *server.Server) error {
+func startServices(ctx context.Context, cancelSvc context.CancelFunc, wd *webdav.WebDav, srv *server.Server) error {
 	var wg sync.WaitGroup
 	errChan := make(chan error)
 
@@ -146,11 +145,7 @@ func startServices(ctx context.Context, wd *webdav.WebDav, srv *server.Server) e
 	})
 
 	safeGo(func() error {
-		return worker.Start(ctx)
-	})
-
-	safeGo(func() error {
-		arr := service.GetService().Arr
+		arr := store.Get().Arr()
 		if arr == nil {
 			return nil
 		}
@@ -159,15 +154,19 @@ func startServices(ctx context.Context, wd *webdav.WebDav, srv *server.Server) e
 
 	if cfg := config.Get(); cfg.Repair.Enabled {
 		safeGo(func() error {
-			r := service.GetService().Repair
-			if r != nil {
-				if err := r.Start(ctx); err != nil {
+			repair := store.Get().Repair()
+			if repair != nil {
+				if err := repair.Start(ctx); err != nil {
 					_log.Error().Err(err).Msg("repair failed")
 				}
 			}
 			return nil
 		})
 	}
+
+	safeGo(func() error {
+		return store.Get().StartQueueSchedule(ctx)
+	})
 
 	go func() {
 		wg.Wait()
@@ -178,7 +177,11 @@ func startServices(ctx context.Context, wd *webdav.WebDav, srv *server.Server) e
 		for err := range errChan {
 			if err != nil {
 				_log.Error().Err(err).Msg("Service error detected")
-				// Don't shut down the whole app
+				// If the error is critical, return it to stop the main loop
+				if ctx.Err() == nil {
+					_log.Error().Msg("Stopping services due to error")
+					cancelSvc() // Cancel the service context to stop all services
+				}
 			}
 		}
 	}()

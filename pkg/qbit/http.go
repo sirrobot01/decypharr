@@ -1,114 +1,24 @@
 package qbit
 
 import (
-	"context"
-	"encoding/base64"
-	"github.com/go-chi/chi/v5"
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/pkg/arr"
-	"github.com/sirrobot01/decypharr/pkg/service"
 	"net/http"
 	"path/filepath"
 	"strings"
 )
 
-func decodeAuthHeader(header string) (string, string, error) {
-	encodedTokens := strings.Split(header, " ")
-	if len(encodedTokens) != 2 {
-		return "", "", nil
-	}
-	encodedToken := encodedTokens[1]
-
-	bytes, err := base64.StdEncoding.DecodeString(encodedToken)
-	if err != nil {
-		return "", "", err
-	}
-
-	bearer := string(bytes)
-
-	colonIndex := strings.LastIndex(bearer, ":")
-	host := bearer[:colonIndex]
-	token := bearer[colonIndex+1:]
-
-	return host, token, nil
-}
-
-func (q *QBit) CategoryContext(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		category := strings.Trim(r.URL.Query().Get("category"), "")
-		if category == "" {
-			// Get from form
-			_ = r.ParseForm()
-			category = r.Form.Get("category")
-			if category == "" {
-				// Get from multipart form
-				_ = r.ParseMultipartForm(32 << 20)
-				category = r.FormValue("category")
-			}
-		}
-		ctx := context.WithValue(r.Context(), "category", strings.TrimSpace(category))
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
-func (q *QBit) authContext(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host, token, err := decodeAuthHeader(r.Header.Get("Authorization"))
-		category := r.Context().Value("category").(string)
-		svc := service.GetService()
-		// Check if arr exists
-		a := svc.Arr.Get(category)
-		if a == nil {
-			downloadUncached := false
-			a = arr.New(category, "", "", false, false, &downloadUncached)
-		}
-		if err == nil {
-			host = strings.TrimSpace(host)
-			if host != "" {
-				a.Host = host
-			}
-			token = strings.TrimSpace(token)
-			if token != "" {
-				a.Token = token
-			}
-		}
-
-		svc.Arr.AddOrUpdate(a)
-		ctx := context.WithValue(r.Context(), "arr", a)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
-func HashesCtx(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_hashes := chi.URLParam(r, "hashes")
-		var hashes []string
-		if _hashes != "" {
-			hashes = strings.Split(_hashes, "|")
-		}
-		if hashes == nil {
-			// Get hashes from form
-			_ = r.ParseForm()
-			hashes = r.Form["hashes"]
-		}
-		for i, hash := range hashes {
-			hashes[i] = strings.TrimSpace(hash)
-		}
-		ctx := context.WithValue(r.Context(), "hashes", hashes)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
 func (q *QBit) handleLogin(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	_arr := ctx.Value("arr").(*arr.Arr)
+	_arr := getArrFromContext(ctx)
 	if _arr == nil {
-		// No arr
+		// Arr not in context, return OK
 		_, _ = w.Write([]byte("Ok."))
 		return
 	}
 	if err := _arr.Validate(); err != nil {
-		q.logger.Info().Msgf("Error validating arr: %v", err)
+		q.logger.Error().Err(err).Msgf("Error validating arr")
+		http.Error(w, "Invalid arr configuration", http.StatusBadRequest)
 	}
 	_, _ = w.Write([]byte("Ok."))
 }
@@ -122,7 +32,7 @@ func (q *QBit) handleWebAPIVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 func (q *QBit) handlePreferences(w http.ResponseWriter, r *http.Request) {
-	preferences := NewAppPreferences()
+	preferences := getAppPreferences()
 
 	preferences.WebUiUsername = q.Username
 	preferences.SavePath = q.DownloadFolder
@@ -150,10 +60,10 @@ func (q *QBit) handleShutdown(w http.ResponseWriter, r *http.Request) {
 func (q *QBit) handleTorrentsInfo(w http.ResponseWriter, r *http.Request) {
 	//log all url params
 	ctx := r.Context()
-	category := ctx.Value("category").(string)
+	category := getCategory(ctx)
 	filter := strings.Trim(r.URL.Query().Get("filter"), "")
-	hashes, _ := ctx.Value("hashes").([]string)
-	torrents := q.Storage.GetAllSorted(category, filter, hashes, "added_on", false)
+	hashes := getHashes(ctx)
+	torrents := q.storage.GetAllSorted(category, filter, hashes, "added_on", false)
 	request.JSONResponse(w, torrents, http.StatusOK)
 }
 
@@ -164,13 +74,13 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 	contentType := r.Header.Get("Content-Type")
 	if strings.Contains(contentType, "multipart/form-data") {
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
-			q.logger.Info().Msgf("Error parsing multipart form: %v", err)
+			q.logger.Error().Err(err).Msgf("Error parsing multipart form")
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 	} else if strings.Contains(contentType, "application/x-www-form-urlencoded") {
 		if err := r.ParseForm(); err != nil {
-			q.logger.Info().Msgf("Error parsing form: %v", err)
+			q.logger.Error().Err(err).Msgf("Error parsing form")
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -179,10 +89,18 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isSymlink := strings.ToLower(r.FormValue("sequentialDownload")) != "true"
+	action := "symlink"
+	if strings.ToLower(r.FormValue("sequentialDownload")) == "true" {
+		action = "download"
+	}
+	debridName := r.FormValue("debrid")
 	category := r.FormValue("category")
+	_arr := getArrFromContext(ctx)
+	if _arr == nil {
+		// Arr is not in context
+		_arr = arr.New(category, "", "", false, false, nil, "", "")
+	}
 	atleastOne := false
-	ctx = context.WithValue(ctx, "isSymlink", isSymlink)
 
 	// Handle magnet URLs
 	if urls := r.FormValue("urls"); urls != "" {
@@ -191,8 +109,8 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 			urlList = append(urlList, strings.TrimSpace(u))
 		}
 		for _, url := range urlList {
-			if err := q.AddMagnet(ctx, url, category); err != nil {
-				q.logger.Info().Msgf("Error adding magnet: %v", err)
+			if err := q.addMagnet(ctx, url, _arr, debridName, action); err != nil {
+				q.logger.Debug().Msgf("Error adding magnet: %s", err.Error())
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -204,8 +122,8 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 	if r.MultipartForm != nil && r.MultipartForm.File != nil {
 		if files := r.MultipartForm.File["torrents"]; len(files) > 0 {
 			for _, fileHeader := range files {
-				if err := q.AddTorrent(ctx, fileHeader, category); err != nil {
-					q.logger.Info().Msgf("Error adding torrent: %v", err)
+				if err := q.addTorrent(ctx, fileHeader, _arr, debridName, action); err != nil {
+					q.logger.Debug().Err(err).Msgf("Error adding torrent")
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
 				}
@@ -224,14 +142,14 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 
 func (q *QBit) handleTorrentsDelete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	hashes, _ := ctx.Value("hashes").([]string)
+	hashes := getHashes(ctx)
 	if len(hashes) == 0 {
 		http.Error(w, "No hashes provided", http.StatusBadRequest)
 		return
 	}
-	category := ctx.Value("category").(string)
+	category := getCategory(ctx)
 	for _, hash := range hashes {
-		q.Storage.Delete(hash, category, false)
+		q.storage.Delete(hash, category, false)
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -239,10 +157,10 @@ func (q *QBit) handleTorrentsDelete(w http.ResponseWriter, r *http.Request) {
 
 func (q *QBit) handleTorrentsPause(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	hashes, _ := ctx.Value("hashes").([]string)
-	category := ctx.Value("category").(string)
+	hashes := getHashes(ctx)
+	category := getCategory(ctx)
 	for _, hash := range hashes {
-		torrent := q.Storage.Get(hash, category)
+		torrent := q.storage.Get(hash, category)
 		if torrent == nil {
 			continue
 		}
@@ -254,10 +172,10 @@ func (q *QBit) handleTorrentsPause(w http.ResponseWriter, r *http.Request) {
 
 func (q *QBit) handleTorrentsResume(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	hashes, _ := ctx.Value("hashes").([]string)
-	category := ctx.Value("category").(string)
+	hashes := getHashes(ctx)
+	category := getCategory(ctx)
 	for _, hash := range hashes {
-		torrent := q.Storage.Get(hash, category)
+		torrent := q.storage.Get(hash, category)
 		if torrent == nil {
 			continue
 		}
@@ -269,10 +187,10 @@ func (q *QBit) handleTorrentsResume(w http.ResponseWriter, r *http.Request) {
 
 func (q *QBit) handleTorrentRecheck(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	hashes, _ := ctx.Value("hashes").([]string)
-	category := ctx.Value("category").(string)
+	hashes := getHashes(ctx)
+	category := getCategory(ctx)
 	for _, hash := range hashes {
-		torrent := q.Storage.Get(hash, category)
+		torrent := q.storage.Get(hash, category)
 		if torrent == nil {
 			continue
 		}
@@ -315,7 +233,7 @@ func (q *QBit) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 func (q *QBit) handleTorrentProperties(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	hash := r.URL.Query().Get("hash")
-	torrent := q.Storage.Get(hash, ctx.Value("category").(string))
+	torrent := q.storage.Get(hash, getCategory(ctx))
 
 	properties := q.GetTorrentProperties(torrent)
 	request.JSONResponse(w, properties, http.StatusOK)
@@ -324,22 +242,21 @@ func (q *QBit) handleTorrentProperties(w http.ResponseWriter, r *http.Request) {
 func (q *QBit) handleTorrentFiles(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	hash := r.URL.Query().Get("hash")
-	torrent := q.Storage.Get(hash, ctx.Value("category").(string))
+	torrent := q.storage.Get(hash, getCategory(ctx))
 	if torrent == nil {
 		return
 	}
-	files := q.GetTorrentFiles(torrent)
-	request.JSONResponse(w, files, http.StatusOK)
+	request.JSONResponse(w, torrent.Files, http.StatusOK)
 }
 
 func (q *QBit) handleSetCategory(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	category := ctx.Value("category").(string)
-	hashes, _ := ctx.Value("hashes").([]string)
-	torrents := q.Storage.GetAll("", "", hashes)
+	category := getCategory(ctx)
+	hashes := getHashes(ctx)
+	torrents := q.storage.GetAll("", "", hashes)
 	for _, torrent := range torrents {
 		torrent.Category = category
-		q.Storage.AddOrUpdate(torrent)
+		q.storage.AddOrUpdate(torrent)
 	}
 	request.JSONResponse(w, nil, http.StatusOK)
 }
@@ -351,14 +268,14 @@ func (q *QBit) handleAddTorrentTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	hashes, _ := ctx.Value("hashes").([]string)
+	hashes := getHashes(ctx)
 	tags := strings.Split(r.FormValue("tags"), ",")
 	for i, tag := range tags {
 		tags[i] = strings.TrimSpace(tag)
 	}
-	torrents := q.Storage.GetAll("", "", hashes)
+	torrents := q.storage.GetAll("", "", hashes)
 	for _, t := range torrents {
-		q.SetTorrentTags(t, tags)
+		q.setTorrentTags(t, tags)
 	}
 	request.JSONResponse(w, nil, http.StatusOK)
 }
@@ -370,14 +287,14 @@ func (q *QBit) handleRemoveTorrentTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	hashes, _ := ctx.Value("hashes").([]string)
+	hashes := getHashes(ctx)
 	tags := strings.Split(r.FormValue("tags"), ",")
 	for i, tag := range tags {
 		tags[i] = strings.TrimSpace(tag)
 	}
-	torrents := q.Storage.GetAll("", "", hashes)
+	torrents := q.storage.GetAll("", "", hashes)
 	for _, torrent := range torrents {
-		q.RemoveTorrentTags(torrent, tags)
+		q.removeTorrentTags(torrent, tags)
 
 	}
 	request.JSONResponse(w, nil, http.StatusOK)
@@ -397,6 +314,6 @@ func (q *QBit) handleCreateTags(w http.ResponseWriter, r *http.Request) {
 	for i, tag := range tags {
 		tags[i] = strings.TrimSpace(tag)
 	}
-	q.AddTags(tags)
+	q.addTags(tags)
 	request.JSONResponse(w, nil, http.StatusOK)
 }

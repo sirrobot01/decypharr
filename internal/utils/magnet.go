@@ -25,11 +25,11 @@ var (
 )
 
 type Magnet struct {
-	Name     string
-	InfoHash string
-	Size     int64
-	Link     string
-	File     []byte
+	Name     string `json:"name"`
+	InfoHash string `json:"infoHash"`
+	Size     int64  `json:"size"`
+	Link     string `json:"link"`
+	File     []byte `json:"-"`
 }
 
 func (m *Magnet) IsTorrent() bool {
@@ -83,7 +83,6 @@ func GetMagnetFromBytes(torrentData []byte) (*Magnet, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Println("InfoHash: ", infoHash)
 	magnet := &Magnet{
 		InfoHash: infoHash,
 		Name:     info.Name,

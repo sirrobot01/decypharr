@@ -6,16 +6,16 @@
 
 ## What is Decypharr?
 
-Decypharr combines the power of QBittorrent with popular Debrid services to enhance your media management. It provides a familiar interface for Sonarr, Radarr, and other \*Arr applications while leveraging the capabilities of Debrid providers.
+Decypharr combines the power of QBittorrent with popular Debrid services to enhance your media management. It provides a familiar interface for Sonarr, Radarr, and other \*Arr applications.
 
 ## Features
 
-- 🔄 Mock Qbittorent API that supports the Arrs (Sonarr, Radarr, Lidarr etc)
-- 🖥️ Full-fledged UI for managing torrents
-- 🛡️ Proxy support for filtering out un-cached Debrid torrents
-- 🔌 Multiple Debrid providers support
-- 📁 WebDAV server support for each debrid provider
-- 🔧 Repair Worker for missing files
+- Mock Qbittorent API that supports the Arrs (Sonarr, Radarr, Lidarr etc)
+- Full-fledged UI for managing torrents
+- Proxy support for filtering out un-cached Debrid torrents
+- Multiple Debrid providers support
+- WebDAV server support for each debrid provider
+- Repair Worker for missing files
 
 ## Supported Debrid Providers
 
@@ -36,14 +36,9 @@ services:
     container_name: decypharr
     ports:
       - "8282:8282" # qBittorrent
-    user: "1000:1000"
     volumes:
       - /mnt/:/mnt
       - ./configs/:/app # config.json must be in this directory
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - UMASK=002
     restart: unless-stopped
 ```
 

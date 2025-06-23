@@ -11,6 +11,7 @@ type Movie struct {
 		RelativePath string `json:"relativePath"`
 		Path         string `json:"path"`
 		Id           int    `json:"id"`
+		Size         int64  `json:"size"`
 	} `json:"movieFile"`
 	Id int `json:"id"`
 }
@@ -25,6 +26,8 @@ type ContentFile struct {
 	IsSymlink    bool   `json:"isSymlink"`
 	IsBroken     bool   `json:"isBroken"`
 	SeasonNumber int    `json:"seasonNumber"`
+	Processed    bool   `json:"processed"`
+	Size         int64  `json:"size"`
 }
 
 func (file *ContentFile) Delete() {
@@ -44,4 +47,5 @@ type seriesFile struct {
 	SeasonNumber int    `json:"seasonNumber"`
 	Path         string `json:"path"`
 	Id           int    `json:"id"`
+	Size         int64  `json:"size"`
 }

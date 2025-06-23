@@ -1,0 +1,76 @@
+name: Bug Report
+description: 'Report a new bug'
+labels: ['Type: Bug', 'Status: Needs Triage']
+body:
+  - type: checkboxes
+    attributes:
+      label: Is there an existing issue for this?
+      description: Please search to see if an open or closed issue already exists for the bug you encountered. If a bug exists and is closed note that it may only be fixed in an unstable branch.
+      options:
+        - label: I have searched the existing open and closed issues
+          required: true
+  - type: textarea
+    attributes:
+      label: Current Behavior
+      description: A concise description of what you're experiencing.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Expected Behavior
+      description: A concise description of what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps To Reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. In this environment...
+        2. With this config...
+        3. Run '...'
+        4. See error...
+    validations:
+      required: false
+  - type: textarea
+    attributes:
+      label: Environment
+      description: |
+        examples:
+          - **OS**: Ubuntu 20.04
+          - **Version**: v1.0.0
+          - **Docker Install**: Yes
+          - **Browser**: Firefox 90 (If UI related)
+      value: |
+        - OS: 
+        - Version: 
+        - Docker Install: 
+        - Browser:
+      render: markdown
+    validations:
+      required: true
+  - type: dropdown
+    attributes:
+      label: What branch are you running?
+      options:
+        - Main/Latest
+        - Beta
+        - Experimental
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Trace Logs? **Not Optional**
+      description: |
+        Trace Logs 
+        - are **required** for bug reports
+        - are not optional
+    validations:
+      required: true
+  - type: checkboxes
+    attributes:
+      label: Trace Logs have been provided as applicable
+      description: Trace logs are **generally required** and are not optional for all bug reports and contain `trace`. Info logs are invalid for bug reports and do not contain `debug` nor `trace`
+      options:
+        - label: I have read and followed the steps in the wiki link above and provided the required trace logs - the logs contain `trace` - that are relevant and show this issue.
+          required: true

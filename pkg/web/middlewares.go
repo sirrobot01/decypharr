@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-func (ui *Handler) setupMiddleware(next http.Handler) http.Handler {
+func (wb *Web) setupMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg := config.Get()
 		needsAuth := cfg.NeedsSetup()
@@ -24,7 +24,7 @@ func (ui *Handler) setupMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func (ui *Handler) authMiddleware(next http.Handler) http.Handler {
+func (wb *Web) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Check if setup is needed
 		cfg := config.Get()
@@ -38,7 +38,7 @@ func (ui *Handler) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		session, _ := store.Get(r, "auth-session")
+		session, _ := wb.cookie.Get(r, "auth-session")
 		auth, ok := session.Values["authenticated"].(bool)
 
 		if !ok || !auth {

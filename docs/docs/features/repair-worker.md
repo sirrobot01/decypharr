@@ -1,5 +1,7 @@
 # Repair Worker
 
+![Repair Worker](../images/repair.png)
+
 The Repair Worker is a powerful feature that helps maintain the health of your media library by scanning for and fixing issues with files.
 
 ## What It Does
@@ -19,7 +21,6 @@ To enable and configure the Repair Worker, add the following to your `config.jso
 "repair": {
   "enabled": true,
   "interval": "12h",
-  "run_on_start": false,
   "use_webdav": false,
   "zurg_url": "http://localhost:9999",
   "auto_process": true
@@ -30,7 +31,6 @@ To enable and configure the Repair Worker, add the following to your `config.jso
 
 - `enabled`: Set to `true` to enable the Repair Worker.
 - `interval`: The time interval for the Repair Worker to run (e.g., `12h`, `1d`).
-- `run_on_start`: If set to `true`, the Repair Worker will run immediately after Decypharr starts.
 - `use_webdav`: If set to `true`, the Repair Worker will use WebDAV for file operations.
 - `zurg_url`: The URL for the Zurg service (if using).
 - `auto_process`: If set to `true`, the Repair Worker will automatically process files that it finds issues with.

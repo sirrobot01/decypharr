@@ -1,6 +1,7 @@
 package webdav
 
 import (
+	"fmt"
 	"github.com/stanNthe5/stringbuf"
 	"net/http"
 	"net/url"
@@ -10,16 +11,6 @@ import (
 	"strings"
 	"time"
 )
-
-// getName: Returns the torrent name and filename from the path
-func getName(rootDir, path string) (string, string) {
-	path = strings.TrimPrefix(path, rootDir)
-	parts := strings.Split(strings.TrimPrefix(path, string(os.PathSeparator)), string(os.PathSeparator))
-	if len(parts) < 2 {
-		return "", ""
-	}
-	return parts[1], strings.Join(parts[2:], string(os.PathSeparator)) // Note the change from [0] to [1]
-}
 
 func isValidURL(str string) bool {
 	u, err := url.Parse(str)
@@ -94,9 +85,7 @@ func filesToXML(urlPath string, fi os.FileInfo, children []os.FileInfo) stringbu
 		})
 	}
 
-	sb := builderPool.Get().(stringbuf.StringBuf)
-	sb.Reset()
-	defer builderPool.Put(sb)
+	sb := stringbuf.New("")
 
 	// XML header and main element
 	_, _ = sb.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
@@ -143,4 +132,123 @@ func writeXml(w http.ResponseWriter, status int, buf stringbuf.StringBuf) {
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.WriteHeader(status)
 	_, _ = w.Write(buf.Bytes())
+}
+
+func hasHeadersWritten(w http.ResponseWriter) bool {
+	// Most ResponseWriter implementations support this
+	if hw, ok := w.(interface{ Written() bool }); ok {
+		return hw.Written()
+	}
+	return false
+}
+
+func isClientDisconnection(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+	// Common client disconnection error patterns
+	return strings.Contains(errStr, "broken pipe") ||
+		strings.Contains(errStr, "connection reset by peer") ||
+		strings.Contains(errStr, "write: connection reset") ||
+		strings.Contains(errStr, "read: connection reset") ||
+		strings.Contains(errStr, "context canceled") ||
+		strings.Contains(errStr, "context deadline exceeded") ||
+		strings.Contains(errStr, "client disconnected") ||
+		strings.Contains(errStr, "EOF")
+}
+
+type httpRange struct{ start, end int64 }
+
+func parseRange(s string, size int64) ([]httpRange, error) {
+	if s == "" {
+		return nil, nil
+	}
+	const b = "bytes="
+	if !strings.HasPrefix(s, b) {
+		return nil, fmt.Errorf("invalid range")
+	}
+
+	var ranges []httpRange
+	for _, ra := range strings.Split(s[len(b):], ",") {
+		ra = strings.TrimSpace(ra)
+		if ra == "" {
+			continue
+		}
+		i := strings.Index(ra, "-")
+		if i < 0 {
+			return nil, fmt.Errorf("invalid range")
+		}
+		start, end := strings.TrimSpace(ra[:i]), strings.TrimSpace(ra[i+1:])
+		var r httpRange
+		if start == "" {
+			i, err := strconv.ParseInt(end, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid range")
+			}
+			if i > size {
+				i = size
+			}
+			r.start = size - i
+			r.end = size - 1
+		} else {
+			i, err := strconv.ParseInt(start, 10, 64)
+			if err != nil || i < 0 {
+				return nil, fmt.Errorf("invalid range")
+			}
+			r.start = i
+			if end == "" {
+				r.end = size - 1
+			} else {
+				i, err := strconv.ParseInt(end, 10, 64)
+				if err != nil || r.start > i {
+					return nil, fmt.Errorf("invalid range")
+				}
+				if i >= size {
+					i = size - 1
+				}
+				r.end = i
+			}
+		}
+		if r.start > size-1 {
+			continue
+		}
+		ranges = append(ranges, r)
+	}
+	return ranges, nil
+}
+
+func setVideoStreamingHeaders(req *http.Request) {
+	// Request optimizations for faster response
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Accept-Encoding", "identity")
+	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("User-Agent", "VideoStream/1.0")
+	req.Header.Set("Priority", "u=1")
+}
+
+func setVideoResponseHeaders(w http.ResponseWriter, resp *http.Response, isRange bool) {
+	// Copy essential headers from upstream
+	if contentLength := resp.Header.Get("Content-Length"); contentLength != "" {
+		w.Header().Set("Content-Length", contentLength)
+	}
+
+	if contentRange := resp.Header.Get("Content-Range"); contentRange != "" && isRange {
+		w.Header().Set("Content-Range", contentRange)
+	}
+
+	// Video streaming optimizations
+	w.Header().Set("Accept-Ranges", "bytes")   // Enable seeking
+	w.Header().Set("Connection", "keep-alive") // Keep connection open
+
+	// Prevent buffering in proxies/CDNs
+	w.Header().Set("X-Accel-Buffering", "no") // Nginx
+	w.Header().Set("Proxy-Buffering", "off")  // General proxy
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Range")
+	w.Header().Set("Access-Control-Expose-Headers", "Content-Length, Content-Range")
+
+	w.WriteHeader(resp.StatusCode)
 }

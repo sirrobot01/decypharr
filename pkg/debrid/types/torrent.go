@@ -2,13 +2,14 @@ package types
 
 import (
 	"fmt"
-	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/arr"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/sirrobot01/decypharr/internal/logger"
+	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/arr"
 )
 
 type Torrent struct {
@@ -33,24 +34,12 @@ type Torrent struct {
 
 	Debrid string `json:"debrid"`
 
-	Arr              *arr.Arr   `json:"arr"`
-	Mu               sync.Mutex `json:"-"`
-	SizeDownloaded   int64      `json:"-"` // This is used for local download
-	DownloadUncached bool       `json:"-"`
-}
+	Arr *arr.Arr `json:"arr"`
 
-type DownloadLink struct {
-	Filename     string    `json:"filename"`
-	Link         string    `json:"link"`
-	DownloadLink string    `json:"download_link"`
-	Generated    time.Time `json:"generated"`
-	Size         int64     `json:"size"`
-	Id           string    `json:"id"`
-	AccountId    string    `json:"account_id"`
-}
+	SizeDownloaded   int64 `json:"-"` // This is used for local download
+	DownloadUncached bool  `json:"-"`
 
-func (d *DownloadLink) String() string {
-	return d.DownloadLink
+	sync.Mutex
 }
 
 func (t *Torrent) GetSymlinkFolder(parent string) string {
@@ -99,12 +88,14 @@ type File struct {
 	Id           string        `json:"id"`
 	Name         string        `json:"name"`
 	Size         int64         `json:"size"`
+	IsRar        bool          `json:"is_rar"`
+	ByteRange    *[2]int64     `json:"byte_range,omitempty"`
 	Path         string        `json:"path"`
 	Link         string        `json:"link"`
-	DownloadLink *DownloadLink `json:"-"`
 	AccountId    string        `json:"account_id"`
 	Generated    time.Time     `json:"generated"`
 	Deleted      bool          `json:"deleted"`
+	DownloadLink *DownloadLink `json:"-"`
 }
 
 func (t *Torrent) Cleanup(remove bool) {
@@ -116,9 +107,38 @@ func (t *Torrent) Cleanup(remove bool) {
 	}
 }
 
-type Account struct {
-	ID       string `json:"id"`
-	Disabled bool   `json:"disabled"`
-	Name     string `json:"name"`
-	Token    string `json:"token"`
+type IngestData struct {
+	Debrid string `json:"debrid"`
+	Name   string `json:"name"`
+	Hash   string `json:"hash"`
+	Size   int64  `json:"size"`
+}
+
+type Profile struct {
+	Name       string    `json:"name"`
+	Id         int64     `json:"id"`
+	Username   string    `json:"username"`
+	Email      string    `json:"email"`
+	Points     int64     `json:"points"`
+	Type       string    `json:"type"`
+	Premium    int       `json:"premium"`
+	Expiration time.Time `json:"expiration"`
+
+	LibrarySize int `json:"library_size"`
+	BadTorrents int `json:"bad_torrents"`
+	ActiveLinks int `json:"active_links"`
+}
+
+type DownloadLink struct {
+	Filename     string    `json:"filename"`
+	Link         string    `json:"link"`
+	DownloadLink string    `json:"download_link"`
+	Generated    time.Time `json:"generated"`
+	Size         int64     `json:"size"`
+	Id           string    `json:"id"`
+	ExpiresAt    time.Time
+}
+
+func (d *DownloadLink) String() string {
+	return d.DownloadLink
 }

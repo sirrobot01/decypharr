@@ -22,8 +22,14 @@ type HealthStatus struct {
 }
 
 func main() {
-	var configPath string
+	var (
+		configPath   string
+		isBasicCheck bool
+		debug        bool
+	)
 	flag.StringVar(&configPath, "config", "/data", "path to the data folder")
+	flag.BoolVar(&isBasicCheck, "basic", false, "perform basic health check without WebDAV")
+	flag.BoolVar(&debug, "debug", false, "enable debug mode for detailed output")
 	flag.Parse()
 	config.SetConfigPath(configPath)
 	cfg := config.Get()
@@ -63,16 +69,17 @@ func main() {
 		status.WebUI = true
 	}
 
-	// Check WebDAV if enabled
-	if webdavPath != "" {
-		if checkWebDAV(ctx, baseUrl, port, webdavPath) {
+	if isBasicCheck {
+		status.WebDAVService = checkBaseWebdav(ctx, baseUrl, port)
+	} else {
+		// If not a basic check, check WebDAV with debrid path
+		if webdavPath != "" {
+			status.WebDAVService = checkDebridWebDAV(ctx, baseUrl, port, webdavPath)
+		} else {
+			// If no WebDAV path is set, consider it healthy
 			status.WebDAVService = true
 		}
-	} else {
-		// If WebDAV is not enabled, consider it healthy
-		status.WebDAVService = true
 	}
-
 	// Determine overall status
 	// Consider the application healthy if core services are running
 	status.OverallStatus = status.QbitAPI && status.WebUI
@@ -81,7 +88,7 @@ func main() {
 	}
 
 	// Optional: output health status as JSON for logging
-	if os.Getenv("DEBUG") == "true" {
+	if debug {
 		statusJSON, _ := json.MarshalIndent(status, "", "  ")
 		fmt.Println(string(statusJSON))
 	}
@@ -132,7 +139,24 @@ func checkWebUI(ctx context.Context, baseUrl, port string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-func checkWebDAV(ctx context.Context, baseUrl, port, path string) bool {
+func checkBaseWebdav(ctx context.Context, baseUrl, port string) bool {
+	url := fmt.Sprintf("http://localhost:%s%swebdav/", port, baseUrl)
+	req, err := http.NewRequestWithContext(ctx, "PROPFIND", url, nil)
+	if err != nil {
+		return false
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode == http.StatusMultiStatus ||
+		resp.StatusCode == http.StatusOK
+}
+
+func checkDebridWebDAV(ctx context.Context, baseUrl, port, path string) bool {
 	url := fmt.Sprintf("http://localhost:%s%swebdav/%s", port, baseUrl, path)
 	req, err := http.NewRequestWithContext(ctx, "PROPFIND", url, nil)
 	if err != nil {
@@ -145,5 +169,7 @@ func checkWebDAV(ctx context.Context, baseUrl, port, path string) bool {
 	}
 	defer resp.Body.Close()
 
-	return resp.StatusCode == 207 || resp.StatusCode == http.StatusOK
+	return resp.StatusCode == http.StatusMultiStatus ||
+		resp.StatusCode == http.StatusOK
+
 }

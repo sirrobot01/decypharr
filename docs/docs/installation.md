@@ -45,21 +45,15 @@ docker run -d \
 Create a `docker-compose.yml` file with the following content:
 
 ```yaml
-version: '3.7'
 services:
   decypharr:
     image: cy01/blackhole:latest
     container_name: decypharr
     ports:
       - "8282:8282"
-    user: "1000:1000"
     volumes:
-      - /mnt/:/mnt # Mount your media directory
+      - /mnt/:/mnt:rslave # Mount your media directory
       - ./config/:/app # config.json must be in this directory
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - UMASK=002
       - QBIT_PORT=8282 # qBittorrent Port (optional)
     restart: unless-stopped
 ```
@@ -73,9 +67,10 @@ docker-compose up -d
 ## Binary Installation
 If you prefer not to use Docker, you can download and run the binary directly.
 
-Download the binary from the releases page
+Download your OS-specific release from the [releases page](https://github.com/sirrobot01/decypharr/releases).
 Create a configuration file (see Configuration)
 Run the binary:
+
 ```bash
 chmod +x decypharr
 ./decypharr --config /path/to/config/folder
@@ -109,8 +104,28 @@ You can also configure Decypharr through the web interface, but it's recommended
 }
 ```
 
-### Few Notes
+### Notes for Docker Users
 
-- Make sure decypharr has access to the directories specified in the configuration file.
-- Ensure decypharr have write permissions to the qbittorrent download folder.
-- Make sure decypharr can write to the `./config/` directory.
+- Ensure that the `/mnt/` directory is mounted correctly to access your media files.
+- The `./config/` directory should contain your `config.json` file.
+- You can adjust the `PUID` and `PGID` environment variables to match your user and group IDs for proper file permissions.
+- The `UMASK` environment variable can be set to control file permissions created by Decypharr.
+
+##### Health Checks
+- Health checks are disabled by default. You can enable them by adding a `healthcheck` section in your `docker-compose.yml` file.
+- Health checks checks for availability of several parts of the application;
+    - The main web interface
+    - The qBittorrent API
+    - The WebDAV server (if enabled). You should disable health checks for the initial indexes as they can take a long time to complete.
+
+```yaml
+services:
+  decypharr:
+    ...
+    ...
+    healthcheck:
+      test: ["CMD", "/usr/bin/healthcheck", "--config", "/app/"]
+      interval: 5s
+      timeout: 10s
+      retries: 3
+```

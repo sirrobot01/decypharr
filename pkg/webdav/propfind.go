@@ -8,21 +8,19 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
-var builderPool = sync.Pool{
+type contextKey string
 
-	New: func() interface{} {
-		buf := stringbuf.New("")
-		return buf
-	},
-}
+const (
+	// metadataOnlyKey is used to indicate that the request is for metadata only
+	metadataOnlyKey contextKey = "metadataOnly"
+)
 
 func (h *Handler) handlePropfind(w http.ResponseWriter, r *http.Request) {
 	// Setup context for metadata only
-	ctx := context.WithValue(r.Context(), "metadataOnly", true)
+	ctx := context.WithValue(r.Context(), metadataOnlyKey, true)
 	r = r.WithContext(ctx)
 
 	cleanPath := path.Clean(r.URL.Path)
@@ -85,9 +83,7 @@ func (h *Handler) handlePropfind(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	sb := builderPool.Get().(stringbuf.StringBuf)
-	sb.Reset()
-	defer builderPool.Put(sb)
+	sb := stringbuf.New("")
 
 	// XML header and main element
 	_, _ = sb.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)

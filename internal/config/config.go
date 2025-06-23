@@ -27,7 +27,9 @@ type Debrid struct {
 	CheckCached      bool     `json:"check_cached,omitempty"`
 	RateLimit        string   `json:"rate_limit,omitempty"` // 200/minute or 10/second
 	Proxy            string   `json:"proxy,omitempty"`
+	UnpackRar        bool     `json:"unpack_rar,omitempty"`
 	AddSamples       bool     `json:"add_samples,omitempty"`
+	MinimumFreeSlot  int      `json:"minimum_free_slot,omitempty"` // Minimum active pots to use this debrid
 
 	UseWebDav bool `json:"use_webdav,omitempty"`
 	WebDav
@@ -51,12 +53,13 @@ type Arr struct {
 	Cleanup          bool   `json:"cleanup,omitempty"`
 	SkipRepair       bool   `json:"skip_repair,omitempty"`
 	DownloadUncached *bool  `json:"download_uncached,omitempty"`
+	SelectedDebrid   string `json:"selected_debrid,omitempty"`
+	Source           string `json:"source,omitempty"` // The source of the arr, e.g. "auto", "config", "". Auto means it was automatically detected from the arr
 }
 
 type Repair struct {
 	Enabled     bool   `json:"enabled,omitempty"`
 	Interval    string `json:"interval,omitempty"`
-	RunOnStart  bool   `json:"run_on_start,omitempty"`
 	ZurgURL     string `json:"zurg_url,omitempty"`
 	AutoProcess bool   `json:"auto_process,omitempty"`
 	UseWebDav   bool   `json:"use_webdav,omitempty"`
@@ -75,19 +78,20 @@ type Config struct {
 	URLBase     string `json:"url_base,omitempty"`
 	Port        string `json:"port,omitempty"`
 
-	LogLevel       string      `json:"log_level,omitempty"`
-	Debrids        []Debrid    `json:"debrids,omitempty"`
-	QBitTorrent    QBitTorrent `json:"qbittorrent,omitempty"`
-	Arrs           []Arr       `json:"arrs,omitempty"`
-	Repair         Repair      `json:"repair,omitempty"`
-	WebDav         WebDav      `json:"webdav,omitempty"`
-	AllowedExt     []string    `json:"allowed_file_types,omitempty"`
-	MinFileSize    string      `json:"min_file_size,omitempty"` // Minimum file size to download, 10MB, 1GB, etc
-	MaxFileSize    string      `json:"max_file_size,omitempty"` // Maximum file size to download (0 means no limit)
-	Path           string      `json:"-"`                       // Path to save the config file
-	UseAuth        bool        `json:"use_auth,omitempty"`
-	Auth           *Auth       `json:"-"`
-	DiscordWebhook string      `json:"discord_webhook_url,omitempty"`
+	LogLevel           string      `json:"log_level,omitempty"`
+	Debrids            []Debrid    `json:"debrids,omitempty"`
+	QBitTorrent        QBitTorrent `json:"qbittorrent,omitempty"`
+	Arrs               []Arr       `json:"arrs,omitempty"`
+	Repair             Repair      `json:"repair,omitempty"`
+	WebDav             WebDav      `json:"webdav,omitempty"`
+	AllowedExt         []string    `json:"allowed_file_types,omitempty"`
+	MinFileSize        string      `json:"min_file_size,omitempty"` // Minimum file size to download, 10MB, 1GB, etc
+	MaxFileSize        string      `json:"max_file_size,omitempty"` // Maximum file size to download (0 means no limit)
+	Path               string      `json:"-"`                       // Path to save the config file
+	UseAuth            bool        `json:"use_auth,omitempty"`
+	Auth               *Auth       `json:"-"`
+	DiscordWebhook     string      `json:"discord_webhook_url,omitempty"`
+	RemoveStalledAfter string      `json:"remove_stalled_after,omitzero"`
 }
 
 func (c *Config) JsonFile() string {
@@ -95,6 +99,10 @@ func (c *Config) JsonFile() string {
 }
 func (c *Config) AuthFile() string {
 	return filepath.Join(c.Path, "auth.json")
+}
+
+func (c *Config) TorrentsFile() string {
+	return filepath.Join(c.Path, "torrents.json")
 }
 
 func (c *Config) loadConfig() error {
@@ -271,9 +279,15 @@ func (c *Config) updateDebrid(d Debrid) Debrid {
 	workers := runtime.NumCPU() * 50
 	perDebrid := workers / len(c.Debrids)
 
-	if len(d.DownloadAPIKeys) == 0 {
-		d.DownloadAPIKeys = append(d.DownloadAPIKeys, d.APIKey)
+	var downloadKeys []string
+
+	if len(d.DownloadAPIKeys) > 0 {
+		downloadKeys = d.DownloadAPIKeys
+	} else {
+		// If no download API keys are specified, use the main API key
+		downloadKeys = []string{d.APIKey}
 	}
+	d.DownloadAPIKeys = downloadKeys
 
 	if !d.UseWebDav {
 		return d
@@ -378,4 +392,8 @@ func (c *Config) createConfig(path string) error {
 func Reload() {
 	instance = nil
 	once = sync.Once{}
+}
+
+func DefaultFreeSlot() int {
+	return 10
 }

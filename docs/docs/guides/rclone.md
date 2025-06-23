@@ -5,7 +5,7 @@ This guide will help you set up Decypharr with Rclone, allowing you to use your 
 #### Rclone
 Make sure you have Rclone installed and configured on your system. You can follow the [Rclone installation guide](https://rclone.org/install/) for instructions.
 
-It's recommended to use docker version of Rclone, as it provides a consistent environment across different platforms. 
+It's recommended to use a docker version of Rclone, as it provides a consistent environment across different platforms. 
 
 
 ### Steps
@@ -35,7 +35,7 @@ Create a `rclone.conf` file in `/opt/rclone/` with your Rclone configuration.
 ```conf
 [decypharr]
 type = webdav
-url = https://your-ip-or-domain:8282/webdav/realdebrid
+url = http://your-ip-or-domain:8282/webdav/realdebrid
 vendor = other
 pacer_min_sleep = 0
 ```
@@ -51,7 +51,7 @@ Create a `config.json` file in `/opt/decypharr/` with your Decypharr configurati
       "folder": "/mnt/remote/realdebrid/__all__/",
       "rate_limit": "250/minute",
       "use_webdav": true,
-      "rc_url": "http://your-ip-address:5572" // Rclone RC URL
+      "rc_url": "rclone:5572"
     }
   ],
   "qbittorrent": {
@@ -69,13 +69,10 @@ services:
   decypharr:
     image: cy01/blackhole:latest
     container_name: decypharr
-    user: "1000:1000"
     volumes:
-      - /mnt/:/mnt
+      - /mnt/:/mnt:rslave
       - /opt/decypharr/:/app
     environment:
-      - PUID=1000
-      - PGID=1000
       - UMASK=002
     ports:
       - "8282:8282/tcp"
@@ -87,14 +84,11 @@ services:
     restart: unless-stopped
     environment:
       TZ: UTC
-      PUID: 1000
-      PGID: 1000
     ports:
      - 5572:5572
     volumes:
       - /mnt/remote/realdebrid:/data:rshared
       - /opt/rclone/rclone.conf:/config/rclone/rclone.conf
-      - /mnt:/mnt
     cap_add:
       - SYS_ADMIN
     security_opt:
@@ -105,8 +99,16 @@ services:
       decypharr:
         condition: service_healthy
         restart: true
-    command: "mount decypharr: /data --allow-non-empty --allow-other --uid=1000 --gid=1000 --umask=002 --dir-cache-time 10s --rc --rc-addr :5572 --rc-no-auth "
+    command: "mount decypharr: /data --allow-non-empty --allow-other --dir-cache-time 10s --rc --rc-addr :5572 --rc-no-auth"
 ```
+
+#### Docker Notes
+
+- Ensure that the `/mnt/` directory is mounted correctly to access your media files.
+- You can check your current user and group IDs and UMASK by running `id -a` and `umask` commands in your terminal.
+- You can adjust the `PUID` and `PGID` environment variables to match your user and group IDs for proper file permissions.
+- Also adding `--uid=$YOUR_PUID --gid=$YOUR_PGID` to the `rclone mount` command can help with permissions.
+- The `UMASK` environment variable can be set to control file permissions created by Decypharr.
 
 Start the containers:
 ```bash
@@ -132,7 +134,7 @@ For each provider, you'll need a different rclone. OR you can change your `rclon
 ```apache
 [decypharr]
 type = webdav
-url = https://your-ip-or-domain:8282/webdav/
+url = http://your-ip-or-domain:8282/webdav/
 vendor = other
 pacer_min_sleep = 0
 ```
