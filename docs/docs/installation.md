@@ -52,7 +52,7 @@ services:
     ports:
       - "8282:8282"
     volumes:
-      - /mnt/:/mnt # Mount your media directory
+      - /mnt/:/mnt:rslave # Mount your media directory
       - ./config/:/app # config.json must be in this directory
       - QBIT_PORT=8282 # qBittorrent Port (optional)
     restart: unless-stopped

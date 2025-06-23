@@ -1,5 +1,7 @@
 # WebDAV Server
 
+![WebDAV Server](../images/webdav.png)
+
 Decypharr includes a built-in WebDAV server that provides direct access to your Debrid files, making them easily accessible to media players and other applications.
 
 

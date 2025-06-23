@@ -51,7 +51,7 @@ Create a `config.json` file in `/opt/decypharr/` with your Decypharr configurati
       "folder": "/mnt/remote/realdebrid/__all__/",
       "rate_limit": "250/minute",
       "use_webdav": true,
-      "rc_url": "http://your-ip-address:5572"
+      "rc_url": "rclone:5572"
     }
   ],
   "qbittorrent": {

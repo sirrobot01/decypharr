@@ -1,5 +1,7 @@
 # Repair Worker
 
+![Repair Worker](../images/repair.png)
+
 The Repair Worker is a powerful feature that helps maintain the health of your media library by scanning for and fixing issues with files.
 
 ## What It Does
