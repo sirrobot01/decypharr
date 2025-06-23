@@ -40,12 +40,10 @@ func RemoveInvalidChars(value string) string {
 }
 
 func RemoveExtension(value string) string {
-	loc := mediaRegex.FindStringIndex(value)
-	if loc != nil {
+	if loc := mediaRegex.FindStringIndex(value); loc != nil {
 		return value[:loc[0]]
-	} else {
-		return value
 	}
+	return value
 }
 
 func IsMediaFile(path string) bool {

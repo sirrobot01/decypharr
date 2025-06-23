@@ -137,66 +137,74 @@ func (c *Cache) refreshRclone() error {
 	}
 
 	client := &http.Client{
-		Timeout: 60 * time.Second,
+		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
 			MaxIdleConns:        10,
-			IdleConnTimeout:     60 * time.Second,
+			IdleConnTimeout:     30 * time.Second,
 			DisableCompression:  false,
 			MaxIdleConnsPerHost: 5,
 		},
 	}
 	// Create form data
-	data := ""
+	data := c.buildRcloneRequestData()
+
+	if err := c.sendRcloneRequest(client, "vfs/forget", data); err != nil {
+		c.logger.Error().Err(err).Msg("Failed to send rclone vfs/forget request")
+	}
+
+	if err := c.sendRcloneRequest(client, "vfs/refresh", data); err != nil {
+		c.logger.Error().Err(err).Msg("Failed to send rclone vfs/refresh request")
+	}
+
+	return nil
+}
+
+func (c *Cache) buildRcloneRequestData() string {
+	cfg := c.config
 	dirs := strings.FieldsFunc(cfg.RcRefreshDirs, func(r rune) bool {
 		return r == ',' || r == '&'
 	})
+
 	if len(dirs) == 0 {
-		data = "dir=__all__"
-	} else {
-		for index, dir := range dirs {
-			if dir != "" {
-				if index == 0 {
-					data += "dir=" + dir
-				} else {
-					data += "&dir" + fmt.Sprint(index+1) + "=" + dir
-				}
+		return "dir=__all__"
+	}
+
+	var data strings.Builder
+	for index, dir := range dirs {
+		if dir != "" {
+			if index == 0 {
+				data.WriteString("dir=" + dir)
+			} else {
+				data.WriteString("&dir" + fmt.Sprint(index+1) + "=" + dir)
 			}
 		}
 	}
+	return data.String()
+}
 
-	sendRequest := func(endpoint string) error {
-		req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s", cfg.RcUrl, endpoint), strings.NewReader(data))
-		if err != nil {
-			return err
-		}
-
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-		if cfg.RcUser != "" && cfg.RcPass != "" {
-			req.SetBasicAuth(cfg.RcUser, cfg.RcPass)
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != 200 {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-			return fmt.Errorf("failed to perform %s: %s - %s", endpoint, resp.Status, string(body))
-		}
-
-		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil
-	}
-
-	if err := sendRequest("vfs/forget"); err != nil {
-		return err
-	}
-	if err := sendRequest("vfs/refresh"); err != nil {
+func (c *Cache) sendRcloneRequest(client *http.Client, endpoint, data string) error {
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s", c.config.RcUrl, endpoint), strings.NewReader(data))
+	if err != nil {
 		return err
 	}
 
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	if c.config.RcUser != "" && c.config.RcPass != "" {
+		req.SetBasicAuth(c.config.RcUser, c.config.RcPass)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("failed to perform %s: %s - %s", endpoint, resp.Status, string(body))
+	}
+
+	_, _ = io.Copy(io.Discard, resp.Body)
 	return nil
 }
 

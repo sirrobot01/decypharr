@@ -171,17 +171,18 @@ func (tc *torrentCache) refreshListing() {
 
 	wg.Add(1) // for all listing
 	go func() {
+		defer wg.Done()
 		listing := make([]os.FileInfo, len(all))
 		for i, sf := range all {
 			listing[i] = &fileInfo{sf.id, sf.name, sf.size, 0755 | os.ModeDir, sf.modTime, true}
 		}
 		tc.listing.Store(listing)
 	}()
-	wg.Done()
 
 	wg.Add(1)
 	// For __bad__
 	go func() {
+		defer wg.Done()
 		listing := make([]os.FileInfo, 0)
 		for _, sf := range all {
 			if sf.bad {
@@ -203,7 +204,6 @@ func (tc *torrentCache) refreshListing() {
 		}
 		tc.folders.Unlock()
 	}()
-	wg.Done()
 
 	now := time.Now()
 	wg.Add(len(tc.directoriesFilters)) // for each directory filter
