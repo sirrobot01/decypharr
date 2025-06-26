@@ -62,6 +62,11 @@ Create a `config.json` file in `/opt/decypharr/` with your Decypharr configurati
 
 ```
 
+### Docker Compose Setup
+
+- Check your current user and group IDs by running `id -u` and `id -g` in your terminal. You can use these values to set the `PUID` and `PGID` environment variables in the Docker Compose file.
+- You should also set `user` to your user ID and group ID in the Docker Compose file to ensure proper file permissions.
+
 Create a `docker-compose.yml` file with the following content:
 
 ```yaml
@@ -69,11 +74,14 @@ services:
   decypharr:
     image: cy01/blackhole:latest
     container_name: decypharr
+    user: "${PUID:-1000}:${PGID:-1000}"
     volumes:
       - /mnt/:/mnt:rslave
       - /opt/decypharr/:/app
     environment:
       - UMASK=002
+      - PUID=1000 # Replace with your user ID
+      - PGID=1000 # Replace with your group ID
     ports:
       - "8282:8282/tcp"
     restart: unless-stopped

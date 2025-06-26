@@ -28,7 +28,6 @@ func (wb *Web) Routes() http.Handler {
 			r.Post("/repair", wb.handleRepairMedia)
 			r.Get("/repair/jobs", wb.handleGetRepairJobs)
 			r.Post("/repair/jobs/{id}/process", wb.handleProcessRepairJob)
-			r.Post("/repair/jobs/{id}/process-items", wb.handleProcessRepairJobItems)
 			r.Post("/repair/jobs/{id}/stop", wb.handleStopRepairJob)
 			r.Delete("/repair/jobs", wb.handleDeleteRepairJob)
 			r.Get("/torrents", wb.handleGetTorrents)

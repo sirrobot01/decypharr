@@ -89,29 +89,44 @@ func (c *Cache) GetBrokenFiles(t *CachedTorrent, filenames []string) []string {
 	}
 
 	files = t.Files
-
 	var wg sync.WaitGroup
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	wg.Add(len(files))
 
 	for _, f := range files {
-		// Check if file link is still missing
 		go func(f types.File) {
 			defer wg.Done()
+
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			if f.Link == "" {
-				brokenFiles = append(brokenFiles, f.Name)
-			} else {
-				// Check if file.Link not in the downloadLink Cache
-				if err := c.client.CheckLink(f.Link); err != nil {
-					if errors.Is(err, utils.HosterUnavailableError) {
-						brokenFiles = append(brokenFiles, f.Name)
-					}
+				cancel()
+				return
+			}
+
+			if err := c.client.CheckLink(f.Link); err != nil {
+				if errors.Is(err, utils.HosterUnavailableError) {
+					cancel() // Signal all other goroutines to stop
+					return
 				}
 			}
 		}(f)
 	}
 
 	wg.Wait()
+
+	// If context was cancelled, mark all files as broken
+	if ctx.Err() != nil {
+		for _, f := range files {
+			brokenFiles = append(brokenFiles, f.Name)
+		}
+	}
 
 	// Try to reinsert the torrent if it's broken
 	if len(brokenFiles) > 0 && t.Torrent != nil {

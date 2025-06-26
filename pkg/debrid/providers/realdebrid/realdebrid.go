@@ -2,6 +2,7 @@ package realdebrid
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +34,7 @@ type RealDebrid struct {
 	DownloadUncached      bool
 	client                *request.Client
 	downloadClient        *request.Client
+	repairClient          *request.Client
 	autoExpiresLinksAfter time.Duration
 
 	MountPath string
@@ -49,6 +51,8 @@ type RealDebrid struct {
 
 func New(dc config.Debrid) (*RealDebrid, error) {
 	rl := request.ParseRateLimit(dc.RateLimit)
+	repairRl := request.ParseRateLimit(cmp.Or(dc.RepairRateLimit, dc.RateLimit))
+	downloadRl := request.ParseRateLimit(cmp.Or(dc.DownloadRateLimit, dc.RateLimit))
 
 	headers := map[string]string{
 		"Authorization": fmt.Sprintf("Bearer %s", dc.APIKey),
@@ -77,9 +81,18 @@ func New(dc config.Debrid) (*RealDebrid, error) {
 			request.WithProxy(dc.Proxy),
 		),
 		downloadClient: request.New(
+			request.WithRateLimiter(downloadRl),
 			request.WithLogger(_log),
 			request.WithMaxRetries(10),
 			request.WithRetryableStatus(429, 447, 502),
+			request.WithProxy(dc.Proxy),
+		),
+		repairClient: request.New(
+			request.WithRateLimiter(repairRl),
+			request.WithHeaders(headers),
+			request.WithLogger(_log),
+			request.WithMaxRetries(4),
+			request.WithRetryableStatus(429, 502),
 			request.WithProxy(dc.Proxy),
 		),
 		MountPath:       dc.Folder,
@@ -608,7 +621,7 @@ func (r *RealDebrid) CheckLink(link string) error {
 		"link": {link},
 	}
 	req, _ := http.NewRequest(http.MethodPost, url, strings.NewReader(payload.Encode()))
-	resp, err := r.client.Do(req)
+	resp, err := r.repairClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -621,7 +634,7 @@ func (r *RealDebrid) CheckLink(link string) error {
 func (r *RealDebrid) _getDownloadLink(file *types.File) (*types.DownloadLink, error) {
 	url := fmt.Sprintf("%s/unrestrict/link/", r.Host)
 	_link := file.Link
-	if strings.HasPrefix(_link, "https://real-debrid.com/d/") {
+	if strings.HasPrefix(file.Link, "https://real-debrid.com/d/") && len(file.Link) > 39 {
 		_link = file.Link[0:39]
 	}
 	payload := gourl.Values{

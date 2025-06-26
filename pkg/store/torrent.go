@@ -57,6 +57,8 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 	client := deb.Client()
 	downloadingStatuses := client.GetDownloadingStatus()
 	_arr := importReq.Arr
+	backoff := time.NewTimer(s.refreshInterval)
+	defer backoff.Stop()
 	for debridTorrent.Status != "downloaded" {
 		s.logger.Debug().Msgf("%s <- (%s) Download Progress: %.2f%%", debridTorrent.Debrid, debridTorrent.Name, debridTorrent.Progress)
 		dbT, err := client.CheckStatus(debridTorrent)
@@ -83,10 +85,12 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 		if debridTorrent.Status == "downloaded" || !utils.Contains(downloadingStatuses, debridTorrent.Status) {
 			break
 		}
-		if !utils.Contains(client.GetDownloadingStatus(), debridTorrent.Status) {
-			break
+		select {
+		case <-backoff.C:
+			// Increase interval gradually, cap at max
+			nextInterval := min(s.refreshInterval*2, 30*time.Second)
+			backoff.Reset(nextInterval)
 		}
-		time.Sleep(s.refreshInterval)
 	}
 	var torrentSymlinkPath string
 	var err error
@@ -96,15 +100,15 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 	timer := time.Now()
 
 	onFailed := func(err error) {
-		if err != nil {
-			s.markTorrentAsFailed(torrent)
-			go func() {
-				_ = client.DeleteTorrent(debridTorrent.Id)
-			}()
-			s.logger.Error().Err(err).Msgf("Error occured while processing torrent %s", debridTorrent.Name)
-			importReq.markAsFailed(err, torrent, debridTorrent)
-			return
-		}
+		s.markTorrentAsFailed(torrent)
+		go func() {
+			if deleteErr := client.DeleteTorrent(debridTorrent.Id); deleteErr != nil {
+				s.logger.Warn().Err(deleteErr).Msgf("Failed to delete torrent %s", debridTorrent.Id)
+			}
+		}()
+		s.logger.Error().Err(err).Msgf("Error occured while processing torrent %s", debridTorrent.Name)
+		importReq.markAsFailed(err, torrent, debridTorrent)
+		return
 	}
 
 	onSuccess := func(torrentSymlinkPath string) {
@@ -118,7 +122,9 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 				s.logger.Error().Msgf("Error sending discord message: %v", err)
 			}
 		}()
-		_arr.Refresh()
+		go func() {
+			_arr.Refresh()
+		}()
 	}
 
 	switch importReq.Action {
@@ -137,7 +143,6 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 			rclonePath := filepath.Join(debridTorrent.MountPath, cache.GetTorrentFolder(debridTorrent)) // /mnt/remote/realdebrid/MyTVShow
 			torrentFolderNoExt := utils.RemoveExtension(debridTorrent.Name)
 			torrentSymlinkPath, err = s.createSymlinksWebdav(torrent, debridTorrent, rclonePath, torrentFolderNoExt) // /mnt/symlinks/{category}/MyTVShow/
-
 		} else {
 			// User is using either zurg or debrid webdav
 			torrentSymlinkPath, err = s.processSymlink(torrent, debridTorrent) // /mnt/symlinks/{category}/MyTVShow/

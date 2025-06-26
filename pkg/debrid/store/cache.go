@@ -514,9 +514,9 @@ func (c *Cache) setTorrent(t CachedTorrent, callback func(torrent CachedTorrent)
 		updatedTorrent.Files = mergedFiles
 	}
 	c.torrents.set(torrentName, t, updatedTorrent)
-	c.SaveTorrent(t)
+	go c.SaveTorrent(t)
 	if callback != nil {
-		callback(updatedTorrent)
+		go callback(updatedTorrent)
 	}
 }
 
@@ -702,6 +702,7 @@ func (c *Cache) ProcessTorrent(t *types.Torrent) error {
 
 func (c *Cache) Add(t *types.Torrent) error {
 	if len(t.Files) == 0 {
+		c.logger.Warn().Msgf("Torrent %s has no files to add. Refreshing", t.Id)
 		if err := c.client.UpdateTorrent(t); err != nil {
 			return fmt.Errorf("failed to update torrent: %w", err)
 		}

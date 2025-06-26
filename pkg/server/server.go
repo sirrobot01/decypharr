@@ -103,10 +103,5 @@ func (s *Server) getLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Expires", "0")
 
 	// Stream the file
-	_, err = io.Copy(w, file)
-	if err != nil {
-		s.logger.Error().Err(err).Msg("Error streaming log file")
-		http.Error(w, "Error streaming log file", http.StatusInternalServerError)
-		return
-	}
+	_, _ = io.Copy(w, file)
 }
