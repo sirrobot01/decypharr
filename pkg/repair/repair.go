@@ -670,35 +670,17 @@ func (r *Repair) getWebdavBrokenFiles(job *Job, media arr.Content) []arr.Content
 
 	brokenFiles := make([]arr.ContentFile, 0)
 	uniqueParents := collectFiles(media)
-	var brokenFilesMutex sync.Mutex
-	var wg sync.WaitGroup
-
-	// Limit concurrent torrent checks
-	semaphore := make(chan struct{}, min(len(uniqueParents), 30)) // Limit to 5 concurrent checks
 	for torrentPath, files := range uniqueParents {
-		wg.Add(1)
-		go func(torrentPath string, files []arr.ContentFile) {
-			defer wg.Done()
-			semaphore <- struct{}{}        // Acquire
-			defer func() { <-semaphore }() // Release
-
-			select {
-			case <-job.ctx.Done():
-				return
-			default:
-			}
-
-			brokenFilesForTorrent := r.checkTorrentFiles(torrentPath, files, clients, caches)
-
-			if len(brokenFilesForTorrent) > 0 {
-				brokenFilesMutex.Lock()
-				brokenFiles = append(brokenFiles, brokenFilesForTorrent...)
-				brokenFilesMutex.Unlock()
-			}
-		}(torrentPath, files)
+		select {
+		case <-job.ctx.Done():
+			return brokenFiles
+		default:
+		}
+		brokenFilesForTorrent := r.checkTorrentFiles(torrentPath, files, clients, caches)
+		if len(brokenFilesForTorrent) > 0 {
+			brokenFiles = append(brokenFiles, brokenFilesForTorrent...)
+		}
 	}
-
-	wg.Wait()
 	if len(brokenFiles) == 0 {
 		return nil
 	}
