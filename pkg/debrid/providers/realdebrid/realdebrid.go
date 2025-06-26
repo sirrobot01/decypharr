@@ -2,6 +2,7 @@ package realdebrid
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -50,8 +51,8 @@ type RealDebrid struct {
 
 func New(dc config.Debrid) (*RealDebrid, error) {
 	rl := request.ParseRateLimit(dc.RateLimit)
-	repairRl := request.ParseRateLimit(dc.RepairRateLimit)
-	downloadRl := request.ParseRateLimit(dc.DownloadRateLimit)
+	repairRl := request.ParseRateLimit(cmp.Or(dc.RepairRateLimit, dc.RateLimit))
+	downloadRl := request.ParseRateLimit(cmp.Or(dc.DownloadRateLimit, dc.RateLimit))
 
 	headers := map[string]string{
 		"Authorization": fmt.Sprintf("Bearer %s", dc.APIKey),
