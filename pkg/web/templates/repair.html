@@ -380,6 +380,12 @@
                 let totalItems = job.broken_items ? Object.values(job.broken_items).reduce((sum, arr) => sum + arr.length, 0) : 0;
 
                 row.innerHTML = `
+                    <td>
+                        <div class="form-check">
+                            <input class="form-check-input job-checkbox" type="checkbox" value="${job.id}"
+                                ${canDelete ? '' : 'disabled'} data-can-delete="${canDelete}">
+                        </div>
+                    </td>
                     <td><a href="#" class="text-link view-job" data-id="${job.id}"><small>${job.id.substring(0, 8)}</small></a></td>
                     <td>${job.arrs.join(', ')}</td>
                     <td><small>${formattedDate}</small></td>
@@ -619,7 +625,7 @@
             document.querySelectorAll('#itemsPagination a[data-items-page]').forEach(link => {
                 link.addEventListener('click', (e) => {
                     e.preventDefault();
-                    currentItemsPage = parseInt(e.currentTarget.dataset.itemsPage);;
+                    currentItemsPage = parseInt(e.currentTarget.dataset.itemsPage);
                     renderBrokenItemsTable();
                 });
             });
