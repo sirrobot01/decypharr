@@ -621,7 +621,7 @@ func (r *RealDebrid) CheckLink(link string) error {
 func (r *RealDebrid) _getDownloadLink(file *types.File) (*types.DownloadLink, error) {
 	url := fmt.Sprintf("%s/unrestrict/link/", r.Host)
 	_link := file.Link
-	if strings.HasPrefix(_link, "https://real-debrid.com/d/") {
+	if strings.HasPrefix(file.Link, "https://real-debrid.com/d/") && len(file.Link) > 39 {
 		_link = file.Link[0:39]
 	}
 	payload := gourl.Values{

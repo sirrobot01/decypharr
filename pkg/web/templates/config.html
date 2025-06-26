@@ -1005,6 +1005,9 @@
                 if (config.max_file_size) {
                     document.querySelector('[name="max_file_size"]').value = config.max_file_size;
                 }
+                if (config.remove_stalled_after) {
+                    document.querySelector('[name="remove_stalled_after"]').value = config.remove_stalled_after;
+                }
                 if (config.discord_webhook_url) {
                     document.querySelector('[name="discord_webhook_url"]').value = config.discord_webhook_url;
                 }

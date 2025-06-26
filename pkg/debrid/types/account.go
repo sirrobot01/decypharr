@@ -18,7 +18,7 @@ func NewAccounts(debridConf config.Debrid) *Accounts {
 		if token == "" {
 			continue
 		}
-		account := newAccount(token, idx)
+		account := newAccount(debridConf.Name, token, idx)
 		accounts = append(accounts, account)
 	}
 
@@ -33,6 +33,7 @@ func NewAccounts(debridConf config.Debrid) *Accounts {
 }
 
 type Account struct {
+	Debrid   string // e.g., "realdebrid", "torbox", etc.
 	Order    int
 	Disabled bool
 	Token    string
@@ -176,30 +177,31 @@ func (a *Accounts) SetDownloadLinks(links map[string]*DownloadLink) {
 	a.Current().setLinks(links)
 }
 
-func newAccount(token string, index int) *Account {
+func newAccount(debridName, token string, index int) *Account {
 	return &Account{
-		Token: token,
-		Order: index,
-		links: make(map[string]*DownloadLink),
+		Debrid: debridName,
+		Token:  token,
+		Order:  index,
+		links:  make(map[string]*DownloadLink),
 	}
 }
 
 func (a *Account) getLink(fileLink string) (*DownloadLink, bool) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	dl, ok := a.links[fileLink[0:39]]
+	dl, ok := a.links[a.sliceFileLink(fileLink)]
 	return dl, ok
 }
 func (a *Account) setLink(fileLink string, dl *DownloadLink) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.links[fileLink[0:39]] = dl
+	a.links[a.sliceFileLink(fileLink)] = dl
 }
 func (a *Account) deleteLink(fileLink string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	delete(a.links, fileLink[0:39])
+	delete(a.links, a.sliceFileLink(fileLink))
 }
 func (a *Account) resetDownloadLinks() {
 	a.mu.Lock()
@@ -225,6 +227,17 @@ func (a *Account) setLinks(links map[string]*DownloadLink) {
 			// Expired, continue
 			continue
 		}
-		a.links[dl.Link[0:39]] = dl
+		a.links[a.sliceFileLink(dl.Link)] = dl
 	}
+}
+
+// slice download link
+func (a *Account) sliceFileLink(fileLink string) string {
+	if a.Debrid != "realdebrid" {
+		return fileLink
+	}
+	if len(fileLink) < 39 {
+		return fileLink
+	}
+	return fileLink[0:39]
 }

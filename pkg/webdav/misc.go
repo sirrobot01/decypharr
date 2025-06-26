@@ -238,17 +238,5 @@ func setVideoResponseHeaders(w http.ResponseWriter, resp *http.Response, isRange
 		w.Header().Set("Content-Range", contentRange)
 	}
 
-	// Video streaming optimizations
-	w.Header().Set("Accept-Ranges", "bytes")   // Enable seeking
-	w.Header().Set("Connection", "keep-alive") // Keep connection open
-
-	// Prevent buffering in proxies/CDNs
-	w.Header().Set("X-Accel-Buffering", "no") // Nginx
-	w.Header().Set("Proxy-Buffering", "off")  // General proxy
-
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "Range")
-	w.Header().Set("Access-Control-Expose-Headers", "Content-Length, Content-Range")
-
 	w.WriteHeader(resp.StatusCode)
 }

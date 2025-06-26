@@ -130,13 +130,7 @@
                                 <h6 class="mb-0">
                                     Broken Items
                                     <span class="badge bg-secondary" id="totalItemsCount">0</span>
-                                    <span class="badge bg-primary" id="selectedItemsCount">0 selected</span>
                                 </h6>
-                                <div class="d-flex gap-2">
-                                    <button class="btn btn-sm btn-primary" id="processSelectedItemsBtn" disabled>
-                                        <i class="bi bi-play-fill me-1"></i>Process Selected
-                                    </button>
-                                </div>
                             </div>
 
                             <!-- Filters and Search -->
@@ -171,11 +165,6 @@
                                 <table class="table table-sm table-striped table-hover">
                                     <thead class="sticky-top">
                                     <tr>
-                                        <th style="width: 40px;">
-                                            <div class="form-check">
-                                                <input class="form-check-input" type="checkbox" id="selectAllItemsTable">
-                                            </div>
-                                        </th>
                                         <th>Arr</th>
                                         <th>Path</th>
                                         <th style="width: 100px;">Type</th>
@@ -294,7 +283,7 @@
 
                 if (!response.ok) throw new Error(await response.text());
                 createToast('Repair process initiated successfully!');
-                loadJobs(1); // Refresh jobs after submission
+                await loadJobs(1); // Refresh jobs after submission
             } catch (error) {
                 createToast(`Error starting repair: ${error.message}`, 'error');
             } finally {
@@ -391,12 +380,6 @@
                 let totalItems = job.broken_items ? Object.values(job.broken_items).reduce((sum, arr) => sum + arr.length, 0) : 0;
 
                 row.innerHTML = `
-                    <td>
-                        <div class="form-check">
-                            <input class="form-check-input job-checkbox" type="checkbox" value="${job.id}"
-                                ${canDelete ? '' : 'disabled'} data-can-delete="${canDelete}">
-                        </div>
-                    </td>
                     <td><a href="#" class="text-link view-job" data-id="${job.id}"><small>${job.id.substring(0, 8)}</small></a></td>
                     <td>${job.arrs.join(', ')}</td>
                     <td><small>${formattedDate}</small></td>
@@ -459,9 +442,8 @@
             document.querySelectorAll('#jobsPagination a[data-page]').forEach(link => {
                 link.addEventListener('click', (e) => {
                     e.preventDefault();
-                    const newPage = parseInt(e.currentTarget.dataset.page);
-                    currentPage = newPage;
-                    renderJobsTable(newPage);
+                    currentPage = parseInt(e.currentTarget.dataset.page);
+                    renderJobsTable(currentPage);
                 });
             });
 
@@ -526,7 +508,6 @@
         // modal functions
         function processItemsData(brokenItems) {
             const items = [];
-            let itemId = 0;
 
             for (const [arrName, itemsArray] of Object.entries(brokenItems)) {
                 if (itemsArray && itemsArray.length > 0) {
@@ -601,50 +582,14 @@
                 row.dataset.itemId = item.id;
 
                 row.innerHTML = `
-                    <td>
-                        <div class="form-check">
-                            <input class="form-check-input item-checkbox"
-                                   type="checkbox"
-                                   value="${item.id}"
-                                   ${selectedItems.has(item.id) ? 'checked' : ''}>
-                        </div>
-                    </td>
                     <td><span class="badge bg-info">${item.arr}</span></td>
                     <td><small class="text-muted" title="${item.path}">${item.path}</small></td>
                     <td><span class="badge ${item.type === 'movie' ? 'bg-primary' : item.type === 'tv' ? 'bg-success' : 'bg-secondary'}">${item.type}</span></td>
                     <td><small>${formatFileSize(item.size)}</small></td>
                 `;
 
-                // Make row clickable to toggle selection
-                row.addEventListener('click', (e) => {
-                    if (e.target.type !== 'checkbox') {
-                        const checkbox = row.querySelector('.item-checkbox');
-                        checkbox.checked = !checkbox.checked;
-                        checkbox.dispatchEvent(new Event('change'));
-                    }
-                });
-
                 tableBody.appendChild(row);
             }
-
-            // Add event listeners to checkboxes
-            document.querySelectorAll('.item-checkbox').forEach(checkbox => {
-                checkbox.addEventListener('change', (e) => {
-                    const itemId = parseInt(e.target.value);
-                    const row = e.target.closest('tr');
-
-                    if (e.target.checked) {
-                        selectedItems.add(itemId);
-                        row.classList.add('selected');
-                    } else {
-                        selectedItems.delete(itemId);
-                        row.classList.remove('selected');
-                    }
-
-                    updateItemsStats();
-                    updateSelectAllStates();
-                });
-            });
 
             // Create pagination
             if (totalPages > 1) {
@@ -674,45 +619,18 @@
             document.querySelectorAll('#itemsPagination a[data-items-page]').forEach(link => {
                 link.addEventListener('click', (e) => {
                     e.preventDefault();
-                    const newPage = parseInt(e.currentTarget.dataset.itemsPage);
-                    currentItemsPage = newPage;
+                    currentItemsPage = parseInt(e.currentTarget.dataset.itemsPage);;
                     renderBrokenItemsTable();
                 });
             });
-
-            updateSelectAllStates();
         }
 
         function updateItemsStats() {
             document.getElementById('totalItemsCount').textContent = allBrokenItems.length;
-            document.getElementById('selectedItemsCount').textContent = `${selectedItems.size} selected`;
-
-            const processSelectedBtn = document.getElementById('processSelectedItemsBtn');
-            processSelectedBtn.disabled = selectedItems.size === 0;
 
             // Update footer stats
             const footerStats = document.getElementById('modalFooterStats');
-            footerStats.textContent = `Total: ${allBrokenItems.length} | Filtered: ${filteredItems.length} | Selected: ${selectedItems.size}`;
-        }
-
-        function updateSelectAllStates() {
-            const selectAllTableCheckbox = document.getElementById('selectAllItemsTable');
-            const visibleCheckboxes = document.querySelectorAll('.item-checkbox');
-            const checkedVisible = document.querySelectorAll('.item-checkbox:checked');
-
-            if (visibleCheckboxes.length === 0) {
-                selectAllTableCheckbox.indeterminate = false;
-                selectAllTableCheckbox.checked = false;
-            } else if (checkedVisible.length === visibleCheckboxes.length) {
-                selectAllTableCheckbox.indeterminate = false;
-                selectAllTableCheckbox.checked = true;
-            } else if (checkedVisible.length > 0) {
-                selectAllTableCheckbox.indeterminate = true;
-                selectAllTableCheckbox.checked = false;
-            } else {
-                selectAllTableCheckbox.indeterminate = false;
-                selectAllTableCheckbox.checked = false;
-            }
+            footerStats.textContent = `Total: ${allBrokenItems.length} | Filtered: ${filteredItems.length}`;
         }
 
         function populateArrFilter() {
@@ -727,62 +645,6 @@
                 arrFilter.appendChild(option);
             });
         }
-
-        document.getElementById('selectAllItemsTable').addEventListener('change', (e) => {
-            const visibleCheckboxes = document.querySelectorAll('.item-checkbox');
-            visibleCheckboxes.forEach(checkbox => {
-                const itemId = parseInt(checkbox.value);
-                const row = checkbox.closest('tr');
-
-                if (e.target.checked) {
-                    selectedItems.add(itemId);
-                    checkbox.checked = true;
-                    row.classList.add('selected');
-                } else {
-                    selectedItems.delete(itemId);
-                    checkbox.checked = false;
-                    row.classList.remove('selected');
-                }
-            });
-            updateItemsStats();
-        });
-
-        document.getElementById('processSelectedItemsBtn').addEventListener('click', async () => {
-            if (selectedItems.size === 0) return;
-
-            const selectedItemsData = allBrokenItems.filter(item => selectedItems.has(item.id));
-
-            // Group by arr
-            const itemsByArr = {};
-            selectedItemsData.forEach(item => {
-                if (!itemsByArr[item.arr]) {
-                    itemsByArr[item.arr] = [];
-                }
-                itemsByArr[item.arr].push(item.id);
-            });
-
-            console.log(itemsByArr);
-
-            try {
-                const response = await fetcher(`/api/repair/jobs/${currentJob.id}/process-items`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ items: itemsByArr })
-                });
-
-                if (!response.ok) throw new Error(await response.text());
-                createToast(`Processing ${selectedItems.size} selected items`);
-
-                // Close modal and refresh jobs
-                const modal = bootstrap.Modal.getInstance(document.getElementById('jobDetailsModal'));
-                modal.hide();
-                loadJobs(currentPage);
-            } catch (error) {
-                createToast(`Error processing selected items: ${error.message}`, 'error');
-            }
-        });
 
         // Filter event listeners
         document.getElementById('itemSearchInput').addEventListener('input', applyFilters);

@@ -137,10 +137,10 @@ func (c *Cache) refreshRclone() error {
 	}
 
 	client := &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 60 * time.Second,
 		Transport: &http.Transport{
 			MaxIdleConns:        10,
-			IdleConnTimeout:     30 * time.Second,
+			IdleConnTimeout:     60 * time.Second,
 			DisableCompression:  false,
 			MaxIdleConnsPerHost: 5,
 		},
