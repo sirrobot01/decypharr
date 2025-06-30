@@ -1,5 +1,10 @@
 package alldebrid
 
+import (
+	"encoding/json"
+	"fmt"
+)
+
 type errorResponse struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -32,6 +37,8 @@ type magnetInfo struct {
 	Files          []MagnetFile `json:"files"`
 }
 
+type Magnets []magnetInfo
+
 type TorrentInfoResponse struct {
 	Status string `json:"status"`
 	Data   struct {
@@ -43,7 +50,7 @@ type TorrentInfoResponse struct {
 type TorrentsListResponse struct {
 	Status string `json:"status"`
 	Data   struct {
-		Magnets []magnetInfo `json:"magnets"`
+		Magnets Magnets `json:"magnets"`
 	} `json:"data"`
 	Error *errorResponse `json:"error"`
 }
@@ -80,4 +87,28 @@ type DownloadLink struct {
 		} `json:"path"`
 	} `json:"data"`
 	Error *errorResponse `json:"error"`
+}
+
+// UnmarshalJSON implements custom unmarshaling for Magnets type
+// It can handle both an array of magnetInfo objects or a map with string keys.
+// If the input is an array, it will be unmarshaled directly into the Magnets slice.
+// If the input is a map, it will extract the values and append them to the Magnets slice.
+// If the input is neither, it will return an error.
+func (m *Magnets) UnmarshalJSON(data []byte) error {
+	// Try to unmarshal as array
+	var arr []magnetInfo
+	if err := json.Unmarshal(data, &arr); err == nil {
+		*m = arr
+		return nil
+	}
+
+	// Try to unmarshal as map
+	var obj map[string]magnetInfo
+	if err := json.Unmarshal(data, &obj); err == nil {
+		for _, v := range obj {
+			*m = append(*m, v)
+		}
+		return nil
+	}
+	return fmt.Errorf("magnets: unsupported JSON format")
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/sirrobot01/decypharr/internal/utils"
 	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -207,6 +208,9 @@ func (s *Store) partialTorrentUpdate(t *Torrent, debridTorrent *types.Torrent) *
 	}
 	totalSize := debridTorrent.Bytes
 	progress := (cmp.Or(debridTorrent.Progress, 0.0)) / 100.0
+	if math.IsNaN(progress) || math.IsInf(progress, 0) {
+		progress = 0
+	}
 	sizeCompleted := int64(float64(totalSize) * progress)
 
 	var speed int64
