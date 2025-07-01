@@ -15,16 +15,14 @@ import (
 var sharedClient = &http.Client{
 	Transport: &http.Transport{
 		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
-		MaxIdleConns:          200,
-		MaxIdleConnsPerHost:   50,
-		MaxConnsPerHost:       100,
-		IdleConnTimeout:       300 * time.Second,
-		TLSHandshakeTimeout:   15 * time.Second,
-		ResponseHeaderTimeout: 60 * time.Second,
-		ExpectContinueTimeout: 2 * time.Second,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   20,
+		MaxConnsPerHost:       50,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
 		DisableKeepAlives:     false,
-		WriteBufferSize:       64 * 1024,
-		ReadBufferSize:        64 * 1024,
 	},
 	Timeout: 0,
 }
@@ -313,11 +311,6 @@ func (f *File) handleRangeRequest(upstreamReq *http.Request, r *http.Request, w 
 	start, end := ranges[0].start, ranges[0].end
 
 	if byteRange != nil {
-		// Add bounds checking to prevent overflow
-		if start > f.size-byteRange[0] || end > f.size-byteRange[0] {
-			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", f.size))
-			return -1 // Invalid range after offset
-		}
 		start += byteRange[0]
 		end += byteRange[0]
 	}
@@ -328,11 +321,9 @@ func (f *File) handleRangeRequest(upstreamReq *http.Request, r *http.Request, w 
 
 func (f *File) streamVideoOptimized(w http.ResponseWriter, src io.Reader) error {
 	// Use larger buffer for video streaming (better throughput)
-	buf := make([]byte, 256*1024) // 256KB buffer for better performance
-	flushInterval := 8 * 1024     // Flush every 8KB for responsive streaming
-	var totalWritten int
+	buf := make([]byte, 64*1024) // 64KB buffer
 
-	// Preread first chunk for immediate response
+	// First chunk optimization - send immediately for faster start
 	n, err := src.Read(buf)
 	if err != nil && err != io.EOF {
 		if isClientDisconnection(err) {
@@ -350,7 +341,6 @@ func (f *File) streamVideoOptimized(w http.ResponseWriter, src io.Reader) error 
 			}
 			return &streamError{Err: writeErr, StatusCode: 0}
 		}
-		totalWritten += n
 
 		// Flush immediately for faster video start
 		if flusher, ok := w.(http.Flusher); ok {
@@ -362,41 +352,16 @@ func (f *File) streamVideoOptimized(w http.ResponseWriter, src io.Reader) error 
 		return nil
 	}
 
-	// Stream remaining data with periodic flushing
-	for {
-		n, err := src.Read(buf)
-		if n > 0 {
-			_, writeErr := w.Write(buf[:n])
-			if writeErr != nil {
-				if isClientDisconnection(writeErr) {
-					return &streamError{Err: writeErr, StatusCode: 0, IsClientDisconnection: true}
-				}
-				return &streamError{Err: writeErr, StatusCode: 0}
-			}
-			totalWritten += n
-
-			// Flush periodically to maintain streaming performance
-			if totalWritten%flushInterval == 0 {
-				if flusher, ok := w.(http.Flusher); ok {
-					flusher.Flush()
-				}
-			}
+	// Continue with optimized copy for remaining data
+	_, err = io.CopyBuffer(w, src, buf)
+	if err != nil {
+		if isClientDisconnection(err) {
+			return &streamError{Err: err, StatusCode: 0, IsClientDisconnection: true}
 		}
-
-		if err != nil {
-			if err == io.EOF {
-				// Final flush
-				if flusher, ok := w.(http.Flusher); ok {
-					flusher.Flush()
-				}
-				return nil
-			}
-			if isClientDisconnection(err) {
-				return &streamError{Err: err, StatusCode: 0, IsClientDisconnection: true}
-			}
-			return &streamError{Err: err, StatusCode: 0}
-		}
+		return &streamError{Err: err, StatusCode: 0}
 	}
+
+	return nil
 }
 
 /*
