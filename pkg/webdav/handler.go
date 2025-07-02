@@ -180,7 +180,7 @@ func (h *Handler) getChildren(name string) []os.FileInfo {
 	if len(parts) == 2 && utils.Contains(h.getParentItems(), parts[0]) {
 		torrentName := parts[1]
 		if t := h.cache.GetTorrentByName(torrentName); t != nil {
-			return h.getFileInfos(t.Torrent)
+			return h.getFileInfos(t)
 		}
 	}
 	return nil
@@ -267,10 +267,9 @@ func (h *Handler) Stat(ctx context.Context, name string) (os.FileInfo, error) {
 	return f.Stat()
 }
 
-func (h *Handler) getFileInfos(torrent *types.Torrent) []os.FileInfo {
+func (h *Handler) getFileInfos(torrent *store.CachedTorrent) []os.FileInfo {
 	torrentFiles := torrent.GetFiles()
 	files := make([]os.FileInfo, 0, len(torrentFiles))
-	now := time.Now()
 
 	// Sort by file name since the order is lost when using the map
 	sortedFiles := make([]*types.File, 0, len(torrentFiles))
@@ -286,7 +285,7 @@ func (h *Handler) getFileInfos(torrent *types.Torrent) []os.FileInfo {
 			name:    file.Name,
 			size:    file.Size,
 			mode:    0644,
-			modTime: now,
+			modTime: torrent.AddedOn,
 			isDir:   false,
 		})
 	}

@@ -8,7 +8,6 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"time"
 )
 
 type contextKey string
@@ -55,7 +54,6 @@ func (h *Handler) handlePropfind(w http.ResponseWriter, r *http.Request) {
 		rawEntries = append(rawEntries, h.getChildren(cleanPath)...)
 	}
 
-	now := time.Now().UTC().Format("2006-01-02T15:04:05.000-07:00")
 	entries := make([]entry, 0, len(rawEntries)+1)
 	// Add the current file itself
 	entries = append(entries, entry{
@@ -108,7 +106,7 @@ func (h *Handler) handlePropfind(w http.ResponseWriter, r *http.Request) {
 		}
 
 		_, _ = sb.WriteString(`<d:getlastmodified>`)
-		_, _ = sb.WriteString(now)
+		_, _ = sb.WriteString(e.modTime)
 		_, _ = sb.WriteString(`</d:getlastmodified>`)
 
 		_, _ = sb.WriteString(`<d:displayname>`)
