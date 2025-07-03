@@ -56,7 +56,7 @@ type entry struct {
 
 func filesToXML(urlPath string, fi os.FileInfo, children []os.FileInfo) stringbuf.StringBuf {
 
-	now := time.Now().UTC().Format("2006-01-02T15:04:05.000-07:00")
+	now := time.Now().UTC().Format(time.RFC3339)
 	entries := make([]entry, 0, len(children)+1)
 
 	// Add the current file itself
@@ -65,7 +65,7 @@ func filesToXML(urlPath string, fi os.FileInfo, children []os.FileInfo) stringbu
 		escName: xmlEscape(fi.Name()),
 		isDir:   fi.IsDir(),
 		size:    fi.Size(),
-		modTime: fi.ModTime().Format("2006-01-02T15:04:05.000-07:00"),
+		modTime: fi.ModTime().Format(time.RFC3339),
 	})
 	for _, info := range children {
 
@@ -81,7 +81,7 @@ func filesToXML(urlPath string, fi os.FileInfo, children []os.FileInfo) stringbu
 			escName: xmlEscape(nm),
 			isDir:   info.IsDir(),
 			size:    info.Size(),
-			modTime: info.ModTime().Format("2006-01-02T15:04:05.000-07:00"),
+			modTime: info.ModTime().Format(time.RFC3339),
 		})
 	}
 

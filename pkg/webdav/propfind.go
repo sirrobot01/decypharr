@@ -8,6 +8,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type contextKey string
@@ -61,7 +62,7 @@ func (h *Handler) handlePropfind(w http.ResponseWriter, r *http.Request) {
 		escName: xmlEscape(fi.Name()),
 		isDir:   fi.IsDir(),
 		size:    fi.Size(),
-		modTime: fi.ModTime().Format("2006-01-02T15:04:05.000-07:00"),
+		modTime: fi.ModTime().Format(time.RFC3339),
 	})
 	for _, info := range rawEntries {
 
@@ -77,7 +78,7 @@ func (h *Handler) handlePropfind(w http.ResponseWriter, r *http.Request) {
 			escName: xmlEscape(nm),
 			isDir:   info.IsDir(),
 			size:    info.Size(),
-			modTime: info.ModTime().Format("2006-01-02T15:04:05.000-07:00"),
+			modTime: info.ModTime().Format(time.RFC3339),
 		})
 	}
 
