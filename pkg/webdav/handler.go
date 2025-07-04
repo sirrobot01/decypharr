@@ -22,6 +22,8 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/version"
 )
 
+const DeleteAllBadTorrentKey = "DELETE_ALL_BAD_TORRENTS"
+
 type Handler struct {
 	Name     string
 	logger   zerolog.Logger
@@ -308,7 +310,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handlePropfind(w, r)
 		return
 	case "DELETE":
-		if err := h.handleIDDelete(w, r); err == nil {
+		if err := h.handleDelete(w, r); err == nil {
 			return
 		}
 		// fallthrough to default
@@ -387,21 +389,23 @@ func (h *Handler) serveDirectory(w http.ResponseWriter, r *http.Request, file we
 
 	// Prepare template data
 	data := struct {
-		Path       string
-		ParentPath string
-		ShowParent bool
-		Children   []os.FileInfo
-		URLBase    string
-		IsBadPath  bool
-		CanDelete  bool
+		Path                   string
+		ParentPath             string
+		ShowParent             bool
+		Children               []os.FileInfo
+		URLBase                string
+		IsBadPath              bool
+		CanDelete              bool
+		DeleteAllBadTorrentKey string
 	}{
-		Path:       cleanPath,
-		ParentPath: parentPath,
-		ShowParent: showParent,
-		Children:   children,
-		URLBase:    h.URLBase,
-		IsBadPath:  isBadPath,
-		CanDelete:  canDelete,
+		Path:                   cleanPath,
+		ParentPath:             parentPath,
+		ShowParent:             showParent,
+		Children:               children,
+		URLBase:                h.URLBase,
+		IsBadPath:              isBadPath,
+		CanDelete:              canDelete,
+		DeleteAllBadTorrentKey: DeleteAllBadTorrentKey,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -534,8 +538,8 @@ func (h *Handler) handleOptions(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// handleDelete deletes a torrent from using id
-func (h *Handler) handleIDDelete(w http.ResponseWriter, r *http.Request) error {
+// handleDelete deletes a torrent by id, or all bad torrents if the id is DeleteAllBadTorrentKey
+func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) error {
 	cleanPath := path.Clean(r.URL.Path) // Remove any leading slashes
 
 	_, torrentId := path.Split(cleanPath)
@@ -543,12 +547,39 @@ func (h *Handler) handleIDDelete(w http.ResponseWriter, r *http.Request) error {
 		return os.ErrNotExist
 	}
 
-	cachedTorrent := h.cache.GetTorrent(torrentId)
+	if torrentId == DeleteAllBadTorrentKey {
+		return h.handleDeleteAll(w)
+	}
+
+	return h.handleDeleteById(w, torrentId)
+}
+
+func (h *Handler) handleDeleteById(w http.ResponseWriter, tId string) error {
+	cachedTorrent := h.cache.GetTorrent(tId)
 	if cachedTorrent == nil {
 		return os.ErrNotExist
 	}
 
 	h.cache.OnRemove(cachedTorrent.Id)
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (h *Handler) handleDeleteAll(w http.ResponseWriter) error {
+	badTorrents := h.cache.GetListing("__bad__")
+	if len(badTorrents) == 0 {
+		http.Error(w, "No bad torrents to delete", http.StatusNotFound)
+		return nil
+	}
+
+	for _, fi := range badTorrents {
+		tName := strings.TrimSpace(strings.SplitN(fi.Name(), "||", 2)[0])
+		t := h.cache.GetTorrentByName(tName)
+		if t != nil {
+			h.cache.OnRemove(t.Id)
+		}
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
