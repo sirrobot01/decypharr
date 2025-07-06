@@ -2,13 +2,16 @@ package web
 
 import (
 	"cmp"
+	"context"
 	"embed"
+	"html/template"
+	"os"
+
 	"github.com/gorilla/sessions"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/logger"
+	"github.com/sirrobot01/decypharr/pkg/arr"
 	"github.com/sirrobot01/decypharr/pkg/store"
-	"html/template"
-	"os"
 )
 
 var restartFunc func()
@@ -16,6 +19,35 @@ var restartFunc func()
 // SetRestartFunc allows setting a callback to restart services
 func SetRestartFunc(fn func()) {
 	restartFunc = fn
+}
+
+// StoreInterface defines the interface for store operations that Web needs
+type StoreInterface interface {
+	AddTorrent(ctx context.Context, req *store.ImportRequest) error
+	Arr() ArrStorageInterface
+}
+
+// ArrStorageInterface defines the interface for arr storage operations
+type ArrStorageInterface interface {
+	Get(name string) *arr.Arr
+}
+
+// ProductionStore wraps the real store to implement StoreInterface
+type ProductionStore struct{}
+
+func (p *ProductionStore) AddTorrent(ctx context.Context, req *store.ImportRequest) error {
+	return store.Get().AddTorrent(ctx, req)
+}
+
+func (p *ProductionStore) Arr() ArrStorageInterface {
+	return &ProductionArrStorage{}
+}
+
+// ProductionArrStorage wraps the real arr storage to implement ArrStorageInterface
+type ProductionArrStorage struct{}
+
+func (p *ProductionArrStorage) Get(name string) *arr.Arr {
+	return store.Get().Arr().Get(name)
 }
 
 type AddRequest struct {
@@ -55,6 +87,7 @@ type Web struct {
 	cookie    *sessions.CookieStore
 	templates *template.Template
 	torrents  *store.TorrentStorage
+	store     StoreInterface
 }
 
 func New() *Web {
@@ -80,5 +113,15 @@ func New() *Web {
 		templates: templates,
 		cookie:    cookieStore,
 		torrents:  store.Get().Torrents(),
+		store:     &ProductionStore{},
+	}
+}
+
+// NewWithDependencies creates a Web instance with injected dependencies for testing
+func NewWithDependencies(storeInterface StoreInterface, logger zerolog.Logger) *Web {
+	return &Web{
+		logger: logger,
+		store:  storeInterface,
+		// Note: We don't need cookie, templates, or torrents for API testing
 	}
 }

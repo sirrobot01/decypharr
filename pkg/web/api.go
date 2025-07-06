@@ -29,7 +29,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	_store := store.Get()
+	_store := wb.store
 
 	results := make([]*store.ImportRequest, 0)
 	errs := make([]string, 0)
