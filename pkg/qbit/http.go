@@ -1,11 +1,12 @@
 package qbit
 
 import (
-	"github.com/sirrobot01/decypharr/internal/request"
-	"github.com/sirrobot01/decypharr/pkg/arr"
 	"net/http"
 	"path/filepath"
 	"strings"
+
+	"github.com/sirrobot01/decypharr/internal/request"
+	"github.com/sirrobot01/decypharr/pkg/arr"
 )
 
 func (q *QBit) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +94,13 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 	if strings.ToLower(r.FormValue("sequentialDownload")) == "true" {
 		action = "download"
 	}
+	rmTrackerUrls := strings.ToLower(r.FormValue("firstLastPiecePrio")) == "true"
+
+	// Check config setting - if always remove tracker URLs is enabled, force it to true
+	if q.AlwaysRmTrackerUrls {
+		rmTrackerUrls = true
+	}
+
 	debridName := r.FormValue("debrid")
 	category := r.FormValue("category")
 	_arr := getArrFromContext(ctx)
@@ -109,7 +117,7 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 			urlList = append(urlList, strings.TrimSpace(u))
 		}
 		for _, url := range urlList {
-			if err := q.addMagnet(ctx, url, _arr, debridName, action); err != nil {
+			if err := q.addMagnet(ctx, url, _arr, debridName, action, rmTrackerUrls); err != nil {
 				q.logger.Debug().Msgf("Error adding magnet: %s", err.Error())
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
@@ -122,7 +130,7 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 	if r.MultipartForm != nil && r.MultipartForm.File != nil {
 		if files := r.MultipartForm.File["torrents"]; len(files) > 0 {
 			for _, fileHeader := range files {
-				if err := q.addTorrent(ctx, fileHeader, _arr, debridName, action); err != nil {
+				if err := q.addTorrent(ctx, fileHeader, _arr, debridName, action, rmTrackerUrls); err != nil {
 					q.logger.Debug().Err(err).Msgf("Error adding torrent")
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return

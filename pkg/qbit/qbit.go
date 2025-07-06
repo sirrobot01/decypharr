@@ -12,6 +12,7 @@ type QBit struct {
 	Password       string
 	DownloadFolder string
 	Categories     []string
+	AlwaysRmTrackerUrls bool
 	storage        *store.TorrentStorage
 	logger         zerolog.Logger
 	Tags           []string
@@ -21,12 +22,13 @@ func New() *QBit {
 	_cfg := config.Get()
 	cfg := _cfg.QBitTorrent
 	return &QBit{
-		Username:       cfg.Username,
-		Password:       cfg.Password,
-		DownloadFolder: cfg.DownloadFolder,
-		Categories:     cfg.Categories,
-		storage:        store.Get().Torrents(),
-		logger:         logger.New("qbit"),
+		Username:            cfg.Username,
+		Password:            cfg.Password,
+		DownloadFolder:      cfg.DownloadFolder,
+		Categories:          cfg.Categories,
+		AlwaysRmTrackerUrls: cfg.AlwaysRmTrackerUrls,
+		storage:             store.Get().Torrents(),
+		logger:              logger.New("qbit"),
 	}
 }
 
