@@ -2,12 +2,14 @@ package web
 
 import (
 	"fmt"
-	"github.com/sirrobot01/decypharr/pkg/store"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/sirrobot01/decypharr/pkg/store"
+
 	"encoding/json"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/request"
@@ -27,7 +29,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	_store := store.Get()
+	_store := wb.store
 
 	results := make([]*store.ImportRequest, 0)
 	errs := make([]string, 0)
@@ -42,6 +44,13 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	downloadUncached := r.FormValue("downloadUncached") == "true"
+	rmTrackerUrls := r.FormValue("rmTrackerUrls") == "true"
+
+	// Check config setting - if always remove tracker URLs is enabled, force it to true
+	cfg := config.Get()
+	if cfg.QBitTorrent.AlwaysRmTrackerUrls {
+		rmTrackerUrls = true
+	}
 
 	_arr := _store.Arr().Get(arrName)
 	if _arr == nil {
@@ -59,7 +68,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for _, url := range urlList {
-			magnet, err := utils.GetMagnetFromUrl(url)
+			magnet, err := utils.GetMagnetFromUrl(url, rmTrackerUrls)
 			if err != nil {
 				errs = append(errs, fmt.Sprintf("Failed to parse URL %s: %v", url, err))
 				continue
@@ -84,7 +93,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			magnet, err := utils.GetMagnetFromFile(file, fileHeader.Filename)
+			magnet, err := utils.GetMagnetFromFile(file, fileHeader.Filename, rmTrackerUrls)
 			if err != nil {
 				errs = append(errs, fmt.Sprintf("Failed to parse torrent file %s: %v", fileHeader.Filename, err))
 				continue

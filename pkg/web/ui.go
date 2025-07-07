@@ -2,9 +2,10 @@ package web
 
 import (
 	"encoding/json"
+	"net/http"
+
 	"github.com/sirrobot01/decypharr/internal/config"
 	"golang.org/x/crypto/bcrypt"
-	"net/http"
 )
 
 func (wb *Web) LoginHandler(w http.ResponseWriter, r *http.Request) {
@@ -127,12 +128,13 @@ func (wb *Web) DownloadHandler(w http.ResponseWriter, r *http.Request) {
 		debrids = append(debrids, d.Name)
 	}
 	data := map[string]interface{}{
-		"URLBase":        cfg.URLBase,
-		"Page":           "download",
-		"Title":          "Download",
-		"Debrids":        debrids,
-		"HasMultiDebrid": len(debrids) > 1,
-		"DownloadFolder": cfg.QBitTorrent.DownloadFolder,
+		"URLBase":             cfg.URLBase,
+		"Page":                "download",
+		"Title":               "Download",
+		"Debrids":             debrids,
+		"HasMultiDebrid":      len(debrids) > 1,
+		"DownloadFolder":      cfg.QBitTorrent.DownloadFolder,
+		"AlwaysRmTrackerUrls": cfg.QBitTorrent.AlwaysRmTrackerUrls,
 	}
 	_ = wb.templates.ExecuteTemplate(w, "layout", data)
 }

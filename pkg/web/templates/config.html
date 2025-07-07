@@ -271,6 +271,14 @@
                                         to speed up import</small>
                                 </div>
                             </div>
+                            <div class="col mb-3">
+                                <div class="form-check me-3 d-inline-block">
+                                    <input type="checkbox" class="form-check-input" name="qbit.always_rm_tracker_urls"
+                                           id="qbit.always_rm_tracker_urls">
+                                    <label class="form-check-label" for="qbit.always_rm_tracker_urls">Always Remove Tracker URLs</label>
+                                    <small class="form-text text-muted">Automatically remove tracker URLs from all torrents to prevent leaks of private tracker passkeys to the debrid service.</small>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div class="mt-4 d-flex justify-content-between">
@@ -1227,7 +1235,8 @@
                     download_folder: document.querySelector('[name="qbit.download_folder"]').value,
                     refresh_interval: parseInt(document.querySelector('[name="qbit.refresh_interval"]').value, 10),
                     max_downloads: parseInt(document.querySelector('[name="qbit.max_downloads"]').value || '0', 5),
-                    skip_pre_cache: document.querySelector('[name="qbit.skip_pre_cache"]').checked
+                    skip_pre_cache: document.querySelector('[name="qbit.skip_pre_cache"]').checked,
+                    always_rm_tracker_urls: document.querySelector('[name="qbit.always_rm_tracker_urls"]').checked
                 },
                 arrs: [],
                 repair: {

@@ -60,8 +60,12 @@
                                 <label class="form-check-label" for="downloadUncached">Download Uncached</label>
                             </div>
                         </div>
-
-
+                        <div class="col-md-2 mb-3">
+                            <div class="form-check d-inline-block">
+                                <input type="checkbox" class="form-check-input" name="rmTrackerUrls" id="rmTrackerUrls"{{ if .AlwaysRmTrackerUrls }} checked disabled{{ end }}>
+                                <label class="form-check-label" for="rmTrackerUrls">Remove Trackers{{ if .AlwaysRmTrackerUrls }} (Always Enabled){{ end }}</label>
+                            </div>
+                        </div>
                     </div>
 
                     <button type="submit" class="btn btn-primary" id="submitDownload">
@@ -79,9 +83,17 @@
                 const savedCategory = localStorage.getItem('downloadCategory');
                 const savedAction = localStorage.getItem('downloadAction');
                 const savedDownloadUncached = localStorage.getItem('downloadUncached');
+                const savedrmTrackerUrls = localStorage.getItem('rmTrackerUrls');
                 document.getElementById('arr').value = savedCategory || '';
                 document.getElementById('downloadAction').value = savedAction || 'symlink';
                 document.getElementById('downloadUncached').checked = savedDownloadUncached === 'true';
+
+                // Only set rmTrackerUrls from localStorage if it's not disabled by config
+                const rmTrackerUrlsCheckbox = document.getElementById('rmTrackerUrls');
+                if (!rmTrackerUrlsCheckbox.disabled) {
+                    rmTrackerUrlsCheckbox.checked = savedrmTrackerUrls === 'true';
+                }
+
                 document.getElementById('downloadFolder').value = localStorage.getItem('downloadFolder') || downloadFolder || '';
             };
 
@@ -89,10 +101,18 @@
                 const arr = document.getElementById('arr').value;
                 const downloadAction = document.getElementById('downloadAction').value;
                 const downloadUncached = document.getElementById('downloadUncached').checked;
+                const rmTrackerUrlsCheckbox = document.getElementById('rmTrackerUrls');
+                const rmTrackerUrls = rmTrackerUrlsCheckbox.checked;
                 const downloadFolder = document.getElementById('downloadFolder').value;
                 localStorage.setItem('downloadCategory', arr);
                 localStorage.setItem('downloadAction', downloadAction);
                 localStorage.setItem('downloadUncached', downloadUncached.toString());
+
+                // Only save rmTrackerUrls to localStorage if it's not disabled by config
+                if (!rmTrackerUrlsCheckbox.disabled) {
+                    localStorage.setItem('rmTrackerUrls', rmTrackerUrls.toString());
+                }
+
                 localStorage.setItem('downloadFolder', downloadFolder);
             };
 
@@ -110,7 +130,7 @@
 
                 try {
                     const formData = new FormData();
-                    
+
                     // Add URLs if present
                     const urls = document.getElementById('magnetURI').value
                         .split('\n')
@@ -141,6 +161,7 @@
                     formData.append('downloadFolder', document.getElementById('downloadFolder').value);
                     formData.append('action', document.getElementById('downloadAction').value);
                     formData.append('downloadUncached', document.getElementById('downloadUncached').checked);
+                    formData.append('rmTrackerUrls', document.getElementById('rmTrackerUrls').checked);
                     formData.append('debrid', document.getElementById('debrid') ? document.getElementById('debrid').value : '');
 
                     const response = await fetcher('/api/add', {
@@ -172,6 +193,13 @@
             // Save the download options to local storage when they change
             document.getElementById('arr').addEventListener('change', saveCurrentDownloadOptions);
             document.getElementById('downloadAction').addEventListener('change', saveCurrentDownloadOptions);
+            document.getElementById('downloadUncached').addEventListener('change', saveCurrentDownloadOptions);
+
+            // Only add event listener for rmTrackerUrls if it's not disabled by config
+            const rmTrackerUrlsCheckbox = document.getElementById('rmTrackerUrls');
+            if (!rmTrackerUrlsCheckbox.disabled) {
+                rmTrackerUrlsCheckbox.addEventListener('change', saveCurrentDownloadOptions);
+            }
 
             // Read the URL parameters for a magnet link and add it to the download queue if found
             const urlParams = new URLSearchParams(window.location.search);

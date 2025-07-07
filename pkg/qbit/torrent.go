@@ -3,43 +3,43 @@ package qbit
 import (
 	"context"
 	"fmt"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/arr"
-	"github.com/sirrobot01/decypharr/pkg/store"
 	"io"
 	"mime/multipart"
 	"strings"
 	"time"
+
+	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/arr"
+	"github.com/sirrobot01/decypharr/pkg/store"
 )
 
 // All torrent-related helpers goes here
-func (q *QBit) addMagnet(ctx context.Context, url string, arr *arr.Arr, debrid string, action string) error {
-	magnet, err := utils.GetMagnetFromUrl(url)
+func (q *QBit) addMagnet(ctx context.Context, url string, arr *arr.Arr, debrid string, action string, rmTrackerUrls bool) error {
+	magnet, err := utils.GetMagnetFromUrl(url, rmTrackerUrls)
 	if err != nil {
 		return fmt.Errorf("error parsing magnet link: %w", err)
 	}
-	_store := store.Get()
 
 	importReq := store.NewImportRequest(debrid, q.DownloadFolder, magnet, arr, action, false, "", store.ImportTypeQBitTorrent)
 
-	err = _store.AddTorrent(ctx, importReq)
+	err = q.store.AddTorrent(ctx, importReq)
 	if err != nil {
 		return fmt.Errorf("failed to process torrent: %w", err)
 	}
 	return nil
 }
 
-func (q *QBit) addTorrent(ctx context.Context, fileHeader *multipart.FileHeader, arr *arr.Arr, debrid string, action string) error {
+func (q *QBit) addTorrent(ctx context.Context, fileHeader *multipart.FileHeader, arr *arr.Arr, debrid string, action string, rmTrackerUrls bool) error {
 	file, _ := fileHeader.Open()
 	defer file.Close()
 	var reader io.Reader = file
-	magnet, err := utils.GetMagnetFromFile(reader, fileHeader.Filename)
+	magnet, err := utils.GetMagnetFromFile(reader, fileHeader.Filename, rmTrackerUrls)
 	if err != nil {
 		return fmt.Errorf("error reading file: %s \n %w", fileHeader.Filename, err)
 	}
-	_store := store.Get()
+
 	importReq := store.NewImportRequest(debrid, q.DownloadFolder, magnet, arr, action, false, "", store.ImportTypeQBitTorrent)
-	err = _store.AddTorrent(ctx, importReq)
+	err = q.store.AddTorrent(ctx, importReq)
 	if err != nil {
 		return fmt.Errorf("failed to process torrent: %w", err)
 	}
