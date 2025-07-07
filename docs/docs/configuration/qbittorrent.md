@@ -24,7 +24,8 @@ The qBittorrent functionality is configured under the `qbittorrent` key:
 
 - `refresh_interval`: How often (in seconds) to refresh the Arrs Monitored Downloads (default: 5)
 - `max_downloads`: The maximum number of concurrent downloads. This is only for downloading real files(Not symlinks). If you set this to 0, it will download all files at once. This is not recommended for most users.(default: 5)
-- `skip_pre_cache`: This option disables the process of pre-caching files. This caches a small portion of the file to speed up your *arrs import process. 
+- `skip_pre_cache`: This option disables the process of pre-caching files. This caches a small portion of the file to speed up your *arrs import process.
+- `always_rm_tracker_urls`: If this option is enabled, decypharr will always remove tracker URLs from all torrents and magnet links. This is useful if you want to [download private tracker torrents](../features/private-tracker-downloads.md) without breaking the rules.
 
 #### Categories
 Categories help organize your downloads and match them to specific Arr applications. Typically, you'll want to configure categories that match your Sonarr, Radarr, or other Arr applications:

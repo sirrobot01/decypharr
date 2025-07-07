@@ -22,6 +22,7 @@ To connect Decypharr to your Sonarr or Radarr instance:
    - **Category**: e.g., `sonarr`, `radarr` (match what you configured in Decypharr)
    - **Use SSL**: `No`
    - **Sequential Download**: `No` or `Yes` (if you want to download torrents locally instead of symlink)
+   - **First and Last First**: `No` by default or `Yes` if you want to remove torrent tracker URLs from the torrents. This can make it possible to [download private trackers torrents without breaking the rules](features/private-tracker-downloads.md).
 3. Click **Test** to verify the connection
 4. Click **Save** to add the download client
 
