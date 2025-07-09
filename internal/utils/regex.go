@@ -55,5 +55,5 @@ func IsSampleFile(path string) bool {
 	if strings.HasSuffix(strings.ToLower(filename), "sample.mkv") {
 		return true
 	}
-	return RegexMatch(sampleRegex, filename)
+	return RegexMatch(sampleRegex, path)
 }
