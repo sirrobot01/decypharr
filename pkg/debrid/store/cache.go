@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"os"
 	"path"
 	"path/filepath"
@@ -17,13 +16,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+
 	"encoding/json"
+	_ "time/tzdata"
+
 	"github.com/go-co-op/gocron/v2"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/utils"
-	_ "time/tzdata"
 )
 
 type WebDavFolderNaming string
@@ -675,15 +677,65 @@ func (c *Cache) ProcessTorrent(t *types.Torrent) error {
 		return _complete
 	}
 
+	// Debug: Log initial torrent state
+	c.logger.Debug().
+		Str("torrent_id", t.Id).
+		Str("torrent_name", t.Name).
+		Str("status", t.Status).
+		Int("file_count", len(t.Files)).
+		Msg("ProcessTorrent: Starting processing")
+
 	if !isComplete(t.Files) {
+		// Debug: Log why torrent is considered incomplete before refresh
+		filesWithoutLinks := 0
+		for fileName, file := range t.Files {
+			if file.Link == "" {
+				filesWithoutLinks++
+				c.logger.Debug().
+					Str("torrent_id", t.Id).
+					Str("file_name", fileName).
+					Str("file_id", file.Id).
+					Msg("ProcessTorrent: File missing download link before refresh")
+			}
+		}
+		c.logger.Debug().
+			Str("torrent_id", t.Id).
+			Int("files_without_links", filesWithoutLinks).
+			Int("total_files", len(t.Files)).
+			Msg("ProcessTorrent: Torrent incomplete, updating from provider")
+
 		if err := c.client.UpdateTorrent(t); err != nil {
 			return fmt.Errorf("failed to update torrent: %w", err)
 		}
 	}
 
 	if !isComplete(t.Files) {
+		// Debug: Log why torrent is still considered incomplete after refresh
+		filesWithoutLinks := 0
+		for fileName, file := range t.Files {
+			if file.Link == "" {
+				filesWithoutLinks++
+				c.logger.Debug().
+					Str("torrent_id", t.Id).
+					Str("file_name", fileName).
+					Str("file_id", file.Id).
+					Msg("ProcessTorrent: File missing download link after refresh")
+			}
+		}
+		c.logger.Debug().
+			Str("torrent_id", t.Id).
+			Int("files_without_links", filesWithoutLinks).
+			Int("total_files", len(t.Files)).
+			Str("status", t.Status).
+			Msg("ProcessTorrent: Torrent still not complete after refresh")
 		c.logger.Debug().Msgf("Torrent %s is still not complete. Triggering a reinsert(disabled)", t.Id)
 	} else {
+		c.logger.Debug().
+			Str("torrent_id", t.Id).
+			Str("torrent_name", t.Name).
+			Int("file_count", len(t.Files)).
+			Msg("ProcessTorrent: Torrent is complete, adding to cache")
+
 		addedOn, err := time.Parse(time.RFC3339, t.Added)
 		if err != nil {
 			addedOn = time.Now()
