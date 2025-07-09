@@ -787,6 +787,14 @@ func (tb *Torbox) GetMountPath() string {
 }
 
 func (tb *Torbox) DeleteDownloadLink(linkId string) error {
+	url := fmt.Sprintf("%s/api/torrents/controltorrent%", tb.Host)
+	payload := map[string]string{"torrent_id": linkId, "operation": "Delete"}
+	jsonPayload, _ := json.Marshal(payload)
+	req, _ := http.NewRequest(http.MethodDelete, url, bytes.NewBuffer(jsonPayload))
+	if _, err := tb.client.MakeRequest(req); err != nil {
+		return err
+	}
+	tb.logger.Info().Msgf("Download link %s deleted from Torbox", linkId)
 	return nil
 }
 
