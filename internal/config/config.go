@@ -12,6 +12,13 @@ import (
 	"sync"
 )
 
+type RepairStrategy string
+
+const (
+	RepairStrategyPerFile    RepairStrategy = "per_file"
+	RepairStrategyPerTorrent RepairStrategy = "per_torrent"
+)
+
 var (
 	instance   *Config
 	once       sync.Once
@@ -60,13 +67,14 @@ type Arr struct {
 }
 
 type Repair struct {
-	Enabled     bool   `json:"enabled,omitempty"`
-	Interval    string `json:"interval,omitempty"`
-	ZurgURL     string `json:"zurg_url,omitempty"`
-	AutoProcess bool   `json:"auto_process,omitempty"`
-	UseWebDav   bool   `json:"use_webdav,omitempty"`
-	Workers     int    `json:"workers,omitempty"`
-	ReInsert    bool   `json:"reinsert,omitempty"`
+	Enabled     bool           `json:"enabled,omitempty"`
+	Interval    string         `json:"interval,omitempty"`
+	ZurgURL     string         `json:"zurg_url,omitempty"`
+	AutoProcess bool           `json:"auto_process,omitempty"`
+	UseWebDav   bool           `json:"use_webdav,omitempty"`
+	Workers     int            `json:"workers,omitempty"`
+	ReInsert    bool           `json:"reinsert,omitempty"`
+	Strategy    RepairStrategy `json:"strategy,omitempty"`
 }
 
 type Auth struct {
@@ -350,6 +358,11 @@ func (c *Config) setDefaults() {
 	}
 	if !strings.HasSuffix(c.URLBase, "/") {
 		c.URLBase += "/"
+	}
+
+	// Set repair defaults
+	if c.Repair.Strategy == "" {
+		c.Repair.Strategy = RepairStrategyPerTorrent
 	}
 
 	// Load the auth file

@@ -106,6 +106,19 @@
     </li>
     {{- end}}
     {{$isBadPath := hasSuffix .Path "__bad__"}}
+    {{- if and $isBadPath (gt (len .Children) 0) }}
+    <li>
+        <span class="file-number">&nbsp;</span>
+        <span class="file-name">&nbsp;</span>
+        <span class="file-info">&nbsp;</span>
+        <button
+                class="delete-btn"
+                id="delete-all-btn"
+                data-name="{{.DeleteAllBadTorrentKey}}">
+            Delete All
+        </button>
+    </li>
+    {{- end}}
     {{- range $i, $file := .Children}}
     <li class="{{if $isBadPath}}disabled{{end}}">
         <a {{ if not $isBadPath}}href="{{urlpath (printf "%s/%s" $.Path $file.Name)}}"{{end}}>
@@ -118,7 +131,7 @@
         </a>
         {{- if and $.CanDelete }}
         <button
-                class="delete-btn"
+                class="delete-btn delete-with-id-btn"
                 data-name="{{$file.Name}}"
                 data-path="{{printf "%s/%s" $.Path $file.ID}}">
         Delete
@@ -128,7 +141,7 @@
     {{- end}}
 </ul>
 <script>
-    document.querySelectorAll('.delete-btn').forEach(btn=>{
+    document.querySelectorAll('.delete-with-id-btn').forEach(btn=>{
         btn.addEventListener('click', ()=>{
             let p = btn.getAttribute('data-path');
             let name = btn.getAttribute('data-name');
@@ -136,6 +149,14 @@
             fetch(p, { method: 'DELETE' })
                 .then(_=>location.reload());
         });
+    });
+
+    const deleteAllButton = document.getElementById('delete-all-btn');
+    deleteAllButton.addEventListener('click', () => {
+        let p = deleteAllButton.getAttribute('data-name');
+        if (!confirm('Delete all entries marked Bad?')) return;
+        fetch(p, { method: 'DELETE' })
+            .then(_=>location.reload());
     });
 </script>
 </body>

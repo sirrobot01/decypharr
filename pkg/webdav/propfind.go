@@ -55,7 +55,6 @@ func (h *Handler) handlePropfind(w http.ResponseWriter, r *http.Request) {
 		rawEntries = append(rawEntries, h.getChildren(cleanPath)...)
 	}
 
-	now := time.Now().UTC().Format("2006-01-02T15:04:05.000-07:00")
 	entries := make([]entry, 0, len(rawEntries)+1)
 	// Add the current file itself
 	entries = append(entries, entry{
@@ -63,7 +62,7 @@ func (h *Handler) handlePropfind(w http.ResponseWriter, r *http.Request) {
 		escName: xmlEscape(fi.Name()),
 		isDir:   fi.IsDir(),
 		size:    fi.Size(),
-		modTime: fi.ModTime().Format("2006-01-02T15:04:05.000-07:00"),
+		modTime: fi.ModTime().Format(time.RFC3339),
 	})
 	for _, info := range rawEntries {
 
@@ -79,7 +78,7 @@ func (h *Handler) handlePropfind(w http.ResponseWriter, r *http.Request) {
 			escName: xmlEscape(nm),
 			isDir:   info.IsDir(),
 			size:    info.Size(),
-			modTime: info.ModTime().Format("2006-01-02T15:04:05.000-07:00"),
+			modTime: info.ModTime().Format(time.RFC3339),
 		})
 	}
 
@@ -108,7 +107,7 @@ func (h *Handler) handlePropfind(w http.ResponseWriter, r *http.Request) {
 		}
 
 		_, _ = sb.WriteString(`<d:getlastmodified>`)
-		_, _ = sb.WriteString(now)
+		_, _ = sb.WriteString(e.modTime)
 		_, _ = sb.WriteString(`</d:getlastmodified>`)
 
 		_, _ = sb.WriteString(`<d:displayname>`)

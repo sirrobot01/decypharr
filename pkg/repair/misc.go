@@ -88,6 +88,8 @@ func collectFiles(media arr.Content) map[string][]arr.ContentFile {
 func (r *Repair) checkTorrentFiles(torrentPath string, files []arr.ContentFile, clients map[string]types.Client, caches map[string]*store.Cache) []arr.ContentFile {
 	brokenFiles := make([]arr.ContentFile, 0)
 
+	emptyFiles := make([]arr.ContentFile, 0)
+
 	r.logger.Debug().Msgf("Checking %s", torrentPath)
 
 	// Get the debrid client
@@ -95,17 +97,18 @@ func (r *Repair) checkTorrentFiles(torrentPath string, files []arr.ContentFile, 
 	debridName := r.findDebridForPath(dir, clients)
 	if debridName == "" {
 		r.logger.Debug().Msgf("No debrid found for %s. Skipping", torrentPath)
-		return files // Return all files as broken if no debrid found
+		return emptyFiles
 	}
 
 	cache, ok := caches[debridName]
 	if !ok {
 		r.logger.Debug().Msgf("No cache found for %s. Skipping", debridName)
-		return files // Return all files as broken if no cache found
+		return emptyFiles
 	}
 	tor, ok := r.torrentsMap.Load(debridName)
 	if !ok {
 		r.logger.Debug().Msgf("Could not find torrents for %s. Skipping", debridName)
+		return emptyFiles
 	}
 
 	torrentsMap := tor.(map[string]store.CachedTorrent)
@@ -114,8 +117,9 @@ func (r *Repair) checkTorrentFiles(torrentPath string, files []arr.ContentFile, 
 	torrentName := filepath.Clean(filepath.Base(torrentPath))
 	torrent, ok := torrentsMap[torrentName]
 	if !ok {
-		r.logger.Debug().Msgf("No torrent found for %s. Skipping", torrentName)
-		return files // Return all files as broken if torrent not found
+		r.logger.Debug().Msgf("Can't find torrent %s in %s. Marking as broken", torrentName, debridName)
+		// Return all files as broken
+		return files
 	}
 
 	// Batch check files

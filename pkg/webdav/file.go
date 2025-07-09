@@ -12,19 +12,24 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/debrid/store"
 )
 
+var streamingTransport = &http.Transport{
+	TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
+	MaxIdleConns:          200,
+	MaxIdleConnsPerHost:   100,
+	MaxConnsPerHost:       200,
+	IdleConnTimeout:       90 * time.Second,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ResponseHeaderTimeout: 60 * time.Second, // give the upstream a minute to send headers
+	ExpectContinueTimeout: 1 * time.Second,
+	DisableKeepAlives:     true,  // close after each request
+	ForceAttemptHTTP2:     false, // don’t speak HTTP/2
+	// this line is what truly blocks HTTP/2:
+	TLSNextProto: make(map[string]func(string, *tls.Conn) http.RoundTripper),
+}
+
 var sharedClient = &http.Client{
-	Transport: &http.Transport{
-		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   20,
-		MaxConnsPerHost:       50,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		DisableKeepAlives:     false,
-	},
-	Timeout: 0,
+	Transport: streamingTransport,
+	Timeout:   0,
 }
 
 type streamError struct {
@@ -143,7 +148,7 @@ func (f *File) StreamResponse(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (f *File) streamWithRetry(w http.ResponseWriter, r *http.Request, retryCount int) error {
-	const maxRetries = 0
+	const maxRetries = 3
 	_log := f.cache.Logger()
 
 	// Get download link (with caching optimization)
@@ -192,8 +197,47 @@ func (f *File) streamWithRetry(w http.ResponseWriter, r *http.Request, retryCoun
 
 	setVideoResponseHeaders(w, resp, isRangeRequest == 1)
 
-	// Stream with optimized buffering for video
-	return f.streamVideoOptimized(w, resp.Body)
+	return f.streamBuffer(w, resp.Body)
+}
+
+func (f *File) streamBuffer(w http.ResponseWriter, src io.Reader) error {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return fmt.Errorf("response does not support flushing")
+	}
+
+	smallBuf := make([]byte, 64*1024) // 64 KB
+	if n, err := src.Read(smallBuf); n > 0 {
+		if _, werr := w.Write(smallBuf[:n]); werr != nil {
+			return werr
+		}
+		flusher.Flush()
+	} else if err != nil && err != io.EOF {
+		return err
+	}
+
+	buf := make([]byte, 256*1024) // 256 KB
+	for {
+		n, readErr := src.Read(buf)
+		if n > 0 {
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				if isClientDisconnection(writeErr) {
+					return &streamError{Err: writeErr, StatusCode: 0, IsClientDisconnection: true}
+				}
+				return writeErr
+			}
+			flusher.Flush()
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				return nil
+			}
+			if isClientDisconnection(readErr) {
+				return &streamError{Err: readErr, StatusCode: 0, IsClientDisconnection: true}
+			}
+			return readErr
+		}
+	}
 }
 
 func (f *File) handleUpstream(resp *http.Response, retryCount, maxRetries int) (shouldRetry bool, err error) {
@@ -317,51 +361,6 @@ func (f *File) handleRangeRequest(upstreamReq *http.Request, r *http.Request, w 
 
 	upstreamReq.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
 	return 1 // Valid range request
-}
-
-func (f *File) streamVideoOptimized(w http.ResponseWriter, src io.Reader) error {
-	// Use larger buffer for video streaming (better throughput)
-	buf := make([]byte, 64*1024) // 64KB buffer
-
-	// First chunk optimization - send immediately for faster start
-	n, err := src.Read(buf)
-	if err != nil && err != io.EOF {
-		if isClientDisconnection(err) {
-			return &streamError{Err: err, StatusCode: 0, IsClientDisconnection: true}
-		}
-		return &streamError{Err: err, StatusCode: 0}
-	}
-
-	if n > 0 {
-		// Write first chunk immediately
-		_, writeErr := w.Write(buf[:n])
-		if writeErr != nil {
-			if isClientDisconnection(writeErr) {
-				return &streamError{Err: writeErr, StatusCode: 0, IsClientDisconnection: true}
-			}
-			return &streamError{Err: writeErr, StatusCode: 0}
-		}
-
-		// Flush immediately for faster video start
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
-	}
-
-	if err == io.EOF {
-		return nil
-	}
-
-	// Continue with optimized copy for remaining data
-	_, err = io.CopyBuffer(w, src, buf)
-	if err != nil {
-		if isClientDisconnection(err) {
-			return &streamError{Err: err, StatusCode: 0, IsClientDisconnection: true}
-		}
-		return &streamError{Err: err, StatusCode: 0}
-	}
-
-	return nil
 }
 
 /*

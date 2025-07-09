@@ -338,6 +338,14 @@
                             </div>
                             <div class="row">
                                 <div class="col-md-4 mb-3">
+                                    <label class="form-label" for="repair.strategy">Repair Strategy</label>
+                                    <select class="form-select" name="repair.strategy" id="repair.strategy">
+                                        <option value="per_torrent" selected>Per Torrent</option>
+                                        <option value="per_file">Per File</option>
+                                    </select>
+                                    <small class="form-text text-muted">How to handle repairs, per torrent or per file</small>
+                                </div>
+                                <div class="col-md-4 mb-3">
                                     <div class="form-check">
                                         <input type="checkbox" class="form-check-input" name="repair.use_webdav"
                                                id="repair.use_webdav">
@@ -1226,6 +1234,7 @@
                     enabled: document.querySelector('[name="repair.enabled"]').checked,
                     interval: document.querySelector('[name="repair.interval"]').value,
                     zurg_url: document.querySelector('[name="repair.zurg_url"]').value,
+                    strategy: document.querySelector('[name="repair.strategy"]').value,
                     workers: parseInt(document.querySelector('[name="repair.workers"]').value),
                     use_webdav: document.querySelector('[name="repair.use_webdav"]').checked,
                     auto_process: document.querySelector('[name="repair.auto_process"]').checked

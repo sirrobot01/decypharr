@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"sync"
@@ -60,6 +61,7 @@ func (c *Cache) markAsSuccessfullyReinserted(torrentId string) {
 
 func (c *Cache) GetBrokenFiles(t *CachedTorrent, filenames []string) []string {
 	files := make(map[string]types.File)
+	repairStrategy := config.Get().Repair.Strategy
 	brokenFiles := make([]string, 0)
 	if len(filenames) > 0 {
 		for name, f := range t.Files {
@@ -93,6 +95,10 @@ func (c *Cache) GetBrokenFiles(t *CachedTorrent, filenames []string) []string {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Use a mutex to protect brokenFiles slice and torrent-wide failure flag
+	var mu sync.Mutex
+	torrentWideFailed := false
+
 	wg.Add(len(files))
 
 	for _, f := range files {
@@ -106,14 +112,33 @@ func (c *Cache) GetBrokenFiles(t *CachedTorrent, filenames []string) []string {
 			}
 
 			if f.Link == "" {
-				cancel()
+				mu.Lock()
+				if repairStrategy == config.RepairStrategyPerTorrent {
+					torrentWideFailed = true
+					mu.Unlock()
+					cancel() // Signal all other goroutines to stop
+					return
+				} else {
+					// per_file strategy - only mark this file as broken
+					brokenFiles = append(brokenFiles, f.Name)
+				}
+				mu.Unlock()
 				return
 			}
 
 			if err := c.client.CheckLink(f.Link); err != nil {
 				if errors.Is(err, utils.HosterUnavailableError) {
-					cancel() // Signal all other goroutines to stop
-					return
+					mu.Lock()
+					if repairStrategy == config.RepairStrategyPerTorrent {
+						torrentWideFailed = true
+						mu.Unlock()
+						cancel() // Signal all other goroutines to stop
+						return
+					} else {
+						// per_file strategy - only mark this file as broken
+						brokenFiles = append(brokenFiles, f.Name)
+					}
+					mu.Unlock()
 				}
 			}
 		}(f)
@@ -121,12 +146,14 @@ func (c *Cache) GetBrokenFiles(t *CachedTorrent, filenames []string) []string {
 
 	wg.Wait()
 
-	// If context was cancelled, mark all files as broken
-	if ctx.Err() != nil {
+	// Handle the result based on strategy
+	if repairStrategy == config.RepairStrategyPerTorrent && torrentWideFailed {
+		// Mark all files as broken for per_torrent strategy
 		for _, f := range files {
 			brokenFiles = append(brokenFiles, f.Name)
 		}
 	}
+	// For per_file strategy, brokenFiles already contains only the broken ones
 
 	// Try to reinsert the torrent if it's broken
 	if len(brokenFiles) > 0 && t.Torrent != nil {

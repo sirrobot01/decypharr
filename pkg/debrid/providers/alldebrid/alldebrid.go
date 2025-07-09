@@ -309,7 +309,7 @@ func (ad *AllDebrid) GetFileDownloadLinks(t *types.Torrent) error {
 				errCh <- err
 				return
 			}
-			if link != nil {
+			if link == nil {
 				errCh <- fmt.Errorf("download link is empty")
 				return
 			}

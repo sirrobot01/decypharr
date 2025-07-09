@@ -115,8 +115,10 @@ func (a *Arr) Validate() error {
 	if err != nil {
 		return err
 	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("arr test failed: %s", resp.Status)
+	defer resp.Body.Close()
+	// If response is not 200 or 404(this is the case for Lidarr, etc), return an error
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound {
+		return fmt.Errorf("failed to validate arr %s: %s", a.Name, resp.Status)
 	}
 	return nil
 }

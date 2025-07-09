@@ -136,15 +136,7 @@ func (c *Cache) refreshRclone() error {
 		return nil
 	}
 
-	client := &http.Client{
-		Timeout: 60 * time.Second,
-		Transport: &http.Transport{
-			MaxIdleConns:        10,
-			IdleConnTimeout:     60 * time.Second,
-			DisableCompression:  false,
-			MaxIdleConnsPerHost: 5,
-		},
-	}
+	client := http.DefaultClient
 	// Create form data
 	data := c.buildRcloneRequestData()
 
