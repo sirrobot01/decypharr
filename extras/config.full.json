@@ -1,0 +1,88 @@
+{
+  "debrids": [
+    {
+      "name": "realdebrid",
+      "api_key": "realdebrid_key",
+      "folder": "/mnt/remote/realdebrid/__all__/",
+      "download_api_keys": [],
+      "proxy": "",
+      "rate_limit": "250/minute",
+      "download_uncached": false,
+      "use_webdav": true,
+      "torrents_refresh_interval": "15s",
+      "folder_naming": "original_no_ext",
+      "auto_expire_links_after": "3d",
+      "rc_url": "http://your-ip-address:9990",
+      "rc_user": "your_rclone_rc_user",
+      "rc_pass": "your_rclone_rc_pass"
+    },
+    {
+      "name": "torbox",
+      "api_key": "torbox_api_key",
+      "folder": "/mnt/remote/torbox/torrents/",
+      "rate_limit": "250/minute",
+      "download_uncached": false,
+    },
+    {
+      "name": "debridlink",
+      "api_key": "debridlink_key",
+      "folder": "/mnt/remote/debridlink/torrents/",
+      "rate_limit": "250/minute",
+      "download_uncached": false,
+    },
+    {
+      "name": "alldebrid",
+      "api_key": "alldebrid_key",
+      "folder": "/mnt/remote/alldebrid/magnet/",
+      "rate_limit": "600/minute",
+      "download_uncached": false,
+    }
+  ],
+  "max_cache_size": 1000,
+  "qbittorrent": {
+    "port": "8282",
+    "download_folder": "/mnt/symlinks/",
+    "categories": ["sonarr", "radarr"],
+    "refresh_interval": 5,
+    "skip_pre_cache": false
+  },
+  "arrs": [
+    {
+      "name": "sonarr",
+      "host": "http://sonarr:8989",
+      "token": "arr_key",
+      "cleanup": true,
+      "skip_repair": true,
+      "download_uncached": false
+    },
+    {
+      "name": "radarr",
+      "host": "http://radarr:7878",
+      "token": "arr_key",
+      "cleanup": false,
+      "download_uncached": false
+    },
+    {
+      "name": "lidarr",
+      "host": "http://lidarr:8686",
+      "token": "arr_key",
+      "cleanup": false,
+      "skip_repair": true,
+      "download_uncached": false
+    }
+  ],
+  "repair": {
+    "enabled": false,
+    "interval": "12h",
+    "run_on_start": false,
+    "zurg_url": "",
+    "use_webdav": false,
+    "auto_process": false
+  },
+  "log_level": "info",
+  "min_file_size": "",
+  "max_file_size": "",
+  "allowed_file_types": [],
+  "use_auth": false,
+  "discord_webhook_url": "https://discord.com/api/webhooks/..."
+}
