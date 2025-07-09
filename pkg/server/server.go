@@ -11,7 +11,6 @@ import (
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 )
 
@@ -30,10 +29,6 @@ func New(handlers map[string]http.Handler) *Server {
 	s := &Server{
 		logger: l,
 	}
-	staticPath, _ := url.JoinPath(cfg.URLBase, "static")
-	r.Handle(staticPath+"/*",
-		http.StripPrefix(staticPath, http.FileServer(http.Dir("static"))),
-	)
 
 	r.Route(cfg.URLBase, func(r chi.Router) {
 		for pattern, handler := range handlers {

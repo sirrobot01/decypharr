@@ -1,103 +1,59 @@
 {{ define "config" }}
-<style>
-    /* Custom styles for the stepper navigation */
-    .nav-pills .nav-link {
-        color: var(--text-color);
-        background-color: var(--card-bg);
-        margin: 0 3px;
-    }
-
-    .nav-pills .nav-link.active {
-        background-color: var(--primary-color);
-        color: white !important;
-        font-weight: 500 !important;
-    }
-
-    /* For dark mode */
-    [data-bs-theme="dark"] .nav-pills .nav-link.active {
-        color: white !important;
-    }
-
-    .config-item.bg-light {
-        background-color: var(--bs-gray-100) !important;
-        border-left: 4px solid var(--bs-info) !important;
-    }
-
-    .config-item input[readonly] {
-        background-color: var(--bs-gray-200);
-        opacity: 1;
-    }
-
-    .config-item select[readonly] {
-        background-color: var(--bs-gray-200);
-        pointer-events: none;
-    }
-
-    /* Dark mode specific overrides */
-    [data-bs-theme="dark"] .config-item.bg-light {
-        background-color: var(--bs-gray-800) !important;
-        border-left: 4px solid var(--bs-info) !important;
-    }
-
-    [data-bs-theme="dark"] .config-item input[readonly] {
-        background-color: var(--bs-gray-700);
-        color: var(--bs-gray-300);
-    }
-
-    [data-bs-theme="dark"] .config-item select[readonly] {
-        background-color: var(--bs-gray-700);
-        color: var(--bs-gray-300);
-    }
-</style>
-<div class="container mt-4">
-    <form id="configForm">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center mb-2">
-                <h4 class="mb-0"><i class="bi bi-gear me-2"></i>Settings</h4>
-                <button type="submit" class="btn btn-success px-4">
-                    <i class="bi bi-save"></i> Save
-                </button>
-            </div>
+<div class="space-y-6">
+    <!-- Configuration Form -->
+    <form id="configForm" class="space-y-6">
+        <!-- Tab Navigation Card -->
+        <div class="card bg-base-100 shadow-xl">
             <div class="card-body">
-                <!-- Stepper navigation -->
-                <div class="stepper-nav mb-4">
-                    <ul class="nav nav-pills nav-justified">
-                        <li class="nav-item">
-                            <button type="button" class="nav-link active fw-medium" data-step="1">
-                                <i class="bi bi-1-circle me-1"></i>General
-                            </button>
-                        </li>
-                        <li class="nav-item">
-                            <button type="button" class="nav-link fw-medium" data-step="2">
-                                <i class="bi bi-2-circle me-1"></i>Debrid
-                            </button>
-                        </li>
-                        <li class="nav-item">
-                            <button type="button" class="nav-link fw-medium" data-step="3">
-                                <i class="bi bi-3-circle me-1"></i>QBitTorrent
-                            </button>
-                        </li>
-                        <li class="nav-item">
-                            <button type="button" class="nav-link fw-medium" data-step="4">
-                                <i class="bi bi-4-circle me-1"></i>*Arrs
-                            </button>
-                        </li>
-                        <li class="nav-item">
-                            <button type="button" class="nav-link fw-medium" data-step="5">
-                                <i class="bi bi-5-circle me-1"></i>Repair
-                            </button>
-                        </li>
-                    </ul>
+                <!-- Modern Tab Navigation -->
+                <div class="border-b border-base-300 mb-8">
+                    <nav class="flex space-x-8" aria-label="Configuration Tabs">
+                        <button type="button" class="tab-button active flex items-center gap-2 py-3 px-1 border-b-2 border-primary text-primary font-medium text-sm" data-tab="general">
+                            <i class="bi bi-gear text-lg"></i>
+                            <span class="hidden sm:inline">General</span>
+                        </button>
+                        <button type="button" class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors" data-tab="debrid">
+                            <i class="bi bi-cloud text-lg"></i>
+                            <span class="hidden sm:inline">Debrid</span>
+                        </button>
+                        <button type="button" class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors" data-tab="qbittorrent">
+                            <i class="bi bi-download text-lg"></i>
+                            <span class="hidden sm:inline">QBittorrent</span>
+                        </button>
+                        <button type="button" class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors" data-tab="arrs">
+                            <i class="bi bi-collection text-lg"></i>
+                            <span class="hidden sm:inline">*Arrs</span>
+                        </button>
+                        <button type="button" class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors" data-tab="repair">
+                            <i class="bi bi-wrench text-lg"></i>
+                            <span class="hidden sm:inline">Repair</span>
+                        </button>
+                    </nav>
                 </div>
 
-                <!-- Step 1: General Configuration -->
-                <div class="setup-step" id="step1">
-                    <div class="section mb-5">
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="form-group">
-                                    <label for="log-level">Log Level</label>
-                                    <select class="form-select" name="log_level" id="log-level">
+                <!-- Save Button (Sticky) -->
+                <div class="sticky top-20 z-30 flex justify-end mb-6">
+                    <button type="submit" class="btn btn-success btn-lg shadow-lg">
+                        <i class="bi bi-save mr-2"></i>Save Configuration
+                    </button>
+                </div>
+
+                <!-- Tab Content Container -->
+                <div class="tab-content-container">
+
+                    <!-- General Tab Content -->
+                    <div class="tab-content" data-tab-content="general">
+                        <div class="space-y-6">
+                            <h2 class="text-2xl font-bold flex items-center mb-6">
+                                <i class="bi bi-gear mr-3 text-primary"></i>General Settings
+                            </h2>
+
+                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                <div class="form-control">
+                                    <label class="label" for="log-level">
+                                        <span class="label-text font-medium">Log Level</span>
+                                    </label>
+                                    <select class="select select-bordered" name="log_level" id="log-level">
                                         <option value="info">Info</option>
                                         <option value="debug">Debug</option>
                                         <option value="warn">Warning</option>
@@ -105,1278 +61,354 @@
                                         <option value="trace">Trace</option>
                                     </select>
                                 </div>
+                                <div class="form-control">
+                                    <label class="label">
+                                        <span class="label-text font-medium">Magnet Link Handler</span>
+                                    </label>
+                                    <button type="button" class="btn btn-primary" onclick="registerMagnetLinkHandler();" id="registerMagnetLink">
+                                        <i class="bi bi-magnet mr-2"></i>Register Magnet Handler
+                                    </button>
+                                </div>
                             </div>
-                            <!-- Register Magnet Link Button -->
-                            <div class="col-md-6">
-                                <label>
-                                    <!-- Empty label to keep the button aligned -->
+
+                            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                                <div class="form-control">
+                                    <label class="label" for="urlBase">
+                                        <span class="label-text font-medium">URL Base</span>
+                                    </label>
+                                    <input type="text" class="input input-bordered" id="urlBase" name="url_base" placeholder="/">
+                                    <div class="label">
+                                        <span class="label-text-alt">URL base for the application</span>
+                                    </div>
+                                </div>
+
+                                <div class="form-control">
+                                    <label class="label" for="bindAddress">
+                                        <span class="label-text font-medium">Bind Address</span>
+                                    </label>
+                                    <input type="text" class="input input-bordered" id="bindAddress" name="bind_address" placeholder="0.0.0.0">
+                                    <div class="label">
+                                        <span class="label-text-alt">Bind address (default: all interfaces)</span>
+                                    </div>
+                                </div>
+
+                                <div class="form-control">
+                                    <label class="label" for="port">
+                                        <span class="label-text font-medium">Port</span>
+                                    </label>
+                                    <input type="number" class="input input-bordered" id="port" name="port" placeholder="8282">
+                                    <div class="label">
+                                        <span class="label-text-alt">Application port</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                <div class="form-control">
+                                    <label class="label" for="discordWebhookUrl">
+                                        <span class="label-text font-medium">Discord Webhook URL</span>
+                                    </label>
+                                    <textarea class="textarea textarea-bordered" id="discordWebhookUrl" name="discord_webhook_url" placeholder="https://discord.com/api/webhooks/..."></textarea>
+                                </div>
+
+                                <div class="form-control">
+                                    <label class="label" for="allowedExtensions">
+                                        <span class="label-text font-medium">Allowed File Extensions</span>
+                                    </label>
+                                    <textarea class="textarea textarea-bordered" id="allowedExtensions" name="allowed_file_types" placeholder="mkv, mp4, avi, mov"></textarea>
+                                    <div class="label">
+                                        <span class="label-text-alt">Comma-separated list of allowed file extensions</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                                <div class="form-control">
+                                    <label class="label" for="minFileSize">
+                                        <span class="label-text font-medium">Minimum File Size</span>
+                                    </label>
+                                    <input type="text" class="input input-bordered" id="minFileSize" name="min_file_size" placeholder="10MB">
+                                    <div class="label">
+                                        <span class="label-text-alt">Minimum file size to download</span>
+                                    </div>
+                                </div>
+
+                                <div class="form-control">
+                                    <label class="label" for="maxFileSize">
+                                        <span class="label-text font-medium">Maximum File Size</span>
+                                    </label>
+                                    <input type="text" class="input input-bordered" id="maxFileSize" name="max_file_size" placeholder="50GB">
+                                    <div class="label">
+                                        <span class="label-text-alt">Maximum file size to download</span>
+                                    </div>
+                                </div>
+
+                                <div class="form-control">
+                                    <label class="label" for="removeStalledAfter">
+                                        <span class="label-text font-medium">Remove Stalled After</span>
+                                    </label>
+                                    <input type="text" class="input input-bordered" id="removeStalledAfter" name="remove_stalled_after" placeholder="1h">
+                                    <div class="label">
+                                        <span class="label-text-alt">Duration before removing stalled torrents</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Debrid Tab Content -->
+                    <div class="tab-content hidden" data-tab-content="debrid">
+                        <div class="space-y-6">
+                            <div class="flex justify-between items-center">
+                                <h2 class="text-2xl font-bold flex items-center">
+                                    <i class="bi bi-cloud mr-3 text-secondary"></i>Debrid Services
+                                </h2>
+                                <button type="button" id="addDebridBtn" class="btn btn-secondary">
+                                    <i class="bi bi-plus mr-2"></i>Add Debrid Service
+                                </button>
+                            </div>
+
+                            <div id="debridConfigs" class="space-y-4">
+                                <!-- Dynamic debrid configurations will be added here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- QBittorrent Tab Content -->
+                    <div class="tab-content hidden" data-tab-content="qbittorrent">
+                        <div class="space-y-6">
+                            <h2 class="text-2xl font-bold flex items-center mb-6">
+                                <i class="bi bi-download mr-3 text-accent"></i>QBittorrent Settings
+                            </h2>
+
+                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                <div class="form-control">
+                                    <label class="label" for="qbit.download_folder">
+                                        <span class="label-text font-medium">Download Folder</span>
+                                    </label>
+                                    <input type="text" class="input input-bordered" name="qbit.download_folder" id="qbit.download_folder">
+                                    <div class="label">
+                                        <span class="label-text-alt">Folder where downloaded files will be stored</span>
+                                    </div>
+                                </div>
+
+                                <div class="form-control">
+                                    <label class="label" for="qbit.refresh_interval">
+                                        <span class="label-text font-medium">Refresh Interval (seconds)</span>
+                                    </label>
+                                    <input type="number" class="input input-bordered" name="qbit.refresh_interval" id="qbit.refresh_interval" min="1" max="3600">
+                                </div>
+
+                                <div class="form-control">
+                                    <label class="label" for="qbit.max_downloads">
+                                        <span class="label-text font-medium">Maximum Downloads</span>
+                                    </label>
+                                    <input type="number" class="input input-bordered" name="qbit.max_downloads" id="qbit.max_downloads" min="0">
+                                    <div class="label">
+                                        <span class="label-text-alt">Maximum simultaneous downloads (0 = unlimited)</span>
+                                    </div>
+                                </div>
+
+                                <div class="form-control">
+                                    <label class="label cursor-pointer justify-start gap-3">
+                                        <input type="checkbox" class="checkbox" name="qbit.skip_pre_cache" id="qbit.skip_pre_cache">
+                                        <div>
+                                            <span class="label-text font-medium">Skip Pre-Cache</span>
+                                            <div class="label-text-alt">Disable pre-caching to speed up imports</div>
+                                        </div>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Arrs Tab Content -->
+                    <div class="tab-content hidden" data-tab-content="arrs">
+                        <div class="space-y-6">
+                            <div class="flex justify-between items-center">
+                                <h2 class="text-2xl font-bold flex items-center">
+                                    <i class="bi bi-collection mr-3 text-warning"></i>Arr Applications
+                                </h2>
+                                <button type="button" id="addArrBtn" class="btn btn-warning">
+                                    <i class="bi bi-plus mr-2"></i>Add Arr Service
+                                </button>
+                            </div>
+
+                            <div id="arrConfigs" class="space-y-4">
+                                <!-- Dynamic arr configurations will be added here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Repair Tab Content -->
+                    <div class="tab-content hidden" data-tab-content="repair">
+                        <div class="space-y-6">
+                            <h2 class="text-2xl font-bold flex items-center mb-6">
+                                <i class="bi bi-wrench mr-3 text-error"></i>Repair Settings
+                            </h2>
+
+                            <div class="form-control">
+                                <label class="label cursor-pointer justify-start gap-3">
+                                    <input type="checkbox" class="checkbox checkbox-lg" name="repair.enabled" id="repair.enabled">
+                                    <div>
+                                        <span class="label-text font-medium text-lg">Enable Scheduled Repair</span>
+                                        <div class="label-text-alt">Automatically repair broken symlinks and missing files</div>
+                                    </div>
                                 </label>
-                                <div class="btn btn-primary w-100" onclick="registerMagnetLinkHandler();"
-                                     id="registerMagnetLink">
-                                    Open Magnet Links in Decypharr
-                                </div>
                             </div>
-                            <div class="col-md-6 mt-3">
-                                <div class="form-group">
-                                    <label for="urlBase">URL Base</label>
-                                    <input type="text"
-                                           class="form-control"
-                                           id="urlBase"
-                                           name="url_base"
-                                           placeholder="/">
-                                    <small class="form-text text-muted">URL base for the application</small>
+
+                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                <div class="space-y-4">
+                                    <div class="form-control">
+                                        <label class="label" for="repair.interval">
+                                            <span class="label-text font-medium">Repair Interval</span>
+                                        </label>
+                                        <input type="text" class="input input-bordered" name="repair.interval" id="repair.interval" placeholder="24h">
+                                        <div class="label">
+                                            <span class="label-text-alt">How often to run repair (e.g., 24h, 1d, 03:00, or crontab)</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-control">
+                                        <label class="label" for="repair.workers">
+                                            <span class="label-text font-medium">Worker Threads</span>
+                                        </label>
+                                        <input type="number" class="input input-bordered" name="repair.workers" id="repair.workers" min="1" max="20">
+                                        <div class="label">
+                                            <span class="label-text-alt">Number of concurrent repair workers</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-control">
+                                        <label class="label" for="repair.strategy">
+                                            <span class="label-text font-medium">Repair Strategy</span>
+                                        </label>
+                                        <select class="select select-bordered" name="repair.strategy" id="repair.strategy">
+                                            <option value="per_torrent" selected>Per Torrent</option>
+                                            <option value="per_file">Per File</option>
+                                        </select>
+                                        <div class="label">
+                                            <span class="label-text-alt">How to handle repairs</span>
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                            <div class="col-md-4 mt-3">
-                                <div class="form-group">
-                                    <label for="bindAddress">Bind Address</label>
-                                    <input type="text"
-                                           class="form-control"
-                                           id="bindAddress"
-                                           name="bind_address"
-                                           placeholder="">
-                                    <small class="form-text text-muted">Bind address for the application(default is all
-                                        interface)</small>
-                                </div>
-                            </div>
-                            <div class="col-md-2 mt-3">
-                                <div class="form-group">
-                                    <label for="port">Port</label>
-                                    <input type="text"
-                                           class="form-control"
-                                           id="port"
-                                           name="port"
-                                           placeholder="8282">
-                                    <small class="form-text text-muted">Port</small>
-                                </div>
-                            </div>
-                            <div class="col-md-6 mt-3">
-                                <div class="form-group">
-                                    <label for="discordWebhookUrl">Discord Webhook URL</label>
-                                    <div class="input-group">
-                                        <textarea
-                                                class="form-control"
-                                                id="discordWebhookUrl"
-                                                name="discord_webhook_url"
-                                                placeholder="https://discord..."></textarea>
+
+                                <div class="space-y-4">
+                                    <div class="form-control">
+                                        <label class="label" for="repair.zurg_url">
+                                            <span class="label-text font-medium">Zurg URL</span>
+                                        </label>
+                                        <input type="url" class="input input-bordered" name="repair.zurg_url" id="repair.zurg_url" placeholder="http://zurg:9999">
+                                        <div class="label">
+                                            <span class="label-text-alt">Optional Zurg instance to speed up repairs</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-control">
+                                        <label class="label cursor-pointer justify-start gap-3">
+                                            <input type="checkbox" class="checkbox" name="repair.use_webdav" id="repair.use_webdav">
+                                            <div>
+                                                <span class="label-text font-medium">Use WebDAV</span>
+                                                <div class="label-text-alt">Use internal WebDAV for repairs</div>
+                                            </div>
+                                        </label>
+                                    </div>
+
+                                    <div class="form-control">
+                                        <label class="label cursor-pointer justify-start gap-3">
+                                            <input type="checkbox" class="checkbox" name="repair.auto_process" id="repair.auto_process">
+                                            <div>
+                                                <span class="label-text font-medium">Auto Process</span>
+                                                <div class="label-text-alt">Automatically delete broken symlinks and re-search</div>
+                                            </div>
+                                        </label>
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-6 mt-3">
-                                <div class="form-group">
-                                    <label for="allowedExtensions">Allowed File Extensions</label>
-                                    <div class="input-group">
-                                        <textarea
-                                                class="form-control"
-                                                id="allowedExtensions"
-                                                name="allowed_file_types"
-                                                placeholder="mkv, mp4, avi, etc.">
-                                        </textarea>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-4 mt-3">
-                                <div class="form-group">
-                                    <label for="minFileSize">Minimum File Size</label>
-                                    <input type="text"
-                                           class="form-control"
-                                           id="minFileSize"
-                                           name="min_file_size"
-                                           placeholder="e.g., 10MB, 1GB">
-                                    <small class="form-text text-muted">Minimum file size to download (Empty for no
-                                        limit)</small>
-                                </div>
-                            </div>
-                            <div class="col-md-4 mt-3">
-                                <div class="form-group">
-                                    <label for="maxFileSize">Maximum File Size</label>
-                                    <input type="text"
-                                           class="form-control"
-                                           id="maxFileSize"
-                                           name="max_file_size"
-                                           placeholder="e.g., 50GB, 100MB">
-                                    <small class="form-text text-muted">Maximum file size to download (Empty for no
-                                        limit)</small>
-                                </div>
-                            </div>
-                            <div class="col-md-4 mt-3">
-                                <div class="form-group">
-                                    <label for="removeStalledAfter">Remove Stalled Torrents After</label>
-                                    <input type="text"
-                                           class="form-control"
-                                           id="removeStalledAfter"
-                                           name="remove_stalled_after"
-                                           placeholder="e.g., 1m, 30s, 1h">
-                                    <small class="form-text text-muted">Remove torrents that have been stalled for this
-                                        duration</small>
-                                </div>
-                            </div>
                         </div>
                     </div>
-                    <div class="mt-4 d-flex justify-content-end">
-                        <button type="button" class="btn btn-primary next-step" data-next="2">Next <i
-                                class="bi bi-arrow-right"></i></button>
-                    </div>
-                </div>
 
-                <!-- Step 2: Debrid Configuration -->
-                <div class="setup-step d-none" id="step2">
-                    <div class="section mb-5">
-                        <div id="debridConfigs"></div>
-                        <div class="mb-3">
-                            <button type="button" id="addDebridBtn" class="btn btn-secondary">
-                                <i class="bi bi-plus"></i> Add New Debrid
-                            </button>
-                        </div>
-                    </div>
-                    <div class="mt-4 d-flex justify-content-between">
-                        <button type="button" class="btn btn-outline-secondary prev-step" data-prev="1">
-                            <i class="bi bi-arrow-left"></i> Previous
-                        </button>
-                        <button type="button" class="btn btn-primary next-step" data-next="3">Next <i
-                                class="bi bi-arrow-right"></i></button>
-                    </div>
-                </div>
-
-                <!-- Step 3: QBitTorrent Configuration -->
-                <div class="setup-step d-none" id="step3">
-                    <div class="section mb-5">
-                        <div class="row">
-                            <div class="col-md-4 mb-3">
-                                <label class="form-label" for="qbit.download_folder">Symlink/Download Folder</label>
-                                <input type="text" class="form-control" name="qbit.download_folder"
-                                       id="qbit.download_folder">
-                                <small class="form-text text-muted">Folder where the downloaded files will be
-                                    stored</small>
-                            </div>
-                            <div class="col-md-3 mb-3">
-                                <label class="form-label" for="qbit.refresh_interval">Refresh Interval (seconds)</label>
-                                <input type="number" class="form-control" name="qbit.refresh_interval"
-                                       id="qbit.refresh_interval">
-                            </div>
-                            <div class="col-md-5 mb-3">
-                                <label class="form-label" for="qbit.max_downloads">Maximum Downloads Limit</label>
-                                <input type="number" class="form-control" name="qbit.max_downloads"
-                                       id="qbit.max_downloads">
-                                <small class="form-text text-muted">Maximum number of simultaneous local downloads
-                                    across all torrents</small>
-                            </div>
-                            <div class="col mb-3">
-                                <div class="form-check me-3 d-inline-block">
-                                    <input type="checkbox" class="form-check-input" name="qbit.skip_pre_cache"
-                                           id="qbit.skip_pre_cache">
-                                    <label class="form-check-label" for="qbit.skip_pre_cache">Disable Pre-Cache On
-                                        Download</label>
-                                    <small class="form-text text-muted">Unchecking this caches a tiny part of your file
-                                        to speed up import</small>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="mt-4 d-flex justify-content-between">
-                        <button type="button" class="btn btn-outline-secondary prev-step" data-prev="2">
-                            <i class="bi bi-arrow-left"></i> Previous
-                        </button>
-                        <button type="button" class="btn btn-primary next-step" data-next="4">Next <i
-                                class="bi bi-arrow-right"></i></button>
-                    </div>
-                </div>
-
-                <!-- Step 4: Arr Configuration -->
-                <div class="setup-step d-none" id="step4">
-                    <div class="section mb-5">
-                        <div id="arrConfigs"></div>
-                        <div class="mb-3">
-                            <button type="button" id="addArrBtn" class="btn btn-secondary">
-                                <i class="bi bi-plus"></i> Add New Arr
-                            </button>
-                        </div>
-                    </div>
-                    <div class="mt-4 d-flex justify-content-between">
-                        <button type="button" class="btn btn-outline-secondary prev-step" data-prev="3">
-                            <i class="bi bi-arrow-left"></i> Previous
-                        </button>
-                        <button type="button" class="btn btn-primary next-step" data-next="5">Next <i
-                                class="bi bi-arrow-right"></i></button>
-                    </div>
-                </div>
-
-                <!-- Step 5: Repair Configuration -->
-                <div class="setup-step d-none" id="step5">
-                    <div class="section mb-5">
-                        <div class="row mb-3">
-                            <div class="col">
-                                <div class="form-check me-3 d-inline-block">
-                                    <input type="checkbox" class="form-check-input" name="repair.enabled"
-                                           id="repair.enabled">
-                                    <label class="form-check-label" for="repair.enabled">Enable Scheduled Repair</label>
-                                </div>
-                            </div>
-                        </div>
-                        <div>
-                            <div class="row">
-                                <div class="col-md-4 mb-3">
-                                    <label class="form-label" for="repair.interval">Scheduled Interval</label>
-                                    <input type="text" class="form-control" name="repair.interval" id="repair.interval"
-                                           placeholder="e.g., 24h">
-                                    <small class="form-text text-muted">Interval for the repair process(e.g., 24h, 1d,
-                                        03:00, or a crontab)</small>
-                                </div>
-                                <div class="col-md-3 mb-3">
-                                    <label class="form-label" for="repair.workers">Workers</label>
-                                    <input type="text" class="form-control" name="repair.workers" id="repair.workers">
-                                    <small class="form-text text-muted">Number of workers to use for the repair
-                                        process</small>
-                                </div>
-                                <div class="col-md-5 mb-3">
-                                    <label class="form-label" for="repair.zurg_url">Zurg URL</label>
-                                    <input type="text" class="form-control" name="repair.zurg_url" id="repair.zurg_url"
-                                           placeholder="http://zurg:9999">
-                                    <small class="form-text text-muted">If you have Zurg running, you can use it to
-                                        speed up the repair process</small>
-                                </div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-4 mb-3">
-                                    <label class="form-label" for="repair.strategy">Repair Strategy</label>
-                                    <select class="form-select" name="repair.strategy" id="repair.strategy">
-                                        <option value="per_torrent" selected>Per Torrent</option>
-                                        <option value="per_file">Per File</option>
-                                    </select>
-                                    <small class="form-text text-muted">How to handle repairs, per torrent or per file</small>
-                                </div>
-                                <div class="col-md-4 mb-3">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" name="repair.use_webdav"
-                                               id="repair.use_webdav">
-                                        <label class="form-check-label" for="repair.use_webdav">Use Webdav</label>
-                                    </div>
-                                    <small class="form-text text-muted">Use Internal Webdav for repair(make sure webdav
-                                        is enabled in the debrid section</small>
-                                </div>
-                                <div class="col-md-4 mb-3">
-                                    <div class="form-check">
-                                        <input type="checkbox" class="form-check-input" name="repair.auto_process"
-                                               id="repair.auto_process">
-                                        <label class="form-check-label" for="repair.auto_process">Auto Process</label>
-                                    </div>
-                                    <small class="form-text text-muted">Automatically process the repair job(delete
-                                        broken symlinks and searches the arr again)</small>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="mt-4 d-flex justify-content-between">
-                        <button type="button" class="btn btn-outline-secondary prev-step" data-prev="4">
-                            <i class="bi bi-arrow-left"></i> Previous
-                        </button>
-                        <button type="submit" class="btn btn-success">
-                            <i class="bi bi-save"></i> Save
-                        </button>
-                    </div>
-                </div>
+                </div> <!-- End tab-content-container -->
             </div>
         </div>
     </form>
 </div>
 
+<!-- Loading Overlay -->
+<div id="loadingOverlay" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden">
+    <div class="flex items-center justify-center h-full">
+        <div class="card bg-base-100 shadow-2xl">
+            <div class="card-body text-center">
+                <span class="loading loading-spinner loading-lg text-primary"></span>
+                <h3 class="text-lg font-semibold mt-4">Applying Configuration</h3>
+                <p class="text-base-content/70">Please wait while we save your settings...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
-    // Templates for dynamic elements
-    const debridTemplate = (index) => `
-<div class="config-item position-relative mb-3 p-3 border rounded">
-    <button type="button" class="btn btn-sm btn-danger position-absolute top-0 end-0 m-2"
-        onclick="if(confirm('Are you sure you want to delete this debrid?')) this.closest('.config-item').remove();"
-        title="Delete this debrid">
-        <i class="bi bi-trash"></i>
-    </button>
-    <div class="row">
-        <div class="col-md-6 mb-3">
-            <label class="form-label" for="debrid[${index}].name" >Name</label>
-            <select class="form-select" name="debrid[${index}].name" id="debrid[${index}].name" required>
-                <option value="realdebrid">Real Debrid</option>
-                <option value="alldebrid">AllDebrid</option>
-                <option value="debrid_link">Debrid Link</option>
-                <option value="torbox">Torbox</option>
-            </select>
-        </div>
-        <div class="col-md-6 mb-3">
-            <label class="form-label" for="debrid[${index}].api_key" >API Key</label>
-            <div class="password-toggle-container">
-                <input type="password"
-                       class="form-control has-toggle"
-                       name="debrid[${index}].api_key"
-                       id="debrid[${index}].api_key"
-                       required>
-                <button type="button"
-                        class="password-toggle-btn"
-                        onclick="togglePassword('debrid[${index}].api_key');">
-                    <i class="bi bi-eye" id="debrid[${index}].api_key_icon"></i>
-                </button>
-            </div>
-            <small class="form-text text-muted">API Key for the debrid service</small>
-        </div>
-        <div class="col-md-6 mb-3">
-            <label class="form-label" for="debrid[${index}].download_api_keys">Download API Keys</label>
-            <div class="password-toggle-container">
-                <textarea class="form-control has-toggle"
-                          name="debrid[${index}].download_api_keys"
-                          id="debrid[${index}].download_api_keys"
-                          rows="3"
-                          style="font-family: monospace; resize: vertical;"
-                          placeholder="Enter one API key per line&#10;key1&#10;key2&#10;key3"></textarea>
-                <button type="button"
-                        class="password-toggle-btn"
-                        style="top: 20px;"
-                        onclick="togglePasswordTextarea('debrid[${index}].download_api_keys');">
-                    <i class="bi bi-eye" id="debrid[${index}].download_api_keys_icon"></i>
-                </button>
-            </div>
-            <small class="form-text text-muted">Multiple API keys for download (one per line). If empty, main API key will be used.</small>
-        </div>
-        <div class="col-md-3 mb-3">
-            <label class="form-label" for="debrid[${index}].folder">Mount/Rclone Folder</label>
-            <input type="text" class="form-control" name="debrid[${index}].folder" id="debrid[${index}].folder" placeholder="e.g. /mnt/remote/realdebrid" required>
-            <small class="form-text text-muted">Path to where you've mounted the debrid files. Usually your rclone path</small>
-        </div>
-        <div class="col-md-3 mb-3">
-            <label class="form-label" for="debrid[${index}].rate_limit" >Rate Limit</label>
-            <input type="text" class="form-control" name="debrid[${index}].rate_limit" id="debrid[${index}].rate_limit" placeholder="e.g., 200/minute" value="250/minute">
-            <small class="form-text text-muted">Rate limit for the debrid service. Confirm your debrid service rate limit</small>
-        </div>
-    </div>
-    <div class="row mb-3">
-        <div class="col-md-3">
-            <div class="form-check me-3">
-                <input type="checkbox" class="form-check-input useWebdav" name="debrid[${index}].use_webdav" id="debrid[${index}].use_webdav">
-                <label class="form-check-label" for="debrid[${index}].use_webdav">Enable WebDav Server</label>
-            </div>
-            <small class="form-text text-muted">Create an internal webdav for this debrid</small>
-        </div>
-        <div class="col-md-3">
-             <div class="form-check me-3">
-                <input type="checkbox" class="form-check-input" name="debrid[${index}].download_uncached" id="debrid[${index}].download_uncached">
-                <label class="form-check-label" for="debrid[${index}].download_uncached">Download Uncached</label>
-            </div>
-            <small class="form-text text-muted">Download uncached files from the debrid service</small>
-        </div>
-        <div class="col-md-3">
-            <div class="form-check me-3">
-                <input type="checkbox" class="form-check-input" name="debrid[${index}].add_samples" id="debrid[${index}].add_samples">
-                <label class="form-check-label" for="debrid[${index}].add_samples">Add Samples</label>
-            </div>
-             <small class="form-text text-muted">Add samples, extras etc when adding torrent to debrid(disabled by default)</small>
-        </div>
-        <div class="col-md-3">
-            <div class="form-check me-3">
-                <input type="checkbox" class="form-check-input" name="debrid[${index}].unpack_rar" id="debrid[${index}].unpack_rar">
-                <label class="form-check-label" for="debrid[${index}].unpack_rar">Unpack RAR</label>
-            </div>
-            <small class="form-text text-muted">Preprocess RARed torrents to allow reading the files inside</small>
-        </div>
-    </div>
-    <div class="webdav d-none mt-1">
-        <hr/>
-        <h6 class="pb-2">Webdav Settings</h6>
-        <div class="row mt-3">
-            <div class="col-md-3 mb-3">
-                <label class="form-label" for="debrid[${index}].torrents_refresh_interval">Torrents Refresh Interval</label>
-                <input type="text" class="form-control webdav-field" name="debrid[${index}].torrents_refresh_interval" id="debrid[${index}].torrents_refresh_interval" placeholder="15s" value="15s">
-                <small class="form-text text-muted">How often to refresh the torrents list from debrid</small>
-                </div>
-            <div class="col-md-3 mb-3">
-                <label class="form-label" for="debrid[${index}].download_links_refresh_interval">Links Refresh Interval</label>
-                <input type="text" class="form-control webdav-field" name="debrid[${index}].download_links_refresh_interval" id="debrid[${index}].download_links_refresh_interval" placeholder="40m" value="40m">
-                <small class="form-text text-muted">How often to refresh the download links list from debrid</small>
-            </div>
-            <div class="col-md-3 mb-3">
-                <label class="form-label" for="debrid[${index}].auto_expire_links_after">Expire Links After</label>
-                <input type="text" class="form-control webdav-field" name="debrid[${index}].auto_expire_links_after" id="debrid[${index}].auto_expire_links_after" placeholder="3d" value="3d">
-                <small class="form-text text-muted">How long to keep the links in the webdav before expiring</small>
-            </div>
-            <div class="col-md-3 mb-3">
-                <label class="form-label" for="debrid[${index}].workers">Number of Workers</label>
-                <input type="text" class="form-control webdav-field" name="debrid[${index}].workers" id="debrid[${index}].workers" placeholder="e.g., 50" value="50">
-                <small class="form-text text-muted">Number of workers to use for the webdav server(when refreshing)</small>
-            </div>
-            <div class="col-md-3 mb-3">
-                <label class="form-label" for="debrid[${index}].folder_naming">Folder Naming Structure</label>
-                <select class="form-select webdav-field" name="debrid[${index}].folder_naming" id="debrid[${index}].folder_naming">
-                    <option value="original_no_ext" selected>Original name with No Ext</option>
-                    <option value="original">Original name</option>
-                    <option value="filename">File name</option>
-                    <option value="filename_no_ext">File name with No Ext</option>
-                    <option value="id">Use ID</option>
-                    <option value="infohash">Use Infohash</option>
-                </select>
-                <small class="form-text text-muted">How to name each torrent directory in the webdav</small>
-            </div>
-            <div class="col-md-3 mb-3">
-                <label class="form-label" for="debrid[${index}].rc_url">Rclone RC URL</label>
-                <input type="text" class="form-control webdav-field" name="debrid[${index}].rc_url" id="debrid[${index}].rc_url" placeholder="e.g., http://localhost:9990">
-                <small class="form-text text-muted">Rclone RC URL for the webdav server(speeds up import significantly)</small>
-            </div>
-            <div class="col-md-3 mb-3">
-                <label class="form-label" for="debrid[${index}].rc_refresh_dirs">Rclone RC Dirs</label>
-                <input type="text" class="form-control webdav-field" name="debrid[${index}].rc_refresh_dirs" id="debrid[${index}].rc_refresh_dirs">
-                <small class="form-text text-muted">Directories to refresh via RC(comma-seperated e.g. __all__, torrents) </small>
-            </div>
-            <div class="col-md-3 mb-3">
-                <label class="form-label" for="debrid[${index}].rc_user">Rclone RC User</label>
-                <input type="text" class="form-control webdav-field" name="debrid[${index}].rc_user" id="debrid[${index}].rc_user">
-                <small class="form-text text-muted">Rclone RC User for the webdav server</small>
-            </div>
-            <div class="col-md-3 mb-3">
-                <label class="form-label" for="debrid[${index}].rc_pass">Rclone RC Password</label>
-                <div class="password-toggle-container">
-                    <input type="password"
-                           class="form-control webdav-field has-toggle"
-                           name="debrid[${index}].rc_pass"
-                           id="debrid[${index}].rc_pass">
-                    <button type="button"
-                            class="password-toggle-btn"
-                            onclick="togglePassword('debrid[${index}].rc_pass');">
-                        <i class="bi bi-eye" id="debrid[${index}].rc_pass_icon"></i>
-                    </button>
-                </div>
-                <small class="form-text text-muted">Rclone RC Password for the webdav server</small>
-            </div>
-            <div class="col-md-3 mb-3">
-                <div class="form-check me-3">
-                    <input type="checkbox" class="form-check-input" name="debrid[${index}].serve_from_rclone" id="debrid[${index}].serve_from_rclone">
-                    <label class="form-check-label" for="debrid[${index}].serve_from_rclone">Serve From Rclone</label>
-                </div>
-                 <small class="form-text text-muted">Rclone handles serving/streaming the download link</small>
-            </div>
-        </div>
-        <div class="row mt-3">
-            <div class="col">
-                <h6 class="pb-2">Virtual Folders</h6>
-                <div class="col-12">
-                    <p class="text-muted small">Create virtual directories with filters to organize your content</p>
-                    <div class="directories-container" id="debrid[${index}].directories">
+    // Tab Navigation Handler
+    document.addEventListener('DOMContentLoaded', function() {
 
-                    </div>
-                    <button type="button" class="btn btn-secondary mt-2 webdav-field" onclick="addDirectory(${index});">
-                        <i class="bi bi-plus"></i> Add Directory
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-`;
-    // Template for directory entries (with filter buttons for both positive and negative variants)
-    const directoryTemplate = (debridIndex, dirIndex) => `
-<div class="directory-item mb-3 border rounded p-3 position-relative">
-    <button type="button" class="btn btn-sm btn-danger position-absolute top-0 end-0 m-2"
-            onclick="removeDirectory(this);" title="Remove directory">
-        <i class="bi bi-trash"></i>
-    </button>
+        const tabButtons = document.querySelectorAll('.tab-button');
+        const tabContents = document.querySelectorAll('.tab-content');
 
-    <div class="col-md-4 mb-3">
-        <label class="form-label">Folder Name</label>
-        <input type="text" class="form-control webdav-field"
-              name="debrid[${debridIndex}].directory[${dirIndex}].name"
-              placeholder="e.g., Movies, TV Shows, Spiderman Collection">
-    </div>
+        // Tab switching function
+        function switchTab(targetTab) {
 
-    <div class="col-12">
-        <h6 class="mb-3">
-            Filters
-            <button type="button" class="btn btn-sm btn-link" onclick="showFilterHelp();">
-                <i class="bi bi-question-circle"></i>
-            </button>
-        </h6>
-        <div class="filters-container" id="debrid[${debridIndex}].directory[${dirIndex}].filters">
-            <!-- Filters will be added here -->
-        </div>
-
-        <div class="mt-2">
-            <div class="dropdown d-inline-block me-2 mb-2">
-                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
-                        data-bs-toggle="dropdown" aria-expanded="false">
-                    Add Text Filter
-                </button>
-                <ul class="dropdown-menu">
-                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'include'); return false;">Include</a></li>
-                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'exclude'); return false;">Exclude</a></li>
-                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'starts_with'); return false;">Starts With</a></li>
-                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'not_starts_with'); return false;">Not Starts With</a></li>
-                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'ends_with'); return false;">Ends With</a></li>
-                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'not_ends_with'); return false;">Not Ends With</a></li>
-                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'exact_match'); return false;">Exact Match</a></li>
-                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'not_exact_match'); return false;">Not Exact Match</a></li>
-                </ul>
-            </div>
-
-            <div class="dropdown d-inline-block me-2 mb-2">
-                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
-                        data-bs-toggle="dropdown" aria-expanded="false">
-                    Add Regex Filter
-                </button>
-                <ul class="dropdown-menu">
-                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'regex'); return false;">Regex Match</a></li>
-                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'not_regex'); return false;">Regex Not Match</a></li>
-                </ul>
-            </div>
-
-            <div class="dropdown d-inline-block me-2 mb-2">
-                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
-                        data-bs-toggle="dropdown" aria-expanded="false">
-                    Add Size Filter
-                </button>
-                <ul class="dropdown-menu">
-                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'size_gt'); return false;">Size Greater Than</a></li>
-                    <li><a class="dropdown-item" href="#" onclick="addFilter(${debridIndex}, ${dirIndex}, 'size_lt'); return false;">Size Less Than</a></li>
-                </ul>
-            </div>
-
-            <button type="button" class="btn btn-sm btn-outline-secondary me-2"
-                    onclick="addFilter(${debridIndex}, ${dirIndex}, 'last_added');">
-                Add Last Added Filter
-            </button>
-        </div>
-    </div>
-</div>
-`;
-    // Enhanced filter template with support for all filter types
-    const filterTemplate = (debridIndex, dirIndex, filterIndex, filterType) => {
-        let placeholder, label;
-
-        switch (filterType) {
-            case 'include':
-                placeholder = "Text that should be included in filename";
-                label = "Include";
-                break;
-            case 'exclude':
-                placeholder = "Text that should not be in filename";
-                label = "Exclude";
-                break;
-            case 'regex':
-                placeholder = "Regular expression pattern";
-                label = "Regex Match";
-                break;
-            case 'not_regex':
-                placeholder = "Regular expression pattern that should not match";
-                label = "Regex Not Match";
-                break;
-            case 'exact_match':
-                placeholder = "Exact text to match";
-                label = "Exact Match";
-                break;
-            case 'not_exact_match':
-                placeholder = "Exact text that should not match";
-                label = "Not Exact Match";
-                break;
-            case 'starts_with':
-                placeholder = "Text that filename starts with";
-                label = "Starts With";
-                break;
-            case 'not_starts_with':
-                placeholder = "Text that filename should not start with";
-                label = "Not Starts With";
-                break;
-            case 'ends_with':
-                placeholder = "Text that filename ends with";
-                label = "Ends With";
-                break;
-            case 'not_ends_with':
-                placeholder = "Text that filename should not end with";
-                label = "Not Ends With";
-                break;
-            case 'size_gt':
-                placeholder = "Size in bytes, KB, MB, GB (e.g. 700MB)";
-                label = "Size Greater Than";
-                break;
-            case 'size_lt':
-                placeholder = "Size in bytes, KB, MB, GB (e.g. 700MB)";
-                label = "Size Less Than";
-                break;
-            case 'last_added':
-                placeholder = "Time duration (e.g. 24h, 7d, 30d)";
-                label = "Added in the last";
-                break;
-            default:
-                placeholder = "Filter value";
-                label = filterType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-        }
-
-        // Use a color coding scheme for filter types
-        let badgeClass = "bg-secondary";
-        if (filterType.startsWith('not_') || filterType === 'exclude' || filterType === 'size_lt') {
-            badgeClass = "bg-danger"; // Negative filters
-        } else if (filterType === 'last_added') {
-            badgeClass = "bg-info"; // Time-based filters
-        } else if (filterType === 'size_gt') {
-            badgeClass = "bg-success"; // Size filters
-        } else if (filterType === 'regex' || filterType === 'not_regex') {
-            badgeClass = "bg-warning"; // Regex filters
-        } else if (filterType === 'include' || filterType === 'starts_with' || filterType === 'ends_with' || filterType === 'exact_match') {
-            badgeClass = "bg-primary"; // Positive text filters
-        }
-
-        return `
-    <div class="filter-item row mb-2 align-items-center">
-        <div class="col-md-3">
-            <span class="badge ${badgeClass}">${label}</span>
-            <input type="hidden"
-                   name="debrid[${debridIndex}].directory[${dirIndex}].filter[${filterIndex}].type"
-                   value="${filterType}">
-        </div>
-        <div class="col-md-8">
-            <input type="text" class="form-control form-control-sm webdav-field"
-                   name="debrid[${debridIndex}].directory[${dirIndex}].filter[${filterIndex}].value"
-                   placeholder="${placeholder}">
-        </div>
-        <div class="col-md-1">
-            <button type="button" class="btn btn-sm btn-danger" onclick="removeFilter(this);">
-                <i class="bi bi-x"></i>
-            </button>
-        </div>
-    </div>
-    `;
-    };
-
-    const arrTemplate = (index, data = {}) => `
-        <div class="config-item position-relative mb-3 p-3 border rounded ${data.source === 'auto' ? 'bg-light' : ''}">
-            ${data.source !== 'auto' ? `
-            <button type="button" class="btn btn-sm btn-danger position-absolute top-0 end-0 m-2"
-                onclick="if(confirm('Are you sure you want to delete this arr?')) this.closest('.config-item').remove();"
-                title="Delete this arr">
-                <i class="bi bi-trash"></i>
-            </button>
-            ` : `
-            <div class="position-absolute top-0 end-0 m-2">
-                <span class="badge bg-info">Auto-detected</span>
-            </div>
-            `}
-            <div class="row">
-                <input type="hidden" name="arr[${index}].source" value="${data.source || ''}">
-                <div class="col-md-4 mb-3">
-                    <label for="arr[${index}].name" class="form-label">Name</label>
-                    <input type="text"
-                           class="form-control"
-                           name="arr[${index}].name"
-                           id="arr[${index}].name"
-                           ${data.source === 'auto' ? 'readonly' : 'required'}>
-                    ${data.source === 'auto' ? '<input type="hidden" name="arr[' + index + '].source" value="auto">' : ''}
-                </div>
-                <div class="col-md-4 mb-3">
-                    <label for="arr[${index}].host" class="form-label">Host</label>
-                    <input type="text"
-                           class="form-control"
-                           name="arr[${index}].host"
-                           id="arr[${index}].host"
-                           ${data.source === 'auto' ? 'readonly' : 'required'}>
-                </div>
-                <div class="col-md-4 mb-3">
-                    <label for="arr[${index}].token" class="form-label">API Token</label>
-                    <div class="password-toggle-container">
-                        <input type="password"
-                               class="form-control has-toggle"
-                               name="arr[${index}].token"
-                               id="arr[${index}].token"
-                               ${data.source === 'auto' ? 'readonly' : 'required'}>
-                        <button type="button"
-                                class="password-toggle-btn"
-                                onclick="togglePassword('arr[${index}].token');"
-                                ${data.source === 'auto' ? 'disabled style="opacity: 0.5;"' : ''}>
-                            <i class="bi bi-eye" id="arr[${index}].token_icon"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-            <div class="row">
-                <div class="col-md-4 mb-3">
-                    <label for="arr[${index}].selected_debrid" class="form-label">Select Arr Debrid</label>
-                    <select class="form-select" name="arr[${index}].selected_debrid" id="arr[${index}].selected_debrid">
-                        <option value="" selected disabled>Select Arr Debrid</option>
-                        <option value="realdebrid">Real Debrid</option>
-                        <option value="alldebrid">AllDebrid</option>
-                        <option value="debrid_link">Debrid Link</option>
-                        <option value="torbox">Torbox</option>
-                    </select>
-                </div>
-                <div class="col-md-2 mb-3">
-                    <div class="form-check">
-                        <label for="arr[${index}].cleanup" class="form-check-label">Cleanup Queue</label>
-                        <input type="checkbox" class="form-check-input" name="arr[${index}].cleanup" id="arr[${index}].cleanup">
-                    </div>
-                </div>
-                <div class="col-md-2 mb-3">
-                    <div class="form-check">
-                        <label for="arr[${index}].skip_repair" class="form-check-label">Skip Repair</label>
-                        <input type="checkbox" class="form-check-input" name="arr[${index}].skip_repair" id="arr[${index}].skip_repair">
-                    </div>
-                </div>
-                <div class="col-md-2 mb-3">
-                    <div class="form-check">
-                        <label for="arr[${index}].download_uncached" class="form-check-label">Download Uncached</label>
-                        <input type="checkbox" class="form-check-input" name="arr[${index}].download_uncached" id="arr[${index}].download_uncached">
-                    </div>
-                </div>
-            </div>
-        </div>
-        `;
-
-    const debridDirectoryCounts = {};
-    const directoryFilterCounts = {};
-
-    // Helper function to show a tooltip explaining filter types
-    function showFilterHelp() {
-        const helpContent = `
-        <h5>Filter Types</h5>
-        <ul>
-            <li><strong>Include/Exclude</strong>: Simple text inclusion/exclusion</li>
-            <li><strong>Starts/Ends With</strong>: Matches beginning or end of filename</li>
-            <li><strong>Exact Match</strong>: Match the entire filename</li>
-            <li><strong>Regex</strong>: Use regular expressions for complex patterns</li>
-            <li><strong>Size</strong>: Filter by file size</li>
-            <li><strong>Last Added</strong>: Show only recently added content</li>
-        </ul>
-        <p>Negative filters (Not...) will exclude matches instead of including them.</p>
-    `;
-
-        // Show a modal or tooltip with this content
-        // This will depend on your UI framework
-        // For Bootstrap:
-        $('#filterHelpModal .modal-body').html(helpContent);
-        $('#filterHelpModal').modal('show');
-    }
-
-    function addDirectory(debridIndex, data = {}) {
-        if (!debridDirectoryCounts[debridIndex]) {
-            debridDirectoryCounts[debridIndex] = 0;
-        }
-
-        const dirIndex = debridDirectoryCounts[debridIndex];
-        const container = document.getElementById(`debrid[${debridIndex}].directories`);
-        container.insertAdjacentHTML('beforeend', directoryTemplate(debridIndex, dirIndex));
-
-        // Set up tracking for filters in this directory
-        const dirKey = `${debridIndex}-${dirIndex}`;
-        directoryFilterCounts[dirKey] = 0;
-
-        // Fill with directory name if provided
-        if (data.name) {
-            const nameInput = document.querySelector(`[name="debrid[${debridIndex}].directory[${dirIndex}].name"]`);
-            if (nameInput) nameInput.value = data.name;
-        }
-
-        // Add filters if provided
-        if (data.filters) {
-            Object.entries(data.filters).forEach(([filterType, filterValue]) => {
-                addFilter(debridIndex, dirIndex, filterType, filterValue);
+            // Remove active class from all tabs
+            tabButtons.forEach(btn => {
+                btn.classList.remove('active');
             });
-        }
 
-        debridDirectoryCounts[debridIndex]++;
-        return dirIndex;
-    }
-
-    function addFilter(debridIndex, dirIndex, filterType, filterValue = "") {
-        const dirKey = `${debridIndex}-${dirIndex}`;
-        if (!directoryFilterCounts[dirKey]) {
-            directoryFilterCounts[dirKey] = 0;
-        }
-
-        const filterIndex = directoryFilterCounts[dirKey];
-        const container = document.getElementById(`debrid[${debridIndex}].directory[${dirIndex}].filters`);
-
-        if (container) {
-            container.insertAdjacentHTML('beforeend', filterTemplate(debridIndex, dirIndex, filterIndex, filterType));
-
-            // Set filter value if provided
-            if (filterValue) {
-                const valueInput = container.querySelector(`[name="debrid[${debridIndex}].directory[${dirIndex}].filter[${filterIndex}].value"]`);
-                if (valueInput) valueInput.value = filterValue;
+            // Add active class to clicked tab
+            const activeButton = document.querySelector(`[data-tab="${targetTab}"]`);
+            if (activeButton) {
+                activeButton.classList.add('active');
             }
 
-            directoryFilterCounts[dirKey]++;
-        }
-    }
+            // Hide all tab contents
+            tabContents.forEach(content => {
+                content.classList.add('hidden');
+            });
 
-    function removeDirectory(button) {
-        button.closest('.directory-item').remove();
-    }
+            // Show selected tab content
+            const activeContent = document.querySelector(`[data-tab-content="${targetTab}"]`);
+            if (activeContent) {
+                activeContent.classList.remove('hidden');
+            }
 
-    // Function to remove a filter
-    function removeFilter(button) {
-        button.closest('.filter-item').remove();
-    }
-
-    // Main functionality
-    document.addEventListener('DOMContentLoaded', function () {
-        let debridCount = 0;
-        let arrCount = 0;
-        let currentStep = 1;
-
-        // Check query parameters for incomplete config
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.has('inco')) {
-            const errMsg = urlParams.get('inco');
-            createToast(`Incomplete configuration: ${errMsg}`, 'warning');
+            // Update URL hash for bookmarking
+            window.location.hash = `tab-${targetTab}`;
         }
 
-        // Step navigation
-        document.querySelectorAll('.nav-link').forEach(navLink => {
-            navLink.addEventListener('click', function () {
-                const stepNumber = parseInt(this.getAttribute('data-step'));
-                goToStep(stepNumber);
+        // Add click handlers to tab buttons
+        tabButtons.forEach(button => {
+            button.addEventListener('click', (e) => {
+                e.preventDefault();
+                const tabId = button.getAttribute('data-tab');
+                switchTab(tabId);
             });
         });
 
-        document.querySelectorAll('.next-step').forEach(button => {
-            button.addEventListener('click', function () {
-                const nextStep = parseInt(this.getAttribute('data-next'));
-                goToStep(nextStep);
-            });
-        });
-
-        document.querySelectorAll('.prev-step').forEach(button => {
-            button.addEventListener('click', function () {
-                const prevStep = parseInt(this.getAttribute('data-prev'));
-                goToStep(prevStep);
-            });
-        });
-
-        function goToStep(stepNumber) {
-            // Hide all steps
-            document.querySelectorAll('.setup-step').forEach(step => {
-                step.classList.add('d-none');
-            });
-
-            // Show the target step
-            document.getElementById(`step${stepNumber}`).classList.remove('d-none');
-
-            // Update nav pills
-            document.querySelectorAll('.nav-link').forEach(link => {
-                link.classList.remove('active');
-            });
-            document.querySelector(`.nav-link[data-step="${stepNumber}"]`).classList.add('active');
-
-            // Update current step
-            currentStep = stepNumber;
+        // Handle initial tab based on URL hash
+        const hash = window.location.hash;
+        if (hash.startsWith('#tab-')) {
+            const tabId = hash.replace('#tab-', '');
+            switchTab(tabId);
+        } else {
+            switchTab('general');
         }
 
-        // Load existing configuration
-        fetcher('/api/config')
-            .then(response => response.json())
-            .then(config => {
-                // Load Debrid configs
-                config.debrids?.forEach(debrid => {
-                    addDebridConfig(debrid);
-                });
-
-                // Load QBitTorrent config
-                if (config.qbittorrent) {
-                    Object.entries(config.qbittorrent).forEach(([key, value]) => {
-                        const input = document.querySelector(`[name="qbit.${key}"]`);
-                        if (input) {
-                            if (input.type === 'checkbox') {
-                                input.checked = value;
-                            } else {
-                                input.value = value;
-                            }
-                        }
-                    });
-                }
-
-                // Load Arr configs
-                config.arrs?.forEach(arr => {
-                    addArrConfig(arr);
-                });
-
-                // Load Repair config
-                if (config.repair) {
-                    Object.entries(config.repair).forEach(([key, value]) => {
-                        const input = document.querySelector(`[name="repair.${key}"]`);
-                        if (input) {
-                            if (input.type === 'checkbox') {
-                                input.checked = value;
-                            } else {
-                                input.value = value;
-                            }
-                        }
-                    });
-                }
-
-                // Load general config
-                const logLevel = document.getElementById('log-level');
-                logLevel.value = config.log_level;
-                if (config.allowed_file_types && Array.isArray(config.allowed_file_types)) {
-                    document.querySelector('[name="allowed_file_types"]').value = config.allowed_file_types.join(', ');
-                }
-                if (config.min_file_size) {
-                    document.querySelector('[name="min_file_size"]').value = config.min_file_size;
-                }
-                if (config.max_file_size) {
-                    document.querySelector('[name="max_file_size"]').value = config.max_file_size;
-                }
-                if (config.remove_stalled_after) {
-                    document.querySelector('[name="remove_stalled_after"]').value = config.remove_stalled_after;
-                }
-                if (config.discord_webhook_url) {
-                    document.querySelector('[name="discord_webhook_url"]').value = config.discord_webhook_url;
-                }
-                if (config.url_base) {
-                    document.querySelector('[name="url_base"]').value = config.url_base;
-                }
-                if (config.bind_address) {
-                    document.querySelector('[name="bind_address"]').value = config.bind_address;
-                }
-                if (config.port) {
-                    document.querySelector('[name="port"]').value = config.port;
-                }
-            })
-            .catch(error => {
-                console.log(error);
-                console.error('Error loading configuration:', error);
-                createToast(`Error loading configuration: ${error.message}`, 'error');
-            });
-
-        // Handle form submission
-        document.getElementById('configForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            await saveConfig(e);
-        });
-
-        document.getElementById('addDebridBtn').addEventListener('click', () => {
-            addDebridConfig();
-        });
-        document.getElementById('addArrBtn').addEventListener('click', () => {
-            addArrConfig();
-        });
-
-        $(document).on('change', '.useWebdav', function () {
-            const webdavConfig = $(this).closest('.config-item').find(`.webdav`);
-            if (webdavConfig.length === 0) return;
-
-            const webdavFields = webdavConfig.find('.webdav-field');
-
-            if (this.checked) {
-                webdavConfig.removeClass('d-none');
-                // Add required attribute to key fields
-                webdavConfig.find('input[name$=".torrents_refresh_interval"]').prop('required', true);
-                webdavConfig.find('input[name$=".download_links_refresh_interval"]').prop('required', true);
-                webdavConfig.find('input[name$=".auto_expire_links_after"]').prop('required', true);
-                webdavConfig.find('input[name$=".workers"]').prop('required', true);
-            } else {
-                webdavConfig.addClass('d-none');
-                // Remove required attribute from all fields
-                webdavFields.prop('required', false);
+        // Handle browser back/forward
+        window.addEventListener('hashchange', () => {
+            const hash = window.location.hash;
+            if (hash.startsWith('#tab-')) {
+                const tabId = hash.replace('#tab-', '');
+                switchTab(tabId);
             }
         });
-
-        async function saveConfig(e) {
-            const submitButton = e.target.querySelector('button[type="submit"]');
-            submitButton.disabled = true;
-            submitButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
-            // Show a spinner or loading overlay
-            const overlay = document.createElement('div');
-            overlay.className = 'position-fixed top-0 start-0 w-100 h-100 d-flex justify-content-center align-items-center';
-            overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-            overlay.style.zIndex = '9999';
-            overlay.innerHTML = `
-               <div class="card p-4 text-center">
-                   <div class="spinner-border mb-3" role="status"></div>
-                   <h5>Applying configuration changes...</h5>
-                   <p class="text-muted">This may take a few seconds</p>
-               </div>
-           `;
-            document.body.appendChild(overlay);
-
-            try {
-                const config = collectFormData();
-                // Save config logic
-                const response = await fetcher('/api/config', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(config)
-                });
-
-                if (!response.ok) throw new Error(await response.text());
-
-                createToast('Configuration saved successfully! Services are restarting...', 'success');
-
-                // Wait a moment before reloading to allow the server to restart
-                setTimeout(() => {
-                    window.location.reload();
-                }, 1500);
-            } catch (error) {
-                createToast(`Error saving configuration: ${error.message}`, 'error');
-                console.error('Error saving configuration:', error);
-                overlay.remove(); // Remove overlay on error
-            } finally {
-                // Re-enable the button
-                submitButton.disabled = false;
-                submitButton.innerHTML = '<i class="bi bi-save"></i> Save';
-            }
-        }
-
-        function addDebridConfig(data = {}) {
-            const container = document.getElementById('debridConfigs');
-            container.insertAdjacentHTML('beforeend', debridTemplate(debridCount));
-
-            // Add a delete button to the new debrid
-            const newDebrid = container.lastElementChild;
-            addDeleteButton(newDebrid, `Delete this debrid`);
-
-            if (data) {
-                if (data.use_webdav) {
-                    let _webCfg = newDebrid.querySelector(`.webdav`);
-                    if (_webCfg) {
-                        _webCfg.classList.remove('d-none');
-                    }
-                }
-
-                Object.entries(data).forEach(([key, value]) => {
-                    const input = container.querySelector(`[name="debrid[${debridCount}].${key}"]`);
-                    if (input) {
-                        if (input.type === 'checkbox') {
-                            input.checked = value;
-                        } else {
-                            input.value = value;
-                        }
-                    }
-                });
-
-                if (data.use_webdav && data.directories) {
-                    Object.entries(data.directories).forEach(([dirName, dirData]) => {
-                        const dirIndex = addDirectory(debridCount, {name: dirName});
-
-                        // Add filters if available
-                        if (dirData.filters) {
-                            Object.entries(dirData.filters).forEach(([filterType, filterValue]) => {
-                                addFilter(debridCount, dirIndex, filterType, filterValue);
-                            });
-                        }
-                    });
-                }
-
-                if (data.download_api_keys && Array.isArray(data.download_api_keys)) {
-                    const downloadKeysTextarea = container.querySelector(`[name="debrid[${debridCount}].download_api_keys"]`);
-                    if (downloadKeysTextarea) {
-                        downloadKeysTextarea.value = data.download_api_keys.join('\n');
-                    }
-                }
-            }
-
-            const downloadKeysTextarea = newDebrid.querySelector(`[name="debrid[${debridCount}].download_api_keys"]`);
-            if (downloadKeysTextarea) {
-                downloadKeysTextarea.style.webkitTextSecurity = 'disc';
-                downloadKeysTextarea.style.textSecurity = 'disc';
-                downloadKeysTextarea.setAttribute('data-password-visible', 'false');
-            }
-
-            debridCount++;
-        }
-
-        function addArrConfig(data = {}) {
-            const container = document.getElementById('arrConfigs');
-            container.insertAdjacentHTML('beforeend', arrTemplate(arrCount, data));
-
-            // Don't add delete button for auto-detected arrs since it's already handled in template
-            const newArr = container.lastElementChild;
-
-            if (data) {
-                Object.entries(data).forEach(([key, value]) => {
-                    const input = container.querySelector(`[name="arr[${arrCount}].${key}"]`);
-                    if (input) {
-                        if (input.type === 'checkbox') {
-                            input.checked = value;
-                        } else {
-                            input.value = value;
-                        }
-                    }
-                });
-            }
-
-            arrCount++;
-        }
-
-        function addDeleteButton(element, tooltip) {
-            const deleteBtn = document.createElement('button');
-            deleteBtn.type = 'button';
-            deleteBtn.className = 'btn btn-sm btn-danger position-absolute top-0 end-0 m-2';
-            deleteBtn.innerHTML = '<i class="bi bi-trash"></i>';
-            deleteBtn.title = tooltip;
-
-            deleteBtn.addEventListener('click', function () {
-                if (confirm('Are you sure you want to delete this item?')) {
-                    element.remove();
-                }
-            });
-            element.appendChild(deleteBtn);
-        }
-
-        function collectFormData() {
-            // Create the config object
-            const config = {
-                log_level: document.getElementById('log-level').value,
-                discord_webhook_url: document.getElementById('discordWebhookUrl').value,
-                allowed_file_types: document.getElementById('allowedExtensions').value.split(',').map(ext => ext.trim()).filter(Boolean),
-                min_file_size: document.getElementById('minFileSize').value,
-                max_file_size: document.getElementById('maxFileSize').value,
-                remove_stalled_after: document.getElementById('removeStalledAfter').value,
-                url_base: document.getElementById('urlBase').value,
-                bind_address: document.getElementById('bindAddress').value,
-                port: document.getElementById('port').value,
-                debrids: [],
-                qbittorrent: {
-                    download_folder: document.querySelector('[name="qbit.download_folder"]').value,
-                    refresh_interval: parseInt(document.querySelector('[name="qbit.refresh_interval"]').value, 10),
-                    max_downloads: parseInt(document.querySelector('[name="qbit.max_downloads"]').value || '0', 5),
-                    skip_pre_cache: document.querySelector('[name="qbit.skip_pre_cache"]').checked
-                },
-                arrs: [],
-                repair: {
-                    enabled: document.querySelector('[name="repair.enabled"]').checked,
-                    interval: document.querySelector('[name="repair.interval"]').value,
-                    zurg_url: document.querySelector('[name="repair.zurg_url"]').value,
-                    strategy: document.querySelector('[name="repair.strategy"]').value,
-                    workers: parseInt(document.querySelector('[name="repair.workers"]').value),
-                    use_webdav: document.querySelector('[name="repair.use_webdav"]').checked,
-                    auto_process: document.querySelector('[name="repair.auto_process"]').checked
-                }
-            };
-
-            // Collect all debrids
-            for (let i = 0; i < debridCount; i++) {
-                const nameEl = document.querySelector(`[name="debrid[${i}].name"]`);
-                if (!nameEl) continue;
-
-                const debrid = {
-                    name: nameEl.value,
-                    api_key: document.querySelector(`[name="debrid[${i}].api_key"]`).value,
-                    folder: document.querySelector(`[name="debrid[${i}].folder"]`).value,
-                    rate_limit: document.querySelector(`[name="debrid[${i}].rate_limit"]`).value,
-                    download_uncached: document.querySelector(`[name="debrid[${i}].download_uncached"]`).checked,
-                    unpack_rar: document.querySelector(`[name="debrid[${i}].unpack_rar"]`).checked,
-                    add_samples: document.querySelector(`[name="debrid[${i}].add_samples"]`).checked,
-                    use_webdav: document.querySelector(`[name="debrid[${i}].use_webdav"]`).checked
-                };
-
-                // Add WebDAV specific properties if enabled
-                if (debrid.use_webdav) {
-                    debrid.torrents_refresh_interval = document.querySelector(`[name="debrid[${i}].torrents_refresh_interval"]`).value;
-                    debrid.download_links_refresh_interval = document.querySelector(`[name="debrid[${i}].download_links_refresh_interval"]`).value;
-                    debrid.auto_expire_links_after = document.querySelector(`[name="debrid[${i}].auto_expire_links_after"]`).value;
-                    debrid.folder_naming = document.querySelector(`[name="debrid[${i}].folder_naming"]`).value;
-                    debrid.workers = parseInt(document.querySelector(`[name="debrid[${i}].workers"]`).value);
-                    debrid.rc_url = document.querySelector(`[name="debrid[${i}].rc_url"]`).value;
-                    debrid.rc_user = document.querySelector(`[name="debrid[${i}].rc_user"]`).value;
-                    debrid.rc_pass = document.querySelector(`[name="debrid[${i}].rc_pass"]`).value;
-                    debrid.rc_refresh_dirs = document.querySelector(`[name="debrid[${i}].rc_refresh_dirs"]`).value;
-                    debrid.serve_from_rclone = document.querySelector(`[name="debrid[${i}].serve_from_rclone"]`).checked;
-
-                    //custom folders
-                    debrid.directories = {};
-                    const dirCount = debridDirectoryCounts[i] || 0;
-
-                    for (let j = 0; j < dirCount; j++) {
-                        const nameInput = document.querySelector(`[name="debrid[${i}].directory[${j}].name"]`);
-                        if (nameInput && nameInput.value) {
-                            const dirName = nameInput.value;
-                            debrid.directories[dirName] = {filters: {}};
-
-                            // Get directory key for filter counting
-                            const dirKey = `${i}-${j}`;
-                            const filterCount = directoryFilterCounts[dirKey] || 0;
-
-                            // Collect all filters for this directory
-                            for (let k = 0; k < filterCount; k++) {
-                                const filterTypeInput = document.querySelector(`[name="debrid[${i}].directory[${j}].filter[${k}].type"]`);
-                                const filterValueInput = document.querySelector(`[name="debrid[${i}].directory[${j}].filter[${k}].value"]`);
-
-                                if (filterTypeInput && filterValueInput && filterValueInput.value) {
-                                    const filterType = filterTypeInput.value;
-                                    debrid.directories[dirName].filters[filterType] = filterValueInput.value;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                let downloadApiKeysTextarea = document.querySelector(`[name="debrid[${i}].download_api_keys"]`);
-                if (downloadApiKeysTextarea && downloadApiKeysTextarea.value.trim()) {
-                    debrid.download_api_keys = downloadApiKeysTextarea.value
-                        .split('\n')
-                        .map(key => key.trim())
-                        .filter(key => key.length > 0);
-                }
-
-                if (debrid.name && debrid.api_key) {
-                    config.debrids.push(debrid);
-                }
-            }
-
-            // Collect all arrs
-            for (let i = 0; i < arrCount; i++) {
-                const nameEl = document.querySelector(`[name="arr[${i}].name"]`);
-                if (!nameEl) continue;
-
-                const arr = {
-                    name: nameEl.value,
-                    host: document.querySelector(`[name="arr[${i}].host"]`).value,
-                    token: document.querySelector(`[name="arr[${i}].token"]`).value,
-                    cleanup: document.querySelector(`[name="arr[${i}].cleanup"]`).checked,
-                    skip_repair: document.querySelector(`[name="arr[${i}].skip_repair"]`).checked,
-                    download_uncached: document.querySelector(`[name="arr[${i}].download_uncached"]`).checked,
-                    selected_debrid: document.querySelector(`[name="arr[${i}].selected_debrid"]`).value,
-                    source: document.querySelector(`[name="arr[${i}].source"]`).value
-                };
-
-                if (arr.name && arr.host) {
-                    config.arrs.push(arr);
-                }
-            }
-
-            return config;
-        }
     });
-
-    // Register magnet link handler
-    function registerMagnetLinkHandler() {
-        if ('registerProtocolHandler' in navigator) {
-            try {
-                navigator.registerProtocolHandler(
-                    'magnet',
-                    `${window.location.origin}/download?magnet=%s`,
-                    'Decypharr'
-                );
-                localStorage.setItem('magnetHandler', 'true');
-                document.getElementById('registerMagnetLink').innerText = '✅ Decypharr Can Open Magnet Links';
-                document.getElementById('registerMagnetLink').classList.add('bg-white', 'text-black');
-                console.log('Registered magnet link handler successfully.');
-            } catch (error) {
-                console.error('Failed to register magnet link handler:', error);
-            }
-        }
-    }
-
-    var magnetHandler = localStorage.getItem('magnetHandler');
-    if (magnetHandler === 'true') {
-        document.getElementById('registerMagnetLink').innerText = '✅ Decypharr Can Open Magnet Links';
-        document.getElementById('registerMagnetLink').classList.add('bg-white', 'text-black');
-    }
 </script>
-
-<!-- Filter Help Modal -->
-<div class="modal fade" id="filterHelpModal" tabindex="-1" aria-labelledby="filterHelpModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="filterHelpModalLabel">Directory Filter Help</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <!-- Content will be injected by the showFilterHelp function -->
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-            </div>
-        </div>
-    </div>
-</div>
 {{ end }}

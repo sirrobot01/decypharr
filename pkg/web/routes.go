@@ -2,11 +2,19 @@ package web
 
 import (
 	"github.com/go-chi/chi/v5"
+	"io/fs"
 	"net/http"
 )
 
 func (wb *Web) Routes() http.Handler {
 	r := chi.NewRouter()
+
+	staticFS, err := fs.Sub(content, "assets")
+	if err != nil {
+		panic(err)
+	}
+
+	r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.FS(staticFS))))
 
 	r.Get("/login", wb.LoginHandler)
 	r.Post("/login", wb.LoginHandler)

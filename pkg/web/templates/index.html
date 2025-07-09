@@ -1,25 +1,34 @@
 {{ define "index" }}
-    <div class="container mt-4">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center gap-4">
-                <h4 class="mb-0 text-nowrap"><i class="bi bi-table me-2"></i>Active Torrents</h4>
-                <div class="d-flex align-items-center overflow-auto" style="flex-wrap: nowrap; gap: 0.5rem;">
-                    <button class="btn btn-outline-danger btn-sm" id="batchDeleteBtn" style="display: none; flex-shrink: 0;">
-                        <i class="bi bi-trash me-1"></i>Delete Selected
+<div class="space-y-6">
+
+    <!-- Controls Section -->
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-body">
+            <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+                <!-- Batch Actions -->
+                <div class="flex items-center gap-2">
+                    <button class="btn btn-error btn-sm hidden" id="batchDeleteBtn">
+                        <i class="bi bi-trash"></i>
+                        <span class="hidden sm:inline">Delete Selected</span>
                     </button>
-                    <button class="btn btn-outline-secondary btn-sm me-2" id="refreshBtn" style="flex-shrink: 0;">
-                        <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                    <button class="btn btn-outline btn-sm" id="refreshBtn">
+                        <i class="bi bi-arrow-clockwise"></i>
+                        <span class="hidden sm:inline">Refresh</span>
                     </button>
-                    <select class="form-select form-select-sm d-inline-block w-auto me-2" id="stateFilter" style="flex-shrink: 0;">
+                </div>
+
+                <!-- Filters -->
+                <div class="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+                    <select class="select select-bordered select-sm w-full sm:w-auto min-w-32" id="stateFilter">
                         <option value="">All States</option>
-                        <option value="pausedUP">PausedUP(Completed)</option>
+                        <option value="pausedUP">Completed</option>
                         <option value="downloading">Downloading</option>
                         <option value="error">Error</option>
                     </select>
-                    <select class="form-select form-select-sm d-inline-block w-auto" id="categoryFilter">
+                    <select class="select select-bordered select-sm w-full sm:w-auto min-w-32" id="categoryFilter">
                         <option value="">All Categories</option>
                     </select>
-                    <select class="form-select form-select-sm d-inline-block w-auto" id="sortSelector" style="flex-shrink: 0;">
+                    <select class="select select-bordered select-sm w-full sm:w-auto min-w-48" id="sortSelector">
                         <option value="added_on" selected>Date Added (Newest First)</option>
                         <option value="added_on_asc">Date Added (Oldest First)</option>
                         <option value="name_asc">Name (A-Z)</option>
@@ -31,470 +40,91 @@
                     </select>
                 </div>
             </div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0">
-                        <thead>
-                        <tr>
-                            <th>
-                                <input type="checkbox" class="form-check-input" id="selectAll">
-                            </th>
-                            <th>Name</th>
-                            <th>Size</th>
-                            <th>Progress</th>
-                            <th>Speed</th>
-                            <th>Category</th>
-                            <th>Debrid</th>
-                            <th>State</th>
-                            <th>Actions</th>
-                        </tr>
-                        </thead>
-                        <tbody id="torrentsList">
-                        </tbody>
-                    </table>
+        </div>
+    </div>
+
+    <!-- Torrents Table -->
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-body p-0">
+            <div class="overflow-x-auto">
+                <table class="table table-hover">
+                    <thead class="bg-base-200">
+                    <tr>
+                        <th class="w-12">
+                            <label class="cursor-pointer">
+                                <input type="checkbox" class="checkbox checkbox-sm" id="selectAll">
+                            </label>
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-file-text mr-2"></i>Name
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-hdd mr-2"></i>Size
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-speedometer2 mr-2"></i>Progress
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-download mr-2"></i>Speed
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-tag mr-2"></i>Category
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-cloud mr-2"></i>Debrid
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-activity mr-2"></i>State
+                        </th>
+                        <th class="font-semibold w-32">Actions</th>
+                    </tr>
+                    </thead>
+                    <tbody id="torrentsList">
+                    <!-- Dynamic content will be loaded here -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pagination -->
+            <div class="flex flex-col sm:flex-row justify-between items-center p-6 border-t border-base-200 gap-4">
+                <div class="text-sm text-base-content/70">
+                    <span id="paginationInfo">Loading torrents...</span>
                 </div>
-                <div class="d-flex justify-content-between align-items-center p-3 border-top">
-                    <div class="pagination-info">
-                        <span id="paginationInfo">Showing 0-0 of 0 torrents</span>
-                    </div>
-                    <nav aria-label="Torrents pagination">
-                        <ul class="pagination pagination-sm m-0" id="paginationControls"></ul>
-                    </nav>
-                </div>
+                <div class="join" id="paginationControls"></div>
             </div>
         </div>
     </div>
 
-    <!-- Context menu for torrent rows -->
-    <div class="dropdown-menu context-menu shadow" id="torrentContextMenu">
-        <h6 class="dropdown-header torrent-name text-truncate"></h6>
-        <div class="dropdown-divider"></div>
-        <button class="dropdown-item" data-action="copy-magnet">
-            <i class="bi bi-magnet me-2"></i>Copy Magnet Link
-        </button>
-        <button class="dropdown-item" data-action="copy-name">
-            <i class="bi bi-copy me-2"></i>Copy Name
-        </button>
-        <div class="dropdown-divider"></div>
-        <button class="dropdown-item text-danger" data-action="delete">
-            <i class="bi bi-trash me-2"></i>Delete
-        </button>
+    <!-- Empty State -->
+    <div class="card bg-base-100 shadow-xl hidden" id="emptyState">
+        <div class="card-body text-center py-16">
+            <div class="text-6xl text-base-content/30 mb-4">
+                <i class="bi bi-inbox"></i>
+            </div>
+            <h3 class="text-2xl font-bold mb-2">No Torrents Found</h3>
+            <p class="text-base-content/70 mb-6">You haven't added any torrents yet. Start by adding your first download!</p>
+            <a href="{{.URLBase}}download" class="btn btn-primary">
+                <i class="bi bi-plus-circle mr-2"></i>Add New Download
+            </a>
+        </div>
     </div>
+</div>
 
-    <script>
-        let refs = {
-            torrentsList: document.getElementById('torrentsList'),
-            categoryFilter: document.getElementById('categoryFilter'),
-            stateFilter: document.getElementById('stateFilter'),
-            sortSelector: document.getElementById('sortSelector'),
-            selectAll: document.getElementById('selectAll'),
-            batchDeleteBtn: document.getElementById('batchDeleteBtn'),
-            refreshBtn: document.getElementById('refreshBtn'),
-            torrentContextMenu: document.getElementById('torrentContextMenu'),
-            paginationControls: document.getElementById('paginationControls'),
-            paginationInfo: document.getElementById('paginationInfo')
-        };
-        let state = {
-            torrents: [],
-            selectedTorrents: new Set(),
-            categories: new Set(),
-            states: new Set('downloading', 'pausedUP', 'error'),
-            selectedCategory: refs.categoryFilter?.value || '',
-            selectedState: refs.stateFilter?.value || '',
-            selectedTorrentContextMenu: null,
-            sortBy: refs.sortSelector?.value || 'added_on',
-            itemsPerPage: 20,
-            currentPage: 1
-        };
-
-        const torrentRowTemplate = (torrent) => `
-        <tr data-hash="${torrent.hash}" data-magnet="${torrent.magnet || ''}" data-name="${torrent.name}">
-            <td>
-                <input type="checkbox" class="form-check-input torrent-select" data-hash="${torrent.hash}" ${state.selectedTorrents.has(torrent.hash) ? 'checked' : ''}>
-            </td>
-            <td class="text-nowrap text-truncate overflow-hidden" style="max-width: 350px;" title="${torrent.name}">${torrent.name}</td>
-            <td class="text-nowrap">${formatBytes(torrent.size)}</td>
-            <td style="min-width: 150px;">
-                <div class="progress" style="height: 8px;">
-                    <div class="progress-bar" role="progressbar"
-                         style="width: ${(torrent.progress * 100).toFixed(1)}%"
-                         aria-valuenow="${(torrent.progress * 100).toFixed(1)}"
-                         aria-valuemin="0"
-                         aria-valuemax="100"></div>
-                </div>
-                <small class="text-muted">${(torrent.progress * 100).toFixed(1)}%</small>
-            </td>
-            <td>${formatSpeed(torrent.dlspeed)}</td>
-            <td><span class="badge bg-secondary">${torrent.category || 'None'}</span></td>
-            <td>${torrent.debrid || 'None'}</td>
-            <td><span class="badge ${getStateColor(torrent.state)}">${torrent.state}</span></td>
-            <td>
-                <button class="btn btn-sm btn-outline-danger" onclick="deleteTorrent('${torrent.hash}', '${torrent.category || ''}', false)">
-                    <i class="bi bi-trash"></i>
-                </button>
-                ${torrent.debrid && torrent.id  ? `
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteTorrent('${torrent.hash}', '${torrent.category || ''}', true)">
-                    <i class="bi bi-trash"></i> Remove from Debrid
-                </button>
-                ` : ''}
-            </td>
-        </tr>
-        `;
-
-        function formatBytes(bytes) {
-            if (!bytes) return '0 B';
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
-        }
-
-        function formatSpeed(speed) {
-            return `${formatBytes(speed)}/s`;
-        }
-
-        function getStateColor(state) {
-            const stateColors = {
-                'downloading': 'bg-primary',
-                'pausedup': 'bg-success',
-                'error': 'bg-danger',
-            };
-            return stateColors[state?.toLowerCase()] || 'bg-secondary';
-        }
-
-        function updateUI() {
-            // Filter torrents by selected category and state
-            let filteredTorrents = state.torrents;
-            if (state.selectedCategory) {
-                filteredTorrents = filteredTorrents.filter(t => t.category === state.selectedCategory);
-            }
-            if (state.selectedState) {
-                filteredTorrents = filteredTorrents.filter(t => t.state === state.selectedState);
-            }
-
-            // Sort the filtered torrents
-            filteredTorrents = sortTorrents(filteredTorrents, state.sortBy);
-
-            const totalPages = Math.ceil(filteredTorrents.length / state.itemsPerPage);
-            if (state.currentPage > totalPages && totalPages > 0) {
-                state.currentPage = totalPages;
-            }
-
-            const paginatedTorrents = paginateTorrents(filteredTorrents);
-
-            // Update the torrents list table
-            refs.torrentsList.innerHTML = paginatedTorrents.map(torrent => torrentRowTemplate(torrent)).join('');
-
-
-            // Update the category filter dropdown
-            const currentCategories = Array.from(state.categories).sort();
-            const categoryOptions = ['<option value="">All Categories</option>']
-                .concat(currentCategories.map(cat => 
-                    `<option value="${cat}" ${cat === state.selectedCategory ? 'selected' : ''}>${cat}</option>`
-                ));
-            refs.categoryFilter.innerHTML = categoryOptions.join('');
-
-            // Clean up selected torrents that no longer exist
-            state.selectedTorrents = new Set(
-                Array.from(state.selectedTorrents)
-                    .filter(hash => filteredTorrents.some(t => t.hash === hash))
-            );
-
-            // Update batch delete button visibility
-            refs.batchDeleteBtn.style.display = state.selectedTorrents.size > 0 ? '' : 'none';
-
-            // Update the select all checkbox state
-            refs.selectAll.checked = filteredTorrents.length > 0 && filteredTorrents.every(torrent => state.selectedTorrents.has(torrent.hash));
-        }
-
-        async function loadTorrents() {
-            try {
-                const response = await fetcher('/api/torrents');
-                const torrents = await response.json();
-                
-                state.torrents = torrents;
-                state.categories = new Set(torrents.map(t => t.category).filter(Boolean));
-                
-                updateUI();
-            } catch (error) {
-                console.error('Error loading torrents:', error);
-            }
-        }
-
-        function sortTorrents(torrents, sortBy) {
-            // Create a copy of the array to avoid mutating the original
-            const result = [...torrents];
-
-            // Parse the sort value to determine field and direction
-            const [field, direction] = sortBy.includes('_asc') || sortBy.includes('_desc')
-                ? [sortBy.split('_').slice(0, -1).join('_'), sortBy.endsWith('_asc') ? 'asc' : 'desc']
-                : [sortBy, 'desc']; // Default to descending if not specified
-
-            result.sort((a, b) => {
-                let valueA, valueB;
-
-                // Get values based on field
-                switch (field) {
-                    case 'name':
-                        valueA = a.name?.toLowerCase() || '';
-                        valueB = b.name?.toLowerCase() || '';
-                        break;
-                    case 'size':
-                        valueA = a.size || 0;
-                        valueB = b.size || 0;
-                        break;
-                    case 'progress':
-                        valueA = a.progress || 0;
-                        valueB = b.progress || 0;
-                        break;
-                    case 'added_on':
-                        valueA = a.added_on || 0;
-                        valueB = b.added_on || 0;
-                        break;
-                    default:
-                        valueA = a[field] || 0;
-                        valueB = b[field] || 0;
-                }
-
-                // Compare based on type
-                if (typeof valueA === 'string') {
-                    return direction === 'asc'
-                        ? valueA.localeCompare(valueB)
-                        : valueB.localeCompare(valueA);
-                } else {
-                    return direction === 'asc'
-                        ? valueA - valueB
-                        : valueB - valueA;
-                }
-            });
-
-            return result;
-        }
-
-        async function deleteTorrent(hash, category, removeFromDebrid = false) {
-            if (!confirm('Are you sure you want to delete this torrent?')) return;
-
-            try {
-                await fetcher(`/api/torrents/${category}/${hash}?removeFromDebrid=${removeFromDebrid}`, {
-                    method: 'DELETE'
-                });
-                await loadTorrents();
-                createToast('Torrent deleted successfully');
-            } catch (error) {
-                console.error('Error deleting torrent:', error);
-                createToast('Failed to delete torrent', 'error');
-            }
-        }
-
-        async function deleteSelectedTorrents() {
-            if (!confirm(`Are you sure you want to delete ${state.selectedTorrents.size} selected torrents?`)) return;
-
-            try {
-                // COmma separated list of hashes
-                const hashes = Array.from(state.selectedTorrents).join(',');
-                await fetcher(`/api/torrents/?hashes=${encodeURIComponent(hashes)}`, {
-                    method: 'DELETE'
-                });
-                await loadTorrents();
-                createToast('Selected torrents deleted successfully');
-            } catch (error) {
-                console.error('Error deleting torrents:', error);
-                createToast('Failed to delete some torrents' , 'error');
-            }
-        }
-
-        function paginateTorrents(torrents) {
-            const totalItems = torrents.length;
-            const totalPages = Math.ceil(totalItems / state.itemsPerPage);
-            const startIndex = (state.currentPage - 1) * state.itemsPerPage;
-            const endIndex = Math.min(startIndex + state.itemsPerPage, totalItems);
-
-            // Update pagination info text
-            refs.paginationInfo.textContent =
-                `Showing ${totalItems > 0 ? startIndex + 1 : 0}-${endIndex} of ${totalItems} torrents`;
-
-            // Generate pagination controls
-            refs.paginationControls.innerHTML = '';
-
-            if (totalPages <= 1) {
-                return torrents.slice(startIndex, endIndex);
-            }
-
-            // Previous button
-            const prevLi = document.createElement('li');
-            prevLi.className = `page-item ${state.currentPage === 1 ? 'disabled' : ''}`;
-            prevLi.innerHTML = `
-        <a class="page-link" href="#" aria-label="Previous" ${state.currentPage === 1 ? 'tabindex="-1" aria-disabled="true"' : ''}>
-            <span aria-hidden="true">&laquo;</span>
-        </a>
-    `;
-            if (state.currentPage > 1) {
-                prevLi.querySelector('a').addEventListener('click', (e) => {
-                    e.preventDefault();
-                    state.currentPage--;
-                    updateUI();
-                });
-            }
-            refs.paginationControls.appendChild(prevLi);
-
-            // Page numbers
-            const maxPageButtons = 5;
-            let startPage = Math.max(1, state.currentPage - Math.floor(maxPageButtons / 2));
-            let endPage = Math.min(totalPages, startPage + maxPageButtons - 1);
-
-            if (endPage - startPage + 1 < maxPageButtons) {
-                startPage = Math.max(1, endPage - maxPageButtons + 1);
-            }
-
-            for (let i = startPage; i <= endPage; i++) {
-                const pageLi = document.createElement('li');
-                pageLi.className = `page-item ${i === state.currentPage ? 'active' : ''}`;
-                pageLi.innerHTML = `<a class="page-link" href="#">${i}</a>`;
-
-                pageLi.querySelector('a').addEventListener('click', (e) => {
-                    e.preventDefault();
-                    state.currentPage = i;
-                    updateUI();
-                });
-
-                refs.paginationControls.appendChild(pageLi);
-            }
-
-            // Next button
-            const nextLi = document.createElement('li');
-            nextLi.className = `page-item ${state.currentPage === totalPages ? 'disabled' : ''}`;
-            nextLi.innerHTML = `
-        <a class="page-link" href="#" aria-label="Next" ${state.currentPage === totalPages ? 'tabindex="-1" aria-disabled="true"' : ''}>
-            <span aria-hidden="true">&raquo;</span>
-        </a>
-    `;
-            if (state.currentPage < totalPages) {
-                nextLi.querySelector('a').addEventListener('click', (e) => {
-                    e.preventDefault();
-                    state.currentPage++;
-                    updateUI();
-                });
-            }
-            refs.paginationControls.appendChild(nextLi);
-
-            return torrents.slice(startIndex, endIndex);
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            loadTorrents();
-            const refreshInterval = setInterval(loadTorrents, 5000);
-
-            refs.refreshBtn.addEventListener('click', loadTorrents);
-            refs.batchDeleteBtn.addEventListener('click', deleteSelectedTorrents);
-
-            refs.selectAll.addEventListener('change', (e) => {
-                const filteredTorrents = state.torrents.filter(t => {
-                    if (state.selectedCategory && t.category !== state.selectedCategory) return false;
-                    if (state.selectedState && t.state?.toLowerCase() !== state.selectedState.toLowerCase()) return false;
-                    return true;
-                });
-                    
-                if (e.target.checked) {
-                    filteredTorrents.forEach(torrent => state.selectedTorrents.add(torrent.hash));
-                } else {
-                    filteredTorrents.forEach(torrent => state.selectedTorrents.delete(torrent.hash));
-                }
-                updateUI();
-            });
-
-            refs.torrentsList.addEventListener('change', (e) => {
-                if (e.target.classList.contains('torrent-select')) {
-                    const hash = e.target.dataset.hash;
-                    if (e.target.checked) {
-                        state.selectedTorrents.add(hash);
-                    } else {
-                        state.selectedTorrents.delete(hash);
-                    }
-                    updateUI();
-                }
-            });
-
-            refs.categoryFilter.addEventListener('change', (e) => {
-                state.selectedCategory = e.target.value;
-                state.currentPage = 1; // Reset to first page
-                updateUI();
-            });
-
-            refs.stateFilter.addEventListener('change', (e) => {
-                state.selectedState = e.target.value;
-                state.currentPage = 1; // Reset to first page
-                updateUI();
-            });
-
-            refs.sortSelector.addEventListener('change', (e) => {
-                state.sortBy = e.target.value;
-                state.currentPage = 1; // Reset to first page
-                updateUI();
-            });
-
-            window.addEventListener('beforeunload', () => {
-                clearInterval(refreshInterval);
-            });
-
-            document.addEventListener('click', (e) => {
-                if (!refs.torrentContextMenu.contains(e.target)) {
-                    refs.torrentContextMenu.style.display = 'none';
-                }
-            });
-
-            refs.torrentsList.addEventListener('contextmenu', (e) => {
-                const row = e.target.closest('tr');
-                if (!row) return;
-
-                e.preventDefault();
-                state.selectedTorrentContextMenu = row.dataset.hash;
-
-                refs.torrentContextMenu.querySelector('.torrent-name').textContent = row.dataset.name;
-                refs.torrentContextMenu.style.display = 'block';
-
-                const { pageX, pageY } = e;
-                const { clientWidth, clientHeight } = document.documentElement;
-                const { offsetWidth, offsetHeight } = refs.torrentContextMenu;
-
-                refs.torrentContextMenu.style.maxWidth = `${clientWidth - 72}px`;
-                refs.torrentContextMenu.style.left = `${Math.min(pageX, clientWidth - offsetWidth - 5)}px`;
-                refs.torrentContextMenu.style.top = `${Math.min(pageY, clientHeight - offsetHeight - 5)}px`;
-            });
-
-            refs.torrentContextMenu.addEventListener('click', async (e) => {
-                const action = e.target.closest('[data-action]')?.dataset.action;
-                if (!action) return;
-
-                const actions = {
-                    'copy-magnet': async (torrent) => {
-                        try {
-                            await navigator.clipboard.writeText(`magnet:?xt=urn:btih:${torrent.hash}`);
-                            createToast('Magnet link copied to clipboard');
-                        } catch (error) {
-                            console.error('Error copying magnet link:', error);
-                            createToast('Failed to copy magnet link', 'error');
-                        }
-                    },
-                    'copy-name': async (torrent) => {
-                        try {
-                            await navigator.clipboard.writeText(torrent.name);
-                            createToast('Torrent name copied to clipboard');
-                        } catch (error) {
-                            console.error('Error copying torrent name:', error);
-                            createToast('Failed to copy torrent name', 'error');
-                        }
-                    },
-                    'delete': async (torrent) => {
-                        await deleteTorrent(torrent.hash, torrent.category || '', false);
-                    }
-                };
-
-                const torrent = state.torrents.find(t => t.hash === state.selectedTorrentContextMenu);
-                if (torrent && actions[action]) {
-                    await actions[action](torrent);
-                    refs.torrentContextMenu.style.display = 'none';
-                }
-            });
-        });
-    </script>
+<!-- Context Menu -->
+<ul class="menu bg-base-100 shadow-lg rounded-box context-menu hidden fixed z-50" id="torrentContextMenu">
+    <li class="menu-title">
+        <span class="torrent-name text-sm font-bold truncate max-w-48"></span>
+    </li>
+    <li><hr class="my-1"></li>
+    <li><a class="menu-item text-sm" data-action="copy-magnet">
+        <i class="bi bi-magnet text-primary"></i>Copy Magnet Link
+    </a></li>
+    <li><a class="menu-item text-sm" data-action="copy-name">
+        <i class="bi bi-clipboard text-info"></i>Copy Name
+    </a></li>
+    <li><hr class="my-1"></li>
+    <li><a class="menu-item text-sm text-error" data-action="delete">
+        <i class="bi bi-trash"></i>Delete Torrent
+    </a></li>
+</ul>
 {{ end }}

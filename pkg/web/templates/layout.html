@@ -1,463 +1,206 @@
 {{ define "layout" }}
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="light">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Decypharr - {{.Title}}</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"/>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css"/>
-    <style>
-        :root {
-            --primary-color: #2563eb;
-            --secondary-color: #1e40af;
-            --bg-color: #f8fafc;
-            --card-bg: #ffffff;
-            --text-color: #333333;
-            --card-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            --nav-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            --border-color: #e5e7eb;
-        }
 
-        [data-bs-theme="dark"] {
-            --primary-color: #3b82f6;
-            --secondary-color: #60a5fa;
-            --bg-color: #1e293b;
-            --card-bg: #283548;
-            --text-color: #e5e7eb;
-            --card-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-            --nav-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-            --border-color: #4b5563;
-        }
+    <!-- DaisyUI and Tailwind CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet" type="text/css" />
+    <script src="https://cdn.tailwindcss.com"></script>
 
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            transition: background-color 0.3s ease, color 0.3s ease;
-            display: flex;
-            flex-direction: column;
-            min-height: 100vh;
-        }
+    <!-- Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.css" rel="stylesheet">
 
-        footer {
-            background-color: var(--bg-color);
-            border-top: 1px solid var(--border-color);
-        }
+    <!-- Custom Styles -->
+    <link href="{{.URLBase}}assets/css/styles.css" rel="stylesheet">
 
-        footer a {
-            color: var(--text-color);
-        }
+    <link rel="apple-touch-icon" sizes="180x180" href="{{.URLBase}}assetsfavicon/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{.URLBase}}assets/favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{.URLBase}}assets/favicon/favicon-16x16.png">
+    <link rel="manifest" href="{{.URLBase}}assets/favicon/site.webmanifest">
 
-        footer a:hover {
-            color: var(--primary-color);
-        }
+    <!-- Preload JavaScript -->
+    <link rel="preload" href="{{.URLBase}}assets/js/common.js" as="script">
 
-        .navbar {
-            padding: 1rem 0;
-            background: var(--card-bg) !important;
-            box-shadow: var(--nav-shadow);
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .navbar-brand {
-            color: var(--primary-color) !important;
-            font-weight: 700;
-            font-size: 1.5rem;
-        }
-
-        .card {
-            border: none;
-            border-radius: 10px;
-            box-shadow: var(--card-shadow);
-            background-color: var(--card-bg);
-        }
-
-        .nav-link {
-            padding: 0.5rem 1rem;
-            color: var(--text-color);
-        }
-
-        .nav-link.active {
-            color: var(--primary-color) !important;
-            font-weight: 500;
-        }
-
-        .table {
-            color: var(--text-color);
-        }
-
-        /* Dark mode specific overrides */
-        [data-bs-theme="dark"] .navbar-light .navbar-toggler-icon {
-            filter: invert(1);
-        }
-
-        [data-bs-theme="dark"] .form-control,
-        [data-bs-theme="dark"] .form-select {
-            background-color: #374151;
-            color: #e5e7eb;
-            border-color: #4b5563;
-        }
-
-        [data-bs-theme="dark"] .form-control:focus,
-        [data-bs-theme="dark"] .form-select:focus {
-            border-color: var(--primary-color);
-        }
-
-        /* Theme toggle button styles */
-        .theme-toggle {
-            cursor: pointer;
-            padding: 0.5rem;
-            border-radius: 50%;
-            width: 38px;
-            height: 38px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background-color 0.3s;
-        }
-
-        .theme-toggle:hover {
-            background-color: rgba(128, 128, 128, 0.2);
-        }
-        .password-toggle-container {
-            position: relative;
-        }
-
-        .password-toggle-btn {
-            position: absolute;
-            right: 10px;
-            top: 50%;
-            transform: translateY(-50%);
-            background: none;
-            border: none;
-            color: #6c757d;
-            cursor: pointer;
-            padding: 0;
-            z-index: 10;
-        }
-
-        .password-toggle-btn:hover {
-            color: #495057;
-        }
-
-        .form-control.has-toggle {
-            padding-right: 35px;
-        }
-        textarea.has-toggle {
-            -webkit-text-security: disc;
-            text-security: disc;
-            font-family: monospace !important;
-        }
-
-        textarea.has-toggle[data-password-visible="true"] {
-            -webkit-text-security: none;
-            text-security: none;
-        }
-
-        /* Adjust toggle button position for textareas */
-        .password-toggle-container textarea.has-toggle ~ .password-toggle-btn {
-            top: 20px;
-        }
-    </style>
     <script>
+        // Early theme detection to prevent FOUC
         (function() {
             const savedTheme = localStorage.getItem('theme');
             if (savedTheme) {
-                document.documentElement.setAttribute('data-bs-theme', savedTheme);
+                document.documentElement.setAttribute('data-theme', savedTheme);
             } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                document.documentElement.setAttribute('data-bs-theme', 'dark');
+                document.documentElement.setAttribute('data-theme', 'dark');
             } else {
-                document.documentElement.setAttribute('data-bs-theme', 'light');
+                document.documentElement.setAttribute('data-theme', 'light');
             }
         })();
+
+        // Set global URL base
+        window.urlBase = "{{.URLBase}}";
     </script>
 </head>
-<body>
-<div class="toast-container position-fixed bottom-0 end-0 p-3">
+<body class="min-h-screen bg-base-200 flex flex-col">
+<!-- Toast Container -->
+<div class="toast-container fixed bottom-4 right-4 z-50 space-y-2">
     <!-- Toast messages will be created dynamically here -->
 </div>
-<nav class="navbar navbar-expand-lg navbar-light mb-4">
-    <div class="container">
-        <a class="navbar-brand" href="/">
-            <i class="bi bi-cloud-download me-2"></i>Decypharr
-        </a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-            <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="navbarNav">
-            <ul class="navbar-nav me-auto">
-                <li class="nav-item">
-                    <a class="nav-link {{if eq .Page "index"}}active{{end}}" href="{{.URLBase}}">
-                    <i class="bi bi-table me-1"></i>Torrents
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {{if eq .Page "download"}}active{{end}}" href="{{.URLBase}}download">
-                    <i class="bi bi-cloud-download me-1"></i>Download
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {{if eq .Page "repair"}}active{{end}}" href="{{.URLBase}}repair">
-                    <i class="bi bi-tools me-1"></i>Repair
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {{if eq .Page "config"}}active{{end}}" href="{{.URLBase}}config">
-                    <i class="bi bi-gear me-1"></i>Settings
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="{{.URLBase}}webdav" target="_blank">
-                        <i class="bi bi-cloud me-1"></i>WebDAV
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="{{.URLBase}}logs" target="_blank">
-                        <i class="bi bi-journal me-1"></i>Logs
-                    </a>
-                </li>
+
+<!-- Navigation -->
+<header class="navbar bg-base-100 shadow-lg sticky top-0 z-40 backdrop-blur-sm">
+    <div class="navbar-start">
+        <div class="dropdown">
+            <div tabindex="0" role="button" class="btn btn-ghost lg:hidden">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h8m-8 6h16"/>
+                </svg>
+            </div>
+            <ul class="menu menu-sm dropdown-content mt-3 z-[1] p-2 shadow-lg bg-base-100 rounded-box w-52 border border-base-300">
+                <li><a href="{{.URLBase}}" class="{{if eq .Page "index"}}active{{end}}">
+                    <i class="bi bi-grid-3x3-gap text-primary"></i>Dashboard
+                    </a></li>
+                <li><a href="{{.URLBase}}download" class="{{if eq .Page "download"}}active{{end}}">
+                    <i class="bi bi-cloud-download text-secondary"></i>Download
+                    </a></li>
+                <li><a href="{{.URLBase}}repair" class="{{if eq .Page "repair"}}active{{end}}">
+                    <i class="bi bi-wrench-adjustable text-accent"></i>Repair
+                    </a></li>
+                <li><a href="{{.URLBase}}config" class="{{if eq .Page "config"}}active{{end}}">
+                    <i class="bi bi-gear text-info"></i>Settings
+                    </a></li>
+                <li><a href="{{.URLBase}}webdav" target="_blank">
+                    <i class="bi bi-cloud text-success"></i>WebDAV
+                </a></li>
+                <li><a href="{{.URLBase}}logs" target="_blank">
+                    <i class="bi bi-journal-text text-warning"></i>Logs
+                </a></li>
             </ul>
-            <div class="d-flex align-items-center">
-                <div class="theme-toggle me-3" id="themeToggle" title="Toggle dark mode">
-                    <i class="bi bi-sun-fill" id="lightIcon"></i>
-                    <i class="bi bi-moon-fill d-none" id="darkIcon"></i>
-                </div>
-                <a href="{{.URLBase}}debug/stats" class="me-2">
-                    <i class="bi bi-bar-chart-line me-1"></i>Stats
+        </div>
+        <a class="btn btn-ghost text-xl font-bold text-primary group" href="{{.URLBase}}">
+            <!-- Logo -->
+            <img src="{{.URLBase}}assets/logo.svg" alt="Decypharr Logo" class="w-8 h-8 inline-block mr-2">
+            <span class="hidden sm:inline bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">Decypharr</span>
+        </a>
+    </div>
+
+    <div class="navbar-center hidden lg:flex">
+        <ul class="menu menu-horizontal px-1 gap-1">
+            <li><a href="{{.URLBase}}" class="{{if eq .Page "index"}}active{{end}} tooltip tooltip-bottom" data-tip="Dashboard">
+                <i class="bi bi-grid-3x3-gap"></i>
+                <span class="hidden xl:inline">Dashboard</span>
+                </a></li>
+            <li><a href="{{.URLBase}}download" class="{{if eq .Page "download"}}active{{end}} tooltip tooltip-bottom" data-tip="Add Downloads">
+                <i class="bi bi-cloud-download"></i>
+                <span class="hidden xl:inline">Download</span>
+                </a></li>
+            <li><a href="{{.URLBase}}repair" class="{{if eq .Page "repair"}}active{{end}} tooltip tooltip-bottom" data-tip="Repair Media">
+                <i class="bi bi-wrench-adjustable"></i>
+                <span class="hidden xl:inline">Repair</span>
+                </a></li>
+            <li><a href="{{.URLBase}}config" class="{{if eq .Page "config"}}active{{end}} tooltip tooltip-bottom" data-tip="Settings">
+                <i class="bi bi-gear"></i>
+                <span class="hidden xl:inline">Settings</span>
+                </a></li>
+            <li><a href="{{.URLBase}}webdav" target="_blank" class="tooltip tooltip-bottom" data-tip="WebDAV Access">
+                <i class="bi bi-cloud"></i>
+                <span class="hidden xl:inline">WebDAV</span>
+            </a></li>
+            <li><a href="{{.URLBase}}logs" target="_blank" class="tooltip tooltip-bottom" data-tip="System Logs">
+                <i class="bi bi-journal-text"></i>
+                <span class="hidden xl:inline">Logs</span>
+            </a></li>
+        </ul>
+    </div>
+
+    <div class="navbar-end">
+        <div class="flex items-center gap-3">
+            <!-- Theme Toggle -->
+            <div class="tooltip tooltip-left" data-tip="Toggle Theme">
+                <label class="swap swap-rotate btn btn-ghost btn-circle hover:bg-base-300 transition-colors">
+                    <input type="checkbox" id="themeToggle" class="theme-controller" />
+                    <!-- Sun icon for light mode -->
+                    <i class="swap-off bi bi-sun text-lg text-warning"></i>
+                    <!-- Moon icon for dark mode -->
+                    <i class="swap-on bi bi-moon-stars text-lg text-info"></i>
+                </label>
+            </div>
+
+            <!-- Stats Link -->
+            <div class="tooltip tooltip-left" data-tip="System Statistics">
+                <a href="{{.URLBase}}debug/stats" class="btn btn-ghost btn-sm hover:bg-base-300 transition-colors">
+                    <i class="bi bi-graph-up text-lg"></i>
+                    <span class="hidden md:inline ml-1">Stats</span>
                 </a>
-                <span class="badge bg-primary" id="version-badge">Loading...</span>
+            </div>
+
+            <!-- Version Badge -->
+            <div class="tooltip tooltip-left" data-tip="Current Version">
+                <div class="badge badge-primary font-mono text-xs hover:badge-primary-focus transition-colors cursor-pointer" id="version-badge">
+                    Loading...
+                </div>
             </div>
         </div>
     </div>
-</nav>
+</header>
 
-{{ if eq .Page "index" }}
-{{ template "index" . }}
-{{ else if eq .Page "download" }}
-{{ template "download" . }}
-{{ else if eq .Page "repair" }}
-{{ template "repair" . }}
-{{ else if eq .Page "config" }}
-{{ template "config" . }}
-{{ else if eq .Page "login" }}
-{{ template "login" . }}
-{{ else if eq .Page "register" }}
-{{ template "register" . }}
-{{ else }}
-{{ end }}
-
-<footer class="mt-auto py-2 text-center border-top">
-    <div class="container">
-        <small class="text-muted">
-            <a href="https://github.com/sirrobot01/decypharr" target="_blank" class="text-decoration-none me-3">
-                <i class="bi bi-github me-1"></i>GitHub
-            </a>
-            <a href="https://sirrobot01.github.io/decypharr" target="_blank" class="text-decoration-none">
-                <i class="bi bi-book me-1"></i>Documentation
-            </a>
-        </small>
+<!-- Main Content -->
+<main class="flex-1 container mx-auto px-4 py-6">
+    {{ if eq .Page "index" }}
+    {{ template "index" . }}
+    {{ else if eq .Page "download" }}
+    {{ template "download" . }}
+    {{ else if eq .Page "repair" }}
+    {{ template "repair" . }}
+    {{ else if eq .Page "config" }}
+    {{ template "config" . }}
+    {{ else if eq .Page "login" }}
+    {{ template "login" . }}
+    {{ else if eq .Page "register" }}
+    {{ template "register" . }}
+    {{ else }}
+    <div class="hero min-h-96">
+        <div class="hero-content text-center">
+            <div class="max-w-md">
+                <h1 class="text-5xl font-bold text-error">404</h1>
+                <p class="py-6">Page not found. The page you're looking for doesn't exist.</p>
+                <a href="{{.URLBase}}" class="btn btn-primary">Go Home</a>
+            </div>
+        </div>
     </div>
+    {{ end }}
+</main>
+
+<!-- Footer -->
+<footer class="footer footer-center p-6 bg-base-300 text-base-content border-t border-base-200">
+    <aside class="grid-flow-col gap-4">
+        <a href="https://github.com/sirrobot01/decypharr" target="_blank"
+           class="link link-hover flex items-center gap-2 hover:text-primary transition-colors">
+            <i class="bi bi-github text-lg"></i>
+            <span>GitHub</span>
+        </a>
+        <a href="https://sirrobot01.github.io/decypharr" target="_blank"
+           class="link link-hover flex items-center gap-2 hover:text-primary transition-colors">
+            <i class="bi bi-book text-lg"></i>
+            <span>Documentation</span>
+        </a>
+    </aside>
 </footer>
 
+<!-- Scripts -->
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="{{.URLBase}}assets/js/common.js"></script>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
-<script>
-
-    window.urlBase = "{{.URLBase}}";
-
-    function joinURL(base, path) {
-        if (!base.endsWith('/')) {
-            base += '/';
-        }
-        if (path.startsWith('/')) {
-            path = path.substring(1);
-        }
-        return base + path;
-
-    }
-
-    function fetcher(endpoint, options = {}) {
-        // Use the global urlBase or default to empty string
-        let baseUrl = window.urlBase || '';
-
-        let url = joinURL(baseUrl, endpoint);
-
-        // Return the regular fetcher with the complete URL
-        return fetch(url, options);
-    }
-    /**
-     * Create a toast message
-     * @param {string} message - The message to display
-     * @param {string} [type='success'] - The type of toast (success, warning, error)
-     */
-    const createToast = (message, type = 'success') => {
-        type = ['success', 'warning', 'error'].includes(type) ? type : 'success';
-
-        const toastTimeouts = {
-            success: 5000,
-            warning: 10000,
-            error: 15000
-        };
-
-        const toastContainer = document.querySelector('.toast-container');
-        const toastId = `toast-${Date.now()}`;
-
-        const toastHtml = `
-            <div id="${toastId}" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
-                <div class="toast-header ${type === 'error' ? 'bg-danger text-white' : type === 'warning' ? 'bg-warning text-dark' : 'bg-success text-white'}">
-                <strong class="me-auto">
-                    ${type === 'error' ? 'Error' : type === 'warning' ? 'Warning' : 'Success'}
-                </strong>
-                <button type="button" class="btn-close ${type === 'warning' ? '' : 'btn-close-white'}" data-bs-dismiss="toast" aria-label="Close"></button>
-                </div>
-                <div class="toast-body">
-                ${message.replace(/\n/g, '<br>')}
-                </div>
-            </div>
-            `;
-
-        toastContainer.insertAdjacentHTML('beforeend', toastHtml);
-
-        const toastElement = document.getElementById(toastId);
-        const toast = new bootstrap.Toast(toastElement, {
-            autohide: true,
-            delay: toastTimeouts[type]
-
-        });
-
-        toast.show();
-
-        toastElement.addEventListener('hidden.bs.toast', () => {
-            toastElement.remove();
-        });
-    };
-
-    function createPasswordField(name, id, placeholder = "", required = false) {
-        return `
-        <div class="password-toggle-container">
-            <input type="password"
-                   class="form-control has-toggle"
-                   name="${name}"
-                   id="${id}"
-                   placeholder="${placeholder}"
-                   ${required ? 'required' : ''}>
-            <button type="button"
-                    class="password-toggle-btn"
-                    onclick="togglePassword('${id}');">
-                <i class="bi bi-eye" id="${id}_icon"></i>
-            </button>
-        </div>
-    `;
-    }
-
-    function togglePassword(fieldId) {
-        const field = document.getElementById(fieldId);
-        const icon = document.getElementById(fieldId + '_icon');
-
-        if (field.type === 'password') {
-            field.type = 'text';
-            icon.className = 'bi bi-eye-slash';
-        } else {
-            field.type = 'password';
-            icon.className = 'bi bi-eye';
-        }
-    }
-
-    // Add this function to handle textarea password toggling
-    function togglePasswordTextarea(fieldId) {
-        const field = document.getElementById(fieldId);
-        const icon = document.getElementById(fieldId + '_icon');
-
-        if (field.style.webkitTextSecurity === 'disc' || field.style.webkitTextSecurity === '') {
-            // Show text
-            field.style.webkitTextSecurity = 'none';
-            field.style.textSecurity = 'none'; // For other browsers
-            field.setAttribute('data-password-visible', 'true');
-            icon.className = 'bi bi-eye-slash';
-        } else {
-            // Hide text
-            field.style.webkitTextSecurity = 'disc';
-            field.style.textSecurity = 'disc'; // For other browsers
-            field.setAttribute('data-password-visible', 'false');
-            icon.className = 'bi bi-eye';
-        }
-    }
-
-    // Theme management
-    const themeToggle = document.getElementById('themeToggle');
-    const lightIcon = document.getElementById('lightIcon');
-    const darkIcon = document.getElementById('darkIcon');
-    const htmlElement = document.documentElement;
-
-    // Function to set the theme
-    function setTheme(theme) {
-        htmlElement.setAttribute('data-bs-theme', theme);
-        localStorage.setItem('theme', theme);
-
-        if (theme === 'dark') {
-            lightIcon.classList.add('d-none');
-            darkIcon.classList.remove('d-none');
-        } else {
-            lightIcon.classList.remove('d-none');
-            darkIcon.classList.add('d-none');
-        }
-    }
-
-    // Check for saved theme preference or use system preference
-    const savedTheme = localStorage.getItem('theme');
-
-    if (savedTheme) {
-        setTheme(savedTheme);
-    } else {
-        // Check for system preference
-        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-            setTheme('dark');
-        } else {
-            setTheme('light');
-        }
-    }
-
-    // Toggle theme when button is clicked
-    themeToggle.addEventListener('click', () => {
-        const currentTheme = htmlElement.getAttribute('data-bs-theme');
-        setTheme(currentTheme === 'dark' ? 'light' : 'dark');
-    });
-
-    // Listen for system theme changes
-    if (window.matchMedia) {
-        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
-            if (!localStorage.getItem('theme')) {
-                setTheme(e.matches ? 'dark' : 'light');
-            }
-        });
-    }
-
-    document.addEventListener('DOMContentLoaded', function() {
-        fetcher('/version')
-            .then(response => response.json())
-            .then(data => {
-                const versionBadge = document.getElementById('version-badge');
-
-                // Add url to version badge
-                versionBadge.innerHTML = `<a href="https://github.com/sirrobot01/decypharr/releases/tag/${data.version}" target="_blank" class="text-white">${data.channel}-${data.version}</a>`;
-
-
-                if (data.channel === 'beta') {
-                    versionBadge.classList.add('beta');
-                } else if (data.channel === 'nightly') {
-                    versionBadge.classList.add('nightly');
-                }
-            })
-            .catch(error => {
-                console.error('Error fetching version:', error);
-                document.getElementById('version-badge').textContent = 'Unknown';
-            });
-    });
-</script>
+<!-- Page-specific scripts -->
+{{ if eq .Page "index" }}
+<script src="{{.URLBase}}assets/js/dashboard.js"></script>
+{{ else if eq .Page "download" }}
+<script src="{{.URLBase}}assets/js/download.js"></script>
+{{ else if eq .Page "repair" }}
+<script src="{{.URLBase}}assets/js/repair.js"></script>
+{{ else if eq .Page "config" }}
+<script src="{{.URLBase}}assets/js/config.js"></script>
+{{ end }}
 </body>
 </html>
 {{ end }}
