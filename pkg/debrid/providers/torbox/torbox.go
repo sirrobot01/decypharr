@@ -440,7 +440,81 @@ func (tb *Torbox) GetDownloadingStatus() []string {
 }
 
 func (tb *Torbox) GetTorrents() ([]*types.Torrent, error) {
-	return nil, nil
+	url := fmt.Sprintf("%s/api/torrents/mylist", tb.Host)
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	resp, err := tb.client.MakeRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	
+	var res TorrentsListResponse
+	err = json.Unmarshal(resp, &res)
+	if err != nil {
+		return nil, err
+	}
+	
+	if !res.Success || res.Data == nil {
+		return nil, fmt.Errorf("torbox API error: %v", res.Error)
+	}
+	
+	torrents := make([]*types.Torrent, 0, len(*res.Data))
+	cfg := config.Get()
+	
+	for _, data := range *res.Data {
+		t := &types.Torrent{
+			Id:               strconv.Itoa(data.Id),
+			Name:             data.Name,
+			Bytes:            data.Size,
+			Folder:           data.Name,
+			Progress:         data.Progress * 100,
+			Status:           getTorboxStatus(data.DownloadState, data.DownloadFinished),
+			Speed:            data.DownloadSpeed,
+			Seeders:          data.Seeds,
+			Filename:         data.Name,
+			OriginalFilename: data.Name,
+			MountPath:        tb.MountPath,
+			Debrid:           tb.name,
+			Files:            make(map[string]types.File),
+			Added:            data.CreatedAt.Format(time.RFC3339),
+			InfoHash:         data.Hash,
+		}
+		
+		// Process files
+		for _, f := range data.Files {
+			fileName := filepath.Base(f.Name)
+			if !tb.addSamples && utils.IsSampleFile(f.AbsolutePath) {
+				// Skip sample files
+				continue
+			}
+			if !cfg.IsAllowedFile(fileName) {
+				continue
+			}
+			if !cfg.IsSizeAllowed(f.Size) {
+				continue
+			}
+			file := types.File{
+				TorrentId: t.Id,
+				Id:        strconv.Itoa(f.Id),
+				Name:      fileName,
+				Size:      f.Size,
+				Path:      f.Name,
+			}
+			t.Files[fileName] = file
+		}
+		
+		// Set original filename based on first file or torrent name
+		var cleanPath string
+		if len(t.Files) > 0 {
+			cleanPath = path.Clean(data.Files[0].Name)
+		} else {
+			cleanPath = path.Clean(data.Name)
+		}
+		t.OriginalFilename = strings.Split(cleanPath, "/")[0]
+		
+		torrents = append(torrents, t)
+	}
+	
+	return torrents, nil
 }
 
 func (tb *Torbox) GetDownloadUncached() bool {

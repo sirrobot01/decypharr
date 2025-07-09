@@ -73,3 +73,5 @@ type torboxInfo struct {
 type InfoResponse APIResponse[torboxInfo]
 
 type DownloadLinksResponse APIResponse[string]
+
+type TorrentsListResponse APIResponse[[]torboxInfo]
