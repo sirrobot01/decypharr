@@ -271,14 +271,6 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 		totalFiles++
 		fileName := filepath.Base(f.Name)
 
-		tb.logger.Trace().
-			Str("torrent_id", t.Id).
-			Str("file_name", fileName).
-			Str("file_path", f.Name).
-			Str("file_extension", filepath.Ext(fileName)).
-			Int64("file_size", f.Size).
-			Msg("UpdateTorrent: Processing file")
-
 		if !tb.addSamples && utils.IsSampleFile(f.AbsolutePath) {
 			skippedSamples++
 			tb.logger.Trace().
