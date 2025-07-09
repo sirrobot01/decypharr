@@ -1,863 +1,328 @@
 {{ define "repair" }}
-<div class="container mt-4">
-    <div class="card">
-        <div class="card-header">
-            <h4 class="mb-0"><i class="bi bi-tools me-2"></i>Repair Media</h4>
-        </div>
+<div class="space-y-6">
+    <!-- Repair Form -->
+    <div class="card bg-base-100 shadow-xl">
         <div class="card-body">
-            <form id="repairForm">
-                <div class="mb-3">
-                    <label for="arrSelect" class="form-label">Select Arr Instance</label>
-                    <select class="form-select" id="arrSelect">
-                        <option value="">Select an Arr instance</option>
-                    </select>
-                </div>
+            <h2 class="card-title text-2xl mb-6">
+                <i class="bi bi-plus-circle mr-2 text-primary"></i>Start New Repair
+            </h2>
 
-                <div class="mb-3">
-                    <label for="mediaIds" class="form-label">Media IDs</label>
-                    <input type="text" class="form-control" id="mediaIds"
-                           placeholder="Enter IDs (comma-separated)">
-                    <small class="text-muted">Enter TV DB ids for Sonarr, TM DB ids for Radarr</small>
-                </div>
+            <form id="repairForm" class="space-y-6">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Left Column -->
+                    <div class="space-y-4">
+                        <div class="form-control">
+                            <label class="label" for="arrSelect">
+                                <span class="label-text font-semibold">
+                                    <i class="bi bi-collection mr-2 text-secondary"></i>Arr Instance
+                                </span>
+                            </label>
+                            <select class="select select-bordered" id="arrSelect" required>
+                                <option value="">Select an Arr instance</option>
+                            </select>
+                            <div class="label">
+                                <span class="label-text-alt">Choose which Arr service to repair</span>
+                            </div>
+                        </div>
 
-                <div class="mb-2">
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" id="isAsync" checked>
-                        <label class="form-check-label" for="isAsync">
-                            Run in background
-                        </label>
+                        <div class="form-control">
+                            <label class="label" for="mediaIds">
+                                <span class="label-text font-semibold">
+                                    <i class="bi bi-hash mr-2 text-accent"></i>Media IDs
+                                </span>
+                                <span class="label-text-alt">Optional</span>
+                            </label>
+                            <input type="text"
+                                   class="input input-bordered"
+                                   id="mediaIds"
+                                   placeholder="123, 456, 789">
+                            <div class="label">
+                                <span class="label-text-alt">
+                                    Enter specific TV DB IDs (Sonarr) or TM DB IDs (Radarr), comma-separated. Leave empty for all media.
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Column -->
+                    <div class="space-y-4">
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text font-semibold">
+                                    <i class="bi bi-sliders mr-2 text-info"></i>Repair Options
+                                </span>
+                            </label>
+                            <div class="space-y-3">
+                                <div class="form-control">
+                                    <label class="label cursor-pointer justify-start gap-3">
+                                        <input type="checkbox" class="checkbox checkbox-lg" id="isAsync" checked>
+                                        <div>
+                                            <span class="label-text font-medium">Run in Background</span>
+                                            <div class="label-text-alt">Process repair job asynchronously</div>
+                                        </div>
+                                    </label>
+                                </div>
+
+                                <div class="form-control">
+                                    <label class="label cursor-pointer justify-start gap-3">
+                                        <input type="checkbox" class="checkbox checkbox-lg" id="autoProcess">
+                                        <div>
+                                            <span class="label-text font-medium">Auto Process</span>
+                                            <div class="label-text-alt text-warning">
+                                                <i class="bi bi-exclamation-triangle mr-1"></i>
+                                                Automatically delete broken symlinks and re-search media
+                                            </div>
+                                        </div>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-control">
+                            <button type="submit" class="btn btn-primary btn-lg" id="submitRepair">
+                                <i class="bi bi-wrench mr-2"></i>Start Repair
+                            </button>
+                        </div>
                     </div>
                 </div>
-
-                <div class="mb-3">
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" id="autoProcess">
-                        <label class="form-check-label" for="autoProcess">
-                            Auto Process(this will delete and re-search broken media)
-                        </label>
-                    </div>
-                </div>
-
-                <button type="submit" class="btn btn-primary" id="submitRepair">
-                    <i class="bi bi-wrench me-2"></i>Start Repair
-                </button>
             </form>
         </div>
     </div>
 
-    <!-- Jobs Table Section -->
-    <div class="card mt-4">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <h4 class="mb-0"><i class="bi bi-list-task me-2"></i>Repair Jobs</h4>
-            <div>
-                <button id="deleteSelectedJobs" class="btn btn-sm btn-danger me-2" disabled>
-                    <i class="bi bi-trash me-1"></i>Delete Selected
-                </button>
-                <button id="refreshJobs" class="btn btn-sm btn-outline-secondary">
-                    <i class="bi bi-arrow-clockwise me-1"></i>Refresh
-                </button>
+    <!-- Jobs Table -->
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-header">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 p-6 border-b border-base-200">
+                <h2 class="card-title text-xl">
+                    <i class="bi bi-list-task mr-2"></i>Repair Jobs
+                </h2>
+                <div class="flex flex-wrap gap-2">
+                    <button id="deleteSelectedJobs" class="btn btn-error btn-sm" disabled>
+                        <i class="bi bi-trash mr-1"></i>Delete Selected
+                    </button>
+                    <button id="refreshJobs" class="btn btn-outline btn-sm">
+                        <i class="bi bi-arrow-clockwise mr-1"></i>Refresh
+                    </button>
+                </div>
             </div>
         </div>
-        <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-striped table-hover" id="jobsTable">
-                    <thead>
+
+        <div class="card-body p-0">
+            <div class="overflow-x-auto">
+                <table class="table table-hover" id="jobsTable">
+                    <thead class="bg-base-200">
                     <tr>
-                        <th>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="selectAllJobs">
-                            </div>
+                        <th class="w-12">
+                            <label class="cursor-pointer">
+                                <input type="checkbox" class="checkbox checkbox-sm" id="selectAllJobs">
+                            </label>
                         </th>
-                        <th>ID</th>
-                        <th>Arr Instances</th>
-                        <th>Started</th>
-                        <th>Status</th>
-                        <th>Broken Items</th>
-                        <th>Actions</th>
+                        <th class="font-semibold">
+                            <i class="bi bi-hash mr-2"></i>Job ID
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-collection mr-2"></i>Arr Instances
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-calendar mr-2"></i>Started
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-activity mr-2"></i>Status
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-exclamation-triangle mr-2"></i>Broken Items
+                        </th>
+                        <th class="font-semibold w-32">Actions</th>
                     </tr>
                     </thead>
                     <tbody id="jobsTableBody">
-                    <!-- Jobs will be loaded here -->
+                    <!-- Dynamic content will be loaded here -->
                     </tbody>
                 </table>
             </div>
 
             <!-- Pagination -->
-            <nav aria-label="Jobs pagination" class="mt-3">
-                <ul class="pagination justify-content-center" id="jobsPagination">
+            <div class="flex justify-center p-6 border-t border-base-200">
+                <div class="join" id="jobsPagination">
                     <!-- Pagination will be generated here -->
-                </ul>
-            </nav>
-
-            <div id="noJobsMessage" class="text-center py-3 d-none">
-                <p class="text-muted">No repair jobs found</p>
+                </div>
             </div>
-        </div>
-    </div>
 
-    <!-- Job Details Modal -->
-    <div class="modal fade" id="jobDetailsModal" tabindex="-1" aria-labelledby="jobDetailsModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-xl">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="jobDetailsModalLabel">Job Details</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            <!-- No Jobs Message -->
+            <div id="noJobsMessage" class="text-center py-16 hidden">
+                <div class="text-6xl text-base-content/30 mb-4">
+                    <i class="bi bi-clipboard-check"></i>
                 </div>
-                <div class="modal-body">
-                    <!-- Job Info -->
-                    <div class="row mb-4">
-                        <div class="col-md-6">
-                            <p><strong>Job ID:</strong> <span id="modalJobId"></span></p>
-                            <p><strong>Status:</strong> <span id="modalJobStatus"></span></p>
-                            <p><strong>Started:</strong> <span id="modalJobStarted"></span></p>
-                            <p><strong>Completed:</strong> <span id="modalJobCompleted"></span></p>
-                        </div>
-                        <div class="col-md-6">
-                            <p><strong>Arrs:</strong> <span id="modalJobArrs"></span></p>
-                            <p><strong>Media IDs:</strong> <span id="modalJobMediaIds"></span></p>
-                            <p><strong>Auto Process:</strong> <span id="modalJobAutoProcess"></span></p>
-                        </div>
-                    </div>
-
-                    <div id="errorContainer" class="alert alert-danger mb-3 d-none">
-                        <strong>Error:</strong> <span id="modalJobError"></span>
-                    </div>
-
-                    <!-- Broken Items Section -->
-                    <div class="row">
-                        <div class="col-12">
-                            <div class="d-flex justify-content-between align-items-center mb-3">
-                                <h6 class="mb-0">
-                                    Broken Items
-                                    <span class="badge bg-secondary" id="totalItemsCount">0</span>
-                                </h6>
-                            </div>
-
-                            <!-- Filters and Search -->
-                            <div class="row mb-3">
-                                <div class="col-md-4">
-                                    <input type="text" class="form-control form-control-sm"
-                                           id="itemSearchInput"
-                                           placeholder="Search by path...">
-                                </div>
-                                <div class="col-md-3">
-                                    <select class="form-select form-select-sm" id="arrFilterSelect">
-                                        <option value="">All Arrs</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-3">
-                                    <select class="form-select form-select-sm" id="pathFilterSelect">
-                                        <option value="">All Types</option>
-                                        <option value="movie">Movies</option>
-                                        <option value="tv">TV Shows</option>
-                                        <option value="other">Other</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-2">
-                                    <button class="btn btn-sm btn-outline-secondary w-100" id="clearFiltersBtn">
-                                        <i class="bi bi-x-circle me-1"></i>Clear
-                                    </button>
-                                </div>
-                            </div>
-
-                            <!-- Items Table -->
-                            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
-                                <table class="table table-sm table-striped table-hover">
-                                    <thead class="sticky-top">
-                                    <tr>
-                                        <th>Arr</th>
-                                        <th>Path</th>
-                                        <th style="width: 100px;">Type</th>
-                                        <th style="width: 80px;">Size</th>
-                                    </tr>
-                                    </thead>
-                                    <tbody id="brokenItemsTableBody">
-                                    <!-- Broken items will be loaded here -->
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            <!-- Items Pagination -->
-                            <nav aria-label="Items pagination" class="mt-2">
-                                <ul class="pagination pagination-sm justify-content-center" id="itemsPagination">
-                                    <!-- Pagination will be generated here -->
-                                </ul>
-                            </nav>
-
-                            <div id="noBrokenItemsMessage" class="text-center py-3 d-none">
-                                <p class="text-muted">No broken items found</p>
-                            </div>
-
-                            <div id="noFilteredItemsMessage" class="text-center py-3 d-none">
-                                <p class="text-muted">No items match the current filters</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <div class="me-auto">
-                        <small class="text-muted" id="modalFooterStats"></small>
-                    </div>
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    <button type="button" class="btn btn-primary" id="processJobBtn">Process All Items</button>
-                    <button type="button" class="btn btn-warning d-none" id="stopJobBtn">
-                        <i class="bi bi-stop-fill me-1"></i>Stop Job
-                    </button>
-                </div>
+                <h3 class="text-2xl font-bold mb-2">No Repair Jobs</h3>
+                <p class="text-base-content/70 mb-6">You haven't run any repair jobs yet. Start your first repair above!</p>
             </div>
         </div>
     </div>
 </div>
 
-<style>
-    .sticky-top {
-        position: sticky;
-        top: 0;
-        z-index: 10;
-    }
+<!-- Job Details Modal -->
+<dialog id="jobDetailsModal" class="modal">
+    <div class="modal-box max-w-6xl max-h-[90vh]">
+        <form method="dialog">
+            <button class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">✕</button>
+        </form>
 
-    .table-hover tbody tr:hover {
-        background-color: var(--bs-gray-100);
-    }
+        <div class="flex justify-between items-start mb-6">
+            <h3 class="font-bold text-2xl">
+                <i class="bi bi-info-circle mr-2 text-primary"></i>Job Details
+            </h3>
+            <div class="flex gap-2">
+                <button type="button" class="btn btn-primary btn-sm hidden" id="processJobBtn">
+                    <i class="bi bi-play-fill mr-1"></i>Process
+                </button>
+                <button type="button" class="btn btn-warning btn-sm hidden" id="stopJobBtn">
+                    <i class="bi bi-stop-fill mr-1"></i>Stop
+                </button>
+            </div>
+        </div>
 
-    [data-bs-theme="dark"] .table-hover tbody tr:hover {
-        background-color: var(--bs-gray-800);
-    }
-
-    .item-row.selected {
-        background-color: var(--bs-primary-bg-subtle) !important;
-    }
-
-    .badge {
-        font-size: 0.75em;
-    }
-
-    #brokenItemsTableBody tr {
-        cursor: pointer;
-    }
-
-    .form-check-input:checked {
-        background-color: var(--bs-primary);
-        border-color: var(--bs-primary);
-    }
-</style>
-
-<script>
-    document.addEventListener('DOMContentLoaded', () => {
-        // Load Arr instances
-        fetcher('/api/arrs')
-            .then(response => response.json())
-            .then(arrs => {
-                const select = document.getElementById('arrSelect');
-                arrs.forEach(arr => {
-                    const option = document.createElement('option');
-                    option.value = arr.name;
-                    option.textContent = arr.name;
-                    select.appendChild(option);
-                });
-            });
-
-        // Handle form submission
-        document.getElementById('repairForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const submitBtn = document.getElementById('submitRepair');
-            const originalText = submitBtn.innerHTML;
-
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Repairing...';
-            let mediaIds = document.getElementById('mediaIds').value.split(',').map(id => id.trim());
-            let arr = document.getElementById('arrSelect').value;
-            try {
-                const response = await fetcher('/api/repair', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        arr: arr,
-                        mediaIds: mediaIds,
-                        async: document.getElementById('isAsync').checked,
-                        autoProcess: document.getElementById('autoProcess').checked,
-                    })
-                });
-
-                if (!response.ok) throw new Error(await response.text());
-                createToast('Repair process initiated successfully!');
-                await loadJobs(1); // Refresh jobs after submission
-            } catch (error) {
-                createToast(`Error starting repair: ${error.message}`, 'error');
-            } finally {
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = originalText;
-            }
-        });
-
-        // Jobs table pagination variables
-        let currentPage = 1;
-        const itemsPerPage = 10;
-        let allJobs = [];
-
-        // Modal state variables
-        let currentJob = null;
-        let allBrokenItems = [];
-        let filteredItems = [];
-        let selectedItems = new Set();
-        let currentItemsPage = 1;
-        const itemsPerModalPage = 20;
-
-        // Load jobs function
-        async function loadJobs(page) {
-            try {
-                const response = await fetcher('/api/repair/jobs');
-                if (!response.ok) throw new Error('Failed to fetch jobs');
-
-                allJobs = await response.json();
-                renderJobsTable(page);
-            } catch (error) {
-                console.error('Error loading jobs:', error);
-                createToast(`Error loading jobs: ${error.message}`, 'error');
-            }
-        }
-
-        // Return status text and class based on job status
-        function getStatus(status) {
-            switch (status) {
-                case 'started':
-                    return {text: 'In Progress', class: 'text-primary'};
-                case 'failed':
-                    return {text: 'Failed', class: 'text-danger'};
-                case 'completed':
-                    return {text: 'Completed', class: 'text-success'};
-                case 'pending':
-                    return {text: 'Pending', class: 'text-warning'};
-                case 'cancelled':
-                    return {text: 'Cancelled', class: 'text-secondary'};
-                case 'processing':
-                    return {text: 'Processing', class: 'text-info'};
-                default:
-                    return {text: status.charAt(0).toUpperCase() + status.slice(1), class: 'text-secondary'};
-            }
-        }
-
-        // Render jobs table with pagination (keeping existing implementation)
-        function renderJobsTable(page) {
-            const tableBody = document.getElementById('jobsTableBody');
-            const paginationElement = document.getElementById('jobsPagination');
-            const noJobsMessage = document.getElementById('noJobsMessage');
-            const deleteSelectedBtn = document.getElementById('deleteSelectedJobs');
-
-            // Clear previous content
-            tableBody.innerHTML = '';
-            paginationElement.innerHTML = '';
-
-            document.getElementById('selectAllJobs').checked = false;
-            deleteSelectedBtn.disabled = true;
-
-            if (allJobs.length === 0) {
-                noJobsMessage.classList.remove('d-none');
-                return;
-            }
-
-            noJobsMessage.classList.add('d-none');
-
-            // Calculate pagination
-            const totalPages = Math.ceil(allJobs.length / itemsPerPage);
-            const startIndex = (page - 1) * itemsPerPage;
-            const endIndex = Math.min(startIndex + itemsPerPage, allJobs.length);
-
-            // Display jobs for current page
-            for (let i = startIndex; i < endIndex; i++) {
-                const job = allJobs[i];
-                const row = document.createElement('tr');
-
-                // Format date
-                const startedDate = new Date(job.created_at);
-                const formattedDate = startedDate.toLocaleString();
-
-                // Determine status
-                let status = getStatus(job.status);
-                let canDelete = job.status !== "started";
-                let totalItems = job.broken_items ? Object.values(job.broken_items).reduce((sum, arr) => sum + arr.length, 0) : 0;
-
-                row.innerHTML = `
-                    <td>
-                        <div class="form-check">
-                            <input class="form-check-input job-checkbox" type="checkbox" value="${job.id}"
-                                ${canDelete ? '' : 'disabled'} data-can-delete="${canDelete}">
+        <div class="space-y-6">
+            <!-- Job Information -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="card bg-base-200">
+                    <div class="card-body">
+                        <h4 class="card-title text-lg mb-4">Job Information</h4>
+                        <div class="space-y-3">
+                            <div class="flex justify-between">
+                                <span class="font-medium">Job ID:</span>
+                                <span class="font-mono" id="modalJobId">-</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="font-medium">Status:</span>
+                                <span id="modalJobStatus">-</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="font-medium">Started:</span>
+                                <span id="modalJobStarted">-</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="font-medium">Completed:</span>
+                                <span id="modalJobCompleted">-</span>
+                            </div>
                         </div>
-                    </td>
-                    <td><a href="#" class="text-link view-job" data-id="${job.id}"><small>${job.id.substring(0, 8)}</small></a></td>
-                    <td>${job.arrs.join(', ')}</td>
-                    <td><small>${formattedDate}</small></td>
-                    <td><span class="${status.class}">${status.text}</span></td>
-                    <td>${totalItems}</td>
-                    <td>
-                        ${job.status === "pending" ?
-                    `<button class="btn btn-sm btn-primary process-job" data-id="${job.id}">
-                                <i class="bi bi-play-fill"></i> Process
-                            </button>` :
-                    `<button class="btn btn-sm btn-primary" disabled>
-                                <i class="bi bi-eye"></i> Process
-                            </button>`
-                }
-                        ${(job.status === "started" || job.status === "processing") ?
-                    `<button class="btn btn-sm btn-warning stop-job" data-id="${job.id}">
-                                <i class="bi bi-stop-fill"></i> Stop
-                            </button>` :
-                    ''
-                }
-                        ${canDelete ?
-                    `<button class="btn btn-sm btn-danger delete-job" data-id="${job.id}">
-                                <i class="bi bi-trash"></i>
-                            </button>` :
-                    `<button class="btn btn-sm btn-danger" disabled>
-                                <i class="bi bi-trash"></i>
-                            </button>`
-                }
-                    </td>
-                `;
-
-                tableBody.appendChild(row);
-            }
-
-            // Create pagination (keeping existing implementation)
-            if (totalPages > 1) {
-                const prevLi = document.createElement('li');
-                prevLi.className = `page-item ${page === 1 ? 'disabled' : ''}`;
-                prevLi.innerHTML = `<a class="page-link" href="#" aria-label="Previous" ${page !== 1 ? `data-page="${page - 1}"` : ''}>
-                    <span aria-hidden="true">&laquo;</span>
-                </a>`;
-                paginationElement.appendChild(prevLi);
-
-                for (let i = 1; i <= totalPages; i++) {
-                    const pageLi = document.createElement('li');
-                    pageLi.className = `page-item ${i === page ? 'active' : ''}`;
-                    pageLi.innerHTML = `<a class="page-link" href="#" data-page="${i}">${i}</a>`;
-                    paginationElement.appendChild(pageLi);
-                }
-
-                const nextLi = document.createElement('li');
-                nextLi.className = `page-item ${page === totalPages ? 'disabled' : ''}`;
-                nextLi.innerHTML = `<a class="page-link" href="#" aria-label="Next" ${page !== totalPages ? `data-page="${page + 1}"` : ''}>
-                    <span aria-hidden="true">&raquo;</span>
-                </a>`;
-                paginationElement.appendChild(nextLi);
-            }
-
-            // Add event listeners (keeping existing implementation)
-            document.querySelectorAll('#jobsPagination a[data-page]').forEach(link => {
-                link.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    currentPage = parseInt(e.currentTarget.dataset.page);
-                    renderJobsTable(currentPage);
-                });
-            });
-
-            document.querySelectorAll('.job-checkbox').forEach(checkbox => {
-                checkbox.addEventListener('change', updateDeleteButtonState);
-            });
-
-            document.querySelectorAll('.delete-job').forEach(button => {
-                button.addEventListener('click', (e) => {
-                    const jobId = e.currentTarget.dataset.id;
-                    deleteJob(jobId);
-                });
-            });
-
-            document.querySelectorAll('.process-job').forEach(button => {
-                button.addEventListener('click', (e) => {
-                    const jobId = e.currentTarget.dataset.id;
-                    processJob(jobId);
-                });
-            });
-
-            document.querySelectorAll('.view-job').forEach(button => {
-                button.addEventListener('click', (e) => {
-                    const jobId = e.currentTarget.dataset.id;
-                    viewJobDetails(jobId);
-                });
-            });
-
-            document.querySelectorAll('.stop-job').forEach(button => {
-                button.addEventListener('click', (e) => {
-                    const jobId = e.currentTarget.dataset.id;
-                    stopJob(jobId);
-                });
-            });
-        }
-
-        // Helper functions to determine file type and format size
-        function getFileType(path) {
-            const movieExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm'];
-            const tvIndicators = ['/TV/', '/Television/', '/Series/', '/Shows/'];
-
-            const pathLower = path.toLowerCase();
-
-            if (tvIndicators.some(indicator => pathLower.includes(indicator.toLowerCase()))) {
-                return 'tv';
-            }
-
-            if (movieExtensions.some(ext => pathLower.endsWith(ext))) {
-                return pathLower.includes('/movies/') || pathLower.includes('/film') ? 'movie' : 'tv';
-            }
-
-            return 'other';
-        }
-
-        function formatFileSize(bytes) {
-            if (!bytes || bytes === 0) return 'Unknown';
-            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(1024));
-            return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
-        }
-
-        // modal functions
-        function processItemsData(brokenItems) {
-            const items = [];
-
-            for (const [arrName, itemsArray] of Object.entries(brokenItems)) {
-                if (itemsArray && itemsArray.length > 0) {
-                    itemsArray.forEach(item => {
-                        items.push({
-                            id: item.fileId,
-                            arr: arrName,
-                            path: item.path,
-                            size: item.size || 0,
-                            type: getFileType(item.path),
-                            selected: false
-                        });
-                    });
-                }
-            }
-
-            return items;
-        }
-
-        function applyFilters() {
-            const searchTerm = document.getElementById('itemSearchInput').value.toLowerCase();
-            const arrFilter = document.getElementById('arrFilterSelect').value;
-            const pathFilter = document.getElementById('pathFilterSelect').value;
-
-            filteredItems = allBrokenItems.filter(item => {
-                const matchesSearch = !searchTerm || item.path.toLowerCase().includes(searchTerm);
-                const matchesArr = !arrFilter || item.arr === arrFilter;
-                const matchesPath = !pathFilter || item.type === pathFilter;
-
-                return matchesSearch && matchesArr && matchesPath;
-            });
-
-            currentItemsPage = 1;
-            renderBrokenItemsTable();
-            updateItemsStats();
-        }
-
-        function renderBrokenItemsTable() {
-            const tableBody = document.getElementById('brokenItemsTableBody');
-            const paginationElement = document.getElementById('itemsPagination');
-            const noItemsMessage = document.getElementById('noBrokenItemsMessage');
-            const noFilteredMessage = document.getElementById('noFilteredItemsMessage');
-
-            tableBody.innerHTML = '';
-            paginationElement.innerHTML = '';
-
-            if (allBrokenItems.length === 0) {
-                noItemsMessage.classList.remove('d-none');
-                noFilteredMessage.classList.add('d-none');
-                return;
-            }
-
-            if (filteredItems.length === 0) {
-                noItemsMessage.classList.add('d-none');
-                noFilteredMessage.classList.remove('d-none');
-                return;
-            }
-
-            noItemsMessage.classList.add('d-none');
-            noFilteredMessage.classList.add('d-none');
-
-            // Calculate pagination
-            const totalPages = Math.ceil(filteredItems.length / itemsPerModalPage);
-            const startIndex = (currentItemsPage - 1) * itemsPerModalPage;
-            const endIndex = Math.min(startIndex + itemsPerModalPage, filteredItems.length);
-
-            // Display items for current page
-            for (let i = startIndex; i < endIndex; i++) {
-                const item = filteredItems[i];
-                const row = document.createElement('tr');
-                row.className = `item-row ${selectedItems.has(item.id) ? 'selected' : ''}`;
-                row.dataset.itemId = item.id;
-
-                row.innerHTML = `
-                    <td><span class="badge bg-info">${item.arr}</span></td>
-                    <td><small class="text-muted" title="${item.path}">${item.path}</small></td>
-                    <td><span class="badge ${item.type === 'movie' ? 'bg-primary' : item.type === 'tv' ? 'bg-success' : 'bg-secondary'}">${item.type}</span></td>
-                    <td><small>${formatFileSize(item.size)}</small></td>
-                `;
-
-                tableBody.appendChild(row);
-            }
-
-            // Create pagination
-            if (totalPages > 1) {
-                const prevLi = document.createElement('li');
-                prevLi.className = `page-item ${currentItemsPage === 1 ? 'disabled' : ''}`;
-                prevLi.innerHTML = `<a class="page-link" href="#" aria-label="Previous" ${currentItemsPage !== 1 ? `data-items-page="${currentItemsPage - 1}"` : ''}>
-                    <span aria-hidden="true">&laquo;</span>
-                </a>`;
-                paginationElement.appendChild(prevLi);
-
-                for (let i = 1; i <= totalPages; i++) {
-                    const pageLi = document.createElement('li');
-                    pageLi.className = `page-item ${i === currentItemsPage ? 'active' : ''}`;
-                    pageLi.innerHTML = `<a class="page-link" href="#" data-items-page="${i}">${i}</a>`;
-                    paginationElement.appendChild(pageLi);
-                }
-
-                const nextLi = document.createElement('li');
-                nextLi.className = `page-item ${currentItemsPage === totalPages ? 'disabled' : ''}`;
-                nextLi.innerHTML = `<a class="page-link" href="#" aria-label="Next" ${currentItemsPage !== totalPages ? `data-items-page="${currentItemsPage + 1}"` : ''}>
-                    <span aria-hidden="true">&raquo;</span>
-                </a>`;
-                paginationElement.appendChild(nextLi);
-            }
-
-            // Add pagination event listeners
-            document.querySelectorAll('#itemsPagination a[data-items-page]').forEach(link => {
-                link.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    currentItemsPage = parseInt(e.currentTarget.dataset.itemsPage);
-                    renderBrokenItemsTable();
-                });
-            });
-        }
-
-        function updateItemsStats() {
-            document.getElementById('totalItemsCount').textContent = allBrokenItems.length;
-
-            // Update footer stats
-            const footerStats = document.getElementById('modalFooterStats');
-            footerStats.textContent = `Total: ${allBrokenItems.length} | Filtered: ${filteredItems.length}`;
-        }
-
-        function populateArrFilter() {
-            const arrFilter = document.getElementById('arrFilterSelect');
-            arrFilter.innerHTML = '<option value="">All Arrs</option>';
-
-            const uniqueArrs = [...new Set(allBrokenItems.map(item => item.arr))];
-            uniqueArrs.forEach(arr => {
-                const option = document.createElement('option');
-                option.value = arr;
-                option.textContent = arr;
-                arrFilter.appendChild(option);
-            });
-        }
-
-        // Filter event listeners
-        document.getElementById('itemSearchInput').addEventListener('input', applyFilters);
-        document.getElementById('arrFilterSelect').addEventListener('change', applyFilters);
-        document.getElementById('pathFilterSelect').addEventListener('change', applyFilters);
-
-        document.getElementById('clearFiltersBtn').addEventListener('click', () => {
-            document.getElementById('itemSearchInput').value = '';
-            document.getElementById('arrFilterSelect').value = '';
-            document.getElementById('pathFilterSelect').value = '';
-            applyFilters();
-        });
-
-        function viewJobDetails(jobId) {
-            // Find the job
-            const job = allJobs.find(j => j.id === jobId);
-            if (!job) return;
-
-            currentJob = job;
-            selectedItems.clear();
-            currentItemsPage = 1;
-
-            // Prepare modal data
-            document.getElementById('modalJobId').textContent = job.id.substring(0, 8);
-
-            // Format dates
-            const startedDate = new Date(job.created_at);
-            document.getElementById('modalJobStarted').textContent = startedDate.toLocaleString();
-
-            if (job.finished_at) {
-                const completedDate = new Date(job.finished_at);
-                document.getElementById('modalJobCompleted').textContent = completedDate.toLocaleString();
-            } else {
-                document.getElementById('modalJobCompleted').textContent = 'N/A';
-            }
-
-            // Set status with color
-            let status = getStatus(job.status);
-            document.getElementById('modalJobStatus').innerHTML = `<span class="${status.class}">${status.text}</span>`;
-
-            // Set other job details
-            document.getElementById('modalJobArrs').textContent = job.arrs.join(', ');
-            document.getElementById('modalJobMediaIds').textContent = job.media_ids && job.media_ids.length > 0 ?
-                job.media_ids.join(', ') : 'All';
-            document.getElementById('modalJobAutoProcess').textContent = job.auto_process ? 'Yes' : 'No';
-
-            // Show/hide error message
-            const errorContainer = document.getElementById('errorContainer');
-            if (job.error) {
-                document.getElementById('modalJobError').textContent = job.error;
-                errorContainer.classList.remove('d-none');
-            } else {
-                errorContainer.classList.add('d-none');
-            }
-
-            // Process button visibility
-            const processBtn = document.getElementById('processJobBtn');
-            if (job.status === 'pending') {
-                processBtn.classList.remove('d-none');
-                processBtn.onclick = () => {
-                    processJob(job.id);
-                    const modal = bootstrap.Modal.getInstance(document.getElementById('jobDetailsModal'));
-                    modal.hide();
-                };
-            } else {
-                processBtn.classList.add('d-none');
-            }
-
-            // Stop button visibility
-            const stopBtn = document.getElementById('stopJobBtn');
-            if (job.status === 'started' || job.status === 'processing') {
-                stopBtn.classList.remove('d-none');
-                stopBtn.onclick = () => {
-                    stopJob(job.id);
-                    const modal = bootstrap.Modal.getInstance(document.getElementById('jobDetailsModal'));
-                    modal.hide();
-                };
-            } else {
-                stopBtn.classList.add('d-none');
-            }
-
-            // Process broken items data
-            if (job.broken_items && Object.entries(job.broken_items).length > 0) {
-                allBrokenItems = processItemsData(job.broken_items);
-                filteredItems = [...allBrokenItems];
-                populateArrFilter();
-                renderBrokenItemsTable();
-            } else {
-                allBrokenItems = [];
-                filteredItems = [];
-                renderBrokenItemsTable();
-            }
-
-            updateItemsStats();
-
-            // Show the modal
-            const modal = new bootstrap.Modal(document.getElementById('jobDetailsModal'));
-            modal.show();
-        }
-
-        // Keep existing functions (selectAllJobs, updateDeleteButtonState, deleteJob, etc.)
-        document.getElementById('selectAllJobs').addEventListener('change', function() {
-            const isChecked = this.checked;
-            document.querySelectorAll('.job-checkbox:not(:disabled)').forEach(checkbox => {
-                checkbox.checked = isChecked;
-            });
-            updateDeleteButtonState();
-        });
-
-        function updateDeleteButtonState() {
-            const deleteBtn = document.getElementById('deleteSelectedJobs');
-            const selectedCheckboxes = document.querySelectorAll('.job-checkbox:checked');
-            deleteBtn.disabled = selectedCheckboxes.length === 0;
-        }
-
-        document.getElementById('deleteSelectedJobs').addEventListener('click', async () => {
-            const selectedIds = Array.from(
-                document.querySelectorAll('.job-checkbox:checked')
-            ).map(checkbox => checkbox.value);
-
-            if (!selectedIds.length) return;
-
-            if (confirm(`Are you sure you want to delete ${selectedIds.length} job(s)?`)) {
-                await deleteMultipleJobs(selectedIds);
-            }
-        });
-
-        async function deleteJob(jobId) {
-            if (confirm('Are you sure you want to delete this job?')) {
-                try {
-                    const response = await fetcher(`/api/repair/jobs`, {
-                        method: 'DELETE',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ ids: [jobId] })
-                    });
-
-                    if (!response.ok) throw new Error(await response.text());
-                    createToast('Job deleted successfully');
-                    await loadJobs(currentPage);
-                } catch (error) {
-                    createToast(`Error deleting job: ${error.message}`, 'error');
-                }
-            }
-        }
-
-        async function deleteMultipleJobs(jobIds) {
-            try {
-                const response = await fetcher(`/api/repair/jobs`, {
-                    method: 'DELETE',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ ids: jobIds })
-                });
-
-                if (!response.ok) throw new Error(await response.text());
-                createToast(`${jobIds.length} job(s) deleted successfully`);
-                await loadJobs(currentPage);
-            } catch (error) {
-                createToast(`Error deleting jobs: ${error.message}`, 'error');
-            }
-        }
-
-        async function processJob(jobId) {
-            try {
-                const response = await fetcher(`/api/repair/jobs/${jobId}/process`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                });
-
-                if (!response.ok) throw new Error(await response.text());
-                createToast('Job processing started successfully');
-                await loadJobs(currentPage);
-            } catch (error) {
-                createToast(`Error processing job: ${error.message}`, 'error');
-            }
-        }
-
-        async function stopJob(jobId) {
-            if (confirm('Are you sure you want to stop this job?')) {
-                try {
-                    const response = await fetcher(`/api/repair/jobs/${jobId}/stop`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                    });
-
-                    if (!response.ok) throw new Error(await response.text());
-                    createToast('Job stop requested successfully');
-                    await loadJobs(currentPage);
-                } catch (error) {
-                    createToast(`Error stopping job: ${error.message}`, 'error');
-                }
-            }
-        }
-
-        document.getElementById('refreshJobs').addEventListener('click', () => {
-            loadJobs(currentPage);
-        });
-
-        // Load jobs on page load
-        loadJobs(1);
-    });
-</script>
+                    </div>
+                </div>
+
+                <div class="card bg-base-200">
+                    <div class="card-body">
+                        <h4 class="card-title text-lg mb-4">Configuration</h4>
+                        <div class="space-y-3">
+                            <div class="flex justify-between">
+                                <span class="font-medium">Arr Services:</span>
+                                <span id="modalJobArrs">-</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="font-medium">Media IDs:</span>
+                                <span id="modalJobMediaIds">-</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="font-medium">Auto Process:</span>
+                                <span id="modalJobAutoProcess">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Error Message -->
+            <div id="errorContainer" class="alert alert-error hidden">
+                <i class="bi bi-exclamation-triangle"></i>
+                <div>
+                    <strong>Error:</strong>
+                    <span id="modalJobError">-</span>
+                </div>
+            </div>
+
+            <!-- Broken Items Section -->
+            <div class="card bg-base-200">
+                <div class="card-body">
+                    <div class="flex justify-between items-center mb-4">
+                        <h4 class="card-title text-lg">
+                            Broken Items
+                            <div class="badge badge-secondary" id="totalItemsCount">0</div>
+                        </h4>
+                    </div>
+
+                    <!-- Filters -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                        <div class="form-control">
+                            <input type="text"
+                                   class="input input-bordered input-sm"
+                                   id="itemSearchInput"
+                                   placeholder="Search by path...">
+                        </div>
+                        <div class="form-control">
+                            <select class="select select-bordered select-sm" id="arrFilterSelect">
+                                <option value="">All Arrs</option>
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <select class="select select-bordered select-sm" id="pathFilterSelect">
+                                <option value="">All Types</option>
+                                <option value="movie">Movies</option>
+                                <option value="tv">TV Shows</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <button class="btn btn-outline btn-sm w-full" id="clearFiltersBtn">
+                                <i class="bi bi-x-circle mr-1"></i>Clear
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Items Table -->
+                    <div class="overflow-x-auto max-h-96 border border-base-300 rounded-lg">
+                        <table class="table table-sm table-hover">
+                            <thead class="sticky top-0 bg-base-300">
+                            <tr>
+                                <th class="font-semibold">Arr</th>
+                                <th class="font-semibold">Path</th>
+                                <th class="font-semibold w-20">Type</th>
+                                <th class="font-semibold w-24">Size</th>
+                            </tr>
+                            </thead>
+                            <tbody id="brokenItemsTableBody">
+                            <!-- Broken items will be loaded here -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Items Pagination -->
+                    <div class="flex justify-center mt-4">
+                        <div class="join" id="itemsPagination">
+                            <!-- Pagination will be generated here -->
+                        </div>
+                    </div>
+
+                    <!-- No Items Messages -->
+                    <div id="noBrokenItemsMessage" class="text-center py-8 hidden">
+                        <div class="text-4xl text-base-content/30 mb-2">
+                            <i class="bi bi-check-circle"></i>
+                        </div>
+                        <p class="text-base-content/70">No broken items found</p>
+                    </div>
+
+                    <div id="noFilteredItemsMessage" class="text-center py-8 hidden">
+                        <div class="text-4xl text-base-content/30 mb-2">
+                            <i class="bi bi-funnel"></i>
+                        </div>
+                        <p class="text-base-content/70">No items match the current filters</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-action">
+            <div class="flex-1">
+                <small class="text-base-content/60" id="modalFooterStats">-</small>
+            </div>
+        </div>
+    </div>
+</dialog>
 {{ end }}

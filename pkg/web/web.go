@@ -47,7 +47,7 @@ type RepairRequest struct {
 	AutoProcess bool     `json:"autoProcess"`
 }
 
-//go:embed templates/*
+//go:embed templates/* assets/*
 var content embed.FS
 
 type Web struct {
