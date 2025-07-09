@@ -787,8 +787,8 @@ func (tb *Torbox) GetMountPath() string {
 }
 
 func (tb *Torbox) DeleteDownloadLink(linkId string) error {
-	url := fmt.Sprintf("%s/api/torrents/controltorrent", tb.Host)
-	payload := map[string]string{"torrent_id": linkId, "operation": "Delete"}
+	url := fmt.Sprintf("%s/api/torrents/controltorrent/%s", tb.Host, linkId)
+	payload := map[string]string{"torrent_id": linkId, "action": "Delete"}
 	jsonPayload, _ := json.Marshal(payload)
 	req, _ := http.NewRequest(http.MethodDelete, url, bytes.NewBuffer(jsonPayload))
 	if _, err := tb.client.MakeRequest(req); err != nil {
@@ -799,8 +799,78 @@ func (tb *Torbox) DeleteDownloadLink(linkId string) error {
 }
 
 func (tb *Torbox) GetAvailableSlots() (int, error) {
-	//TODO: Implement the logic to check available slots for Torbox
-	return 0, fmt.Errorf("not implemented")
+	// Get user profile to determine plan limits
+	url := fmt.Sprintf("%s/api/user/me?settings=false", tb.Host)
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	resp, err := tb.client.MakeRequest(req)
+	if err != nil {
+		tb.logger.Error().Err(err).Msg("Failed to fetch user profile for slot calculation")
+		return 0, err
+	}
+
+	var userRes UserResponse
+	err = json.Unmarshal(resp, &userRes)
+	if err != nil {
+		tb.logger.Error().Err(err).Msg("Failed to unmarshal user profile response")
+		return 0, err
+	}
+
+	if !userRes.Success || userRes.Data == nil {
+		tb.logger.Error().Interface("error", userRes.Error).Msg("Torbox API error fetching user profile")
+		return 0, fmt.Errorf("torbox API error: %v", userRes.Error)
+	}
+
+	userData := *userRes.Data
+
+	// Calculate max slots based on plan and additional slots
+	var baseSlotsForPlan int
+	switch userData.Plan {
+	case 1: // Plan 1 (likely basic/essential)
+		baseSlotsForPlan = 3
+	case 2: // Plan 2 (likely standard)
+		baseSlotsForPlan = 5
+	case 3: // Plan 3 (likely pro)
+		baseSlotsForPlan = 10
+	default:
+		// Default to a reasonable number for unknown plans
+		baseSlotsForPlan = 3
+		tb.logger.Warn().Int("plan", userData.Plan).Msg("Unknown Torbox plan, using default slot count")
+	}
+
+	maxSlots := baseSlotsForPlan + userData.AdditionalConcurrentSlots
+
+	// Get all torrents to count active ones
+	torrents, err := tb.GetTorrents()
+	if err != nil {
+		tb.logger.Error().Err(err).Msg("Failed to get torrents for slot calculation")
+		return 0, err
+	}
+
+	// Count active torrents (downloading, seeding, etc.)
+	activeTorrents := 0
+	for _, torrent := range torrents {
+		// Count torrents that are actively downloading or processing
+		if torrent.Status == "downloading" || torrent.Progress < 100 {
+			activeTorrents++
+		}
+	}
+
+	// Calculate available slots (ensure we don't go negative)
+	availableSlots := maxSlots - activeTorrents
+	if availableSlots < 0 {
+		availableSlots = 0
+	}
+
+	tb.logger.Debug().
+		Int("plan", userData.Plan).
+		Int("base_slots", baseSlotsForPlan).
+		Int("additional_slots", userData.AdditionalConcurrentSlots).
+		Int("max_slots", maxSlots).
+		Int("active_torrents", activeTorrents).
+		Int("available_slots", availableSlots).
+		Msg("Calculated available slots for Torbox based on user plan")
+
+	return availableSlots, nil
 }
 
 func (tb *Torbox) Accounts() *types.Accounts {
