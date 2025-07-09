@@ -169,14 +169,14 @@ func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
 	return torrent, nil
 }
 
-func getTorboxStatus(status string, finished bool, logger zerolog.Logger) string {
-	logger.Trace().
+func (tb *Torbox) getTorboxStatus(status string, finished bool) string {
+	tb.logger.Trace().
 		Str("download_state", status).
 		Bool("download_finished", finished).
 		Msg("Determining torrent status")
 
 	if finished {
-		logger.Trace().
+		tb.logger.Trace().
 			Str("download_state", status).
 			Bool("download_finished", finished).
 			Str("determined_status", "downloaded").
@@ -196,7 +196,7 @@ func getTorboxStatus(status string, finished bool, logger zerolog.Logger) string
 		determinedStatus = "error"
 	}
 
-	logger.Trace().
+	tb.logger.Trace().
 		Str("download_state", status).
 		Bool("download_finished", finished).
 		Str("determined_status", determinedStatus).
@@ -229,7 +229,7 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 		Bytes:            data.Size,
 		Folder:           data.Name,
 		Progress:         data.Progress * 100,
-		Status:           getTorboxStatus(data.DownloadState, data.DownloadFinished, tb.logger),
+		Status:           tb.getTorboxStatus(data.DownloadState, data.DownloadFinished),
 		Speed:            data.DownloadSpeed,
 		Seeders:          data.Seeds,
 		Filename:         data.Name,
@@ -399,7 +399,7 @@ func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
 	t.Bytes = data.Size
 	t.Folder = name
 	t.Progress = data.Progress * 100
-	t.Status = getTorboxStatus(data.DownloadState, data.DownloadFinished, tb.logger)
+	t.Status = tb.getTorboxStatus(data.DownloadState, data.DownloadFinished)
 	t.Speed = data.DownloadSpeed
 	t.Seeders = data.Seeds
 	t.Filename = name
@@ -688,7 +688,7 @@ func (tb *Torbox) GetTorrents() ([]*types.Torrent, error) {
 			Bytes:            data.Size,
 			Folder:           data.Name,
 			Progress:         data.Progress * 100,
-			Status:           getTorboxStatus(data.DownloadState, data.DownloadFinished, tb.logger),
+			Status:           tb.getTorboxStatus(data.DownloadState, data.DownloadFinished),
 			Speed:            data.DownloadSpeed,
 			Seeders:          data.Seeds,
 			Filename:         data.Name,
