@@ -167,7 +167,7 @@ func NewDebridCache(dc config.Debrid, client types.Client) *Cache {
 		ready: make(chan struct{}),
 	}
 
-	c.listingDebouncer = utils.NewDebouncer[bool](100*time.Millisecond, func(refreshRclone bool) {
+	c.listingDebouncer = utils.NewDebouncer(100*time.Millisecond, func(refreshRclone bool) {
 		c.RefreshListings(refreshRclone)
 	})
 	return c
@@ -210,7 +210,7 @@ func (c *Cache) Reset() {
 	c.downloadLinkRequests = sync.Map{}
 
 	// 5. Rebuild the listing debouncer
-	c.listingDebouncer = utils.NewDebouncer[bool](
+	c.listingDebouncer = utils.NewDebouncer(
 		100*time.Millisecond,
 		func(refreshRclone bool) {
 			c.RefreshListings(refreshRclone)
@@ -349,7 +349,7 @@ func (c *Cache) load(ctx context.Context) (map[string]CachedTorrent, error) {
 	for _, file := range jsonFiles {
 		select {
 		case <-ctx.Done():
-			break // Context cancelled
+			return nil, ctx.Err() // Context cancelled, exit early
 		default:
 			workChan <- file
 		}
@@ -470,7 +470,7 @@ func (c *Cache) sync(ctx context.Context, torrents []*types.Torrent) error {
 		case workChan <- t:
 			// Work sent successfully
 		case <-ctx.Done():
-			break // Context cancelled
+			return nil // Context cancelled, exit early
 		}
 	}
 
