@@ -12,10 +12,6 @@ torrents.json
 .ven/**
 docs/**
 
-
-# Don't copy built assets to avoid conflicts
-pkg/web/assets/build/
-
 # Don't copy node modules
 node_modules/
 
@@ -25,11 +21,6 @@ node_modules/
 *.md
 .env*
 *.log
-
-# Don't copy source assets to the Go builder (they're copied from asset-builder)
-pkg/web/assets/css/
-pkg/web/assets/js/
-pkg/web/assets/images/
 
 # Build artifacts
 decypharr
