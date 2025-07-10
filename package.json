@@ -8,7 +8,7 @@
     "minify-css": "node scripts/minify-css.js",
     "download-assets": "node scripts/download-assets.js",
     "build": "npm run build-css && npm run minify-js && npm run minify-css && npm run download-assets",
-    "dev": "npm run build-assets && air"
+    "dev": "npm run build && air"
   },
   "devDependencies": {
     "tailwindcss": "^3.4.0",
