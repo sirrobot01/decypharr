@@ -6,20 +6,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Decypharr - {{.Title}}</title>
 
-    <!-- DaisyUI and Tailwind CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet" type="text/css" />
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="{{.URLBase}}assets/css/styles.css" rel="stylesheet" type="text/css" />
+    <link href="{{.URLBase}}assets/css/bootstrap-icons.css" rel="stylesheet" type="text/css" />
 
-    <!-- Icons -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.css" rel="stylesheet">
-
-    <!-- Custom Styles -->
-    <link href="{{.URLBase}}assets/css/styles.css" rel="stylesheet">
-
-    <link rel="apple-touch-icon" sizes="180x180" href="{{.URLBase}}assetsfavicon/apple-touch-icon.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="{{.URLBase}}assets/favicon/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="{{.URLBase}}assets/favicon/favicon-16x16.png">
-    <link rel="manifest" href="{{.URLBase}}assets/favicon/site.webmanifest">
+    <link rel="apple-touch-icon" sizes="180x180" href="{{.URLBase}}images/favicon/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{.URLBase}}images/favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{.URLBase}}images/favicon/favicon-16x16.png">
+    <link rel="manifest" href="{{.URLBase}}images/favicon/site.webmanifest">
 
     <!-- Preload JavaScript -->
     <link rel="preload" href="{{.URLBase}}assets/js/common.js" as="script">
@@ -79,7 +72,7 @@
         </div>
         <a class="btn btn-ghost text-xl font-bold text-primary group" href="{{.URLBase}}">
             <!-- Logo -->
-            <img src="{{.URLBase}}assets/logo.svg" alt="Decypharr Logo" class="w-8 h-8 inline-block mr-2">
+            <img src="{{.URLBase}}images/logo.svg" alt="Decypharr Logo" class="w-8 h-8 inline-block mr-2">
             <span class="hidden sm:inline bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">Decypharr</span>
         </a>
     </div>
@@ -188,7 +181,7 @@
 </footer>
 
 <!-- Scripts -->
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="{{.URLBase}}assets/js/jquery-3.7.1.min.js"></script>
 <script src="{{.URLBase}}assets/js/common.js"></script>
 
 <!-- Page-specific scripts -->

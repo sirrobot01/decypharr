@@ -1,10 +1,12 @@
-/* Custom Styles for Decypharr */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 
 /* Smooth transitions for all interactive elements */
 * {
     transition: all 0.2s ease-in-out;
 }
-
 
 
 /* Context menu styles */

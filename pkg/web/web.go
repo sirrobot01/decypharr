@@ -47,8 +47,14 @@ type RepairRequest struct {
 	AutoProcess bool     `json:"autoProcess"`
 }
 
-//go:embed templates/* assets/*
+//go:embed templates/*
 var content embed.FS
+
+//go:embed assets/build
+var assetsEmbed embed.FS
+
+//go:embed assets/images
+var imagesEmbed embed.FS
 
 type Web struct {
 	logger    zerolog.Logger
