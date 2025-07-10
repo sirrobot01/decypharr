@@ -973,7 +973,7 @@ func (tb *Torbox) GetTorrents() ([]*types.Torrent, error) {
 
 		// If we got fewer torrents than the page size, we've reached the end
 		if len(pageData) < pageSize {
-			tb.logger.Info().
+			tb.logger.Trace().
 				Int("total_torrents", len(allTorrents)).
 				Int("total_pages", (offset/pageSize)+1).
 				Msg("Successfully retrieved all torrents with pagination")
