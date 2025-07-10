@@ -1,0 +1,19 @@
+{
+  "name": "decypharr",
+  "version": "1.0.0",
+  "description": "Media management tool",
+  "scripts": {
+    "build-css": "tailwindcss -i ./pkg/web/assets/styles.css -o ./pkg/web/assets/build/css/styles.css --minify",
+    "minify-js": "node scripts/minify-js.js",
+    "minify-css": "node scripts/minify-css.js",
+    "download-assets": "node scripts/download-assets.js",
+    "build": "npm run build-css && npm run minify-js && npm run minify-css && npm run download-assets",
+    "dev": "npm run build-assets && air"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.0",
+    "daisyui": "^4.12.10",
+    "terser": "^5.24.0",
+    "clean-css": "^5.3.3"
+  }
+}

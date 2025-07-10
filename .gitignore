@@ -13,3 +13,5 @@ torrents.json
 logs/**
 auth.json
 .ven/
+.env
+node_modules/

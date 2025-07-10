@@ -9,12 +9,18 @@ import (
 func (wb *Web) Routes() http.Handler {
 	r := chi.NewRouter()
 
-	staticFS, err := fs.Sub(content, "assets")
+	// Load static files from embedded filesystem
+	staticFS, err := fs.Sub(assetsEmbed, "assets/build")
+	if err != nil {
+		panic(err)
+	}
+	imagesFS, err := fs.Sub(imagesEmbed, "assets/images")
 	if err != nil {
 		panic(err)
 	}
 
 	r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.FS(staticFS))))
+	r.Handle("/images/*", http.StripPrefix("/images/", http.FileServer(http.FS(imagesFS))))
 
 	r.Get("/login", wb.LoginHandler)
 	r.Post("/login", wb.LoginHandler)
