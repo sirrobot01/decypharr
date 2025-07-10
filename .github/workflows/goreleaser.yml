@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  packages: write
 
 jobs:
   goreleaser:
@@ -22,29 +21,6 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: '1.24'
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
-
-      - name: Install Node.js dependencies
-        run: npm ci
-
-      - name: Build and minify assets
-        run: npm run build-assets
-
-      - name: Verify assets were built
-        run: |
-          echo "🔍 Verifying built assets..."
-          ls -la pkg/web/assets/build/
-          echo ""
-          echo "📊 Asset sizes:"
-          du -sh pkg/web/assets/build/* 2>/dev/null || echo "No assets found"
-          echo ""
-          echo "📁 Total build directory size:"
-          du -sh pkg/web/assets/build/
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v5
