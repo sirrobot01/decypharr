@@ -21,6 +21,7 @@ class TorrentDashboard {
             sortSelector: document.getElementById('sortSelector'),
             selectAll: document.getElementById('selectAll'),
             batchDeleteBtn: document.getElementById('batchDeleteBtn'),
+            batchDeleteDebridBtn: document.getElementById('batchDeleteDebridBtn'),
             refreshBtn: document.getElementById('refreshBtn'),
             torrentContextMenu: document.getElementById('torrentContextMenu'),
             paginationControls: document.getElementById('paginationControls'),
@@ -43,6 +44,7 @@ class TorrentDashboard {
 
         // Batch delete
         this.refs.batchDeleteBtn.addEventListener('click', () => this.deleteSelectedTorrents());
+        this.refs.batchDeleteDebridBtn.addEventListener('click', () => this.deleteSelectedTorrents(true));
 
         // Select all checkbox
         this.refs.selectAll.addEventListener('change', (e) => this.toggleSelectAll(e.target.checked));
@@ -260,6 +262,7 @@ class TorrentDashboard {
     torrentRowTemplate(torrent) {
         const progressPercent = (torrent.progress * 100).toFixed(1);
         const isSelected = this.state.selectedTorrents.has(torrent.hash);
+        let addedOn = new Date(torrent.added_on).toLocaleString();
 
         return `
             <tr data-hash="${torrent.hash}" 
@@ -304,6 +307,9 @@ class TorrentDashboard {
             `<div class="badge badge-accent badge-sm">${this.escapeHtml(torrent.debrid)}</div>` :
             '<span class="text-base-content/50">None</span>'
         }
+                </td>
+                <td class="text-nowrap font-mono text-sm">
+                    ${torrent.num_seeds || 0}
                 </td>
                 <td>
                     <div class="badge ${this.getStateColor(torrent.state)} badge-sm">
@@ -415,6 +421,7 @@ class TorrentDashboard {
 
         // Update batch delete button
         this.refs.batchDeleteBtn.classList.toggle('hidden', this.state.selectedTorrents.size === 0);
+        this.refs.batchDeleteDebridBtn.classList.toggle('hidden', this.state.selectedTorrents.size === 0);
 
         // Update select all checkbox
         const visibleTorrents = this.state.filteredTorrents.slice(
@@ -497,16 +504,20 @@ class TorrentDashboard {
         }
     }
 
-    async deleteSelectedTorrents() {
+    async deleteSelectedTorrents(removeFromDebrid = false) {
         const count = this.state.selectedTorrents.size;
-        if (!confirm(`Are you sure you want to delete ${count} selected torrent${count > 1 ? 's' : ''}?`)) {
+        if (count === 0) {
+            window.decypharrUtils.createToast('No torrents selected for deletion', 'warning');
+            return;
+        }
+        if (!confirm(`Are you sure you want to delete ${count} torrent${count > 1 ? 's' : ''}${removeFromDebrid ? ' from debrid' : ''}?`)) {
             return;
         }
 
         try {
             const hashes = Array.from(this.state.selectedTorrents).join(',');
             const response = await window.decypharrUtils.fetcher(
-                `/api/torrents/?hashes=${encodeURIComponent(hashes)}`,
+                `/api/torrents/?hashes=${encodeURIComponent(hashes)}&removeFromDebrid=${removeFromDebrid}`,
                 { method: 'DELETE' }
             );
 

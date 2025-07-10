@@ -7,9 +7,13 @@
             <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
                 <!-- Batch Actions -->
                 <div class="flex items-center gap-2">
-                    <button class="btn btn-error btn-sm hidden" id="batchDeleteBtn">
+                    <button class="btn btn-secondary btn-sm hidden" id="batchDeleteBtn">
                         <i class="bi bi-trash"></i>
                         <span class="hidden sm:inline">Delete Selected</span>
+                    </button>
+                    <button class="btn btn-error btn-sm hidden" id="batchDeleteDebridBtn">
+                        <i class="bi bi-cloud-fog-fill"></i>
+                        <span class="hidden sm:inline">Remove From Debrid</span>
                     </button>
                     <button class="btn btn-outline btn-sm" id="refreshBtn">
                         <i class="bi bi-arrow-clockwise"></i>
@@ -74,6 +78,9 @@
                             <i class="bi bi-cloud mr-2"></i>Debrid
                         </th>
                         <th class="font-semibold">
+                            <i class="bi bi-people mr-2"></i>Seeders
+                        </th>
+                        <th class="font-semibold">
                             <i class="bi bi-activity mr-2"></i>State
                         </th>
                         <th class="font-semibold w-32">Actions</th>
@@ -115,14 +122,14 @@
     <li class="menu-title">
         <span class="torrent-name text-sm font-bold truncate max-w-48"></span>
     </li>
-    <li><hr class="my-1"></li>
+    <hr/>
     <li><a class="menu-item text-sm" data-action="copy-magnet">
         <i class="bi bi-magnet text-primary"></i>Copy Magnet Link
     </a></li>
     <li><a class="menu-item text-sm" data-action="copy-name">
         <i class="bi bi-clipboard text-info"></i>Copy Name
     </a></li>
-    <li><hr class="my-1"></li>
+    <hr/>
     <li><a class="menu-item text-sm text-error" data-action="delete">
         <i class="bi bi-trash"></i>Delete Torrent
     </a></li>
