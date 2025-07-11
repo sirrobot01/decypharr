@@ -61,10 +61,10 @@
                     if (!response.ok) {
                         return response.text().then(errorText => {
                             // Throw an error with the response text
-                            createToast(errorText || 'Registration failed', 'error');
+                            window.decypharrUtils.createToast(errorText || 'Registration failed', 'error');
                         });
                     } else {
-                        window.location.href = joinURL(window.urlBase, '/');
+                        window.location.href = window.decypharrUtils.joinURL(window.urlBase, '/');
                     }
 
                 })
@@ -75,10 +75,10 @@
 
         // Handle skip auth button
         skipAuthBtn.addEventListener('click', function() {
-            fetcher('/skip-auth', { method: 'GET' })
+            window.decypharrUtils.fetcher('/skip-auth', { method: 'GET' })
                 .then(response => {
                     if (response.ok) {
-                        window.location.href = joinURL(window.urlBase, '/');
+                        window.location.href = window.decypharrUtils.joinURL(window.urlBase, '/');
                     } else {
                         throw new Error('Failed to skip authentication');
                     }
