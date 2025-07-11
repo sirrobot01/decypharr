@@ -62,24 +62,7 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 	backoff := time.NewTimer(s.refreshInterval)
 	defer backoff.Stop()
 
-	loopCount := 0
-	s.logger.Info().
-		Str("torrent_id", debridTorrent.Id).
-		Str("torrent_name", debridTorrent.Name).
-		Str("initial_status", debridTorrent.Status).
-		Float64("initial_progress", debridTorrent.Progress).
-		Int("file_count", len(debridTorrent.Files)).
-		Msg("Starting torrent processing loop")
-
 	for debridTorrent.Status != "downloaded" {
-		loopCount++
-		s.logger.Debug().
-			Str("torrent_id", debridTorrent.Id).
-			Str("torrent_name", debridTorrent.Name).
-			Str("status", debridTorrent.Status).
-			Float64("progress", debridTorrent.Progress).
-			Int("loop_count", loopCount).
-			Msgf("%s <- (%s) Download Progress: %.2f%%", debridTorrent.Debrid, debridTorrent.Name, debridTorrent.Progress)
 
 		dbT, err := client.CheckStatus(debridTorrent)
 		if err != nil {
@@ -103,20 +86,6 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 			return
 		}
 
-		// Log status change if any
-		if dbT.Status != debridTorrent.Status {
-			s.logger.Info().
-				Str("torrent_id", debridTorrent.Id).
-				Str("torrent_name", debridTorrent.Name).
-				Str("old_status", debridTorrent.Status).
-				Str("new_status", dbT.Status).
-				Float64("old_progress", debridTorrent.Progress).
-				Float64("new_progress", dbT.Progress).
-				Int("old_file_count", len(debridTorrent.Files)).
-				Int("new_file_count", len(dbT.Files)).
-				Msg("Torrent status changed")
-		}
-
 		debridTorrent = dbT
 		torrent = s.partialTorrentUpdate(torrent, debridTorrent)
 
@@ -124,25 +93,7 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 		exitCondition1 := debridTorrent.Status == "downloaded"
 		exitCondition2 := !utils.Contains(downloadingStatuses, debridTorrent.Status)
 
-		s.logger.Debug().
-			Str("torrent_id", debridTorrent.Id).
-			Str("torrent_name", debridTorrent.Name).
-			Str("status", debridTorrent.Status).
-			Bool("is_downloaded", exitCondition1).
-			Bool("not_in_downloading_statuses", exitCondition2).
-			Strs("downloading_statuses", downloadingStatuses).
-			Bool("will_exit_loop", exitCondition1 || exitCondition2).
-			Msg("Checking loop exit conditions")
-
 		if exitCondition1 || exitCondition2 {
-			s.logger.Info().
-				Str("torrent_id", debridTorrent.Id).
-				Str("torrent_name", debridTorrent.Name).
-				Str("final_status", debridTorrent.Status).
-				Bool("is_downloaded", exitCondition1).
-				Bool("not_in_downloading_statuses", exitCondition2).
-				Int("final_file_count", len(debridTorrent.Files)).
-				Msg("Exiting torrent processing loop")
 			break
 		}
 		<-backoff.C
