@@ -102,18 +102,13 @@ func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (*type
 		}
 	}
 
-	c.logger.Debug().
-		Str("filename", filename).
-		Str("file_link", file.Link).
-		Str("torrent_id", ct.Id).
-		Str("file_id", file.Id).
-		Msg("Generating download link for file")
+	c.logger.Trace().Msgf("Getting download link for %s(%s)", filename, file.Link)
 
 	downloadLink, err := c.client.GetDownloadLink(ct.Torrent, &file)
 	if err != nil {
 
 		if errors.Is(err, utils.HosterUnavailableError) {
-			c.logger.Debug().
+			c.logger.Trace().
 				Str("filename", filename).
 				Str("torrent_id", ct.Id).
 				Msg("Hoster unavailable, attempting to reinsert torrent")
