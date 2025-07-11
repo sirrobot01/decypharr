@@ -11,3 +11,18 @@ torrents.json
 *.json
 .ven/**
 docs/**
+
+# Don't copy node modules
+node_modules/
+
+# Don't copy development files
+.git/
+.gitignore
+*.md
+.env*
+*.log
+
+# Build artifacts
+decypharr
+healthcheck
+*.exe
