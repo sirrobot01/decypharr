@@ -202,7 +202,7 @@ func (tb *Torbox) getTorboxStatus(status string, finished bool) string {
 
 func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 	const maxRetries = 3
-	const backoffBase = 1 * time.Second
+	const backoffBase = 1 * time.Minute
 
 	url := fmt.Sprintf("%s/api/torrents/mylist/?id=%s", tb.Host, torrentId)
 
@@ -223,7 +223,8 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 			}
 
 			if tb.isRetryableError(err) {
-				backoffDuration := time.Duration(attempt+1) * backoffBase
+				// Exponential backoff starting from 1 minute
+				backoffDuration := backoffBase * time.Duration(1<<attempt)
 				tb.logger.Warn().
 					Err(err).
 					Str("torrent_id", torrentId).
@@ -338,7 +339,7 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 
 func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
 	const maxRetries = 3
-	const backoffBase = 1 * time.Second
+	const backoffBase = 1 * time.Minute
 
 	url := fmt.Sprintf("%s/api/torrents/mylist/?id=%s", tb.Host, t.Id)
 
@@ -359,7 +360,8 @@ func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
 			}
 
 			if tb.isRetryableError(err) {
-				backoffDuration := time.Duration(attempt+1) * backoffBase
+				// Exponential backoff starting from 1 minute
+				backoffDuration := backoffBase * time.Duration(1<<attempt)
 				tb.logger.Warn().
 					Err(err).
 					Str("torrent_id", t.Id).
@@ -683,7 +685,7 @@ func (tb *Torbox) GetTorrents() ([]*types.Torrent, error) {
 
 	const pageSize = 50 // Reduce page size to avoid timeouts
 	const maxRetries = 3
-	const backoffBase = 2 * time.Second
+	const backoffBase = 1 * time.Minute
 
 	var allTorrents []*types.Torrent
 	offset := 0
@@ -723,7 +725,8 @@ func (tb *Torbox) GetTorrents() ([]*types.Torrent, error) {
 
 				// Check if it's a retryable error
 				if tb.isRetryableError(err) {
-					backoffDuration := time.Duration(attempt+1) * backoffBase
+					// Exponential backoff starting from 1 minute
+					backoffDuration := backoffBase * time.Duration(1<<attempt)
 					tb.logger.Warn().
 						Err(err).
 						Int("offset", offset).
@@ -887,7 +890,7 @@ func (tb *Torbox) DeleteDownloadLink(linkId string) error {
 
 func (tb *Torbox) GetAvailableSlots() (int, error) {
 	const maxRetries = 3
-	const backoffBase = 2 * time.Second
+	const backoffBase = 1 * time.Minute
 
 	// Get user profile to determine plan limits with retry logic
 	url := fmt.Sprintf("%s/api/user/me?settings=false", tb.Host)
@@ -908,7 +911,8 @@ func (tb *Torbox) GetAvailableSlots() (int, error) {
 			}
 
 			if tb.isRetryableError(err) {
-				backoffDuration := time.Duration(attempt+1) * backoffBase
+				// Exponential backoff starting from 1 minute
+				backoffDuration := backoffBase * time.Duration(1<<attempt)
 				tb.logger.Warn().
 					Err(err).
 					Int("attempt", attempt+1).
