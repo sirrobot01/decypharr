@@ -111,13 +111,6 @@ func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (*type
 
 	downloadLink, err := c.client.GetDownloadLink(ct.Torrent, &file)
 	if err != nil {
-		c.logger.Error().
-			Err(err).
-			Str("filename", filename).
-			Str("file_link", file.Link).
-			Str("torrent_id", ct.Id).
-			Str("file_id", file.Id).
-			Msg("Failed to get download link")
 
 		if errors.Is(err, utils.HosterUnavailableError) {
 			c.logger.Debug().
