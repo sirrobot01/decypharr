@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"os"
 	"path"
 	"path/filepath"
@@ -17,13 +16,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+
 	"encoding/json"
+	_ "time/tzdata"
+
 	"github.com/go-co-op/gocron/v2"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/utils"
-	_ "time/tzdata"
 )
 
 type WebDavFolderNaming string
@@ -682,8 +684,13 @@ func (c *Cache) ProcessTorrent(t *types.Torrent) error {
 	}
 
 	if !isComplete(t.Files) {
-		c.logger.Debug().Msgf("Torrent %s is still not complete. Triggering a reinsert(disabled)", t.Id)
+		c.logger.Debug().
+			Str("torrent_id", t.Id).
+			Str("torrent_name", t.Name).
+			Int("total_files", len(t.Files)).
+			Msg("Torrent still not complete after refresh")
 	} else {
+
 		addedOn, err := time.Parse(time.RFC3339, t.Added)
 		if err != nil {
 			addedOn = time.Now()

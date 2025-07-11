@@ -5,14 +5,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/sirrobot01/decypharr/internal/request"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"math"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/sirrobot01/decypharr/internal/request"
+	"github.com/sirrobot01/decypharr/internal/utils"
+	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid"
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 )
 
 func (s *Store) AddTorrent(ctx context.Context, importReq *ImportRequest) error {
@@ -60,10 +61,16 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 	_arr := importReq.Arr
 	backoff := time.NewTimer(s.refreshInterval)
 	defer backoff.Stop()
+
 	for debridTorrent.Status != "downloaded" {
-		s.logger.Debug().Msgf("%s <- (%s) Download Progress: %.2f%%", debridTorrent.Debrid, debridTorrent.Name, debridTorrent.Progress)
+
 		dbT, err := client.CheckStatus(debridTorrent)
 		if err != nil {
+			s.logger.Error().
+				Str("torrent_id", debridTorrent.Id).
+				Str("torrent_name", debridTorrent.Name).
+				Err(err).
+				Msg("Error checking torrent status")
 			if dbT != nil && dbT.Id != "" {
 				// Delete the torrent if it was not downloaded
 				go func() {
@@ -83,15 +90,16 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 		torrent = s.partialTorrentUpdate(torrent, debridTorrent)
 
 		// Exit the loop for downloading statuses to prevent memory buildup
-		if debridTorrent.Status == "downloaded" || !utils.Contains(downloadingStatuses, debridTorrent.Status) {
+		exitCondition1 := debridTorrent.Status == "downloaded"
+		exitCondition2 := !utils.Contains(downloadingStatuses, debridTorrent.Status)
+
+		if exitCondition1 || exitCondition2 {
 			break
 		}
-		select {
-		case <-backoff.C:
-			// Increase interval gradually, cap at max
-			nextInterval := min(s.refreshInterval*2, 30*time.Second)
-			backoff.Reset(nextInterval)
-		}
+		<-backoff.C
+		// Increase interval gradually, cap at max
+		nextInterval := min(s.refreshInterval*2, 30*time.Second)
+		backoff.Reset(nextInterval)
 	}
 	var torrentSymlinkPath string
 	var err error
@@ -109,7 +117,6 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 		}()
 		s.logger.Error().Err(err).Msgf("Error occured while processing torrent %s", debridTorrent.Name)
 		importReq.markAsFailed(err, torrent, debridTorrent)
-		return
 	}
 
 	onSuccess := func(torrentSymlinkPath string) {

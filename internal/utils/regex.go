@@ -51,7 +51,8 @@ func IsMediaFile(path string) bool {
 }
 
 func IsSampleFile(path string) bool {
-	if strings.HasSuffix(strings.ToLower(path), "sample.mkv") {
+	filename := filepath.Base(path)
+	if strings.HasSuffix(strings.ToLower(filename), "sample.mkv") {
 		return true
 	}
 	return RegexMatch(sampleRegex, path)

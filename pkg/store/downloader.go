@@ -2,12 +2,13 @@ package store
 
 import (
 	"fmt"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 
 	"github.com/cavaliergopher/grab/v3"
 	"github.com/sirrobot01/decypharr/internal/utils"
@@ -212,7 +213,7 @@ func (s *Store) processSymlink(torrent *Torrent, debridTorrent *types.Torrent) (
 				if _, err := os.Stat(fullFilePath); !os.IsNotExist(err) {
 					fileSymlinkPath := filepath.Join(torrentSymlinkPath, file.Name)
 					if err := os.Symlink(fullFilePath, fileSymlinkPath); err != nil && !os.IsExist(err) {
-						s.logger.Debug().Msgf("Failed to create symlink: %s: %v", fileSymlinkPath, err)
+						s.logger.Warn().Msgf("Failed to create symlink: %s: %v", fileSymlinkPath, err)
 					} else {
 						filePaths = append(filePaths, fileSymlinkPath)
 						delete(pending, path)
