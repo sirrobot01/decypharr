@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
+
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/utils"
@@ -14,7 +17,6 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/debrid/providers/torbox"
 	"github.com/sirrobot01/decypharr/pkg/debrid/store"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"sync"
 )
 
 type Debrid struct {
@@ -205,6 +207,15 @@ func Process(ctx context.Context, store *Storage, selectedDebrid string, magnet 
 
 		if !overrideDownloadUncached && a.DownloadUncached == nil {
 			debridTorrent.DownloadUncached = db.GetDownloadUncached()
+		}
+
+		// Check if torrent is cached before submitting if download_uncached is false
+		if !debridTorrent.DownloadUncached {
+			cached := db.IsAvailable([]string{debridTorrent.InfoHash})
+			if !cached[strings.ToUpper(debridTorrent.InfoHash)] {
+				errs = append(errs, fmt.Errorf("torrent %s not cached on %s", debridTorrent.Name, db.Name()))
+				continue
+			}
 		}
 
 		dbt, err := db.SubmitMagnet(debridTorrent)

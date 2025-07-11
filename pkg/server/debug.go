@@ -2,12 +2,13 @@ package server
 
 import (
 	"fmt"
+	"net/http"
+	"runtime"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/sirrobot01/decypharr/internal/request"
 	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/store"
-	"net/http"
-	"runtime"
 )
 
 func (s *Server) handleIngests(w http.ResponseWriter, r *http.Request) {
@@ -102,11 +103,15 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	profiles := make([]*debridTypes.Profile, 0)
 	for debridName, client := range clients {
 		profile, err := client.GetProfile()
-		profile.Name = debridName
 		if err != nil {
 			s.logger.Error().Err(err).Msg("Failed to get debrid profile")
 			continue
 		}
+		if profile == nil {
+			s.logger.Error().Msg("Debrid profile is nil")
+			continue
+		}
+		profile.Name = debridName
 		cache, ok := caches[debridName]
 		if ok {
 			// Get torrent data

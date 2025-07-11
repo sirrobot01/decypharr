@@ -38,6 +38,14 @@ type Torbox struct {
 	logger      zerolog.Logger
 	checkCached bool
 	addSamples  bool
+
+	// Circuit breaker fields
+	circuitBreakerOpen    bool
+	circuitBreakerTime    time.Time
+	circuitBreakerCount   int
+	circuitBreakerWindow  time.Duration
+	circuitBreakerTimeout time.Duration
+	mu                    sync.RWMutex
 }
 
 func (tb *Torbox) GetProfile() (*types.Profile, error) {
@@ -57,6 +65,7 @@ func New(dc config.Debrid) (*Torbox, error) {
 		request.WithRateLimiter(rl),
 		request.WithLogger(_log),
 		request.WithProxy(dc.Proxy),
+		request.WithTimeout(3*time.Minute), // Increase timeout for Torbox API operations
 	)
 	autoExpiresLinksAfter, err := time.ParseDuration(dc.AutoExpireLinksAfter)
 	if autoExpiresLinksAfter == 0 || err != nil {
@@ -75,6 +84,8 @@ func New(dc config.Debrid) (*Torbox, error) {
 		logger:                _log,
 		checkCached:           dc.CheckCached,
 		addSamples:            dc.AddSamples,
+		circuitBreakerWindow:  5 * time.Minute,
+		circuitBreakerTimeout: 30 * time.Second,
 	}, nil
 }
 
@@ -190,12 +201,49 @@ func (tb *Torbox) getTorboxStatus(status string, finished bool) string {
 }
 
 func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
+	const maxRetries = 3
+	const backoffBase = 1 * time.Minute
+
 	url := fmt.Sprintf("%s/api/torrents/mylist/?id=%s", tb.Host, torrentId)
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	resp, err := tb.client.MakeRequest(req)
-	if err != nil {
-		return nil, err
+
+	var resp []byte
+	var err error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		resp, err = tb.client.MakeRequest(req)
+		if err != nil {
+			if attempt == maxRetries-1 {
+				tb.logger.Error().
+					Err(err).
+					Str("torrent_id", torrentId).
+					Int("final_attempt", attempt+1).
+					Msg("Failed to get torrent after all retries")
+				return nil, err
+			}
+
+			if tb.isRetryableError(err) {
+				// Exponential backoff starting from 1 minute
+				backoffDuration := backoffBase * time.Duration(1<<attempt)
+				tb.logger.Warn().
+					Err(err).
+					Str("torrent_id", torrentId).
+					Int("attempt", attempt+1).
+					Dur("backoff", backoffDuration).
+					Msg("Retryable error getting torrent, backing off")
+				time.Sleep(backoffDuration)
+				continue
+			} else {
+				tb.logger.Error().
+					Err(err).
+					Str("torrent_id", torrentId).
+					Msg("Non-retryable error getting torrent")
+				return nil, err
+			}
+		}
+		break
 	}
+
 	var res InfoResponse
 	err = json.Unmarshal(resp, &res)
 	if err != nil {
@@ -290,12 +338,49 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 }
 
 func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
+	const maxRetries = 3
+	const backoffBase = 1 * time.Minute
+
 	url := fmt.Sprintf("%s/api/torrents/mylist/?id=%s", tb.Host, t.Id)
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	resp, err := tb.client.MakeRequest(req)
-	if err != nil {
-		return err
+
+	var resp []byte
+	var err error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		resp, err = tb.client.MakeRequest(req)
+		if err != nil {
+			if attempt == maxRetries-1 {
+				tb.logger.Error().
+					Err(err).
+					Str("torrent_id", t.Id).
+					Int("final_attempt", attempt+1).
+					Msg("Failed to update torrent after all retries")
+				return err
+			}
+
+			if tb.isRetryableError(err) {
+				// Exponential backoff starting from 1 minute
+				backoffDuration := backoffBase * time.Duration(1<<attempt)
+				tb.logger.Warn().
+					Err(err).
+					Str("torrent_id", t.Id).
+					Int("attempt", attempt+1).
+					Dur("backoff", backoffDuration).
+					Msg("Retryable error updating torrent, backing off")
+				time.Sleep(backoffDuration)
+				continue
+			} else {
+				tb.logger.Error().
+					Err(err).
+					Str("torrent_id", t.Id).
+					Msg("Non-retryable error updating torrent")
+				return err
+			}
+		}
+		break
 	}
+
 	var res InfoResponse
 	err = json.Unmarshal(resp, &res)
 	if err != nil {
@@ -519,92 +604,260 @@ func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (*types.Do
 	return downloadLink, nil
 }
 
+// isRetryableError determines if an error is retryable
+func (tb *Torbox) isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := strings.ToLower(err.Error())
+
+	// Network-level retryable errors
+	retryableNetErrors := []string{
+		"context deadline exceeded",
+		"timeout",
+		"connection reset",
+		"unexpected eof",
+		"i/o timeout",
+		"tls handshake timeout",
+		"connection refused",
+		"no route to host",
+		"network is unreachable",
+	}
+
+	for _, retryable := range retryableNetErrors {
+		if strings.Contains(errStr, retryable) {
+			tb.logger.Trace().
+				Str("error", errStr).
+				Str("matched_pattern", retryable).
+				Msg("Error identified as retryable network error")
+			return true
+		}
+	}
+
+	// HTTP status code errors that are retryable
+	retryableHttpErrors := []string{
+		"http error 429", // rate limited
+		"http error 500", // internal server error
+		"http error 502", // bad gateway
+		"http error 503", // service unavailable
+		"http error 504", // gateway timeout
+		"http error 520", // cloudflare error
+		"http error 521", // web server is down
+		"http error 522", // connection timed out
+		"http error 523", // origin is unreachable
+		"http error 524", // timeout occurred
+	}
+
+	for _, retryable := range retryableHttpErrors {
+		if strings.Contains(errStr, retryable) {
+			tb.logger.Debug().
+				Str("error", errStr).
+				Str("matched_pattern", retryable).
+				Msg("Error identified as retryable HTTP error")
+			return true
+		}
+	}
+
+	// Check for auth errors - these are NOT retryable
+	if strings.Contains(errStr, "auth_error") || strings.Contains(errStr, "unauthorized") {
+		tb.logger.Debug().
+			Str("error", errStr).
+			Msg("Error identified as non-retryable auth error")
+		return false
+	}
+
+	tb.logger.Debug().
+		Str("error", errStr).
+		Msg("Error not identified as retryable")
+	return false
+}
+
 func (tb *Torbox) GetDownloadingStatus() []string {
 	return []string{"downloading"}
 }
 
 func (tb *Torbox) GetTorrents() ([]*types.Torrent, error) {
-	url := fmt.Sprintf("%s/api/torrents/mylist", tb.Host)
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	resp, err := tb.client.MakeRequest(req)
-	if err != nil {
-		return nil, err
+	// Check circuit breaker
+	if tb.checkCircuitBreaker() {
+		return nil, fmt.Errorf("torbox API temporarily unavailable due to circuit breaker")
 	}
 
-	var res TorrentsListResponse
-	err = json.Unmarshal(resp, &res)
-	if err != nil {
-		return nil, err
-	}
+	const pageSize = 50 // Reduce page size to avoid timeouts
+	const maxRetries = 3
+	const backoffBase = 1 * time.Minute
 
-	if !res.Success || res.Data == nil {
-		return nil, fmt.Errorf("torbox API error: %v", res.Error)
-	}
-
-	torrents := make([]*types.Torrent, 0, len(*res.Data))
+	var allTorrents []*types.Torrent
+	offset := 0
 	cfg := config.Get()
 
-	for _, data := range *res.Data {
-		t := &types.Torrent{
-			Id:               strconv.Itoa(data.Id),
-			Name:             data.Name,
-			Bytes:            data.Size,
-			Folder:           data.Name,
-			Progress:         data.Progress * 100,
-			Status:           tb.getTorboxStatus(data.DownloadState, data.DownloadFinished),
-			Speed:            data.DownloadSpeed,
-			Seeders:          data.Seeds,
-			Filename:         data.Name,
-			OriginalFilename: data.Name,
-			MountPath:        tb.MountPath,
-			Debrid:           tb.name,
-			Files:            make(map[string]types.File),
-			Added:            data.CreatedAt.Format(time.RFC3339),
-			InfoHash:         data.Hash,
+	tb.logger.Trace().
+		Int("page_size", pageSize).
+		Msg("Starting torrent list fetch with pagination")
+
+	for {
+		var resp []byte
+		var err error
+
+		// Retry logic with exponential backoff
+		for attempt := 0; attempt < maxRetries; attempt++ {
+			url := fmt.Sprintf("%s/api/torrents/mylist?limit=%d&offset=%d", tb.Host, pageSize, offset)
+			req, _ := http.NewRequest(http.MethodGet, url, nil)
+
+			tb.logger.Trace().
+				Str("url", url).
+				Int("attempt", attempt+1).
+				Int("max_retries", maxRetries).
+				Msg("Fetching torrent page")
+
+			resp, err = tb.client.MakeRequest(req)
+			if err != nil {
+				tb.recordError(err) // Record error for circuit breaker
+
+				if attempt == maxRetries-1 {
+					tb.logger.Error().
+						Err(err).
+						Int("offset", offset).
+						Int("final_attempt", attempt+1).
+						Msg("Failed to fetch torrent page after all retries")
+					return nil, err
+				}
+
+				// Check if it's a retryable error
+				if tb.isRetryableError(err) {
+					// Exponential backoff starting from 1 minute
+					backoffDuration := backoffBase * time.Duration(1<<attempt)
+					tb.logger.Warn().
+						Err(err).
+						Int("offset", offset).
+						Int("attempt", attempt+1).
+						Dur("backoff", backoffDuration).
+						Msg("Retryable error, backing off")
+					time.Sleep(backoffDuration)
+					continue
+				} else {
+					tb.logger.Error().
+						Err(err).
+						Int("offset", offset).
+						Msg("Non-retryable error, aborting")
+					return nil, err
+				}
+			}
+
+			// Success - break out of retry loop
+			break
 		}
 
-		// Process files
-		for _, f := range data.Files {
-			fileName := filepath.Base(f.Name)
-			if !tb.addSamples && utils.IsSampleFile(f.AbsolutePath) {
-				// Skip sample files
-				continue
-			}
-			if !cfg.IsAllowedFile(fileName) {
-				continue
-			}
-			if !cfg.IsSizeAllowed(f.Size) {
-				continue
-			}
-			file := types.File{
-				TorrentId: t.Id,
-				Id:        strconv.Itoa(f.Id),
-				Name:      fileName,
-				Size:      f.Size,
-				Path:      f.Name,
-			}
-
-			// For downloaded torrents, set a placeholder link to indicate file is available
-			if data.DownloadFinished {
-				file.Link = fmt.Sprintf("torbox://%s/%d", t.Id, f.Id)
-			}
-
-			t.Files[fileName] = file
+		var res TorrentsListResponse
+		err = json.Unmarshal(resp, &res)
+		if err != nil {
+			tb.logger.Error().
+				Err(err).
+				Int("offset", offset).
+				Msg("Failed to unmarshal torrent page response")
+			return nil, err
 		}
 
-		// Set original filename based on first file or torrent name
-		var cleanPath string
-		if len(t.Files) > 0 {
-			cleanPath = path.Clean(data.Files[0].Name)
-		} else {
-			cleanPath = path.Clean(data.Name)
+		if !res.Success || res.Data == nil {
+			tb.logger.Error().
+				Interface("error", res.Error).
+				Int("offset", offset).
+				Msg("Torbox API error in paginated request")
+			return nil, fmt.Errorf("torbox API error: %v", res.Error)
 		}
-		t.OriginalFilename = strings.Split(cleanPath, "/")[0]
 
-		torrents = append(torrents, t)
+		pageData := *res.Data
+
+		// If no torrents in this page, we've reached the end
+		if len(pageData) == 0 {
+			break
+		}
+
+		torrents := make([]*types.Torrent, 0, len(pageData))
+
+		for _, data := range pageData {
+			t := &types.Torrent{
+				Id:               strconv.Itoa(data.Id),
+				Name:             data.Name,
+				Bytes:            data.Size,
+				Folder:           data.Name,
+				Progress:         data.Progress * 100,
+				Status:           tb.getTorboxStatus(data.DownloadState, data.DownloadFinished),
+				Speed:            data.DownloadSpeed,
+				Seeders:          data.Seeds,
+				Filename:         data.Name,
+				OriginalFilename: data.Name,
+				MountPath:        tb.MountPath,
+				Debrid:           tb.name,
+				Files:            make(map[string]types.File),
+				Added:            data.CreatedAt.Format(time.RFC3339),
+				InfoHash:         data.Hash,
+			}
+
+			// Process files
+			for _, f := range data.Files {
+				fileName := filepath.Base(f.Name)
+				if !tb.addSamples && utils.IsSampleFile(f.AbsolutePath) {
+					// Skip sample files
+					continue
+				}
+				if !cfg.IsAllowedFile(fileName) {
+					continue
+				}
+				if !cfg.IsSizeAllowed(f.Size) {
+					continue
+				}
+				file := types.File{
+					TorrentId: t.Id,
+					Id:        strconv.Itoa(f.Id),
+					Name:      fileName,
+					Size:      f.Size,
+					Path:      f.Name,
+				}
+
+				// For downloaded torrents, set a placeholder link to indicate file is available
+				if data.DownloadFinished {
+					file.Link = fmt.Sprintf("torbox://%s/%d", t.Id, f.Id)
+				}
+
+				t.Files[fileName] = file
+			}
+
+			// Set original filename based on first file or torrent name
+			var cleanPath string
+			if len(t.Files) > 0 {
+				cleanPath = path.Clean(data.Files[0].Name)
+			} else {
+				cleanPath = path.Clean(data.Name)
+			}
+			t.OriginalFilename = strings.Split(cleanPath, "/")[0]
+
+			torrents = append(torrents, t)
+		}
+
+		allTorrents = append(allTorrents, torrents...)
+
+		// Log pagination progress
+		tb.logger.Trace().
+			Int("page_torrents", len(pageData)).
+			Int("total_torrents", len(allTorrents)).
+			Int("offset", offset).
+			Int("page_size", pageSize).
+			Msg("Successfully fetched torrent page")
+
+		// If we got fewer torrents than the page size, we've reached the end
+		if len(pageData) < pageSize {
+			tb.logger.Trace().
+				Int("total_torrents", len(allTorrents)).
+				Int("total_pages", (offset/pageSize)+1).
+				Msg("Successfully retrieved all torrents with pagination")
+			break
+		}
+
+		offset += pageSize
 	}
 
-	return torrents, nil
+	return allTorrents, nil
 }
 
 func (tb *Torbox) GetDownloadUncached() bool {
@@ -624,14 +877,186 @@ func (tb *Torbox) GetMountPath() string {
 }
 
 func (tb *Torbox) DeleteDownloadLink(linkId string) error {
+	url := fmt.Sprintf("%s/api/torrents/controltorrent/%s", tb.Host, linkId)
+	payload := map[string]string{"torrent_id": linkId, "action": "Delete"}
+	jsonPayload, _ := json.Marshal(payload)
+	req, _ := http.NewRequest(http.MethodDelete, url, bytes.NewBuffer(jsonPayload))
+	if _, err := tb.client.MakeRequest(req); err != nil {
+		return err
+	}
+	tb.logger.Info().Msgf("Download link %s deleted from Torbox", linkId)
 	return nil
 }
 
 func (tb *Torbox) GetAvailableSlots() (int, error) {
-	//TODO: Implement the logic to check available slots for Torbox
-	return 0, fmt.Errorf("not implemented")
+	const maxRetries = 3
+	const backoffBase = 1 * time.Minute
+
+	// Get user profile to determine plan limits with retry logic
+	url := fmt.Sprintf("%s/api/user/me?settings=false", tb.Host)
+
+	var resp []byte
+	var err error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		resp, err = tb.client.MakeRequest(req)
+		if err != nil {
+			if attempt == maxRetries-1 {
+				tb.logger.Error().
+					Err(err).
+					Int("final_attempt", attempt+1).
+					Msg("Failed to fetch user profile for slot calculation after all retries")
+				return 0, err
+			}
+
+			if tb.isRetryableError(err) {
+				// Exponential backoff starting from 1 minute
+				backoffDuration := backoffBase * time.Duration(1<<attempt)
+				tb.logger.Warn().
+					Err(err).
+					Int("attempt", attempt+1).
+					Dur("backoff", backoffDuration).
+					Msg("Retryable error fetching user profile, backing off")
+				time.Sleep(backoffDuration)
+				continue
+			} else {
+				tb.logger.Error().
+					Err(err).
+					Msg("Non-retryable error fetching user profile")
+				return 0, err
+			}
+		}
+		break
+	}
+	if err != nil {
+		tb.logger.Error().Err(err).Msg("Failed to fetch user profile for slot calculation")
+		return 0, err
+	}
+
+	var userRes UserResponse
+	err = json.Unmarshal(resp, &userRes)
+	if err != nil {
+		tb.logger.Error().Err(err).Msg("Failed to unmarshal user profile response")
+		return 0, err
+	}
+
+	if !userRes.Success || userRes.Data == nil {
+		tb.logger.Error().Interface("error", userRes.Error).Msg("Torbox API error fetching user profile")
+		return 0, fmt.Errorf("torbox API error: %v", userRes.Error)
+	}
+
+	userData := *userRes.Data
+
+	// Calculate max slots based on plan and additional slots
+	var baseSlotsForPlan int
+	switch userData.Plan {
+	case 1: // Plan 1 (likely basic/essential)
+		baseSlotsForPlan = 3
+	case 2: // Plan 2 (likely standard)
+		baseSlotsForPlan = 5
+	case 3: // Plan 3 (likely pro)
+		baseSlotsForPlan = 10
+	default:
+		// Default to a reasonable number for unknown plans
+		baseSlotsForPlan = 3
+		tb.logger.Warn().Int("plan", userData.Plan).Msg("Unknown Torbox plan, using default slot count")
+	}
+
+	maxSlots := baseSlotsForPlan + userData.AdditionalConcurrentSlots
+
+	// Get all torrents to count active ones
+	torrents, err := tb.GetTorrents()
+	if err != nil {
+		tb.logger.Error().Err(err).Msg("Failed to get torrents for slot calculation")
+		return 0, err
+	}
+
+	// Count active torrents (downloading, seeding, etc.)
+	activeTorrents := 0
+	for _, torrent := range torrents {
+		// Count torrents that are actively downloading or processing
+		if torrent.Status == "downloading" || torrent.Progress < 100 {
+			activeTorrents++
+		}
+	}
+
+	// Calculate available slots (ensure we don't go negative)
+	availableSlots := maxSlots - activeTorrents
+	if availableSlots < 0 {
+		availableSlots = 0
+	}
+
+	tb.logger.Debug().
+		Int("plan", userData.Plan).
+		Int("base_slots", baseSlotsForPlan).
+		Int("additional_slots", userData.AdditionalConcurrentSlots).
+		Int("max_slots", maxSlots).
+		Int("active_torrents", activeTorrents).
+		Int("available_slots", availableSlots).
+		Msg("Calculated available slots for Torbox based on user plan")
+
+	return availableSlots, nil
 }
 
 func (tb *Torbox) Accounts() *types.Accounts {
 	return tb.accounts
+}
+
+// checkCircuitBreaker checks if the circuit breaker should prevent API calls
+func (tb *Torbox) checkCircuitBreaker() bool {
+	tb.mu.RLock()
+	defer tb.mu.RUnlock()
+
+	if !tb.circuitBreakerOpen {
+		return false
+	}
+
+	// Check if timeout has passed
+	if time.Since(tb.circuitBreakerTime) > tb.circuitBreakerTimeout {
+		tb.mu.RUnlock()
+		tb.mu.Lock()
+		tb.circuitBreakerOpen = false
+		tb.circuitBreakerCount = 0
+		tb.mu.Unlock()
+		tb.mu.RLock()
+
+		tb.logger.Info().
+			Dur("timeout", tb.circuitBreakerTimeout).
+			Msg("Circuit breaker timeout expired, allowing API calls")
+		return false
+	}
+
+	return true
+}
+
+// recordError records an error for circuit breaker logic
+func (tb *Torbox) recordError(err error) {
+	if !tb.isRetryableError(err) {
+		return
+	}
+
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+
+	now := time.Now()
+
+	// Reset count if window has passed
+	if tb.circuitBreakerTime.IsZero() || now.Sub(tb.circuitBreakerTime) > tb.circuitBreakerWindow {
+		tb.circuitBreakerCount = 1
+		tb.circuitBreakerTime = now
+		return
+	}
+
+	tb.circuitBreakerCount++
+
+	// Open circuit breaker if too many errors
+	if tb.circuitBreakerCount >= 5 {
+		tb.circuitBreakerOpen = true
+		tb.logger.Warn().
+			Int("error_count", tb.circuitBreakerCount).
+			Dur("window", tb.circuitBreakerWindow).
+			Dur("timeout", tb.circuitBreakerTimeout).
+			Msg("Circuit breaker opened due to repeated errors")
+	}
 }
