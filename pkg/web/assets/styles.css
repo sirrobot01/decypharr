@@ -1,11 +1,24 @@
+@import './css/bootstrap-icons.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 
-/* Smooth transitions for all interactive elements */
 * {
-    transition: all 0.2s ease-in-out;
+    transition: transform 0.2s ease-in-out,
+    opacity 0.2s ease-in-out,
+    box-shadow 0.2s ease-in-out,
+    border-color 0.2s ease-in-out,
+    background-color 0.2s ease-in-out;
+}
+
+:root {
+    --warning-color: rgb(245 158 11); /* amber-500 */
+}
+
+[data-theme="dark"] {
+    --warning-color: rgb(251 191 36); /* amber-400 - lighter for dark theme */
 }
 
 
@@ -438,6 +451,12 @@
 
 [data-theme="dark"] .label-text-alt {
     color: #9ca3af; /* Gray-400 */
+}
+
+.text-warning,
+[data-theme="dark"] .text-warning,
+[data-theme="dark"] .label-text-alt.text-warning {
+    color: var(--warning-color) !important;
 }
 
 /* File input */

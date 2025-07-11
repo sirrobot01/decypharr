@@ -5,9 +5,9 @@
   "scripts": {
     "build-css": "tailwindcss -i ./pkg/web/assets/styles.css -o ./pkg/web/assets/build/css/styles.css --minify",
     "minify-js": "node scripts/minify-js.js",
-    "minify-css": "node scripts/minify-css.js",
     "download-assets": "node scripts/download-assets.js",
-    "build": "npm run build-css && npm run minify-js && npm run minify-css && npm run download-assets",
+    "build": "npm run build-css && npm run minify-js",
+    "build-all": "npm run download-assets && npm run build",
     "dev": "npm run build && air"
   },
   "devDependencies": {
