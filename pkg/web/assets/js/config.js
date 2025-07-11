@@ -388,7 +388,7 @@ class ConfigManager {
                                 </label>
                                 <input type="number" class="input input-bordered webdav-field" 
                                        name="debrid[${index}].workers" id="debrid[${index}].workers" 
-                                       placeholder="50" value="50" min="1" max="200">
+                                       placeholder="50" value="50">
                                 <div class="label">
                                     <span class="label-text-alt">Number of concurrent workers</span>
                                 </div>
@@ -972,11 +972,6 @@ class ConfigManager {
     validateConfiguration(config) {
         const errors = [];
 
-        // Validate general settings
-        if (config.port && (config.port < 1 || config.port > 65535)) {
-            errors.push('Port must be between 1 and 65535');
-        }
-
         // Validate debrid services
         config.debrids.forEach((debrid, index) => {
             if (!debrid.name || !debrid.api_key || !debrid.folder) {
@@ -1026,7 +1021,7 @@ class ConfigManager {
             log_level: document.getElementById('log-level').value,
             url_base: document.getElementById('urlBase').value,
             bind_address: document.getElementById('bindAddress').value,
-            port: document.getElementById('port').value ? parseInt(document.getElementById('port').value) : null,
+            port: document.getElementById('port').value ? document.getElementById('port').value : null,
             discord_webhook_url: document.getElementById('discordWebhookUrl').value,
             allowed_file_types: document.getElementById('allowedExtensions').value
                 .split(',').map(ext => ext.trim()).filter(Boolean),
