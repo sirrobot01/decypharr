@@ -35,7 +35,7 @@
         };
 
         try {
-            const response = await fetcher('/login', {
+            const response = await window.decypharrUtils.fetcher('/login', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
