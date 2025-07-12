@@ -75,3 +75,30 @@ type InfoResponse APIResponse[torboxInfo]
 type DownloadLinksResponse APIResponse[string]
 
 type TorrentsListResponse APIResponse[[]torboxInfo]
+
+type UserResponse APIResponse[struct {
+	Id                        int    `json:"id"`
+	AuthId                    string `json:"auth_id"`
+	CreatedAt                 string `json:"created_at"`
+	UpdatedAt                 string `json:"updated_at"`
+	Plan                      int    `json:"plan"`
+	TotalDownloaded           int    `json:"total_downloaded"`
+	Customer                  string `json:"customer"`
+	IsSubscribed              bool   `json:"is_subscribed"`
+	PremiumExpiresAt          string `json:"premium_expires_at"`
+	CooldownUntil             string `json:"cooldown_until"`
+	Email                     string `json:"email"`
+	UserReferral              string `json:"user_referral"`
+	BaseEmail                 string `json:"base_email"`
+	TotalBytesDownloaded      int64  `json:"total_bytes_downloaded"`
+	TotalBytesUploaded        int64  `json:"total_bytes_uploaded"`
+	TorrentsDownloaded        int    `json:"torrents_downloaded"`
+	WebDownloadsDownloaded    int    `json:"web_downloads_downloaded"`
+	UsenetDownloadsDownloaded int    `json:"usenet_downloads_downloaded"`
+	AdditionalConcurrentSlots int    `json:"additional_concurrent_slots"`
+	LongTermSeeding           bool   `json:"long_term_seeding"`
+	LongTermStorage           bool   `json:"long_term_storage"`
+	IsVendor                  bool   `json:"is_vendor"`
+	VendorId                  *int   `json:"vendor_id"`
+	PurchasesReferred         int    `json:"purchases_referred"`
+}]
