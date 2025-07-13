@@ -1,7 +1,7 @@
 // Download page functionality
 class DownloadManager {
-    constructor() {
-        this.downloadFolder = '{{ .DownloadFolder }}' || '';
+    constructor(downloadFolder) {
+        this.downloadFolder = downloadFolder;
         this.refs = {
             downloadForm: document.getElementById('downloadForm'),
             magnetURI: document.getElementById('magnetURI'),
@@ -243,8 +243,3 @@ class DownloadManager {
         }
     }
 }
-
-// Initialize download manager when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-    window.downloadManager = new DownloadManager();
-});

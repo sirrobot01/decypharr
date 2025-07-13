@@ -138,4 +138,10 @@
         </div>
     </div>
 </div>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        let downloadFolder = "{{ .DownloadFolder }}" || '';
+        window.downloadManager = new DownloadManager(downloadFolder);
+    });
+</script>
 {{ end }}

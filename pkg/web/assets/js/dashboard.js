@@ -557,8 +557,3 @@ class TorrentDashboard {
         return text ? text.replace(/[&<>"']/g, (m) => map[m]) : '';
     }
 }
-
-// Initialize dashboard when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-    window.dashboard = new TorrentDashboard();
-});

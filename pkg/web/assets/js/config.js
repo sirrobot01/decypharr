@@ -388,7 +388,7 @@ class ConfigManager {
                                 </label>
                                 <input type="number" class="input input-bordered webdav-field" 
                                        name="debrid[${index}].workers" id="debrid[${index}].workers" 
-                                       placeholder="50" value="50">
+                                       placeholder="50">
                                 <div class="label">
                                     <span class="label-text-alt">Number of concurrent workers</span>
                                 </div>
@@ -1202,8 +1202,3 @@ class ConfigManager {
         }
     }
 }
-
-// Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-    window.configManager = new ConfigManager();
-});

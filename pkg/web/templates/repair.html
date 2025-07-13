@@ -17,7 +17,7 @@
                                     <i class="bi bi-collection mr-2 text-secondary"></i>Arr Instance
                                 </span>
                             </label>
-                            <select class="select select-bordered" id="arrSelect" required>
+                            <select class="select select-bordered" id="arrSelect">
                                 <option value="">Select an Arr instance</option>
                             </select>
                             <div class="label">
@@ -171,14 +171,6 @@
             <h3 class="font-bold text-2xl">
                 <i class="bi bi-info-circle mr-2 text-primary"></i>Job Details
             </h3>
-            <div class="flex gap-2">
-                <button type="button" class="btn btn-primary btn-sm hidden" id="processJobBtn">
-                    <i class="bi bi-play-fill mr-1"></i>Process
-                </button>
-                <button type="button" class="btn btn-warning btn-sm hidden" id="stopJobBtn">
-                    <i class="bi bi-stop-fill mr-1"></i>Stop
-                </button>
-            </div>
         </div>
 
         <div class="space-y-6">
@@ -322,7 +314,21 @@
             <div class="flex-1">
                 <small class="text-base-content/60" id="modalFooterStats">-</small>
             </div>
+            <div class="flex gap-2">
+                <button type="button" class="btn btn-primary btn-sm hidden" id="processJobBtn">
+                    <i class="bi bi-play-fill mr-1"></i>Process
+                </button>
+                <button type="button" class="btn btn-warning btn-sm hidden" id="stopJobBtn">
+                    <i class="bi bi-stop-fill mr-1"></i>Stop
+                </button>
+            </div>
         </div>
     </div>
 </dialog>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        window.repairManager = new RepairManager();
+        window.RepairUtils = RepairUtils;
+    });
+</script>
 {{ end }}

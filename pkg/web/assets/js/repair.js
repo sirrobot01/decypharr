@@ -130,11 +130,6 @@ class RepairManager {
         const arr = this.refs.arrSelect.value;
         const mediaIdsValue = this.refs.mediaIds.value.trim();
 
-        if (!arr) {
-            window.decypharrUtils.createToast('Please select an Arr instance', 'warning');
-            return;
-        }
-
         const mediaIds = mediaIdsValue ?
             mediaIdsValue.split(',').map(id => id.trim()).filter(Boolean) :
             [];
@@ -1106,14 +1101,3 @@ const RepairUtils = {
         }
     }
 };
-
-// Initialize repair manager when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-    window.repairManager = new RepairManager();
-    window.RepairUtils = RepairUtils;
-});
-
-// Export for ES6 modules if needed
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { RepairManager, RepairUtils };
-}
