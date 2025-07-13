@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/utils"
@@ -44,11 +45,21 @@ func NewStorage() *Storage {
 	debrids := make(map[string]*Debrid)
 
 	for _, dc := range cfg.Debrids {
-		client, err := createDebridClient(dc)
+		var client types.Client
+		var err error
+		for i := 0; i < 6; i++ {
+			client, err = createDebridClient(dc)
+			if err == nil {
+				break
+			}
+			_logger.Error().Err(err).Str("Debrid", dc.Name).Msgf("failed to connect to debrid client, retry %d/6", i+1)
+			time.Sleep(5 * time.Second)
+		}
 		if err != nil {
-			_logger.Error().Err(err).Str("Debrid", dc.Name).Msg("failed to connect to debrid client")
+			_logger.Error().Err(err).Str("Debrid", dc.Name).Msg("failed to connect to debrid client after 6 retries")
 			continue
 		}
+
 		var cache *store.Cache
 		_log := client.Logger()
 		if dc.UseWebDav {
