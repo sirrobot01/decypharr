@@ -405,10 +405,46 @@
     box-shadow: 0 0 0 2px hsl(var(--p) / 0.2);
 }
 
-/* Select options */
+/* Select options - Enhanced dark mode support */
 [data-theme="dark"] .select option {
-    background-color: hsl(var(--b1));
-    color: #ffffff;
+    background-color: hsl(var(--b1)) !important;
+    color: #ffffff !important;
+}
+
+/* Force dark styling for select dropdowns even when OS is in light mode */
+[data-theme="dark"] .select {
+    color-scheme: dark !important;
+}
+
+/* Additional browser-specific overrides for select options */
+[data-theme="dark"] select option {
+    background-color: hsl(var(--b1)) !important;
+    color: #ffffff !important;
+    border: none !important;
+}
+
+[data-theme="dark"] select optgroup {
+    background-color: hsl(var(--b1)) !important;
+    color: #ffffff !important;
+}
+
+/* WebKit-specific styling for select dropdown */
+[data-theme="dark"] select::-webkit-scrollbar {
+    width: 8px;
+    background-color: hsl(var(--b2));
+}
+
+[data-theme="dark"] select::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--bc) / 0.3);
+    border-radius: 4px;
+}
+
+/* Firefox-specific select styling */
+@-moz-document url-prefix() {
+    [data-theme="dark"] select option {
+        background-color: hsl(var(--b1)) !important;
+        color: #ffffff !important;
+    }
 }
 
 /* Disabled inputs */

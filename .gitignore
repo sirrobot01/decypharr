@@ -15,3 +15,4 @@ auth.json
 .ven/
 .env
 node_modules/
+.venv/
