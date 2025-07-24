@@ -995,9 +995,6 @@ class ConfigManager {
             if (!config.repair.interval) {
                 errors.push('Repair interval is required when repair is enabled');
             }
-            if (config.repair.workers && (config.repair.workers < 1 || config.repair.workers > 50)) {
-                errors.push('Repair workers must be between 1 and 50');
-            }
         }
 
         return {
