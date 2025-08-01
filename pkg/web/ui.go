@@ -126,13 +126,17 @@ func (wb *Web) DownloadHandler(w http.ResponseWriter, r *http.Request) {
 	for _, d := range cfg.Debrids {
 		debrids = append(debrids, d.Name)
 	}
+	downloadFolder := ""
+	if cfg.QBitTorrent != nil {
+		downloadFolder = cfg.QBitTorrent.DownloadFolder
+	}
 	data := map[string]interface{}{
 		"URLBase":        cfg.URLBase,
 		"Page":           "download",
 		"Title":          "Download",
 		"Debrids":        debrids,
 		"HasMultiDebrid": len(debrids) > 1,
-		"DownloadFolder": cfg.QBitTorrent.DownloadFolder,
+		"DownloadFolder": downloadFolder,
 	}
 	_ = wb.templates.ExecuteTemplate(w, "layout", data)
 }

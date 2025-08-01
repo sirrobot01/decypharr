@@ -2,6 +2,7 @@ package webdav
 
 import (
 	"context"
+	"github.com/rs/zerolog"
 	"github.com/stanNthe5/stringbuf"
 	"net/http"
 	"os"
@@ -18,7 +19,7 @@ const (
 	metadataOnlyKey contextKey = "metadataOnly"
 )
 
-func (h *Handler) handlePropfind(w http.ResponseWriter, r *http.Request) {
+func handlePropfind(h Handler, logger zerolog.Logger, w http.ResponseWriter, r *http.Request) {
 	// Setup context for metadata only
 	ctx := context.WithValue(r.Context(), metadataOnlyKey, true)
 	r = r.WithContext(ctx)
@@ -37,7 +38,7 @@ func (h *Handler) handlePropfind(w http.ResponseWriter, r *http.Request) {
 	// Always include the resource itself
 	f, err := h.OpenFile(r.Context(), cleanPath, os.O_RDONLY, 0)
 	if err != nil {
-		h.logger.Error().Err(err).Str("path", cleanPath).Msg("Failed to open file")
+		logger.Error().Err(err).Str("path", cleanPath).Msg("Failed to open file")
 		http.NotFound(w, r)
 		return
 	}
@@ -45,14 +46,14 @@ func (h *Handler) handlePropfind(w http.ResponseWriter, r *http.Request) {
 
 	fi, err := f.Stat()
 	if err != nil {
-		h.logger.Error().Err(err).Msg("Failed to stat file")
+		logger.Error().Err(err).Msg("Failed to stat file")
 		http.Error(w, "Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	var rawEntries []os.FileInfo
 	if fi.IsDir() {
-		rawEntries = append(rawEntries, h.getChildren(cleanPath)...)
+		rawEntries = append(rawEntries, h.GetChildren(cleanPath)...)
 	}
 
 	entries := make([]entry, 0, len(rawEntries)+1)

@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"github.com/go-chi/chi/v5"
+	"github.com/sirrobot01/decypharr/internal/nntp"
 	"github.com/sirrobot01/decypharr/internal/request"
 	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/store"
@@ -118,5 +119,23 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		profiles = append(profiles, profile)
 	}
 	stats["debrids"] = profiles
+
+	if s.usenet != nil {
+		if client := s.usenet.Client(); client != nil {
+			usenetsData := make([]map[string]interface{}, 0)
+			client.Pools().Range(func(key string, value *nntp.Pool) bool {
+				if value != nil {
+					providerData := make(map[string]interface{})
+					providerData["name"] = key
+					providerData["active_connections"] = value.ActiveConnections()
+					providerData["total_connections"] = value.ConnectionCount()
+					usenetsData = append(usenetsData, providerData)
+				}
+				return true
+			})
+			stats["usenet"] = usenetsData
+		}
+	}
+
 	request.JSONResponse(w, stats, http.StatusOK)
 }

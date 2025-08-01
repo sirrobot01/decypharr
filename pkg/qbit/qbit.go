@@ -18,13 +18,16 @@ type QBit struct {
 }
 
 func New() *QBit {
-	_cfg := config.Get()
-	cfg := _cfg.QBitTorrent
+	cfg := config.Get()
+	qbitCfg := cfg.QBitTorrent
+	if qbitCfg == nil {
+		return nil
+	}
 	return &QBit{
-		Username:       cfg.Username,
-		Password:       cfg.Password,
-		DownloadFolder: cfg.DownloadFolder,
-		Categories:     cfg.Categories,
+		Username:       qbitCfg.Username,
+		Password:       qbitCfg.Password,
+		DownloadFolder: qbitCfg.DownloadFolder,
+		Categories:     qbitCfg.Categories,
 		storage:        store.Get().Torrents(),
 		logger:         logger.New("qbit"),
 	}

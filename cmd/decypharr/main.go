@@ -6,8 +6,10 @@ import (
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/pkg/qbit"
+	"github.com/sirrobot01/decypharr/pkg/sabnzbd"
 	"github.com/sirrobot01/decypharr/pkg/server"
 	"github.com/sirrobot01/decypharr/pkg/store"
+	"github.com/sirrobot01/decypharr/pkg/usenet"
 	"github.com/sirrobot01/decypharr/pkg/version"
 	"github.com/sirrobot01/decypharr/pkg/web"
 	"github.com/sirrobot01/decypharr/pkg/webdav"
@@ -58,20 +60,30 @@ func Start(ctx context.Context) error {
 `, version.GetInfo(), cfg.LogLevel)
 
 		// Initialize services
-		qb := qbit.New()
-		wd := webdav.New()
+		_usenet := usenet.New()
+		debridCaches := store.Get().Debrid().Caches()
+		wd := webdav.New(debridCaches, _usenet)
+		var sb *sabnzbd.SABnzbd
 
-		ui := web.New().Routes()
+		ui := web.New(_usenet).Routes()
 		webdavRoutes := wd.Routes()
-		qbitRoutes := qb.Routes()
+
+		qb := qbit.New()
 
 		// Register routes
 		handlers := map[string]http.Handler{
 			"/":       ui,
-			"/api/v2": qbitRoutes,
 			"/webdav": webdavRoutes,
 		}
-		srv := server.New(handlers)
+		if qb != nil {
+			handlers["/api/v2"] = qb.Routes()
+		}
+		if _usenet != nil {
+			sb = sabnzbd.New(_usenet)
+			sabRoutes := sb.Routes()
+			handlers["/sabnzbd"] = sabRoutes
+		}
+		srv := server.New(_usenet, handlers)
 
 		done := make(chan struct{})
 		go func(ctx context.Context) {
@@ -93,8 +105,13 @@ func Start(ctx context.Context) error {
 			cancelSvc() // tell existing services to shut down
 			_log.Info().Msg("Restarting Decypharr...")
 			<-done // wait for them to finish
-			qb.Reset()
+			if qb != nil {
+				qb.Reset()
+			}
 			store.Reset()
+			if _usenet != nil {
+				_usenet.Close()
+			}
 
 			// rebuild svcCtx off the original parent
 			svcCtx, cancelSvc = context.WithCancel(ctx)

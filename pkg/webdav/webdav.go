@@ -6,8 +6,12 @@ import (
 	"fmt"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/pkg/store"
+	"github.com/sirrobot01/decypharr/internal/logger"
+	"github.com/sirrobot01/decypharr/pkg/debrid/store"
+	"github.com/sirrobot01/decypharr/pkg/usenet"
+	"golang.org/x/net/webdav"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -32,6 +36,10 @@ var (
 				segments[i] = url.PathEscape(segment)
 			}
 			return strings.Join(segments, "/")
+		},
+		"split": strings.Split,
+		"sub": func(a, b int) int {
+			return a - b
 		},
 		"formatSize": func(bytes int64) string {
 			const (
@@ -84,21 +92,50 @@ func init() {
 	chi.RegisterMethod("UNLOCK")
 }
 
-type WebDav struct {
-	Handlers []*Handler
-	URLBase  string
+type Handler interface {
+	http.Handler
+	Start(ctx context.Context) error
+	Readiness(next http.Handler) http.Handler
+	Name() string
+	OpenFile(ctx context.Context, name string, flag int, perm os.FileMode) (webdav.File, error)
+	GetChildren(name string) []os.FileInfo
+	Type() string
 }
 
-func New() *WebDav {
+type WebDav struct {
+	Handlers []Handler
+	URLBase  string
+	logger   zerolog.Logger
+}
+
+func New(debridCaches map[string]*store.Cache, usenet usenet.Usenet) *WebDav {
 	urlBase := config.Get().URLBase
 	w := &WebDav{
-		Handlers: make([]*Handler, 0),
+		Handlers: make([]Handler, 0),
 		URLBase:  urlBase,
+		logger:   logger.New("webdav"),
 	}
-	for name, c := range store.Get().Debrid().Caches() {
-		h := NewHandler(name, urlBase, c, c.Logger())
+
+	// Set debrid handlers
+	for name, c := range debridCaches {
+		h := NewTorrentHandler(name, urlBase, c, c.Logger())
+		if h == nil {
+			w.logger.Warn().Msgf("Debrid handler for %s is nil, skipping", name)
+			continue
+		}
 		w.Handlers = append(w.Handlers, h)
 	}
+
+	// Set usenet handlers
+	if usenet != nil {
+		usenetHandler := NewUsenetHandler("usenet", urlBase, usenet, usenet.Logger())
+		if usenetHandler != nil {
+			w.Handlers = append(w.Handlers, usenetHandler)
+		} else {
+			w.logger.Warn().Msg("Usenet handler is nil, skipping")
+		}
+	}
+
 	return w
 }
 
@@ -119,9 +156,9 @@ func (wd *WebDav) Start(ctx context.Context) error {
 
 	for _, h := range wd.Handlers {
 		wg.Add(1)
-		go func(h *Handler) {
+		go func(h Handler) {
 			defer wg.Done()
-			if err := h.cache.Start(ctx); err != nil {
+			if err := h.Start(ctx); err != nil {
 				select {
 				case errChan <- err:
 				default:
@@ -152,8 +189,8 @@ func (wd *WebDav) Start(ctx context.Context) error {
 
 func (wd *WebDav) mountHandlers(r chi.Router) {
 	for _, h := range wd.Handlers {
-		r.Route("/"+h.Name, func(r chi.Router) {
-			r.Use(h.readinessMiddleware)
+		r.Route("/"+h.Name(), func(r chi.Router) {
+			r.Use(h.Readiness)
 			r.Mount("/", h)
 		}) // Mount to /name since router is already prefixed with /webdav
 	}
@@ -166,11 +203,7 @@ func (wd *WebDav) setupRootHandler(r chi.Router) {
 
 func (wd *WebDav) commonMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("DAV", "1, 2")
 		w.Header().Set("Allow", "OPTIONS, PROPFIND, GET, HEAD, POST, PUT, DELETE, MKCOL, PROPPATCH, COPY, MOVE, LOCK, UNLOCK")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "OPTIONS, PROPFIND, GET, HEAD, POST, PUT, DELETE, MKCOL, PROPPATCH, COPY, MOVE, LOCK, UNLOCK")
-		w.Header().Set("Access-Control-Allow-Headers", "Depth, Content-Type, Authorization")
 
 		next.ServeHTTP(w, r)
 	})
@@ -181,7 +214,7 @@ func (wd *WebDav) handleGetRoot() http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 		data := struct {
-			Handlers []*Handler
+			Handlers []Handler
 			URLBase  string
 		}{
 			Handlers: wd.Handlers,
@@ -205,7 +238,7 @@ func (wd *WebDav) handleWebdavRoot() http.HandlerFunc {
 		children := make([]os.FileInfo, 0, len(wd.Handlers))
 		for _, h := range wd.Handlers {
 			children = append(children, &FileInfo{
-				name:    h.Name,
+				name:    h.Name(),
 				size:    0,
 				mode:    0755 | os.ModeDir,
 				modTime: time.Now(),

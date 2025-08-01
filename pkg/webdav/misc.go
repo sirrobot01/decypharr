@@ -240,3 +240,28 @@ func setVideoResponseHeaders(w http.ResponseWriter, resp *http.Response, isRange
 
 	w.WriteHeader(resp.StatusCode)
 }
+
+func getContentType(fileName string) string {
+	contentType := "application/octet-stream"
+
+	// Determine content type based on file extension
+	switch {
+	case strings.HasSuffix(fileName, ".mp4"):
+		contentType = "video/mp4"
+	case strings.HasSuffix(fileName, ".mkv"):
+		contentType = "video/x-matroska"
+	case strings.HasSuffix(fileName, ".avi"):
+		contentType = "video/x-msvideo"
+	case strings.HasSuffix(fileName, ".mov"):
+		contentType = "video/quicktime"
+	case strings.HasSuffix(fileName, ".m4v"):
+		contentType = "video/x-m4v"
+	case strings.HasSuffix(fileName, ".ts"):
+		contentType = "video/mp2t"
+	case strings.HasSuffix(fileName, ".srt"):
+		contentType = "application/x-subrip"
+	case strings.HasSuffix(fileName, ".vtt"):
+		contentType = "text/vtt"
+	}
+	return contentType
+}

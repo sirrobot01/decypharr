@@ -47,7 +47,6 @@ type Debrid struct {
 type QBitTorrent struct {
 	Username        string   `json:"username,omitempty"`
 	Password        string   `json:"password,omitempty"`
-	Port            string   `json:"port,omitempty"` // deprecated
 	DownloadFolder  string   `json:"download_folder,omitempty"`
 	Categories      []string `json:"categories,omitempty"`
 	RefreshInterval int      `json:"refresh_interval,omitempty"`
@@ -82,26 +81,55 @@ type Auth struct {
 	Password string `json:"password,omitempty"`
 }
 
+type SABnzbd struct {
+	DownloadFolder  string   `json:"download_folder,omitempty"`
+	RefreshInterval int      `json:"refresh_interval,omitempty"`
+	Categories      []string `json:"categories,omitempty"`
+}
+
+type Usenet struct {
+	Providers    []UsenetProvider `json:"providers,omitempty"`    // List of usenet providers
+	MountFolder  string           `json:"mount_folder,omitempty"` // Folder where usenet downloads are mounted
+	SkipPreCache bool             `json:"skip_pre_cache,omitempty"`
+	Chunks       int              `json:"chunks,omitempty"`  // Number of chunks to pre-cache
+	RcUrl        string           `json:"rc_url,omitempty"`  // Rclone RC URL for the webdav
+	RcUser       string           `json:"rc_user,omitempty"` // Rclone RC username
+	RcPass       string           `json:"rc_pass,omitempty"` // Rclone RC password
+}
+
+type UsenetProvider struct {
+	Name        string `json:"name,omitempty"`
+	Host        string `json:"host,omitempty"` // Host of the usenet server
+	Port        int    `json:"port,omitempty"` // Port of the usenet server
+	Username    string `json:"username,omitempty"`
+	Password    string `json:"password,omitempty"`
+	Connections int    `json:"connections,omitempty"` // Number of connections to use
+	SSL         bool   `json:"ssl,omitempty"`         // Use SSL for the connection
+	UseTLS      bool   `json:"use_tls,omitempty"`     // Use TLS for the connection
+}
+
 type Config struct {
 	// server
 	BindAddress string `json:"bind_address,omitempty"`
 	URLBase     string `json:"url_base,omitempty"`
 	Port        string `json:"port,omitempty"`
 
-	LogLevel           string      `json:"log_level,omitempty"`
-	Debrids            []Debrid    `json:"debrids,omitempty"`
-	QBitTorrent        QBitTorrent `json:"qbittorrent,omitempty"`
-	Arrs               []Arr       `json:"arrs,omitempty"`
-	Repair             Repair      `json:"repair,omitempty"`
-	WebDav             WebDav      `json:"webdav,omitempty"`
-	AllowedExt         []string    `json:"allowed_file_types,omitempty"`
-	MinFileSize        string      `json:"min_file_size,omitempty"` // Minimum file size to download, 10MB, 1GB, etc
-	MaxFileSize        string      `json:"max_file_size,omitempty"` // Maximum file size to download (0 means no limit)
-	Path               string      `json:"-"`                       // Path to save the config file
-	UseAuth            bool        `json:"use_auth,omitempty"`
-	Auth               *Auth       `json:"-"`
-	DiscordWebhook     string      `json:"discord_webhook_url,omitempty"`
-	RemoveStalledAfter string      `json:"remove_stalled_after,omitzero"`
+	LogLevel           string       `json:"log_level,omitempty"`
+	Debrids            []Debrid     `json:"debrids,omitempty"`
+	QBitTorrent        *QBitTorrent `json:"qbittorrent,omitempty"`
+	SABnzbd            *SABnzbd     `json:"sabnzbd,omitempty"`
+	Usenet             *Usenet      `json:"usenet,omitempty"` // Usenet configuration
+	Arrs               []Arr        `json:"arrs,omitempty"`
+	Repair             Repair       `json:"repair,omitempty"`
+	WebDav             WebDav       `json:"webdav,omitempty"`
+	AllowedExt         []string     `json:"allowed_file_types,omitempty"`
+	MinFileSize        string       `json:"min_file_size,omitempty"` // Minimum file size to download, 10MB, 1GB, etc
+	MaxFileSize        string       `json:"max_file_size,omitempty"` // Maximum file size to download (0 means no limit)
+	Path               string       `json:"-"`                       // Path to save the config file
+	UseAuth            bool         `json:"use_auth,omitempty"`
+	Auth               *Auth        `json:"-"`
+	DiscordWebhook     string       `json:"discord_webhook_url,omitempty"`
+	RemoveStalledAfter string       `json:"remove_stalled_after,omitzero"`
 }
 
 func (c *Config) JsonFile() string {
@@ -113,6 +141,10 @@ func (c *Config) AuthFile() string {
 
 func (c *Config) TorrentsFile() string {
 	return filepath.Join(c.Path, "torrents.json")
+}
+
+func (c *Config) NZBsPath() string {
+	return filepath.Join(c.Path, "cache/nzbs")
 }
 
 func (c *Config) loadConfig() error {
@@ -142,9 +174,6 @@ func (c *Config) loadConfig() error {
 }
 
 func validateDebrids(debrids []Debrid) error {
-	if len(debrids) == 0 {
-		return errors.New("no debrids configured")
-	}
 
 	for _, debrid := range debrids {
 		// Basic field validation
@@ -159,17 +188,51 @@ func validateDebrids(debrids []Debrid) error {
 	return nil
 }
 
-func validateQbitTorrent(config *QBitTorrent) error {
-	if config.DownloadFolder == "" {
-		return errors.New("qbittorent download folder is required")
+func validateUsenet(usenet *Usenet) error {
+	if usenet == nil {
+		return nil // No usenet configuration provided
 	}
-	if _, err := os.Stat(config.DownloadFolder); os.IsNotExist(err) {
-		return fmt.Errorf("qbittorent download folder(%s) does not exist", config.DownloadFolder)
+	for _, usenet := range usenet.Providers {
+		// Basic field validation
+		if usenet.Host == "" {
+			return errors.New("usenet host is required")
+		}
+		if usenet.Username == "" {
+			return errors.New("usenet username is required")
+		}
+		if usenet.Password == "" {
+			return errors.New("usenet password is required")
+		}
+	}
+
+	return nil
+}
+
+func validateSabznbd(config *SABnzbd) error {
+	if config == nil {
+		return nil // No SABnzbd configuration provided
+	}
+	if config.DownloadFolder != "" {
+		if _, err := os.Stat(config.DownloadFolder); os.IsNotExist(err) {
+			return fmt.Errorf("sabnzbd download folder(%s) does not exist", config.DownloadFolder)
+		}
 	}
 	return nil
 }
 
-func validateRepair(config *Repair) error {
+func validateQbitTorrent(config *QBitTorrent) error {
+	if config == nil {
+		return nil // No qBittorrent configuration provided
+	}
+	if config.DownloadFolder != "" {
+		if _, err := os.Stat(config.DownloadFolder); os.IsNotExist(err) {
+			return fmt.Errorf("qbittorent download folder(%s) does not exist", config.DownloadFolder)
+		}
+	}
+	return nil
+}
+
+func validateRepair(config Repair) error {
 	if !config.Enabled {
 		return nil
 	}
@@ -181,19 +244,34 @@ func validateRepair(config *Repair) error {
 
 func ValidateConfig(config *Config) error {
 	// Run validations concurrently
+	// Check if there's at least one debrid or usenet configured
+	hasUsenet := false
+	if config.Usenet != nil && len(config.Usenet.Providers) > 0 {
+		hasUsenet = true
+	}
+	if len(config.Debrids) == 0 && !hasUsenet {
+		return errors.New("at least one debrid or usenet provider must be configured")
+	}
 
 	if err := validateDebrids(config.Debrids); err != nil {
 		return err
 	}
 
-	if err := validateQbitTorrent(&config.QBitTorrent); err != nil {
+	if err := validateUsenet(config.Usenet); err != nil {
 		return err
 	}
 
-	if err := validateRepair(&config.Repair); err != nil {
+	if err := validateSabznbd(config.SABnzbd); err != nil {
 		return err
 	}
 
+	if err := validateQbitTorrent(config.QBitTorrent); err != nil {
+		return err
+	}
+
+	if err := validateRepair(config.Repair); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -299,6 +377,10 @@ func (c *Config) updateDebrid(d Debrid) Debrid {
 	}
 	d.DownloadAPIKeys = downloadKeys
 
+	if d.Workers == 0 {
+		d.Workers = perDebrid
+	}
+
 	if !d.UseWebDav {
 		return d
 	}
@@ -308,9 +390,6 @@ func (c *Config) updateDebrid(d Debrid) Debrid {
 	}
 	if d.WebDav.DownloadLinksRefreshInterval == "" {
 		d.DownloadLinksRefreshInterval = cmp.Or(c.WebDav.DownloadLinksRefreshInterval, "40m") // 40 minutes
-	}
-	if d.Workers == 0 {
-		d.Workers = perDebrid
 	}
 	if d.FolderNaming == "" {
 		d.FolderNaming = cmp.Or(c.WebDav.FolderNaming, "original_no_ext")
@@ -338,16 +417,46 @@ func (c *Config) updateDebrid(d Debrid) Debrid {
 	return d
 }
 
+func (c *Config) updateUsenet(u UsenetProvider) UsenetProvider {
+	if u.Name == "" {
+		parts := strings.Split(u.Host, ".")
+		if len(parts) >= 2 {
+			u.Name = parts[len(parts)-2] // Gets "example" from "news.example.com"
+		} else {
+			u.Name = u.Host // Fallback to host if it doesn't look like a domain
+		}
+	}
+	if u.Port == 0 {
+		u.Port = 119 // Default port for usenet
+	}
+	if u.Connections == 0 {
+		u.Connections = 30 // Default connections
+	}
+	if u.SSL && !u.UseTLS {
+		u.UseTLS = true // Use TLS if SSL is enabled
+	}
+	return u
+}
+
 func (c *Config) setDefaults() {
 	for i, debrid := range c.Debrids {
 		c.Debrids[i] = c.updateDebrid(debrid)
 	}
 
+	if c.SABnzbd != nil {
+		c.SABnzbd.RefreshInterval = cmp.Or(c.SABnzbd.RefreshInterval, 10) // Default to 10 seconds
+	}
+
+	if c.Usenet != nil {
+		c.Usenet.Chunks = cmp.Or(c.Usenet.Chunks, 5)
+		for i, provider := range c.Usenet.Providers {
+			c.Usenet.Providers[i] = c.updateUsenet(provider)
+		}
+	}
+
 	if len(c.AllowedExt) == 0 {
 		c.AllowedExt = getDefaultExtensions()
 	}
-
-	c.Port = cmp.Or(c.Port, c.QBitTorrent.Port)
 
 	if c.URLBase == "" {
 		c.URLBase = "/"
@@ -395,11 +504,6 @@ func (c *Config) createConfig(path string) error {
 	c.Port = "8282"
 	c.LogLevel = "info"
 	c.UseAuth = true
-	c.QBitTorrent = QBitTorrent{
-		DownloadFolder:  filepath.Join(path, "downloads"),
-		Categories:      []string{"sonarr", "radarr"},
-		RefreshInterval: 15,
-	}
 	return nil
 }
 
@@ -407,8 +511,4 @@ func (c *Config) createConfig(path string) error {
 func Reload() {
 	instance = nil
 	once = sync.Once{}
-}
-
-func DefaultFreeSlot() int {
-	return 10
 }

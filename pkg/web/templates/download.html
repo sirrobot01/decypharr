@@ -4,8 +4,20 @@
     <div class="card bg-base-100 shadow-xl">
         <div class="card-body">
             <form id="downloadForm" enctype="multipart/form-data" class="space-y-3">
+                <!-- Mode Selection -->
+                <div class="flex justify-center mb-4">
+                    <div class="join">
+                        <button type="button" class="btn btn-primary join-item" id="torrentMode" data-mode="torrent">
+                            <i class="bi bi-magnet mr-2"></i>Torrents
+                        </button>
+                        <button type="button" class="btn btn-outline join-item" id="nzbMode" data-mode="nzb">
+                            <i class="bi bi-file-zip mr-2"></i>NZBs
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Torrent Input Section -->
-                <div class="space-y-2">
+                <div class="space-y-2" id="torrentInputs">
                     <div class="form-control">
                         <label class="label" for="magnetURI">
                             <span class="label-text font-semibold">
@@ -34,6 +46,44 @@
                                name="torrents"
                                multiple
                                accept=".torrent">
+                        <div class="label">
+                            <span class="label-text-alt">
+                                <i class="bi bi-info-circle mr-1"></i>You can select multiple files at once
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- NZB Input Section -->
+                <div class="space-y-2 hidden" id="nzbInputs">
+                    <div class="form-control">
+                        <label class="label" for="nzbURLs">
+                            <span class="label-text font-semibold">
+                                <i class="bi bi-link-45deg mr-2 text-primary"></i>NZB URLs
+                            </span>
+                            <span class="label-text-alt">Paste NZB download URLs</span>
+                        </label>
+                        <textarea class="textarea textarea-bordered h-32 font-mono text-sm"
+                                  id="nzbURLs"
+                                  name="nzbUrls"
+                                  placeholder="Paste your NZB URLs here, one per line..."></textarea>
+                    </div>
+
+                    <div class="divider">OR</div>
+
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text font-semibold">
+                                <i class="bi bi-file-earmark-arrow-up mr-2 text-secondary"></i>Upload NZB Files
+                            </span>
+                            <span class="label-text-alt">Select .nzb files</span>
+                        </label>
+                        <input type="file"
+                               class="file-input file-input-bordered w-full"
+                               id="nzbFiles"
+                               name="nzbs"
+                               multiple
+                               accept=".nzb">
                         <div class="label">
                             <span class="label-text-alt">
                                 <i class="bi bi-info-circle mr-1"></i>You can select multiple files at once
@@ -75,7 +125,7 @@
                                    name="downloadFolder"
                                    placeholder="/downloads/torrents">
                             <div class="label">
-                                <span class="label-text-alt">Leave empty to use default qBittorrent folder</span>
+                                <span class="label-text-alt" id="downloadFolderHint">Leave empty to use default qBittorrent folder</span>
                             </div>
                         </div>
                     </div>
@@ -131,7 +181,7 @@
                 <!-- Submit Button -->
                 <div class="form-control">
                     <button type="submit" class="btn btn-primary btn-lg" id="submitDownload">
-                        <i class="bi bi-cloud-upload mr-2"></i>Add to Download Queue
+                        <i class="bi bi-cloud-upload mr-2"></i><span id="submitButtonText">Add to Download Queue</span>
                     </button>
                 </div>
             </form>

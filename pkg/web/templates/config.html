@@ -24,6 +24,14 @@
                             <i class="bi bi-collection text-lg"></i>
                             <span class="hidden sm:inline">*Arrs</span>
                         </button>
+                        <button type="button" class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors" data-tab="usenet">
+                            <i class="bi bi-globe text-lg"></i>
+                            <span class="hidden sm:inline">Usenet</span>
+                        </button>
+                        <button type="button" class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors" data-tab="sabnzbd">
+                            <i class="bi bi-download text-lg"></i>
+                            <span class="hidden sm:inline">SABnzbd</span>
+                        </button>
                         <button type="button" class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors" data-tab="repair">
                             <i class="bi bi-wrench text-lg"></i>
                             <span class="hidden sm:inline">Repair</span>
@@ -323,6 +331,146 @@
                                             </div>
                                         </label>
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Usenet Tab Content -->
+                    <div class="tab-content hidden" data-tab-content="usenet">
+                        <div class="space-y-6">
+                            <h2 class="text-2xl font-bold flex items-center mb-6">
+                                <i class="bi bi-globe mr-3 text-info"></i>Usenet Settings
+                            </h2>
+
+                            <!-- Global Usenet Settings -->
+                            <div class="card bg-base-100 border border-base-300 shadow-sm">
+                                <div class="card-body">
+                                    <h3 class="card-title text-lg mb-4">
+                                        <i class="bi bi-folder mr-2 text-info"></i>
+                                        Main Settings
+                                    </h3>
+
+                                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                        <div class="form-control">
+                                            <label class="label" for="usenet.mount_folder">
+                                                <span class="label-text font-medium">Mount Folder</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered"
+                                                   name="usenet.mount_folder" id="usenet.mount_folder"
+                                                   placeholder="/mnt/usenet">
+                                            <div class="label">
+                                                <span class="label-text-alt">Path where usenet downloads are mounted</span>
+                                            </div>
+                                        </div>
+                                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                            <div class="form-control">
+                                                <label class="label" for="usenet.chunks">
+                                                    <span class="label-text font-medium">Download Chunks</span>
+                                                </label>
+                                                <input type="text" class="input input-bordered"
+                                                       name="usenet.chunks" id="usenet.chunks"
+                                                       placeholder="30">
+                                                <div class="label">
+                                                    <span class="label-text-alt">Number of chunks to pre-cache(default 5)</span>
+                                                </div>
+                                            </div>
+                                            <div class="form-control">
+                                                <label class="label cursor-pointer justify-start gap-3">
+                                                    <input type="checkbox" class="checkbox" name="usenet.skip_pre_cache" id="usenet.skip_pre_cache">
+                                                    <div>
+                                                        <span class="label-text font-medium">Skip Pre-Cache</span>
+                                                        <div class="label-text-alt">Disabling this speeds up import</div>
+                                                    </div>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                                        <div class="form-control">
+                                            <label class="label" for="usenet.rc_url">
+                                                <span class="label-text font-medium">Rclone RC URL</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered"
+                                                   name="usenet.rc_url" id="usenet.rc_url"
+                                                   placeholder="http://rclone-usenet:9990">
+                                            <div class="label">
+                                                <span class="label-text-alt">Rclone RC URL</span>
+                                            </div>
+                                        </div>
+                                        <div class="form-control">
+                                            <label class="label" for="usenet.rc_user">
+                                                <span class="label-text font-medium">Rclone RC Username</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered"
+                                                   name="usenet.rc_user" id="usenet.rc_user"
+                                                   placeholder="rcuser">
+                                            <div class="label">
+                                                <span class="label-text-alt">Rclone RC Username</span>
+                                            </div>
+                                        </div>
+                                        <div class="form-control">
+                                            <label class="label" for="usenet.rc_pass">
+                                                <span class="label-text font-medium">Rclone RC Password</span>
+                                            </label>
+                                            <div class="password-toggle-container">
+                                                <input autocomplete="off" type="password" class="input input-bordered webdav-field input-has-toggle"
+                                                       name="usenet.rc_pass" id="usenet.rc_pass">
+                                                <button type="button" class="password-toggle-btn">
+                                                    <i class="bi bi-eye" id="usenet.rc_pass_icon"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+
+                                </div>
+                            </div>
+
+                            <!-- Usenet Servers Section -->
+                            <div class="flex justify-between items-center">
+                                <h3 class="text-xl font-bold flex items-center">
+                                    <i class="bi bi-server mr-2 text-info"></i>Usenet Servers
+                                </h3>
+                                <button type="button" id="addUsenetBtn" class="btn btn-info">
+                                    <i class="bi bi-plus mr-2"></i>Add Usenet Server
+                                </button>
+                            </div>
+
+                            <div id="usenetConfigs" class="space-y-4">
+                                <!-- Dynamic usenet configurations will be added here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SABnzbd Tab Content -->
+                    <div class="tab-content hidden" data-tab-content="sabnzbd">
+                        <div class="space-y-6">
+                            <h2 class="text-2xl font-bold flex items-center mb-6">
+                                <i class="bi bi-download mr-3 text-accent"></i>SABnzbd Settings
+                            </h2>
+
+                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                <div class="form-control">
+                                    <label class="label" for="sabnzbd.download_folder">
+                                        <span class="label-text font-medium">Download Folder</span>
+                                    </label>
+                                    <input type="text" class="input input-bordered" name="sabnzbd.download_folder" id="sabnzbd.download_folder" placeholder="/downloads/sabnzbd">
+                                    <div class="label">
+                                        <span class="label-text-alt">Folder where SABnzbd downloads files</span>
+                                    </div>
+                                </div>
+                                <div class="form-control">
+                                    <label class="label" for="sabnzbd.refresh_interval">
+                                        <span class="label-text font-medium">Refresh Interval (seconds)</span>
+                                    </label>
+                                    <input type="number" class="input input-bordered" name="sabnzbd.refresh_interval" id="sabnzbd.refresh_interval" min="1" max="3600">
+                                </div>
+                                <div class="form-control">
+                                    <label class="label" for="sabnzbd.categories">
+                                        <span class="label-text font-medium">Default Categories</span>
+                                    </label>
+                                    <input type="text" class="input input-bordered" name="sabnzbd.categories" id="sabnzbd.categories">
                                 </div>
                             </div>
                         </div>

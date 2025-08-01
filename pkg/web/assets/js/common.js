@@ -400,7 +400,7 @@ class DecypharrUtils {
 
                 if (data.channel === 'beta') {
                     versionBadge.classList.add('badge-warning');
-                } else if (data.channel === 'nightly') {
+                } else if (data.channel === 'experimental') {
                     versionBadge.classList.add('badge-error');
                 }
             }

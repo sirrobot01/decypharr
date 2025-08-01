@@ -3,8 +3,12 @@ package web
 import (
 	"fmt"
 	"github.com/sirrobot01/decypharr/pkg/store"
+	"github.com/sirrobot01/decypharr/pkg/usenet"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"encoding/json"
@@ -28,6 +32,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_store := store.Get()
+	cfg := config.Get()
 
 	results := make([]*store.ImportRequest, 0)
 	errs := make([]string, 0)
@@ -37,8 +42,8 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 	debridName := r.FormValue("debrid")
 	callbackUrl := r.FormValue("callbackUrl")
 	downloadFolder := r.FormValue("downloadFolder")
-	if downloadFolder == "" {
-		downloadFolder = config.Get().QBitTorrent.DownloadFolder
+	if downloadFolder == "" && cfg.QBitTorrent != nil {
+		downloadFolder = cfg.QBitTorrent.DownloadFolder
 	}
 
 	downloadUncached := r.FormValue("downloadUncached") == "true"
@@ -236,8 +241,6 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	currentConfig.RemoveStalledAfter = updatedConfig.RemoveStalledAfter
 	currentConfig.AllowedExt = updatedConfig.AllowedExt
 	currentConfig.DiscordWebhook = updatedConfig.DiscordWebhook
-
-	// Should this be added?
 	currentConfig.URLBase = updatedConfig.URLBase
 	currentConfig.BindAddress = updatedConfig.BindAddress
 	currentConfig.Port = updatedConfig.Port
@@ -251,8 +254,10 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	// Update Debrids
 	if len(updatedConfig.Debrids) > 0 {
 		currentConfig.Debrids = updatedConfig.Debrids
-		// Clear legacy single debrid if using array
 	}
+
+	currentConfig.Usenet = updatedConfig.Usenet
+	currentConfig.SABnzbd = updatedConfig.SABnzbd
 
 	// Update Arrs through the service
 	storage := store.Get()
@@ -358,4 +363,199 @@ func (wb *Web) handleStopRepairJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// NZB API Handlers
+
+func (wb *Web) handleGetNZBs(w http.ResponseWriter, r *http.Request) {
+	// Get query parameters for filtering
+	status := r.URL.Query().Get("status")
+	category := r.URL.Query().Get("category")
+	nzbs := wb.usenet.Store().GetQueue()
+
+	// Apply filters if provided
+	filteredNZBs := make([]*usenet.NZB, 0)
+	for _, nzb := range nzbs {
+		if status != "" && nzb.Status != status {
+			continue
+		}
+		if category != "" && nzb.Category != category {
+			continue
+		}
+		filteredNZBs = append(filteredNZBs, nzb)
+	}
+
+	response := map[string]interface{}{
+		"nzbs":  filteredNZBs,
+		"count": len(filteredNZBs),
+	}
+
+	request.JSONResponse(w, response, http.StatusOK)
+}
+
+func (wb *Web) handleDeleteNZB(w http.ResponseWriter, r *http.Request) {
+	nzbID := chi.URLParam(r, "id")
+	if nzbID == "" {
+		http.Error(w, "No NZB ID provided", http.StatusBadRequest)
+		return
+	}
+	wb.usenet.Store().RemoveFromQueue(nzbID)
+
+	wb.logger.Info().Str("nzb_id", nzbID).Msg("NZB delete requested")
+	request.JSONResponse(w, map[string]string{"status": "success"}, http.StatusOK)
+}
+
+func (wb *Web) handleAddNZBContent(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	cfg := config.Get()
+	_store := store.Get()
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	results := make([]interface{}, 0)
+	errs := make([]string, 0)
+
+	arrName := r.FormValue("arr")
+	action := r.FormValue("action")
+	downloadFolder := r.FormValue("downloadFolder")
+	if downloadFolder == "" {
+		downloadFolder = cfg.SABnzbd.DownloadFolder
+	}
+
+	_arr := _store.Arr().Get(arrName)
+	if _arr == nil {
+		// These are not found in the config. They are throwaway arrs.
+		_arr = arr.New(arrName, "", "", false, false, nil, "", "")
+	}
+	_nzbURLS := r.FormValue("nzbUrls")
+	urlList := make([]string, 0)
+	if _nzbURLS != "" {
+		for _, u := range strings.Split(_nzbURLS, "\n") {
+			if trimmed := strings.TrimSpace(u); trimmed != "" {
+				urlList = append(urlList, trimmed)
+			}
+		}
+	}
+	files := r.MultipartForm.File["nzbFiles"]
+	totalItems := len(files) + len(urlList)
+	if totalItems == 0 {
+		request.JSONResponse(w, map[string]any{
+			"results": nil,
+			"errors":  "No NZB URLs or files provided",
+		}, http.StatusBadRequest)
+		return
+	}
+
+	var wg sync.WaitGroup
+	for _, url := range urlList {
+		wg.Add(1)
+		go func(url string) {
+			defer wg.Done()
+			select {
+			case <-ctx.Done():
+				return // Exit if context is done
+			default:
+			}
+			if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+				errs = append(errs, fmt.Sprintf("Invalid URL format: %s", url))
+				return
+			}
+			// Download the NZB file from the URL
+			filename, content, err := utils.DownloadFile(url)
+			if err != nil {
+				wb.logger.Error().Err(err).Str("url", url).Msg("Failed to download NZB from URL")
+				errs = append(errs, fmt.Sprintf("Failed to download NZB from URL %s: %v", url, err))
+				return // Continue processing other URLs
+			}
+			req := &usenet.ProcessRequest{
+				NZBContent:  content,
+				Name:        filename,
+				Arr:         _arr,
+				Action:      action,
+				DownloadDir: downloadFolder,
+			}
+			nzb, err := wb.usenet.ProcessNZB(ctx, req)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("Failed to process NZB from URL %s: %v", url, err))
+				return
+			}
+			wb.logger.Info().Str("nzb_id", nzb.ID).Str("url", url).Msg("NZB added from URL")
+
+			result := map[string]interface{}{
+				"id":       nzb.ID,
+				"name":     "NZB from URL",
+				"url":      url,
+				"category": arrName,
+			}
+			results = append(results, result)
+		}(url)
+	}
+
+	// Handle NZB files
+	for _, fileHeader := range files {
+		wg.Add(1)
+		go func(fileHeader *multipart.FileHeader) {
+			defer wg.Done()
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			file, err := fileHeader.Open()
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("failed to open NZB file %s: %v", fileHeader.Filename, err))
+				return
+			}
+			defer file.Close()
+
+			content, err := io.ReadAll(file)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("failed to read NZB file %s: %v", fileHeader.Filename, err))
+				return
+			}
+			req := &usenet.ProcessRequest{
+				NZBContent:  content,
+				Name:        fileHeader.Filename,
+				Arr:         _arr,
+				Action:      action,
+				DownloadDir: downloadFolder,
+			}
+			nzb, err := wb.usenet.ProcessNZB(ctx, req)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("failed to process NZB file %s: %v", fileHeader.Filename, err))
+				return
+			}
+			wb.logger.Info().Str("nzb_id", nzb.ID).Str("file", fileHeader.Filename).Msg("NZB added from file")
+			// Simulate successful addition
+			result := map[string]interface{}{
+				"id":       nzb.ID,
+				"name":     fileHeader.Filename,
+				"filename": fileHeader.Filename,
+				"category": arrName,
+			}
+			results = append(results, result)
+		}(fileHeader)
+	}
+
+	// Wait for all goroutines to finish
+	wg.Wait()
+
+	// Validation
+	if len(results) == 0 && len(errs) == 0 {
+		request.JSONResponse(w, map[string]any{
+			"results": nil,
+			"errors":  "No NZB URLs or files processed successfully",
+		}, http.StatusBadRequest)
+		return
+	}
+
+	request.JSONResponse(w, struct {
+		Results []interface{} `json:"results"`
+		Errors  []string      `json:"errors,omitempty"`
+	}{
+		Results: results,
+		Errors:  errs,
+	}, http.StatusOK)
 }

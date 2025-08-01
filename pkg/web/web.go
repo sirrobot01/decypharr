@@ -7,6 +7,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/pkg/store"
+	"github.com/sirrobot01/decypharr/pkg/usenet"
 	"html/template"
 	"os"
 )
@@ -61,9 +62,10 @@ type Web struct {
 	cookie    *sessions.CookieStore
 	templates *template.Template
 	torrents  *store.TorrentStorage
+	usenet    usenet.Usenet
 }
 
-func New() *Web {
+func New(usenet usenet.Usenet) *Web {
 	templates := template.Must(template.ParseFS(
 		content,
 		"templates/layout.html",
@@ -86,5 +88,6 @@ func New() *Web {
 		templates: templates,
 		cookie:    cookieStore,
 		torrents:  store.Get().Torrents(),
+		usenet:    usenet,
 	}
 }

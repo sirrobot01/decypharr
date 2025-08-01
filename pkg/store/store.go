@@ -1,7 +1,6 @@
 package store
 
 import (
-	"cmp"
 	"context"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
@@ -37,18 +36,21 @@ func Get() *Store {
 		arrs := arr.NewStorage()
 		deb := debrid.NewStorage()
 		cfg := config.Get()
-		qbitCfg := cfg.QBitTorrent
-
 		instance = &Store{
 			repair:            repair.New(arrs, deb),
 			arr:               arrs,
 			debrid:            deb,
 			torrents:          newTorrentStorage(cfg.TorrentsFile()),
 			logger:            logger.Default(), // Use default logger [decypharr]
-			refreshInterval:   time.Duration(cmp.Or(qbitCfg.RefreshInterval, 10)) * time.Minute,
-			skipPreCache:      qbitCfg.SkipPreCache,
-			downloadSemaphore: make(chan struct{}, cmp.Or(qbitCfg.MaxDownloads, 5)),
 			importsQueue:      NewImportQueue(context.Background(), 1000),
+			refreshInterval:   10 * time.Minute,       // Default refresh interval
+			skipPreCache:      false,                  // Default skip pre-cache
+			downloadSemaphore: make(chan struct{}, 5), // Default max concurrent downloads
+		}
+		if cfg.QBitTorrent != nil {
+			instance.refreshInterval = time.Duration(cfg.QBitTorrent.RefreshInterval) * time.Minute
+			instance.skipPreCache = cfg.QBitTorrent.SkipPreCache
+			instance.downloadSemaphore = make(chan struct{}, cfg.QBitTorrent.MaxDownloads)
 		}
 		if cfg.RemoveStalledAfter != "" {
 			removeStalledAfter, err := time.ParseDuration(cfg.RemoveStalledAfter)

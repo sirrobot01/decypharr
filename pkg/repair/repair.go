@@ -214,7 +214,6 @@ func (r *Repair) newJob(arrsNames []string, mediaIDs []string) *Job {
 	}
 }
 
-// initRun initializes the repair run, setting up necessary configurations, checks and caches
 func (r *Repair) initRun(ctx context.Context) {
 	if r.useWebdav {
 		// Webdav use is enabled, initialize debrid torrent caches

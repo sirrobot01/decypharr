@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
+	"github.com/sirrobot01/decypharr/pkg/usenet"
 	"io"
 	"net/http"
 	"os"
@@ -17,9 +18,10 @@ import (
 type Server struct {
 	router *chi.Mux
 	logger zerolog.Logger
+	usenet usenet.Usenet
 }
 
-func New(handlers map[string]http.Handler) *Server {
+func New(usenet usenet.Usenet, handlers map[string]http.Handler) *Server {
 	l := logger.New("http")
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
@@ -28,6 +30,7 @@ func New(handlers map[string]http.Handler) *Server {
 
 	s := &Server{
 		logger: l,
+		usenet: usenet,
 	}
 
 	r.Route(cfg.URLBase, func(r chi.Router) {

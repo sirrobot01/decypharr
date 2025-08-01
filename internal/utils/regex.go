@@ -57,3 +57,15 @@ func IsSampleFile(path string) bool {
 	}
 	return RegexMatch(sampleRegex, path)
 }
+
+func IsParFile(path string) bool {
+	ext := filepath.Ext(path)
+	return strings.EqualFold(ext, ".par") || strings.EqualFold(ext, ".par2")
+}
+
+func IsRarFile(path string) bool {
+	ext := filepath.Ext(path)
+	return strings.EqualFold(ext, ".rar") || strings.EqualFold(ext, ".r00") ||
+		strings.EqualFold(ext, ".r01") || strings.EqualFold(ext, ".r02") ||
+		strings.EqualFold(ext, ".r03") || strings.EqualFold(ext, ".r04")
+}

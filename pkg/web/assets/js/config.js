@@ -3,6 +3,7 @@ class ConfigManager {
     constructor() {
         this.debridCount = 0;
         this.arrCount = 0;
+        this.usenetProviderCount = 0;
         this.debridDirectoryCounts = {};
         this.directoryFilterCounts = {};
 
@@ -11,8 +12,10 @@ class ConfigManager {
             loadingOverlay: document.getElementById('loadingOverlay'),
             debridConfigs: document.getElementById('debridConfigs'),
             arrConfigs: document.getElementById('arrConfigs'),
+            usenetConfigs: document.getElementById('usenetConfigs'),
             addDebridBtn: document.getElementById('addDebridBtn'),
-            addArrBtn: document.getElementById('addArrBtn')
+            addArrBtn: document.getElementById('addArrBtn'),
+            addUsenetBtn: document.getElementById('addUsenetBtn')
         };
 
         this.init();
@@ -40,6 +43,7 @@ class ConfigManager {
         // Add buttons
         this.refs.addDebridBtn.addEventListener('click', () => this.addDebridConfig());
         this.refs.addArrBtn.addEventListener('click', () => this.addArrConfig());
+        this.refs.addUsenetBtn.addEventListener('click', () => this.addUsenetConfig());
 
         // WebDAV toggle handlers
         document.addEventListener('change', (e) => {
@@ -81,6 +85,12 @@ class ConfigManager {
         if (config.arrs && Array.isArray(config.arrs)) {
             config.arrs.forEach(arr => this.addArrConfig(arr));
         }
+
+        // Load usenet config
+        this.populateUsenetSettings(config.usenet);
+
+        // Load SABnzbd config
+        this.populateSABnzbdSettings(config.sabnzbd);
 
         // Load repair config
         this.populateRepairSettings(config.repair);
@@ -137,6 +147,26 @@ class ConfigManager {
                 }
             }
         });
+    }
+
+    populateUsenetSettings(usenetConfig) {
+        if (!usenetConfig) return;
+        // Populate general Usenet settings
+        let fields = ["mount_folder", "chunks", "skip_pre_cache", "rc_url", "rc_user", "rc_pass"];
+        fields.forEach(field => {
+            const element = document.querySelector(`[name="usenet.${field}"]`);
+            if (element && usenetConfig[field] !== undefined) {
+                if (element.type === 'checkbox') {
+                    element.checked = usenetConfig[field];
+                } else {
+                    element.value = usenetConfig[field];
+                }
+            }
+        });
+
+        if (usenetConfig.providers && Array.isArray(usenetConfig.providers)) {
+            usenetConfig.providers.forEach(usenet => this.addUsenetConfig(usenet));
+        }
     }
 
     addDebridConfig(data = {}) {
@@ -228,7 +258,7 @@ class ConfigManager {
                                 <span class="label-text font-medium">API Key</span>
                             </label>
                             <div class="password-toggle-container">
-                                <input type="password" class="input input-bordered input-has-toggle" 
+                                <input autocomplete="off" type="password" class="input input-bordered input-has-toggle" 
                                        name="debrid[${index}].api_key" id="debrid[${index}].api_key" required>
                                 <button type="button" class="password-toggle-btn">
                                     <i class="bi bi-eye" id="debrid[${index}].api_key_icon"></i>
@@ -448,7 +478,7 @@ class ConfigManager {
                                         <span class="label-text font-medium">RC Password</span>
                                     </label>
                                     <div class="password-toggle-container">
-                                        <input type="password" class="input input-bordered webdav-field input-has-toggle" 
+                                        <input autocomplete="off" type="password" class="input input-bordered webdav-field input-has-toggle" 
                                                name="debrid[${index}].rc_pass" id="debrid[${index}].rc_pass">
                                         <button type="button" class="password-toggle-btn">
                                             <i class="bi bi-eye" id="debrid[${index}].rc_pass_icon"></i>
@@ -745,9 +775,9 @@ class ConfigManager {
         modal.className = 'modal';
         modal.innerHTML = `
             <div class="modal-box max-w-2xl">
-                <form method="dialog">
+                <div method="dialog">
                     <button class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">✕</button>
-                </form>
+                </div>
                 <h3 class="font-bold text-lg mb-4">Directory Filter Types</h3>
                 <div class="space-y-4">
                     <div>
@@ -779,7 +809,7 @@ class ConfigManager {
                             <li>Examples: 24h, 7d, 30d</li>
                         </ul>
                     </div>
-                    <div class="alert alert-info">
+                    <div class="alert alert-warning">
                         <i class="bi bi-info-circle"></i>
                         <span>Negative filters (Not...) will exclude matches instead of including them.</span>
                     </div>
@@ -868,7 +898,7 @@ class ConfigManager {
                                 <span class="label-text font-medium">API Token</span>
                             </label>
                             <div class="password-toggle-container">
-                                <input type="password" class="input input-bordered input-has-toggle ${isAutoDetected ? 'input-disabled' : ''}" 
+                                <input autocomplete="off" type="password" class="input input-bordered input-has-toggle ${isAutoDetected ? 'input-disabled' : ''}" 
                                        name="arr[${index}].token" id="arr[${index}].token" 
                                        ${isAutoDetected ? 'readonly' : 'required'}>
                                 <button type="button" class="password-toggle-btn ${isAutoDetected ? 'opacity-50 cursor-not-allowed' : ''}"
@@ -882,7 +912,7 @@ class ConfigManager {
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
                         <div class="form-control">
                             <label class="label" for="arr[${index}].selected_debrid">
-                                <span class="label-text font-medium">Preferred Debrid Service</span>
+                                <span class="label-text font-medium">Preferred Service</span>
                             </label>
                             <select class="select select-bordered" name="arr[${index}].selected_debrid" id="arr[${index}].selected_debrid">
                                 <option value="" selected>Auto-select</option>
@@ -890,6 +920,7 @@ class ConfigManager {
                                 <option value="alldebrid">AllDebrid</option>
                                 <option value="debrid_link">Debrid Link</option>
                                 <option value="torbox">Torbox</option>
+                                <option value="usenet">Usenet</option>
                             </select>
                             <div class="label">
                                 <span class="label-text-alt">Which debrid service this Arr should prefer</span>
@@ -990,6 +1021,23 @@ class ConfigManager {
             }
         });
 
+        // Validate Usenet servers
+        if (config.usenet) {
+            config.usenet.providers.forEach((usenet, index) => {
+                if (!usenet.host) {
+                    errors.push(`Usenet server #${index + 1}: Host is required`);
+                }
+
+                if (usenet.port && (usenet.port < 1 || usenet.port > 65535)) {
+                    errors.push(`Usenet server #${index + 1}: Port must be between 1 and 65535`);
+                }
+
+                if (usenet.connections && (usenet.connections < 1 )) {
+                    errors.push(`Usenet server #${index + 1}: Connections must be more than 0`);
+                }
+            });
+        }
+
         // Validate repair settings
         if (config.repair.enabled) {
             if (!config.repair.interval) {
@@ -1037,6 +1085,12 @@ class ConfigManager {
 
             // Arr configurations
             arrs: this.collectArrConfigs(),
+
+            // Usenet configurations
+            usenet: this.collectUsenetConfig(),
+
+            // SABnzbd configuration
+            sabnzbd: this.collectSABnzbdConfig(),
 
             // Repair configuration
             repair: this.collectRepairConfig()
@@ -1151,6 +1205,211 @@ class ConfigManager {
         }
 
         return arrs;
+    }
+
+    addUsenetConfig(data = {}) {
+        const usenetHtml = this.getUsenetTemplate(this.usenetProviderCount, data);
+        this.refs.usenetConfigs.insertAdjacentHTML('beforeend', usenetHtml);
+
+        // Populate data if provided
+        if (Object.keys(data).length > 0) {
+            this.populateUsenetData(this.usenetProviderCount, data);
+        }
+
+        this.usenetProviderCount++;
+    }
+
+    populateUsenetData(index, data) {
+        Object.entries(data).forEach(([key, value]) => {
+            const input = document.querySelector(`[name="usenet[${index}].${key}"]`);
+            if (input) {
+                if (input.type === 'checkbox') {
+                    input.checked = value;
+                } else {
+                    input.value = value;
+                }
+            }
+        });
+    }
+
+    getUsenetTemplate(index, data = {}) {
+        return `
+        <div class="card bg-base-100 border border-base-300 shadow-sm usenet-config" data-index="${index}">
+            <div class="card-body">
+                <div class="flex justify-between items-start mb-4">
+                    <h3 class="card-title text-lg">
+                        <i class="bi bi-globe mr-2 text-info"></i>
+                        Usenet Server #${index + 1}
+                    </h3>
+                    <button type="button" class="btn btn-error btn-sm" onclick="this.closest('.usenet-config').remove();">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+                
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <div class="form-control">
+                        <label class="label" for="usenet[${index}].name">
+                            <span class="label-text font-medium">Name</span>
+                        </label>
+                        <input type="text" class="input input-bordered" 
+                               name="usenet[${index}].name" id="usenet[${index}].name" 
+                               placeholder="provider name, e.g easynews" required>
+                        <div class="label">
+                            <span class="label-text-alt">Usenet Name</span>
+                        </div>
+                    </div>
+                    <div class="form-control">
+                        <label class="label" for="usenet[${index}].host">
+                            <span class="label-text font-medium">Host</span>
+                        </label>
+                        <input type="text" class="input input-bordered" 
+                               name="usenet[${index}].host" id="usenet[${index}].host" 
+                               placeholder="news.provider.com" required>
+                        <div class="label">
+                            <span class="label-text-alt">Usenet server hostname</span>
+                        </div>
+                    </div>
+
+                    <div class="form-control">
+                        <label class="label" for="usenet[${index}].port">
+                            <span class="label-text font-medium">Port</span>
+                        </label>
+                        <input type="number" class="input input-bordered" 
+                               name="usenet[${index}].port" id="usenet[${index}].port" 
+                               placeholder="119" value="119" min="1" max="65535">
+                        <div class="label">
+                            <span class="label-text-alt">Server port (119 for standard, 563 for SSL)</span>
+                        </div>
+                    </div>
+                    <div class="form-control">
+                        <label class="label" for="usenet[${index}].connections">
+                            <span class="label-text font-medium">Connections</span>
+                        </label>
+                        <input type="number" class="input input-bordered" 
+                               name="usenet[${index}].connections" id="usenet[${index}].connections" 
+                               placeholder="30" value="30" min="1" max="50">
+                        <div class="label">
+                            <span class="label-text-alt">Maximum simultaneous connections</span>
+                        </div>
+                    </div>
+                    <div class="form-control">
+                        <label class="label" for="usenet[${index}].username">
+                            <span class="label-text font-medium">Username</span>
+                        </label>
+                        <input type="text" class="input input-bordered" 
+                               name="usenet[${index}].username" id="usenet[${index}].username">
+                        <div class="label">
+                            <span class="label-text-alt">Username for authentication</span>
+                        </div>
+                    </div>
+
+                    <div class="form-control">
+                        <label class="label" for="usenet[${index}].password">
+                            <span class="label-text font-medium">Password</span>
+                        </label>
+                        <div class="password-toggle-container">
+                            <input autocomplete="off" type="password" class="input input-bordered input-has-toggle" 
+                                   name="usenet[${index}].password" id="usenet[${index}].password">
+                            <button type="button" class="password-toggle-btn">
+                                <i class="bi bi-eye" id="usenet[${index}].password_icon"></i>
+                            </button>
+                        </div>
+                        <div class="label">
+                            <span class="label-text-alt">Password for authentication</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-2">
+                            <input type="checkbox" class="checkbox" 
+                                   name="usenet[${index}].ssl" id="usenet[${index}].ssl">
+                            <span class="label-text font-medium">Use SSL</span>
+                        </label>
+                        <div class="label">
+                            <span class="label-text-alt">Use SSL encryption</span>
+                        </div>
+                    </div>
+
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-2">
+                            <input type="checkbox" class="checkbox" 
+                                   name="usenet[${index}].use_tls" id="usenet[${index}].use_tls">
+                            <span class="label-text font-medium">Use TLS</span>
+                        </label>
+                        <div class="label">
+                            <span class="label-text-alt">Use TLS encryption</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    }
+
+    populateSABnzbdSettings(sabnzbdConfig) {
+        if (!sabnzbdConfig) return;
+
+        const fields = ['download_folder', 'refresh_interval'];
+        
+        fields.forEach(field => {
+            const element = document.querySelector(`[name="sabnzbd.${field}"]`);
+            if (element && sabnzbdConfig[field] !== undefined) {
+                if (element.type === 'checkbox') {
+                    element.checked = sabnzbdConfig[field];
+                } else {
+                    element.value = sabnzbdConfig[field];
+                }
+            }
+        });
+        const categoriesEl = document.querySelector('[name="sabnzbd.categories"]');
+        if (categoriesEl && sabnzbdConfig.categories) {
+            categoriesEl.value = sabnzbdConfig.categories.join(', ');
+        }
+    }
+
+    collectUsenetConfig() {
+        const providers = [];
+
+        for (let i = 0; i < this.usenetProviderCount; i++) {
+            const hostEl = document.querySelector(`[name="usenet[${i}].host"]`);
+            if (!hostEl || !hostEl.closest('.usenet-config')) continue;
+
+            const usenet = {
+                host: hostEl.value,
+                port: parseInt(document.querySelector(`[name="usenet[${i}].port"]`).value) || 119,
+                username: document.querySelector(`[name="usenet[${i}].username"]`).value,
+                password: document.querySelector(`[name="usenet[${i}].password"]`).value,
+                connections: parseInt(document.querySelector(`[name="usenet[${i}].connections"]`).value) || 30,
+                name: document.querySelector(`[name="usenet[${i}].name"]`).value,
+                ssl: document.querySelector(`[name="usenet[${i}].ssl"]`).checked,
+                use_tls: document.querySelector(`[name="usenet[${i}].use_tls"]`).checked,
+            };
+
+            if (usenet.host) {
+                providers.push(usenet);
+            }
+        }
+
+        return {
+            "providers": providers,
+            "chunks": parseInt(document.querySelector('[name="usenet.chunks"]').value) || 15,
+            "mount_folder": document.querySelector('[name="usenet.mount_folder"]').value,
+            "skip_pre_cache": document.querySelector('[name="usenet.skip_pre_cache"]').checked,
+            "rc_url": document.querySelector('[name="usenet.rc_url"]').value,
+            "rc_user": document.querySelector('[name="usenet.rc_user"]').value,
+            "rc_pass": document.querySelector('[name="usenet.rc_pass"]').value,
+        };
+    }
+
+    collectSABnzbdConfig() {
+        return {
+            download_folder: document.querySelector('[name="sabnzbd.download_folder"]').value,
+            refresh_interval: parseInt(document.querySelector('[name="sabnzbd.refresh_interval"]').value) || 15,
+            categories: document.querySelector('[name="sabnzbd.categories"]').value
+                .split(',').map(ext => ext.trim()).filter(Boolean)
+        };
     }
 
     collectRepairConfig() {
