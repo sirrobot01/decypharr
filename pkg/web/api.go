@@ -247,6 +247,7 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 
 	// Update Repair config
 	currentConfig.Repair = updatedConfig.Repair
+	currentConfig.Rclone = updatedConfig.Rclone
 
 	// Update Debrids
 	if len(updatedConfig.Debrids) > 0 {

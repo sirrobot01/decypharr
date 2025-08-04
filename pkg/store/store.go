@@ -69,8 +69,10 @@ func Reset() {
 		if instance.importsQueue != nil {
 			instance.importsQueue.Close()
 		}
-
-		close(instance.downloadSemaphore)
+		if instance.downloadSemaphore != nil {
+			// Close the semaphore channel to
+			close(instance.downloadSemaphore)
+		}
 	}
 	once = sync.Once{}
 	instance = nil

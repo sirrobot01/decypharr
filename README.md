@@ -37,9 +37,15 @@ services:
     ports:
       - "8282:8282" # qBittorrent
     volumes:
-      - /mnt/:/mnt
+      - /mnt/:/mnt:rshared
       - ./configs/:/app # config.json must be in this directory
     restart: unless-stopped
+    devices:
+      - /dev/fuse:/dev/fuse:rwm
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
 ```
 
 ## Documentation
@@ -57,25 +63,7 @@ The documentation includes:
 
 ## Basic Configuration
 
-```json
-{
-  "debrids": [
-    {
-      "name": "realdebrid",
-      "api_key": "your_api_key_here",
-      "folder": "/mnt/remote/realdebrid/__all__/",
-      "use_webdav": true
-    }
-  ],
-  "qbittorrent": {
-    "download_folder": "/mnt/symlinks/",
-    "categories": ["sonarr", "radarr"]
-  },
-  "use_auth": false,
-  "log_level": "info",
-  "port": "8282"
-}
-```
+You'll be able to configure Decypharr through the Web UI or by editing the `config.json` file directly.
 
 ## Contributing
 

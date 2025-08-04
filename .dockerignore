@@ -27,3 +27,7 @@ decypharr
 healthcheck
 *.exe
 .venv/
+data/**
+
+.stignore
+.stfolder/**

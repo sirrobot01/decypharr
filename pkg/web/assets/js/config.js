@@ -84,6 +84,9 @@ class ConfigManager {
 
         // Load repair config
         this.populateRepairSettings(config.repair);
+
+        // Load rclone config
+        this.populateRcloneSettings(config.rclone);
     }
 
     populateGeneralSettings(config) {
@@ -134,6 +137,28 @@ class ConfigManager {
                     element.checked = repairConfig[field];
                 } else {
                     element.value = repairConfig[field];
+                }
+            }
+        });
+    }
+
+    populateRcloneSettings(rcloneConfig) {
+        if (!rcloneConfig) return;
+
+        const fields = [
+            'enabled', 'mount_path', 'cache_dir', 'vfs_cache_mode', 'vfs_cache_max_size', 'vfs_cache_max_age',
+            'vfs_cache_poll_interval', 'vfs_read_chunk_size', 'vfs_read_chunk_size_limit', 'buffer_size',
+            'uid', 'gid', 'vfs_read_ahead', 'attr_timeout', 'dir_cache_time', 'poll_interval',
+            'no_modtime', 'no_checksum'
+        ];
+
+        fields.forEach(field => {
+            const element = document.querySelector(`[name="rclone.${field}"]`);
+            if (element && rcloneConfig[field] !== undefined) {
+                if (element.type === 'checkbox') {
+                    element.checked = rcloneConfig[field];
+                } else {
+                    element.value = rcloneConfig[field];
                 }
             }
         });
@@ -262,6 +287,7 @@ class ConfigManager {
                         </div>
                     </div>
                     <div class="space-y-4">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         <div class="form-control">
                             <label class="label" for="debrid[${index}].folder">
                                 <span class="label-text font-medium">Mount/Rclone Folder</span>
@@ -273,7 +299,6 @@ class ConfigManager {
                                 <span class="label-text-alt">Path where debrid files are mounted</span>
                             </div>
                         </div>
-
                         <div class="form-control">
                             <label class="label" for="debrid[${index}].rate_limit">
                                 <span class="label-text font-medium">Rate Limit</span>
@@ -285,6 +310,19 @@ class ConfigManager {
                                 <span class="label-text-alt">API rate limit for this service</span>
                             </div>
                         </div>
+                        <div class="form-control">
+                            <label class="label" for="debrid[${index}].proxy">
+                                <span class="label-text font-medium">Proxy</span>
+                            </label>
+                            <input type="text" class="input input-bordered" 
+                                   name="debrid[${index}].proxy" id="debrid[${index}].proxy" 
+                                   placeholder="socks4, socks5, https proxy">
+                            <div class="label">
+                                <span class="label-text-alt">This proxy is used for this debrid account</span>
+                            </div>
+                        </div>
+                    </div>
+                        
                     </div>
                 </div>
 
@@ -997,6 +1035,10 @@ class ConfigManager {
             }
         }
 
+        if (config.rclone.enabled && config.rclone.mount_path === '') {
+            errors.push('Rclone mount path is required when Rclone is enabled');
+        }
+
         return {
             valid: errors.length === 0,
             errors
@@ -1036,7 +1078,10 @@ class ConfigManager {
             arrs: this.collectArrConfigs(),
 
             // Repair configuration
-            repair: this.collectRepairConfig()
+            repair: this.collectRepairConfig(),
+
+            // Rclone configuration
+            rclone: this.collectRcloneConfig()
         };
     }
 
@@ -1052,6 +1097,7 @@ class ConfigManager {
                 api_key: document.querySelector(`[name="debrid[${i}].api_key"]`).value,
                 folder: document.querySelector(`[name="debrid[${i}].folder"]`).value,
                 rate_limit: document.querySelector(`[name="debrid[${i}].rate_limit"]`).value,
+                proxy: document.querySelector(`[name="debrid[${i}].proxy"]`).value,
                 download_uncached: document.querySelector(`[name="debrid[${i}].download_uncached"]`).checked,
                 unpack_rar: document.querySelector(`[name="debrid[${i}].unpack_rar"]`).checked,
                 add_samples: document.querySelector(`[name="debrid[${i}].add_samples"]`).checked,
@@ -1162,6 +1208,42 @@ class ConfigManager {
         };
     }
 
+    collectRcloneConfig() {
+        const getElementValue = (name, defaultValue = '') => {
+            const element = document.querySelector(`[name="rclone.${name}"]`);
+            if (!element) return defaultValue;
+            
+            if (element.type === 'checkbox') {
+                return element.checked;
+            } else if (element.type === 'number') {
+                const val = parseInt(element.value);
+                return isNaN(val) ? 0 : val;
+            } else {
+                return element.value || defaultValue;
+            }
+        };
+
+        return {
+            enabled: getElementValue('enabled', false),
+            mount_path: getElementValue('mount_path'),
+            buffer_size: getElementValue('buffer_size'),
+            cache_dir: getElementValue('cache_dir'),
+            vfs_cache_mode: getElementValue('vfs_cache_mode', 'off'),
+            vfs_cache_max_age: getElementValue('vfs_cache_max_age', '1h'),
+            vfs_cache_max_size: getElementValue('vfs_cache_max_size'),
+            vfs_cache_poll_interval: getElementValue('vfs_cache_poll_interval', '1m'),
+            vfs_read_chunk_size: getElementValue('vfs_read_chunk_size', '128M'),
+            vfs_read_chunk_size_limit: getElementValue('vfs_read_chunk_size_limit', 'off'),
+            uid: getElementValue('uid', 0),
+            gid: getElementValue('gid', 0),
+            vfs_read_ahead: getElementValue('vfs_read_ahead', '128k'),
+            attr_timeout: getElementValue('attr_timeout', '1s'),
+            dir_cache_time: getElementValue('dir_cache_time', '5m'),
+            no_modtime: getElementValue('no_modtime', false),
+            no_checksum: getElementValue('no_checksum', false),
+        };
+    }
+
     setupMagnetHandler() {
         window.registerMagnetLinkHandler = () => {
             if ('registerProtocolHandler' in navigator) {
@@ -1199,3 +1281,5 @@ class ConfigManager {
         }
     }
 }
+
+

@@ -73,6 +73,14 @@ func Start(ctx context.Context) error {
 		}
 		srv := server.New(handlers)
 
+		reset := func() {
+			// Reset the store and services
+			qb.Reset()
+			store.Reset()
+			// refresh GC
+			runtime.GC()
+		}
+
 		done := make(chan struct{})
 		go func(ctx context.Context) {
 			if err := startServices(ctx, cancelSvc, wd, srv); err != nil {
@@ -87,22 +95,18 @@ func Start(ctx context.Context) error {
 			// graceful shutdown
 			cancelSvc() // propagate to services
 			<-done      // wait for them to finish
+			_log.Info().Msg("Decypharr has been stopped gracefully.")
+			reset() // reset store and services
 			return nil
 
 		case <-restartCh:
 			cancelSvc() // tell existing services to shut down
 			_log.Info().Msg("Restarting Decypharr...")
 			<-done // wait for them to finish
-			qb.Reset()
-			store.Reset()
-
+			_log.Info().Msg("Decypharr has been restarted.")
+			reset() // reset store and services
 			// rebuild svcCtx off the original parent
 			svcCtx, cancelSvc = context.WithCancel(ctx)
-			runtime.GC()
-
-			config.Reload()
-			store.Reset()
-			// loop will restart services automatically
 		}
 	}
 }

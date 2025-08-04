@@ -39,6 +39,7 @@ type Debrid struct {
 	UnpackRar         bool     `json:"unpack_rar,omitempty"`
 	AddSamples        bool     `json:"add_samples,omitempty"`
 	MinimumFreeSlot   int      `json:"minimum_free_slot,omitempty"` // Minimum active pots to use this debrid
+	Limit             int      `json:"limit,omitempty"`             // Maximum number of total torrents
 
 	UseWebDav bool `json:"use_webdav,omitempty"`
 	WebDav
@@ -82,6 +83,37 @@ type Auth struct {
 	Password string `json:"password,omitempty"`
 }
 
+type Rclone struct {
+	// Global mount folder where all providers will be mounted as subfolders
+	Enabled   bool   `json:"enabled,omitempty"`
+	MountPath string `json:"mount_path,omitempty"`
+
+	// Cache settings
+	CacheDir string `json:"cache_dir,omitempty"`
+
+	// VFS settings
+	VfsCacheMode          string `json:"vfs_cache_mode,omitempty"`            // off, minimal, writes, full
+	VfsCacheMaxAge        string `json:"vfs_cache_max_age,omitempty"`         // Maximum age of objects in the cache (default 1h)
+	VfsCacheMaxSize       string `json:"vfs_cache_max_size,omitempty"`        // Maximum size of the cache (default off)
+	VfsCachePollInterval  string `json:"vfs_cache_poll_interval,omitempty"`   // How often to poll for changes (default 1m)
+	VfsReadChunkSize      string `json:"vfs_read_chunk_size,omitempty"`       // Read chunk size (default 128M)
+	VfsReadChunkSizeLimit string `json:"vfs_read_chunk_size_limit,omitempty"` // Max chunk size (default off)
+	VfsReadAhead          string `json:"vfs_read_ahead,omitempty"`            // read ahead size
+	BufferSize            string `json:"buffer_size,omitempty"`               // Buffer size for reading files (default 16M)
+
+	// File system settings
+	UID uint32 `json:"uid,omitempty"` // User ID for mounted files
+	GID uint32 `json:"gid,omitempty"` // Group ID for mounted files
+
+	// Timeout settings
+	AttrTimeout  string `json:"attr_timeout,omitempty"`   // Attribute cache timeout (default 1s)
+	DirCacheTime string `json:"dir_cache_time,omitempty"` // Directory cache time (default 5m)
+
+	// Performance settings
+	NoModTime  bool `json:"no_modtime,omitempty"`  // Don't read/write modification time
+	NoChecksum bool `json:"no_checksum,omitempty"` // Don't checksum files on upload
+}
+
 type Config struct {
 	// server
 	BindAddress string `json:"bind_address,omitempty"`
@@ -94,6 +126,7 @@ type Config struct {
 	Arrs               []Arr       `json:"arrs,omitempty"`
 	Repair             Repair      `json:"repair,omitempty"`
 	WebDav             WebDav      `json:"webdav,omitempty"`
+	Rclone             Rclone      `json:"rclone,omitempty"`
 	AllowedExt         []string    `json:"allowed_file_types,omitempty"`
 	MinFileSize        string      `json:"min_file_size,omitempty"` // Minimum file size to download, 10MB, 1GB, etc
 	MaxFileSize        string      `json:"max_file_size,omitempty"` // Maximum file size to download (0 means no limit)
@@ -365,6 +398,28 @@ func (c *Config) setDefaults() {
 		c.Repair.Strategy = RepairStrategyPerTorrent
 	}
 
+	if c.Rclone.Enabled {
+		c.Rclone.MountPath = cmp.Or(c.Rclone.MountPath, filepath.Join(c.Path, "mounts"))
+		c.Rclone.VfsCacheMode = cmp.Or(c.Rclone.VfsCacheMode, "off")
+		if c.Rclone.UID == 0 {
+			c.Rclone.UID = uint32(os.Getuid())
+		}
+		if c.Rclone.GID == 0 {
+			if runtime.GOOS == "windows" {
+				// On Windows, we use the current user's SID as GID
+				c.Rclone.GID = uint32(os.Getuid()) // Windows does not have GID, using UID instead
+			} else {
+				c.Rclone.GID = uint32(os.Getgid())
+			}
+		}
+		if c.Rclone.VfsCacheMode != "off" {
+			c.Rclone.VfsCachePollInterval = cmp.Or(c.Rclone.VfsCachePollInterval, "1m")
+			c.Rclone.VfsReadChunkSizeLimit = cmp.Or(c.Rclone.VfsReadChunkSizeLimit, "off")
+		}
+
+		c.Rclone.AttrTimeout = cmp.Or(c.Rclone.AttrTimeout, "10s")
+		c.Rclone.DirCacheTime = cmp.Or(c.Rclone.DirCacheTime, "5m")
+	}
 	// Load the auth file
 	c.Auth = c.GetAuth()
 }

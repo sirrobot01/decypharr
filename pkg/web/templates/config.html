@@ -28,6 +28,10 @@
                             <i class="bi bi-wrench text-lg"></i>
                             <span class="hidden sm:inline">Repair</span>
                         </button>
+                        <button type="button" class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors" data-tab="rclone">
+                            <i class="bi bi-hdd-stack text-lg"></i>
+                            <span class="hidden sm:inline">Rclone</span>
+                        </button>
                     </nav>
                 </div>
 
@@ -322,6 +326,198 @@
                                                 <div class="label-text-alt">Automatically delete broken symlinks and re-search</div>
                                             </div>
                                         </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Rclone Tab Content -->
+                    <div class="tab-content hidden" data-tab-content="rclone">
+                        <div class="space-y-6">
+                            <h2 class="text-2xl font-bold flex items-center mb-6">
+                                <i class="bi bi-hdd-stack mr-3 text-info"></i>Rclone Mount Settings
+                            </h2>
+
+                            <div class="form-control">
+                                <label class="label cursor-pointer justify-start gap-3">
+                                    <input type="checkbox" class="checkbox checkbox-lg" name="rclone.enabled" id="rclone.enabled">
+                                    <div>
+                                        <span class="label-text font-medium text-lg">Enable Mount</span>
+                                        <div class="label-text-alt">Automatically mount your debrid items</div>
+                                    </div>
+                                </label>
+                            </div>
+
+                            <!-- Mount Path Section -->
+                            <div class="card bg-base-200">
+                                <div class="card-body">
+                                    <h3 class="text-lg font-semibold mb-4 flex items-center">
+                                        <i class="bi bi-folder mr-2"></i>Mount Configuration
+                                    </h3>
+                                    <div class="grid grid-cols-3 gap-4">
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.mount_path">
+                                                <span class="label-text font-medium">Global Mount Path</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered" name="rclone.mount_path" id="rclone.mount_path" placeholder="/mnt/decypharr">
+                                            <div class="label">
+                                                <span class="label-text-alt">Base directory where all providers will be mounted (e.g., /mnt/decypharr/realdebrid)</span>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.uid">
+                                                <span class="label-text font-medium">User ID (PUID)</span>
+                                            </label>
+                                            <input type="number" class="input input-bordered" name="rclone.uid" id="rclone.uid" placeholder="1000" min="0">
+                                            <div class="label">
+                                                <span class="label-text-alt">User ID for mounted files (0 = current user)</span>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.gid">
+                                                <span class="label-text font-medium">Group ID (PGID)</span>
+                                            </label>
+                                            <input type="number" class="input input-bordered" name="rclone.gid" id="rclone.gid" placeholder="1000" min="0">
+                                            <div class="label">
+                                                <span class="label-text-alt">Group ID for mounted files (0 = current group)</span>
+                                            </div>
+                                        </div>
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.buffer_size">
+                                                <span class="label-text font-medium">Buffer Size</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered" name="rclone.buffer_size" id="rclone.buffer_size" placeholder="10M" min="0">
+                                            <div class="label">
+                                                <span class="label-text-alt">Buffer Size(This caches to memory, be wary!!)</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card bg-base-200">
+                                <div class="card-body">
+                                    <h3 class="text-lg font-semibold mb-4 flex items-center">
+                                        <i class="bi bi-speedometer2 mr-2"></i>VFS Cache Settings
+                                    </h3>
+                                    <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.cache_dir">
+                                                <span class="label-text font-medium">Cache Directory</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered" name="rclone.cache_dir" id="rclone.cache_dir" placeholder="/tmp/rclone">
+                                            <div class="label">
+                                                <span class="label-text-alt">Directory for rclone cache files (leave empty for system default)</span>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.vfs_cache_mode">
+                                                <span class="label-text font-medium">VFS Cache Mode</span>
+                                            </label>
+                                            <select class="select select-bordered" name="rclone.vfs_cache_mode" id="rclone.vfs_cache_mode">
+                                                <option value="off">Off - No caching</option>
+                                                <option value="minimal">Minimal - Cache file structure only</option>
+                                                <option value="writes">Writes - Cache writes for better performance</option>
+                                                <option value="full">Full - Cache reads and writes</option>
+                                            </select>
+                                            <div class="label">
+                                                <span class="label-text-alt">VFS caching mode for performance optimization</span>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.vfs_cache_max_size">
+                                                <span class="label-text font-medium">VFS Cache Max Size</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered" name="rclone.vfs_cache_max_size" id="rclone.vfs_cache_max_size" placeholder="1G">
+                                            <div class="label">
+                                                <span class="label-text-alt">Maximum cache size (e.g., 1G, 500M, leave empty for unlimited)</span>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.vfs_cache_max_age">
+                                                <span class="label-text font-medium">VFS Cache Max Age</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered" name="rclone.vfs_cache_max_age" id="rclone.vfs_cache_max_age" placeholder="1h">
+                                            <div class="label">
+                                                <span class="label-text-alt">Maximum age of cache entries (e.g., 1h, 30m)</span>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.vfs_read_chunk_size">
+                                                <span class="label-text font-medium">Read Chunk Size</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered" name="rclone.vfs_read_chunk_size" id="rclone.vfs_read_chunk_size" placeholder="128M">
+                                            <div class="label">
+                                                <span class="label-text-alt">Size of data chunks to read (e.g., 128M, 64M)</span>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.vfs_read_chunk_size_limit">
+                                                <span class="label-text font-medium">Read Chunk Size Limit</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered" name="rclone.vfs_read_chunk_size_limit" id="rclone.vfs_read_chunk_size_limit" placeholder="128M">
+                                            <div class="label">
+                                                <span class="label-text-alt">Limit Read Chunk Size</span>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.vfs_read_ahead">
+                                                <span class="label-text font-medium">Read Ahead</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered" name="rclone.vfs_read_ahead" id="rclone.vfs_read_ahead" placeholder="128k">
+                                            <div class="label">
+                                                <span class="label-text-alt">Read ahead buffer size (e.g., 128k, 256k)</span>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.dir_cache_time">
+                                                <span class="label-text font-medium">Directory Cache Time</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered" name="rclone.dir_cache_time" id="rclone.dir_cache_time" placeholder="5m">
+                                            <div class="label">
+                                                <span class="label-text-alt">How long to cache directory listings (e.g., 5m, 10m)</span>
+                                            </div>
+                                        </div>
+
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Advanced Settings Section -->
+                            <div class="card bg-base-200">
+                                <div class="card-body">
+                                    <h3 class="text-lg font-semibold mb-4 flex items-center">
+                                        <i class="bi bi-gear mr-2"></i>Advanced Settings
+                                    </h3>
+                                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                        <div class="form-control">
+                                            <label class="label cursor-pointer justify-start gap-3">
+                                                <input type="checkbox" class="checkbox" name="rclone.no_modtime" id="rclone.no_modtime">
+                                                <div>
+                                                    <span class="label-text font-medium">No Modification Time</span>
+                                                    <div class="label-text-alt">Don't read/write modification times</div>
+                                                </div>
+                                            </label>
+                                        </div>
+                                        
+                                        <div class="form-control">
+                                            <label class="label cursor-pointer justify-start gap-3">
+                                                <input type="checkbox" class="checkbox" name="rclone.no_checksum" id="rclone.no_checksum">
+                                                <div>
+                                                    <span class="label-text font-medium">No Checksum</span>
+                                                    <div class="label-text-alt">Don't checksum files on upload</div>
+                                                </div>
+                                            </label>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

@@ -14,6 +14,7 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/debrid/providers/torbox"
 	"github.com/sirrobot01/decypharr/pkg/debrid/store"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"github.com/sirrobot01/decypharr/pkg/mount"
 	"sync"
 )
 
@@ -30,6 +31,12 @@ func (de *Debrid) Cache() *store.Cache {
 	return de.cache
 }
 
+func (de *Debrid) Reset() {
+	if de.cache != nil {
+		de.cache.Reset()
+	}
+}
+
 type Storage struct {
 	debrids  map[string]*Debrid
 	mu       sync.RWMutex
@@ -43,16 +50,28 @@ func NewStorage() *Storage {
 
 	debrids := make(map[string]*Debrid)
 
+	bindAddress := cfg.BindAddress
+	if bindAddress == "" {
+		bindAddress = "localhost"
+	}
+	webdavUrl := fmt.Sprintf("http://%s:%s%s/webdav", bindAddress, cfg.Port, cfg.URLBase)
+
 	for _, dc := range cfg.Debrids {
 		client, err := createDebridClient(dc)
 		if err != nil {
 			_logger.Error().Err(err).Str("Debrid", dc.Name).Msg("failed to connect to debrid client")
 			continue
 		}
-		var cache *store.Cache
+		var (
+			cache   *store.Cache
+			mounter *mount.Mount
+		)
 		_log := client.Logger()
 		if dc.UseWebDav {
-			cache = store.NewDebridCache(dc, client)
+			if cfg.Rclone.Enabled {
+				mounter = mount.NewMount(dc.Name, webdavUrl)
+			}
+			cache = store.NewDebridCache(dc, client, mounter)
 			_log.Info().Msg("Debrid Service started with WebDAV")
 		} else {
 			_log.Info().Msg("Debrid Service started")
@@ -102,8 +121,17 @@ func (d *Storage) Client(name string) types.Client {
 
 func (d *Storage) Reset() {
 	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Reset all debrid clients and caches
+	for _, debrid := range d.debrids {
+		if debrid != nil {
+			debrid.Reset()
+		}
+	}
+
+	// Reinitialize the debrids map
 	d.debrids = make(map[string]*Debrid)
-	d.mu.Unlock()
 	d.lastUsed = ""
 }
 
