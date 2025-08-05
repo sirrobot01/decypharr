@@ -101,8 +101,7 @@ func (m *Mount) Mount(ctx context.Context) error {
 	mountCtx, cancel := context.WithCancel(ctx)
 	m.cancel = cancel
 
-	configName := fmt.Sprintf("decypharr_%s", m.Provider)
-	if err := setRcloneConfig(configName, m.WebDAVURL); err != nil {
+	if err := setRcloneConfig(m.Provider, m.WebDAVURL); err != nil {
 		return fmt.Errorf("failed to set rclone config: %w", err)
 	}
 
@@ -120,7 +119,7 @@ func (m *Mount) Mount(ctx context.Context) error {
 	}
 
 	go func() {
-		if err := m.performMount(mountCtx, mountFn, configName); err != nil {
+		if err := m.performMount(mountCtx, mountFn); err != nil {
 			m.logger.Error().Err(err).Msgf("Failed to mount %s at %s", m.Provider, m.LocalPath)
 			return
 		}
@@ -142,9 +141,9 @@ func setRcloneConfig(configName, webdavURL string) error {
 	return nil
 }
 
-func (m *Mount) performMount(ctx context.Context, mountfn mountlib.MountFn, configName string) error {
+func (m *Mount) performMount(ctx context.Context, mountfn mountlib.MountFn) error {
 	// Create filesystem from config
-	fsrc, err := fs.NewFs(ctx, fmt.Sprintf("%s:", configName))
+	fsrc, err := fs.NewFs(ctx, fmt.Sprintf("%s:", m.Provider))
 	if err != nil {
 		return fmt.Errorf("failed to create filesystem: %w", err)
 	}
@@ -152,10 +151,6 @@ func (m *Mount) performMount(ctx context.Context, mountfn mountlib.MountFn, conf
 	// Get global rclone config
 	cfg := configPkg.Get()
 	rcloneOpt := &cfg.Rclone
-
-	// Parse duration strings
-	dirCacheTime, _ := time.ParseDuration(rcloneOpt.DirCacheTime)
-	attrTimeout, _ := time.ParseDuration(rcloneOpt.AttrTimeout)
 
 	// Parse cache mode
 	var cacheMode vfscommon.CacheMode
@@ -175,11 +170,23 @@ func (m *Mount) performMount(ctx context.Context, mountfn mountlib.MountFn, conf
 	vfsOpt := &vfscommon.Options{
 		NoModTime:    rcloneOpt.NoModTime,
 		NoChecksum:   rcloneOpt.NoChecksum,
-		DirCacheTime: fs.Duration(dirCacheTime),
 		PollInterval: 0, // Polling is disabled for webdav
 		CacheMode:    cacheMode,
 		UID:          rcloneOpt.UID,
 		GID:          rcloneOpt.GID,
+	}
+
+	// Parse duration strings
+	if rcloneOpt.DirCacheTime != "" {
+		if dirCacheTime, err := time.ParseDuration(rcloneOpt.DirCacheTime); err == nil {
+			vfsOpt.DirCacheTime = fs.Duration(dirCacheTime)
+		}
+	}
+
+	if rcloneOpt.VfsCacheMaxAge != "" {
+		if vfsCacheMaxAge, err := time.ParseDuration(rcloneOpt.VfsCacheMaxAge); err == nil {
+			vfsOpt.CacheMaxAge = fs.Duration(vfsCacheMaxAge)
+		}
 	}
 
 	if rcloneOpt.VfsReadChunkSizeLimit != "" {
@@ -211,20 +218,32 @@ func (m *Mount) performMount(ctx context.Context, mountfn mountlib.MountFn, conf
 		}
 	}
 
+	if rcloneOpt.VfsCacheMaxSize != "" {
+		var cacheMaxSize fs.SizeSuffix
+		if err := cacheMaxSize.Set(rcloneOpt.VfsCacheMaxSize); err == nil {
+			vfsOpt.CacheMaxSize = cacheMaxSize
+		}
+	}
+
 	// Create mount options using global config
 	mountOpt := &mountlib.Options{
 		DebugFUSE:     false,
 		AllowNonEmpty: true,
 		AllowOther:    true,
 		Daemon:        false,
-		AttrTimeout:   fs.Duration(attrTimeout),
-		DeviceName:    fmt.Sprintf("decypharr-%s", configName),
-		VolumeName:    fmt.Sprintf("decypharr-%s", configName),
+		DeviceName:    fmt.Sprintf("decypharr-%s", m.Provider),
+		VolumeName:    fmt.Sprintf("decypharr-%s", m.Provider),
+	}
+
+	if rcloneOpt.AttrTimeout != "" {
+		if attrTimeout, err := time.ParseDuration(rcloneOpt.AttrTimeout); err == nil {
+			mountOpt.AttrTimeout = fs.Duration(attrTimeout)
+		}
 	}
 
 	// Set cache dir
 	if rcloneOpt.CacheDir != "" {
-		cacheDir := filepath.Join(rcloneOpt.CacheDir, configName)
+		cacheDir := filepath.Join(rcloneOpt.CacheDir, m.Provider)
 		if err := os.MkdirAll(cacheDir, 0755); err != nil {
 			// Log error but continue
 			m.logger.Error().Err(err).Msgf("Failed to create cache directory %s, using default cache", cacheDir)
