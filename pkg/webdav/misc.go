@@ -227,16 +227,3 @@ func setVideoStreamingHeaders(req *http.Request) {
 	req.Header.Set("User-Agent", "VideoStream/1.0")
 	req.Header.Set("Priority", "u=1")
 }
-
-func setVideoResponseHeaders(w http.ResponseWriter, resp *http.Response, isRange bool) {
-	// Copy essential headers from upstream
-	if contentLength := resp.Header.Get("Content-Length"); contentLength != "" {
-		w.Header().Set("Content-Length", contentLength)
-	}
-
-	if contentRange := resp.Header.Get("Content-Range"); contentRange != "" && isRange {
-		w.Header().Set("Content-Range", contentRange)
-	}
-
-	w.WriteHeader(resp.StatusCode)
-}
