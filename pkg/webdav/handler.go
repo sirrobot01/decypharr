@@ -463,31 +463,30 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		err, ranged := file.StreamResponse(w, r)
+		// Check if this will be a range request before streaming
+		isRangeRequest := r.Header.Get("Range") != ""
 
-		if err != nil {
+		// Write status headers before streaming starts
+		if isRangeRequest {
+			w.WriteHeader(http.StatusPartialContent)
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+
+		if err := file.StreamResponse(w, r); err != nil {
 			var streamErr *streamError
 			if errors.As(err, &streamErr) {
 				// Handle client disconnections silently (just debug log)
 				if errors.Is(streamErr.Err, context.Canceled) || errors.Is(streamErr.Err, context.DeadlineExceeded) || streamErr.IsClientDisconnection {
 					return
 				}
-
-				if streamErr.StatusCode > 0 {
-					http.Error(w, streamErr.Error(), streamErr.StatusCode)
-					return
-				}
-			} else {
-				// Generic error
-				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				// For other errors, we can't send HTTP error response since headers are already written
+				h.logger.Error().Err(streamErr.Err).Str("file", file.name).Msg("Stream error after headers written")
 				return
-			}
-		} else {
-			if ranged {
-				// If the file was served as a ranged request, return a 206 status code
-				w.WriteHeader(http.StatusPartialContent)
 			} else {
-				w.WriteHeader(http.StatusOK)
+				// Generic error - can't send HTTP error response since headers are already written
+				h.logger.Error().Err(err).Str("file", file.name).Msg("Generic stream error after headers written")
+				return
 			}
 		}
 		return

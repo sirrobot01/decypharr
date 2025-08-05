@@ -108,7 +108,7 @@ func (f *File) getDownloadByteRange() (*[2]int64, error) {
 
 // setVideoStreamingHeaders sets the necessary headers for video streaming
 // It returns error and a boolean indicating if the request is a range request
-func (f *File) servePreloadedContent(w http.ResponseWriter, r *http.Request) (error, bool) {
+func (f *File) servePreloadedContent(w http.ResponseWriter, r *http.Request) error {
 	content := f.content
 	size := int64(len(content))
 
@@ -117,7 +117,7 @@ func (f *File) servePreloadedContent(w http.ResponseWriter, r *http.Request) (er
 		ranges, err := parseRange(rangeHeader, size)
 		if err != nil || len(ranges) != 1 {
 			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", size))
-			return &streamError{Err: fmt.Errorf("invalid range"), StatusCode: http.StatusRequestedRangeNotSatisfiable}, false
+			return &streamError{Err: fmt.Errorf("invalid range"), StatusCode: http.StatusRequestedRangeNotSatisfiable}
 		}
 
 		start, end := ranges[0].start, ranges[0].end
@@ -126,7 +126,7 @@ func (f *File) servePreloadedContent(w http.ResponseWriter, r *http.Request) (er
 		w.Header().Set("Accept-Ranges", "bytes")
 
 		_, err = w.Write(content[start : end+1])
-		return err, true
+		return err
 	}
 
 	// Full content
@@ -134,10 +134,10 @@ func (f *File) servePreloadedContent(w http.ResponseWriter, r *http.Request) (er
 	w.Header().Set("Accept-Ranges", "bytes")
 
 	_, err := w.Write(content)
-	return err, false
+	return err
 }
 
-func (f *File) StreamResponse(w http.ResponseWriter, r *http.Request) (error, bool) {
+func (f *File) StreamResponse(w http.ResponseWriter, r *http.Request) error {
 	// Handle preloaded content files
 	if f.content != nil {
 		return f.servePreloadedContent(w, r)
@@ -147,24 +147,24 @@ func (f *File) StreamResponse(w http.ResponseWriter, r *http.Request) (error, bo
 	return f.streamWithRetry(w, r, 0)
 }
 
-func (f *File) streamWithRetry(w http.ResponseWriter, r *http.Request, retryCount int) (error, bool) {
+func (f *File) streamWithRetry(w http.ResponseWriter, r *http.Request, retryCount int) error {
 	const maxRetries = 3
 	_log := f.cache.Logger()
 
 	// Get download link (with caching optimization)
 	downloadLink, err := f.getDownloadLink()
 	if err != nil {
-		return &streamError{Err: err, StatusCode: http.StatusPreconditionFailed}, false
+		return &streamError{Err: err, StatusCode: http.StatusPreconditionFailed}
 	}
 
 	if downloadLink == "" {
-		return &streamError{Err: fmt.Errorf("empty download link"), StatusCode: http.StatusNotFound}, false
+		return &streamError{Err: fmt.Errorf("empty download link"), StatusCode: http.StatusNotFound}
 	}
 
 	// Create upstream request with streaming optimizations
 	upstreamReq, err := http.NewRequest("GET", downloadLink, nil)
 	if err != nil {
-		return &streamError{Err: err, StatusCode: http.StatusInternalServerError}, false
+		return &streamError{Err: err, StatusCode: http.StatusInternalServerError}
 	}
 
 	setVideoStreamingHeaders(upstreamReq)
@@ -172,12 +172,12 @@ func (f *File) streamWithRetry(w http.ResponseWriter, r *http.Request, retryCoun
 	// Handle range requests (critical for video seeking)
 	isRangeRequest := f.handleRangeRequest(upstreamReq, r, w)
 	if isRangeRequest == -1 {
-		return &streamError{Err: fmt.Errorf("invalid range"), StatusCode: http.StatusRequestedRangeNotSatisfiable}, false
+		return &streamError{Err: fmt.Errorf("invalid range"), StatusCode: http.StatusRequestedRangeNotSatisfiable}
 	}
 
 	resp, err := sharedClient.Do(upstreamReq)
 	if err != nil {
-		return &streamError{Err: err, StatusCode: http.StatusServiceUnavailable}, false
+		return &streamError{Err: err, StatusCode: http.StatusServiceUnavailable}
 	}
 	defer resp.Body.Close()
 
@@ -192,11 +192,11 @@ func (f *File) streamWithRetry(w http.ResponseWriter, r *http.Request, retryCoun
 		return f.streamWithRetry(w, r, retryCount+1)
 	}
 	if retryErr != nil {
-		return retryErr, false
+		return retryErr
 	}
 
 	if err := f.streamBuffer(w, resp.Body); err != nil {
-		return err, false
+		return err
 	}
 	if contentLength := resp.Header.Get("Content-Length"); contentLength != "" {
 		w.Header().Set("Content-Length", contentLength)
@@ -205,7 +205,7 @@ func (f *File) streamWithRetry(w http.ResponseWriter, r *http.Request, retryCoun
 	if contentRange := resp.Header.Get("Content-Range"); contentRange != "" && isRangeRequest == 1 {
 		w.Header().Set("Content-Range", contentRange)
 	}
-	return nil, isRangeRequest == 1
+	return nil
 }
 
 func (f *File) streamBuffer(w http.ResponseWriter, src io.Reader) error {
