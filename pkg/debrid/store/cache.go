@@ -270,8 +270,6 @@ func (c *Cache) Start(ctx context.Context) error {
 	if c.mounter != nil {
 		if err := c.mounter.Mount(ctx); err != nil {
 			c.logger.Error().Err(err).Msgf("Failed to mount %s", c.config.Name)
-		} else {
-			c.logger.Info().Msgf("Mounted %s at %s", c.config.Name, c.mounter.LocalPath)
 		}
 	} else {
 		c.logger.Warn().Msgf("Mounting is disabled for %s", c.config.Name)

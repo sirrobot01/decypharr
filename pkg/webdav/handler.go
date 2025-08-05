@@ -471,6 +471,7 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				if streamErr.StatusCode > 0 {
+					h.logger.Trace().Err(err).Msgf("Error streaming %s", fi.Name())
 					http.Error(w, streamErr.Error(), streamErr.StatusCode)
 					return
 				} else {
@@ -480,6 +481,7 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 				}
 			} else {
 				// Generic error
+				h.logger.Error().Err(err).Msgf("Error streaming file %s", fi.Name())
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 				return
 			}
