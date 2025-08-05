@@ -470,7 +470,7 @@
 
                                         <div class="form-control">
                                             <label class="label" for="rclone.vfs_read_ahead">
-                                                <span class="label-text font-medium">Read Ahead</span>
+                                                <span class="label-text font-medium">VFS Read Ahead</span>
                                             </label>
                                             <input type="text" class="input input-bordered" name="rclone.vfs_read_ahead" id="rclone.vfs_read_ahead" placeholder="128k">
                                             <div class="label">
@@ -485,6 +485,16 @@
                                             <input type="text" class="input input-bordered" name="rclone.dir_cache_time" id="rclone.dir_cache_time" placeholder="5m">
                                             <div class="label">
                                                 <span class="label-text-alt">How long to cache directory listings (e.g., 5m, 10m)</span>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.vfs_cache_poll_interval">
+                                                <span class="label-text font-medium">VFS Cache Poll Interval</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered" name="rclone.vfs_cache_poll_interval" id="rclone.vfs_cache_poll_interval" placeholder="1h">
+                                            <div class="label">
+                                                <span class="label-text-alt">How often VFS cache dir gets cleaned</span>
                                             </div>
                                         </div>
 

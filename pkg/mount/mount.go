@@ -168,18 +168,23 @@ func (m *Mount) performMount(ctx context.Context, mountfn mountlib.MountFn) erro
 	}
 
 	vfsOpt := &vfscommon.Options{
-		NoModTime:    rcloneOpt.NoModTime,
-		NoChecksum:   rcloneOpt.NoChecksum,
-		PollInterval: 0, // Polling is disabled for webdav
-		CacheMode:    cacheMode,
-		UID:          rcloneOpt.UID,
-		GID:          rcloneOpt.GID,
+		NoModTime:  rcloneOpt.NoModTime,
+		NoChecksum: rcloneOpt.NoChecksum,
+		CacheMode:  cacheMode,
+		UID:        rcloneOpt.UID,
+		GID:        rcloneOpt.GID,
 	}
 
 	// Parse duration strings
 	if rcloneOpt.DirCacheTime != "" {
 		if dirCacheTime, err := time.ParseDuration(rcloneOpt.DirCacheTime); err == nil {
 			vfsOpt.DirCacheTime = fs.Duration(dirCacheTime)
+		}
+	}
+
+	if rcloneOpt.VfsCachePollInterval != "" {
+		if vfsCachePollInterval, err := time.ParseDuration(rcloneOpt.VfsCachePollInterval); err == nil {
+			vfsOpt.CachePollInterval = fs.Duration(vfsCachePollInterval)
 		}
 	}
 
