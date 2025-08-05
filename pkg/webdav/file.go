@@ -195,9 +195,11 @@ func (f *File) streamWithRetry(w http.ResponseWriter, r *http.Request, retryCoun
 		return retryErr
 	}
 
+	if err := f.streamBuffer(w, resp.Body); err != nil {
+		return err
+	}
 	setVideoResponseHeaders(w, resp, isRangeRequest == 1)
-
-	return f.streamBuffer(w, resp.Body)
+	return nil
 }
 
 func (f *File) streamBuffer(w http.ResponseWriter, src io.Reader) error {

@@ -484,7 +484,7 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 			} else {
 				// Generic error
 				if !hasHeadersWritten(w) {
-					http.Error(w, "Stream error", http.StatusInternalServerError)
+					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 					return
 				} else {
 					h.logger.Error().
