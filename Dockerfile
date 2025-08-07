@@ -59,7 +59,7 @@ ENV LOG_PATH=/app/logs
 EXPOSE 8282
 VOLUME ["/app"]
 
-HEALTHCHECK --interval=3s --retries=10 CMD ["/usr/bin/healthcheck", "--config", "/app", "--basic"]
+HEALTHCHECK --interval=10s --retries=10 CMD ["/usr/bin/healthcheck", "--config", "/app", "--basic"]
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/usr/bin/decypharr", "--config", "/app"]

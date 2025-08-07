@@ -386,12 +386,30 @@
                                             </div>
                                         </div>
                                         <div class="form-control">
+                                            <label class="label" for="rclone.umask">
+                                                <span class="label-text font-medium">Group ID (PGID)</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered" name="rclone.umask" id="rclone.umask" placeholder="0022">
+                                            <div class="label">
+                                                <span class="label-text-alt">Umask</span>
+                                            </div>
+                                        </div>
+                                        <div class="form-control">
                                             <label class="label" for="rclone.buffer_size">
                                                 <span class="label-text font-medium">Buffer Size</span>
                                             </label>
                                             <input type="text" class="input input-bordered" name="rclone.buffer_size" id="rclone.buffer_size" placeholder="10M" min="0">
                                             <div class="label">
                                                 <span class="label-text-alt">Buffer Size(This caches to memory, be wary!!)</span>
+                                            </div>
+                                        </div>
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.attr_timeout">
+                                                <span class="label-text font-medium">Attribute Caching Timeout</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered" name="rclone.attr_timeout" id="rclone.attr_timeout" placeholder="1s">
+                                            <div class="label">
+                                                <span class="label-text-alt">How long the kernel caches the attributes (size, modification time, etc.)</span>
                                             </div>
                                         </div>
                                     </div>
@@ -497,7 +515,6 @@
                                                 <span class="label-text-alt">How often VFS cache dir gets cleaned</span>
                                             </div>
                                         </div>
-
                                     </div>
                                 </div>
                             </div>

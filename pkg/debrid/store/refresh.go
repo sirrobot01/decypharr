@@ -134,7 +134,7 @@ func (c *Cache) refreshRclone() error {
 		dirs = []string{"__all__"}
 	}
 	if c.mounter != nil {
-		return c.mounter.Refresh(dirs)
+		return c.mounter.RefreshDir(dirs)
 	} else {
 		return c.refreshRcloneWithRC(dirs)
 	}

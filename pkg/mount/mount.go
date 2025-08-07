@@ -48,7 +48,6 @@ type Mount struct {
 	LocalPath  string
 	WebDAVURL  string
 	mountPoint *mountlib.MountPoint
-	vfs        *vfs.VFS
 	cancel     context.CancelFunc
 	mounted    atomic.Bool
 	logger     zerolog.Logger
@@ -105,13 +104,6 @@ func (m *Mount) Mount(ctx context.Context) error {
 		return fmt.Errorf("failed to set rclone config: %w", err)
 	}
 
-	// Check if fusermount3 is available
-	if _, err := exec.LookPath("fusermount3"); err != nil {
-		m.logger.Info().Msgf("FUSE mounting not available (fusermount3 not found). Files accessible via WebDAV at %s", m.WebDAVURL)
-		m.mounted.Store(true) // Mark as "mounted" for WebDAV access
-		return nil
-	}
-
 	// Get the mount function - try different mount methods
 	mountFn, err := getMountFn()
 	if err != nil {
@@ -125,9 +117,7 @@ func (m *Mount) Mount(ctx context.Context) error {
 		}
 		m.mounted.Store(true)
 		m.logger.Info().Msgf("Successfully mounted %s WebDAV at %s", m.Provider, m.LocalPath)
-
-		// Wait for context cancellation
-		<-mountCtx.Done()
+		<-mountCtx.Done() // Wait for context cancellation
 	}()
 	m.logger.Info().Msgf("Mount process started for %s at %s", m.Provider, m.LocalPath)
 	return nil
@@ -138,6 +128,7 @@ func setRcloneConfig(configName, webdavURL string) error {
 	config.FileSetValue(configName, "type", "webdav")
 	config.FileSetValue(configName, "url", webdavURL)
 	config.FileSetValue(configName, "vendor", "other")
+	config.FileSetValue(configName, "pacer_min_sleep", "0")
 	return nil
 }
 
@@ -149,8 +140,7 @@ func (m *Mount) performMount(ctx context.Context, mountfn mountlib.MountFn) erro
 	}
 
 	// Get global rclone config
-	cfg := configPkg.Get()
-	rcloneOpt := &cfg.Rclone
+	rcloneOpt := configPkg.Get().Rclone
 
 	// Parse cache mode
 	var cacheMode vfscommon.CacheMode
@@ -167,12 +157,30 @@ func (m *Mount) performMount(ctx context.Context, mountfn mountlib.MountFn) erro
 		cacheMode = vfscommon.CacheModeOff
 	}
 
-	vfsOpt := &vfscommon.Options{
-		NoModTime:  rcloneOpt.NoModTime,
-		NoChecksum: rcloneOpt.NoChecksum,
-		CacheMode:  cacheMode,
-		UID:        rcloneOpt.UID,
-		GID:        rcloneOpt.GID,
+	vfsOpt := &vfscommon.Options{}
+
+	vfsOpt.Init() // Initialize VFS options with default values
+
+	vfsOpt.CacheMode = cacheMode
+
+	// Set VFS options based on rclone configuration
+	if rcloneOpt.NoChecksum {
+		vfsOpt.NoChecksum = rcloneOpt.NoChecksum
+	}
+	if rcloneOpt.NoModTime {
+		vfsOpt.NoModTime = rcloneOpt.NoModTime
+	}
+	if rcloneOpt.UID != 0 {
+		vfsOpt.UID = rcloneOpt.UID
+	}
+	if rcloneOpt.GID != 0 {
+		vfsOpt.GID = rcloneOpt.GID
+	}
+	if rcloneOpt.Umask != "" {
+		var umask vfscommon.FileMode
+		if err := umask.Set(rcloneOpt.Umask); err == nil {
+			vfsOpt.Umask = umask
+		}
 	}
 
 	// Parse duration strings
@@ -223,6 +231,8 @@ func (m *Mount) performMount(ctx context.Context, mountfn mountlib.MountFn) erro
 		}
 	}
 
+	fs.GetConfig(ctx).UseMmap = true
+
 	if rcloneOpt.VfsCacheMaxSize != "" {
 		var cacheMaxSize fs.SizeSuffix
 		if err := cacheMaxSize.Set(rcloneOpt.VfsCacheMaxSize); err == nil {
@@ -236,6 +246,7 @@ func (m *Mount) performMount(ctx context.Context, mountfn mountlib.MountFn) erro
 		AllowNonEmpty: true,
 		AllowOther:    true,
 		Daemon:        false,
+		AsyncRead:     true,
 		DeviceName:    fmt.Sprintf("decypharr-%s", m.Provider),
 		VolumeName:    fmt.Sprintf("decypharr-%s", m.Provider),
 	}
@@ -258,20 +269,14 @@ func (m *Mount) performMount(ctx context.Context, mountfn mountlib.MountFn) erro
 			m.logger.Error().Err(err).Msgf("Failed to set cache directory %s, using default cache", cacheDir)
 		}
 	}
-
-	// Create VFS instance
-	vfsInstance := vfs.New(fsrc, vfsOpt)
-	m.vfs = vfsInstance
-
 	// Create mount point using rclone's internal mounting
-	mountPoint := mountlib.NewMountPoint(mountfn, m.LocalPath, fsrc, mountOpt, vfsOpt)
-	m.mountPoint = mountPoint
+	m.mountPoint = mountlib.NewMountPoint(mountfn, m.LocalPath, fsrc, mountOpt, vfsOpt)
 
 	// Start the mount
-	_, err = mountPoint.Mount()
+	_, err = m.mountPoint.Mount()
 	if err != nil {
 		// Cleanup mount point if it failed
-		if mountPoint != nil && mountPoint.UnmountFn != nil {
+		if m.mountPoint != nil && m.mountPoint.UnmountFn != nil {
 			if unmountErr := m.Unmount(); unmountErr != nil {
 				m.logger.Error().Err(unmountErr).Msgf("Failed to cleanup mount point %s after mount failure", m.LocalPath)
 			} else {
@@ -292,12 +297,8 @@ func (m *Mount) Unmount() error {
 
 	m.mounted.Store(false)
 
-	if m.vfs != nil {
-		m.logger.Debug().Msgf("Shutting down VFS for provider %s", m.Provider)
-		m.vfs.Shutdown()
-	} else {
-		m.logger.Warn().Msgf("VFS instance for provider %s is nil, skipping shutdown", m.Provider)
-	}
+	m.logger.Debug().Msgf("Shutting down VFS for provider %s", m.Provider)
+	m.mountPoint.VFS.Shutdown()
 	if m.mountPoint == nil || m.mountPoint.UnmountFn == nil {
 		m.logger.Warn().Msgf("Mount point for provider %s is nil or unmount function is not set, skipping unmount", m.Provider)
 		return nil
@@ -364,34 +365,31 @@ func (m *Mount) isMountBusy() bool {
 }
 
 func (m *Mount) IsMounted() bool {
-	return m.mounted.Load() && m.mountPoint != nil
+	return m.mounted.Load() && m.mountPoint != nil && m.mountPoint.VFS != nil
 }
 
-func (m *Mount) Refresh(dirs []string) error {
+func (m *Mount) RefreshDir(dirs []string) error {
+	if !m.IsMounted() {
+		return fmt.Errorf("provider %s not properly mounted. Skipping refreshes", m.Provider)
+	}
 
-	if !m.mounted.Load() || m.vfs == nil {
-		return fmt.Errorf("provider %s not properly mounted", m.Provider)
-	}
-	// Forget the directories first
-	if err := m.ForgetVFS(dirs); err != nil {
-		return fmt.Errorf("failed to forget VFS directories for %s: %w", m.Provider, err)
-	}
-	//Then refresh the directories
-	if err := m.RefreshVFS(dirs); err != nil {
-		return fmt.Errorf("failed to refresh VFS directories for %s: %w", m.Provider, err)
-	}
-	return nil
+	// Use atomic forget-and-refresh to avoid race conditions
+	return m.forceRefreshVFS(dirs)
 }
 
-func (m *Mount) RefreshVFS(dirs []string) error {
-
-	root, err := m.vfs.Root()
+// forceRefreshVFS atomically forgets and refreshes VFS directories to ensure immediate visibility
+func (m *Mount) forceRefreshVFS(dirs []string) error {
+	vfsInstance := m.mountPoint.VFS
+	root, err := vfsInstance.Root()
 	if err != nil {
 		return fmt.Errorf("failed to get VFS root for %s: %w", m.Provider, err)
 	}
 
 	getDir := func(path string) (*vfs.Dir, error) {
 		path = strings.Trim(path, "/")
+		if path == "" {
+			return root, nil
+		}
 		segments := strings.Split(path, "/")
 		var node vfs.Node = root
 		for _, s := range segments {
@@ -408,62 +406,38 @@ func (m *Mount) RefreshVFS(dirs []string) error {
 		return nil, vfs.EINVAL
 	}
 
-	// If no specific directories provided, refresh root
+	// If no specific directories provided, work with root
 	if len(dirs) == 0 {
-
+		// Atomically forget and refresh root
+		root.ForgetAll()
 		if _, err := root.ReadDirAll(); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	if len(dirs) == 1 {
-		vfsDir, err := getDir(dirs[0])
-		if err != nil {
-			return fmt.Errorf("failed to find directory '%s' for refresh in %s: %w", dirs[0], m.Provider, err)
-		}
-		if _, err := vfsDir.ReadDirAll(); err != nil {
-			return fmt.Errorf("failed to refresh directory '%s' in %s: %w", dirs[0], m.Provider, err)
+			return fmt.Errorf("failed to force-refresh root for %s: %w", m.Provider, err)
 		}
 		return nil
 	}
 
 	var errs []error
-	// Refresh specific directories
+	// Process each directory atomically
 	for _, dir := range dirs {
 		if dir != "" {
-			// Clean the directory path
+			dir = strings.Trim(dir, "/")
+			// Get the directory handle
 			vfsDir, err := getDir(dir)
 			if err != nil {
-				errs = append(errs, fmt.Errorf("failed to find directory '%s' for refresh in %s: %w", dir, m.Provider, err))
+				errs = append(errs, fmt.Errorf("failed to find directory '%s' for force-refresh in %s: %w", dir, m.Provider, err))
+				continue
 			}
+
+			// Atomically forget and refresh this specific directory
+			vfsDir.ForgetAll()
 			if _, err := vfsDir.ReadDirAll(); err != nil {
-				errs = append(errs, fmt.Errorf("failed to refresh directory '%s' in %s: %w", dir, m.Provider, err))
+				errs = append(errs, fmt.Errorf("failed to force-refresh directory '%s' in %s: %w", dir, m.Provider, err))
 			}
 		}
 	}
+
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
-	return nil
-}
-
-func (m *Mount) ForgetVFS(dirs []string) error {
-	// Get root directory
-	root, err := m.vfs.Root()
-	if err != nil {
-		return fmt.Errorf("failed to get VFS root for %s: %w", m.Provider, err)
-	}
-
-	// Forget specific directories
-	for _, dir := range dirs {
-		if dir != "" {
-			// Clean the directory path
-			dir = strings.Trim(dir, "/")
-			// Forget the directory from cache
-			root.ForgetPath(dir, fs.EntryDirectory)
-		}
-	}
-
 	return nil
 }

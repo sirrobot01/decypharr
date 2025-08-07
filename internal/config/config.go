@@ -103,8 +103,9 @@ type Rclone struct {
 	BufferSize            string `json:"buffer_size,omitempty"`               // Buffer size for reading files (default 16M)
 
 	// File system settings
-	UID uint32 `json:"uid,omitempty"` // User ID for mounted files
-	GID uint32 `json:"gid,omitempty"` // Group ID for mounted files
+	UID   uint32 `json:"uid,omitempty"` // User ID for mounted files
+	GID   uint32 `json:"gid,omitempty"` // Group ID for mounted files
+	Umask string `json:"umask,omitempty"`
 
 	// Timeout settings
 	AttrTimeout  string `json:"attr_timeout,omitempty"`   // Attribute cache timeout (default 1s)
@@ -338,7 +339,7 @@ func (c *Config) updateDebrid(d Debrid) Debrid {
 	}
 
 	if d.TorrentsRefreshInterval == "" {
-		d.TorrentsRefreshInterval = cmp.Or(c.WebDav.TorrentsRefreshInterval, "15s") // 15 seconds
+		d.TorrentsRefreshInterval = cmp.Or(c.WebDav.TorrentsRefreshInterval, "45s") // 45 seconds
 	}
 	if d.WebDav.DownloadLinksRefreshInterval == "" {
 		d.DownloadLinksRefreshInterval = cmp.Or(c.WebDav.DownloadLinksRefreshInterval, "40m") // 40 minutes
@@ -399,8 +400,8 @@ func (c *Config) setDefaults() {
 		c.Repair.Strategy = RepairStrategyPerTorrent
 	}
 
+	// Rclone defaults
 	if c.Rclone.Enabled {
-		c.Rclone.MountPath = cmp.Or(c.Rclone.MountPath, filepath.Join(c.Path, "mounts"))
 		c.Rclone.VfsCacheMode = cmp.Or(c.Rclone.VfsCacheMode, "off")
 		if c.Rclone.UID == 0 {
 			c.Rclone.UID = uint32(os.Getuid())
@@ -414,12 +415,8 @@ func (c *Config) setDefaults() {
 			}
 		}
 		if c.Rclone.VfsCacheMode != "off" {
-			c.Rclone.VfsCachePollInterval = cmp.Or(c.Rclone.VfsCachePollInterval, "1m")
-			c.Rclone.VfsReadChunkSizeLimit = cmp.Or(c.Rclone.VfsReadChunkSizeLimit, "off")
 			c.Rclone.VfsCachePollInterval = cmp.Or(c.Rclone.VfsCachePollInterval, "1m") // Clean cache every minute
 		}
-
-		c.Rclone.AttrTimeout = cmp.Or(c.Rclone.AttrTimeout, "10s")
 		c.Rclone.DirCacheTime = cmp.Or(c.Rclone.DirCacheTime, "5m")
 	}
 	// Load the auth file
