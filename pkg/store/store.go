@@ -8,6 +8,7 @@ import (
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/pkg/arr"
 	"github.com/sirrobot01/decypharr/pkg/debrid"
+	"github.com/sirrobot01/decypharr/pkg/rclone"
 	"github.com/sirrobot01/decypharr/pkg/repair"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ type Store struct {
 	repair             *repair.Repair
 	arr                *arr.Storage
 	debrid             *debrid.Storage
+	rcloneManager      *rclone.Manager
 	importsQueue       *ImportQueue // Queued import requests(probably from too_many_active_downloads)
 	torrents           *TorrentStorage
 	logger             zerolog.Logger
@@ -34,15 +36,24 @@ var (
 // Get returns the singleton instance
 func Get() *Store {
 	once.Do(func() {
-		arrs := arr.NewStorage()
-		deb := debrid.NewStorage()
 		cfg := config.Get()
 		qbitCfg := cfg.QBitTorrent
+
+		// Create rclone manager if enabled
+		var rcManager *rclone.Manager
+		if cfg.Rclone.Enabled {
+			rcManager = rclone.NewManager()
+		}
+
+		// Create services with dependencies
+		arrs := arr.NewStorage()
+		deb := debrid.NewStorage(rcManager)
 
 		instance = &Store{
 			repair:            repair.New(arrs, deb),
 			arr:               arrs,
 			debrid:            deb,
+			rcloneManager:     rcManager,
 			torrents:          newTorrentStorage(cfg.TorrentsFile()),
 			logger:            logger.Default(), // Use default logger [decypharr]
 			refreshInterval:   time.Duration(cmp.Or(qbitCfg.RefreshInterval, 10)) * time.Minute,
@@ -64,6 +75,10 @@ func Reset() {
 	if instance != nil {
 		if instance.debrid != nil {
 			instance.debrid.Reset()
+		}
+
+		if instance.rcloneManager != nil {
+			instance.rcloneManager.Stop()
 		}
 
 		if instance.importsQueue != nil {
@@ -89,4 +104,7 @@ func (s *Store) Repair() *repair.Repair {
 }
 func (s *Store) Torrents() *TorrentStorage {
 	return s.torrents
+}
+func (s *Store) RcloneManager() *rclone.Manager {
+	return s.rcloneManager
 }

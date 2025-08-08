@@ -148,6 +148,15 @@ func startServices(ctx context.Context, cancelSvc context.CancelFunc, wd *webdav
 		return srv.Start(ctx)
 	})
 
+	// Start rclone RC server if enabled
+	safeGo(func() error {
+		rcManager := store.Get().RcloneManager()
+		if rcManager == nil {
+			return nil
+		}
+		return rcManager.Start(ctx)
+	})
+
 	safeGo(func() error {
 		arr := store.Get().Arr()
 		if arr == nil {

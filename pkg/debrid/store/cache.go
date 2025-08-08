@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/sirrobot01/decypharr/pkg/mount"
+	"github.com/sirrobot01/decypharr/pkg/rclone"
 	"os"
 	"path"
 	"path/filepath"
@@ -107,10 +107,10 @@ type Cache struct {
 
 	config        config.Debrid
 	customFolders []string
-	mounter       *mount.Mount
+	mounter       *rclone.Mount
 }
 
-func NewDebridCache(dc config.Debrid, client types.Client, mounter *mount.Mount) *Cache {
+func NewDebridCache(dc config.Debrid, client types.Client, mounter *rclone.Mount) *Cache {
 	cfg := config.Get()
 	cet, err := time.LoadLocation("CET")
 	if err != nil {

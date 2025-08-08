@@ -29,6 +29,12 @@ func (fi *fileInfo) IsDir() bool        { return fi.isDir }
 func (fi *fileInfo) ID() string         { return fi.id }
 func (fi *fileInfo) Sys() interface{}   { return nil }
 
+type RcloneRC struct {
+	URL  string
+	User string
+	Pass string
+}
+
 func (c *Cache) RefreshListings(refreshRclone bool) {
 	// Copy the torrents to a string|time map
 	c.torrents.refreshListing() // refresh torrent listings
@@ -142,10 +148,6 @@ func (c *Cache) refreshRclone() error {
 
 func (c *Cache) refreshRcloneWithRC(dirs []string) error {
 	cfg := c.config
-
-	if cfg.RcUrl == "" {
-		return nil
-	}
 
 	if cfg.RcUrl == "" {
 		return nil

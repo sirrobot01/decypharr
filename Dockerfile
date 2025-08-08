@@ -41,8 +41,8 @@ LABEL org.opencontainers.image.title = "decypharr"
 LABEL org.opencontainers.image.authors = "sirrobot01"
 LABEL org.opencontainers.image.documentation = "https://github.com/sirrobot01/decypharr/blob/main/README.md"
 
-# Install dependencies
-RUN apk add --no-cache fuse3 ca-certificates su-exec shadow && \
+# Install dependencies including rclone
+RUN apk add --no-cache fuse3 ca-certificates su-exec shadow rclone && \
     echo "user_allow_other" >> /etc/fuse.conf
 
 # Copy binaries and entrypoint

@@ -118,5 +118,45 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		profiles = append(profiles, profile)
 	}
 	stats["debrids"] = profiles
+
+	// Add rclone stats if available
+	if rcManager := store.Get().RcloneManager(); rcManager != nil && rcManager.IsReady() {
+		if rcStats, err := rcManager.GetStats(); err == nil {
+			stats["rclone"] = map[string]interface{}{
+				"enabled":        true,
+				"server_ready":   rcManager.IsReady(),
+				"core_stats":     rcStats.CoreStats,
+				"transfer_stats": rcStats.TransferStats,
+				"mount_stats":    rcStats.MountStats,
+			}
+
+			// Add memory usage
+			if memStats, err := rcManager.GetMemoryUsage(); err == nil {
+				stats["rclone"].(map[string]interface{})["memory_stats"] = memStats
+			}
+
+			// Add version info
+			if version, err := rcManager.GetVersion(); err == nil {
+				stats["rclone"].(map[string]interface{})["version"] = version
+			}
+
+			// Add bandwidth stats
+			if bwStats, err := rcManager.GetBandwidthStats(); err == nil {
+				stats["rclone"].(map[string]interface{})["bandwidth_stats"] = bwStats
+			}
+		} else {
+			stats["rclone"] = map[string]interface{}{
+				"enabled":      true,
+				"server_ready": rcManager.IsReady(),
+				"error":        err.Error(),
+			}
+		}
+	} else {
+		stats["rclone"] = map[string]interface{}{
+			"enabled":      false,
+			"server_ready": false,
+		}
+	}
+
 	request.JSONResponse(w, stats, http.StatusOK)
 }
