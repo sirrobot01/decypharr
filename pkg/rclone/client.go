@@ -105,8 +105,9 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 		// Create cache directory if specified
 		if err := os.MkdirAll(cacheDir, 0755); err != nil {
 			m.logger.Warn().Str("cacheDir", cacheDir).Msg("Failed to create cache directory")
+		} else {
+			configOpts["CacheDir"] = cacheDir
 		}
-		configOpts["CacheDir"] = cacheDir
 	}
 
 	if len(configOpts) > 0 {
