@@ -70,6 +70,7 @@ func New() *Web {
 		"templates/index.html",
 		"templates/download.html",
 		"templates/repair.html",
+		"templates/stats.html",
 		"templates/config.html",
 		"templates/login.html",
 		"templates/register.html",

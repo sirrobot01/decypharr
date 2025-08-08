@@ -35,6 +35,7 @@ func (wb *Web) Routes() http.Handler {
 		r.Get("/", wb.IndexHandler)
 		r.Get("/download", wb.DownloadHandler)
 		r.Get("/repair", wb.RepairHandler)
+		r.Get("/stats", wb.StatsHandler)
 		r.Get("/config", wb.ConfigHandler)
 		r.Route("/api", func(r chi.Router) {
 			r.Get("/arrs", wb.handleGetArrs)

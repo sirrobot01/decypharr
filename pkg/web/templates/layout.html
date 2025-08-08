@@ -63,6 +63,9 @@
                 <li><a href="{{.URLBase}}webdav" target="_blank">
                     <i class="bi bi-cloud text-success"></i>WebDAV
                 </a></li>
+                <li><a href="{{.URLBase}}stats" class="{{if eq .Page "stats"}}active{{end}}">
+                    <i class="bi bi-graph-up text-info"></i>Stats
+                </a></li>
                 <li><a href="{{.URLBase}}logs" target="_blank">
                     <i class="bi bi-journal-text text-warning"></i>Logs
                 </a></li>
@@ -97,6 +100,10 @@
                 <i class="bi bi-cloud"></i>
                 <span class="hidden xl:inline">WebDAV</span>
             </a></li>
+            <li><a href="{{.URLBase}}stats" class="{{if eq .Page "stats"}}active{{end}} tooltip tooltip-bottom" data-tip="System Statistics">
+                <i class="bi bi-graph-up"></i>
+                <span class="hidden xl:inline">Stats</span>
+                </a></li>
             <li><a href="{{.URLBase}}logs" target="_blank" class="tooltip tooltip-bottom" data-tip="System Logs">
                 <i class="bi bi-journal-text"></i>
                 <span class="hidden xl:inline">Logs</span>
@@ -143,6 +150,8 @@
     {{ template "download" . }}
     {{ else if eq .Page "repair" }}
     {{ template "repair" . }}
+    {{ else if eq .Page "stats" }}
+    {{ template "stats" . }}
     {{ else if eq .Page "config" }}
     {{ template "config" . }}
     {{ else if eq .Page "login" }}
