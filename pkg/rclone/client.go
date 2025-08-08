@@ -97,7 +97,7 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 		},
 	}
 
-	var configOpts map[string]interface{}
+	configOpts := make(map[string]interface{})
 
 	if cfg.Rclone.BufferSize != "" {
 		configOpts["BufferSize"] = cfg.Rclone.BufferSize
