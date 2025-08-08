@@ -109,7 +109,10 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 		configOpts["CacheDir"] = cacheDir
 	}
 
-	mountArgs["_config"] = configOpts
+	if len(configOpts) > 0 {
+		// Only add _config if there are options to set
+		mountArgs["_config"] = configOpts
+	}
 
 	// Add VFS options if caching is enabled
 	if cfg.Rclone.VfsCacheMode != "off" {
