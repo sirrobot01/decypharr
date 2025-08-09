@@ -13,7 +13,6 @@
     <link rel="icon" type="image/png" sizes="16x16" href="{{.URLBase}}images/favicon/favicon-16x16.png">
     <link rel="manifest" href="{{.URLBase}}images/favicon/site.webmanifest">
 
-    <!-- Preload JavaScript -->
     <link rel="preload" href="{{.URLBase}}assets/js/common.js" as="script">
 
     <script>
@@ -34,11 +33,9 @@
     </script>
 </head>
 <body class="min-h-screen bg-base-200 flex flex-col">
-<!-- Toast Container -->
 <div class="toast-container fixed bottom-4 right-4 z-50 space-y-2">
 </div>
 
-<!-- Navigation -->
 <header class="navbar bg-base-100 shadow-lg sticky top-0 z-40 backdrop-blur-sm">
     <div class="navbar-start">
         <div class="dropdown">
@@ -72,9 +69,8 @@
             </ul>
         </div>
         <a class="btn btn-ghost text-xl font-bold text-primary group" href="{{.URLBase}}">
-            <!-- Logo -->
             <img src="{{.URLBase}}images/logo.svg" alt="Decypharr Logo" class="w-8 h-8 inline-block mr-2">
-            <span class="hidden sm:inline bg-clip-text text-transparent">Decypharr</span>
+            <span class="hidden sm:inline bg-clip-text">Decypharr</span>
         </a>
     </div>
 
@@ -100,10 +96,6 @@
                 <i class="bi bi-cloud"></i>
                 <span class="hidden xl:inline">WebDAV</span>
             </a></li>
-            <li><a href="{{.URLBase}}stats" class="{{if eq .Page "stats"}}active{{end}} tooltip tooltip-bottom" data-tip="System Statistics">
-                <i class="bi bi-graph-up"></i>
-                <span class="hidden xl:inline">Stats</span>
-                </a></li>
             <li><a href="{{.URLBase}}logs" target="_blank" class="tooltip tooltip-bottom" data-tip="System Logs">
                 <i class="bi bi-journal-text"></i>
                 <span class="hidden xl:inline">Logs</span>
@@ -113,26 +105,21 @@
 
     <div class="navbar-end">
         <div class="flex items-center gap-3">
-            <!-- Theme Toggle -->
             <div class="tooltip tooltip-left">
                 <label class="swap swap-rotate btn btn-ghost btn-circle hover:bg-base-300 transition-colors">
                     <input type="checkbox" id="themeToggle" class="theme-controller" />
-                    <!-- Sun icon for light mode -->
                     <i class="swap-off bi bi-sun text-lg text-warning"></i>
-                    <!-- Moon icon for dark mode -->
                     <i class="swap-on bi bi-moon-stars text-lg text-info"></i>
                 </label>
             </div>
 
-            <!-- Stats Link -->
             <div class="tooltip tooltip-left" data-tip="System Statistics">
-                <a href="{{.URLBase}}debug/stats" class="btn btn-ghost btn-sm hover:bg-base-300 transition-colors">
+                <a href="{{.URLBase}}stats" class="btn btn-ghost btn-sm hover:bg-base-300 transition-colors">
                     <i class="bi bi-graph-up text-lg"></i>
                     <span class="hidden md:inline ml-1">Stats</span>
                 </a>
             </div>
 
-            <!-- Version Badge -->
             <div class="tooltip tooltip-left" data-tip="Current Version">
                 <div class="badge badge-primary font-mono text-xs hover:badge-primary-focus transition-colors cursor-pointer" id="version-badge">
                     Loading...
@@ -142,7 +129,6 @@
     </div>
 </header>
 
-<!-- Main Content -->
 <main class="flex-1 container mx-auto px-4 py-6">
     {{ if eq .Page "index" }}
     {{ template "index" . }}
@@ -171,7 +157,6 @@
     {{ end }}
 </main>
 
-<!-- Footer -->
 <footer class="footer footer-center p-6 bg-base-300 text-base-content border-t border-base-200">
     <aside class="grid-flow-col gap-4">
         <a href="https://github.com/sirrobot01/decypharr" target="_blank"
@@ -187,11 +172,9 @@
     </aside>
 </footer>
 
-<!-- Scripts -->
 <script src="{{.URLBase}}assets/js/jquery-3.7.1.min.js"></script>
 <script src="{{.URLBase}}assets/js/common.js"></script>
 
-<!-- Page-specific scripts -->
 {{ if eq .Page "index" }}
 <script src="{{.URLBase}}assets/js/dashboard.js"></script>
 {{ else if eq .Page "download" }}

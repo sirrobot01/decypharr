@@ -50,6 +50,8 @@ func (wb *Web) Routes() http.Handler {
 			r.Delete("/torrents/", wb.handleDeleteTorrents)
 			r.Get("/config", wb.handleGetConfig)
 			r.Post("/config", wb.handleUpdateConfig)
+			r.Post("/refresh-token", wb.handleRefreshAPIToken)
+			r.Post("/update-auth", wb.handleUpdateAuth)
 		})
 	})
 

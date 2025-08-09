@@ -166,7 +166,7 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 		Args:    mountArgs,
 	}
 
-	_, err := m.makeRequest(req)
+	_, err := m.makeRequest(req, true)
 	if err != nil {
 		// Clean up mount point on failure
 		m.forceUnmountPath(mountPath)
@@ -218,7 +218,7 @@ func (m *Manager) unmount(provider string) error {
 
 	var rcErr error
 	if m.IsReady() {
-		_, rcErr = m.makeRequest(req)
+		_, rcErr = m.makeRequest(req, true)
 	}
 
 	// If RC unmount fails or server is not ready, try force unmount
@@ -335,7 +335,7 @@ func (m *Manager) RefreshDir(provider string, dirs []string) error {
 		Args:    args,
 	}
 
-	_, err := m.makeRequest(req)
+	_, err := m.makeRequest(req, true)
 	if err != nil {
 		m.logger.Error().Err(err).
 			Str("provider", provider).
@@ -348,7 +348,7 @@ func (m *Manager) RefreshDir(provider string, dirs []string) error {
 		Args:    args,
 	}
 
-	_, err = m.makeRequest(req)
+	_, err = m.makeRequest(req, true)
 	if err != nil {
 		m.logger.Error().Err(err).
 			Str("provider", provider).
@@ -373,16 +373,10 @@ func (m *Manager) createConfig(configName, webdavURL string) error {
 		},
 	}
 
-	_, err := m.makeRequest(req)
+	_, err := m.makeRequest(req, true)
 	if err != nil {
 		return fmt.Errorf("failed to create config %s: %w", configName, err)
 	}
-
-	m.logger.Trace().
-		Str("config_name", configName).
-		Str("webdav_url", webdavURL).
-		Msg("Rclone config created")
-
 	return nil
 }
 

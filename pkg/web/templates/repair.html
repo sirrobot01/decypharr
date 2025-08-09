@@ -1,6 +1,5 @@
 {{ define "repair" }}
 <div class="space-y-6">
-    <!-- Repair Form -->
     <div class="card bg-base-100 shadow-xl">
         <div class="card-body">
             <h2 class="card-title text-2xl mb-6">
@@ -9,7 +8,6 @@
 
             <form id="repairForm" class="space-y-6">
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <!-- Left Column -->
                     <div class="space-y-4">
                         <div class="form-control">
                             <label class="label" for="arrSelect">
@@ -44,7 +42,6 @@
                         </div>
                     </div>
 
-                    <!-- Right Column -->
                     <div class="space-y-4">
                         <div class="form-control">
                             <label class="label">
@@ -89,7 +86,6 @@
         </div>
     </div>
 
-    <!-- Jobs Table -->
     <div class="card bg-base-100 shadow-xl">
         <div class="card-header">
             <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 p-6 border-b border-base-200">
@@ -136,19 +132,15 @@
                     </tr>
                     </thead>
                     <tbody id="jobsTableBody">
-                    <!-- Dynamic content will be loaded here -->
                     </tbody>
                 </table>
             </div>
 
-            <!-- Pagination -->
             <div class="flex justify-center p-6 border-t border-base-200">
                 <div class="join" id="jobsPagination">
-                    <!-- Pagination will be generated here -->
                 </div>
             </div>
 
-            <!-- No Jobs Message -->
             <div id="noJobsMessage" class="text-center py-16 hidden">
                 <div class="text-6xl text-base-content/30 mb-4">
                     <i class="bi bi-clipboard-check"></i>
@@ -160,7 +152,6 @@
     </div>
 </div>
 
-<!-- Job Details Modal -->
 <dialog id="jobDetailsModal" class="modal">
     <div class="modal-box max-w-6xl max-h-[90vh]">
         <form method="dialog">
@@ -174,7 +165,6 @@
         </div>
 
         <div class="space-y-6">
-            <!-- Job Information -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div class="card bg-base-200">
                     <div class="card-body">
@@ -221,7 +211,6 @@
                 </div>
             </div>
 
-            <!-- Error Message -->
             <div id="errorContainer" class="alert alert-error hidden">
                 <i class="bi bi-exclamation-triangle"></i>
                 <div>
@@ -230,7 +219,6 @@
                 </div>
             </div>
 
-            <!-- Broken Items Section -->
             <div class="card bg-base-200">
                 <div class="card-body">
                     <div class="flex justify-between items-center mb-4">
@@ -240,7 +228,6 @@
                         </h4>
                     </div>
 
-                    <!-- Filters -->
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
                         <div class="form-control">
                             <input type="text"
@@ -268,7 +255,6 @@
                         </div>
                     </div>
 
-                    <!-- Items Table -->
                     <div class="overflow-x-auto max-h-96 border border-base-300 rounded-lg">
                         <table class="table table-sm table-hover">
                             <thead class="sticky top-0 bg-base-300">
@@ -280,19 +266,15 @@
                             </tr>
                             </thead>
                             <tbody id="brokenItemsTableBody">
-                            <!-- Broken items will be loaded here -->
                             </tbody>
                         </table>
                     </div>
 
-                    <!-- Items Pagination -->
                     <div class="flex justify-center mt-4">
                         <div class="join" id="itemsPagination">
-                            <!-- Pagination will be generated here -->
                         </div>
                     </div>
 
-                    <!-- No Items Messages -->
                     <div id="noBrokenItemsMessage" class="text-center py-8 hidden">
                         <div class="text-4xl text-base-content/30 mb-2">
                             <i class="bi bi-check-circle"></i>

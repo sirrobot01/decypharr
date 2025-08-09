@@ -4,6 +4,8 @@ This guide explains how to use Decypharr's internal mounting feature to eliminat
 
 ## Overview
 
+![Decypharr Internal Mounting](../images/settings/rclone.png)
+
 Instead of requiring users to install and configure rclone separately, Decypharr can now mount your WebDAV endpoints internally using rclone as a library dependency. This provides a seamless experience where files appear as regular filesystem paths without any external dependencies.
 
 ## Prerequisites
@@ -12,29 +14,6 @@ Instead of requiring users to install and configure rclone separately, Decypharr
 - **macOS users**: May need [macFUSE](https://osxfuse.github.io/) installed for mounting functionality
 - **Linux users**: FUSE should be available by default on most distributions
 - **Windows users**: Mounting functionality may be limited
-
-## Configuration
-
-To enable internal mounting, add these fields to your debrid provider configuration:
-
-```json
-{
-  "debrids": [
-    {
-      "name": "realdebrid",
-      "api_key": "YOUR_API_KEY",
-      "folder": "/mnt/remote/realdebrid",
-      "use_webdav": true,
-      "enable_internal_mount": true,
-      "internal_mount_path": "/mnt/decypharr/realdebrid",
-      "torrents_refresh_interval": "15s",
-      "download_links_refresh_interval": "40m",
-      "auto_expire_links_after": "3d",
-      "workers": 50
-    }
-  ]
-}
-```
 
 ### Configuration Options
 
@@ -46,17 +25,16 @@ Check the Rclone documentation for more details on the available options: [Rclon
 ## How It Works
 
 1. **WebDAV Server**: Decypharr starts its internal WebDAV server for enabled providers
-2. **Internal Mount**: Rclone libraries are used internally to mount the WebDAV endpoint to a local filesystem path
-3. **File Access**: Your applications can access files using regular filesystem paths like `/mnt/decypharr/realdebrid/MyMovie/`
+2. **Internal Mount**: Rclone is used internally to mount the WebDAV endpoint to a local filesystem path
+3. **File Access**: Your applications can access files using regular filesystem paths like `/mnt/decypharr/realdebrid/__all__/MyMovie/`
 
 ## Benefits
 
-- **Zero External Dependencies**: No need to install or configure rclone separately - it's built into Decypharr
-- **Automatic Setup**: Mounting is handled automatically by Decypharr using internal rclone libraries
+- **Automatic Setup**: Mounting is handled automatically by Decypharr using internal rclone rcd
 - **Filesystem Access**: Files appear as regular directories and files
 - **Seamless Integration**: Works with existing media servers without changes
 
-## Docker Compose Example
+## Docker Compose
 
 ```yaml
 version: '3.8'
@@ -68,8 +46,7 @@ services:
       - "8282:8282"
     volumes:
       - ./config:/config
-      - /mnt:/mnt:rshared  # Important: use 'shared' for mount propagation
-    privileged: true  # Required for mounting
+      - /mnt:/mnt:rshared  # Important: use 'rshared' for mount propagation
     devices:
       - /dev/fuse:/dev/fuse:rwm
     cap_add:
@@ -78,8 +55,7 @@ services:
       - UMASK=002
 ```
 
-⚠️ **Important Docker Notes:**
-- Use `privileged: true` or specific capabilities for mounting
+**Important Docker Notes:**
 - Mount volumes with `:rshared` to allow mount propagation
 - Include `/dev/fuse` device for FUSE mounting
 
@@ -103,40 +79,3 @@ If you see "no mount method available" errors:
 2. **Install Dependencies**: Ensure FUSE libraries are installed
 3. **Use WebDAV Directly**: Access files via `http://localhost:8282/webdav/provider/`
 4. **External Mounting**: Use OS-native WebDAV mounting as fallback
-
-### Log Messages
-
-Monitor logs for mounting status:
-
-```bash
-docker logs decypharr | grep -i mount
-```
-
-## Migration from External Rclone
-
-If you're currently using external rclone:
-
-1. **Remove External Rclone**: Uninstall or disable your existing rclone setup
-2. **Update Configuration**: Modify rclone configuration to use the internal mount.
-3. **Restart Decypharr**: Restart the Decypharr service to apply changes
-4. **Verify Mounts**: Check that files are accessible via the new internal mount paths
-5. **Test Applications**: Ensure your media applications can access files as expected
-6. **Monitor Logs**: Check Decypharr logs for any mount-related messages
-
-## Limitations
-
-- **FUSE Dependency**: Internal mounting requires FUSE support on your system
-- **Platform Support**: 
-  - **Linux**: Full support with FUSE
-  - **macOS**: Requires macFUSE installation
-  - **Windows**: Limited support
-- **Read-Only**: Mounted filesystems are read-only (which is appropriate for debrid content)
-- **Startup Delay**: Initial mounting may take a few seconds during startup
-- **Fallback**: If mounting fails, files remain accessible via WebDAV interface
-
-## Advanced Configuration
-
-For advanced users, you can customize the rclone mounting behavior by modifying the mount options in the UI. The default configuration prioritizes:
-
-- **Stability**: Conservative caching and timeout settings
-- **Resource Usage**: Minimal memory and CPU overhead

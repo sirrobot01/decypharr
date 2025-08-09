@@ -2,6 +2,8 @@ package config
 
 import (
 	"cmp"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,6 +83,7 @@ type Repair struct {
 type Auth struct {
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
+	APIToken string `json:"api_token,omitempty"`
 }
 
 type Rclone struct {
@@ -230,6 +233,15 @@ func ValidateConfig(config *Config) error {
 	}
 
 	return nil
+}
+
+// generateAPIToken creates a new random API token
+func generateAPIToken() (string, error) {
+	bytes := make([]byte, 32) // 256-bit token
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
 }
 
 func SetConfigPath(path string) {
@@ -421,6 +433,20 @@ func (c *Config) setDefaults() {
 	}
 	// Load the auth file
 	c.Auth = c.GetAuth()
+
+	// Generate API token if auth is enabled and no token exists
+	if c.UseAuth {
+		if c.Auth == nil {
+			c.Auth = &Auth{}
+		}
+		if c.Auth.APIToken == "" {
+			if token, err := generateAPIToken(); err == nil {
+				c.Auth.APIToken = token
+				// Save the updated auth config
+				_ = c.SaveAuth(c.Auth)
+			}
+		}
+	}
 }
 
 func (c *Config) Save() error {

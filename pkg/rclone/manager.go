@@ -56,11 +56,6 @@ type RCResponse struct {
 	Error  string      `json:"error,omitempty"`
 }
 
-type CoreStatsResponse struct {
-	TransferStats map[string]interface{} `json:"transferStats"`
-	CoreStats     map[string]interface{} `json:"coreStats"`
-}
-
 // NewManager creates a new rclone RC manager
 func NewManager() *Manager {
 	cfg := config.Get()
@@ -305,12 +300,11 @@ func (m *Manager) waitForServer() {
 // pingServer checks if the RC server is responding
 func (m *Manager) pingServer() bool {
 	req := RCRequest{Command: "core/version"}
-	_, err := m.makeRequest(req)
+	_, err := m.makeRequest(req, true)
 	return err == nil
 }
 
-// makeRequest makes a request to the rclone RC server
-func (m *Manager) makeRequest(req RCRequest) (*RCResponse, error) {
+func (m *Manager) makeRequest(req RCRequest, close bool) (*http.Response, error) {
 	reqBody, err := json.Marshal(req.Args)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -328,26 +322,30 @@ func (m *Manager) makeRequest(req RCRequest) (*RCResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			m.logger.Debug().Err(err).Msg("Failed to close response body")
-		}
-	}()
-
-	var rcResp RCResponse
-	if err := json.NewDecoder(resp.Body).Decode(&rcResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	if rcResp.Error != "" {
-		return nil, fmt.Errorf("rclone error: %s", rcResp.Error)
-	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d - %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+		// Read the response body to get more details
+		defer resp.Body.Close()
+		var errorResp RCResponse
+		if err := json.NewDecoder(resp.Body).Decode(&errorResp); err != nil {
+			return nil, fmt.Errorf("request failed with status %s, but could not decode error response: %w", resp.Status, err)
+		}
+		if errorResp.Error != "" {
+			return nil, fmt.Errorf("%s", errorResp.Error)
+		} else {
+			return nil, fmt.Errorf("request failed with status %s and no error message", resp.Status)
+		}
 	}
 
-	return &rcResp, nil
+	if close {
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				m.logger.Debug().Err(err).Msg("Failed to close response body")
+			}
+		}()
+	}
+
+	return resp, nil
 }
 
 // IsReady returns true if the RC server is ready

@@ -121,35 +121,15 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 
 	// Add rclone stats if available
 	if rcManager := store.Get().RcloneManager(); rcManager != nil && rcManager.IsReady() {
-		if rcStats, err := rcManager.GetStats(); err == nil {
-			stats["rclone"] = map[string]interface{}{
-				"enabled":        true,
-				"server_ready":   rcManager.IsReady(),
-				"core_stats":     rcStats.CoreStats,
-				"transfer_stats": rcStats.TransferStats,
-				"mount_stats":    rcStats.MountStats,
-			}
-
-			// Add memory usage
-			if memStats, err := rcManager.GetMemoryUsage(); err == nil {
-				stats["rclone"].(map[string]interface{})["memory_stats"] = memStats
-			}
-
-			// Add version info
-			if version, err := rcManager.GetVersion(); err == nil {
-				stats["rclone"].(map[string]interface{})["version"] = version
-			}
-
-			// Add bandwidth stats
-			if bwStats, err := rcManager.GetBandwidthStats(); err == nil {
-				stats["rclone"].(map[string]interface{})["bandwidth_stats"] = bwStats
-			}
-		} else {
+		rcStats, err := rcManager.GetStats()
+		if err != nil {
+			s.logger.Error().Err(err).Msg("Failed to get rclone stats")
 			stats["rclone"] = map[string]interface{}{
 				"enabled":      true,
-				"server_ready": rcManager.IsReady(),
-				"error":        err.Error(),
+				"server_ready": false,
 			}
+		} else {
+			stats["rclone"] = rcStats
 		}
 	} else {
 		stats["rclone"] = map[string]interface{}{

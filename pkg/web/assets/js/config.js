@@ -87,6 +87,9 @@ class ConfigManager {
 
         // Load rclone config
         this.populateRcloneSettings(config.rclone);
+
+        // Load API token info
+        this.populateAPIToken(config);
     }
 
     populateGeneralSettings(config) {
@@ -294,7 +297,7 @@ class ConfigManager {
                             </label>
                             <input type="text" class="input input-bordered" 
                                    name="debrid[${index}].folder" id="debrid[${index}].folder" 
-                                   placeholder="/mnt/remote/realdebrid" required>
+                                   placeholder="/mnt/remote/realdebrid/__all__" required>
                             <div class="label">
                                 <span class="label-text-alt">Path where debrid files are mounted</span>
                             </div>
@@ -326,7 +329,6 @@ class ConfigManager {
                     </div>
                 </div>
 
-                <!-- Options Grid - Full Width Below -->
                 <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
                     <div class="form-control">
                         <label class="label cursor-pointer justify-start gap-2">
@@ -373,14 +375,12 @@ class ConfigManager {
                     </div>
                 </div>
 
-                <!-- WebDAV Configuration (Initially Hidden) -->
                 <div class="webdav-section hidden mt-6" id="webdav-section-${index}">
                     <div class="divider">
                         <span class="text-lg font-semibold">WebDAV Settings</span>
                     </div>
                     
                     <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                        <!-- WebDAV Basic Settings -->
                         <div class="form-control">
                                 <label class="label" for="debrid[${index}].torrents_refresh_interval">
                                     <span class="label-text font-medium">Torrents Refresh Interval</span>
@@ -506,7 +506,6 @@ class ConfigManager {
                             </div>
                     </div>
 
-                    <!-- Virtual Directories -->
                     <div class="mt-6">
                         <div class="flex justify-between items-center mb-4">
                             <h4 class="text-lg font-semibold">Virtual Directories</h4>
@@ -516,7 +515,6 @@ class ConfigManager {
                         </div>
                         <p class="text-sm text-base-content/70 mb-4">Create virtual directories with filters to organize your content</p>
                         <div class="directories-container space-y-4" id="debrid[${index}].directories">
-                            <!-- Dynamic directories will be added here -->
                         </div>
                     </div>
                 </div>
@@ -601,7 +599,6 @@ class ConfigManager {
                         </div>
 
                         <div class="filters-container space-y-2" id="debrid[${debridIndex}].directory[${dirIndex}].filters">
-                            <!-- Filters will be added here -->
                         </div>
 
                         <div class="flex flex-wrap gap-2">
@@ -1279,6 +1276,19 @@ class ConfigManager {
                 btn.classList.add('btn-success');
                 btn.disabled = true;
             }
+        }
+    }
+
+    populateAPIToken(config) {
+        const tokenDisplay = document.getElementById('api-token-display');
+        if (tokenDisplay) {
+            tokenDisplay.value = config.api_token || '****';
+        }
+
+        // Populate username (password is not populated for security)
+        const usernameField = document.getElementById('auth-username');
+        if (usernameField && config.auth_username) {
+            usernameField.value = config.auth_username;
         }
     }
 }

@@ -1,11 +1,8 @@
 {{ define "config" }}
 <div class="space-y-6">
-    <!-- Configuration Form -->
     <form id="configForm" class="space-y-6">
-        <!-- Tab Navigation Card -->
         <div class="card bg-base-100 shadow-xl">
             <div class="card-body">
-                <!-- Modern Tab Navigation -->
                 <div class="border-b border-base-300 mb-8">
                     <nav class="flex space-x-8" aria-label="Configuration Tabs">
                         <button type="button" class="tab-button active flex items-center gap-2 py-3 px-1 border-b-2 border-primary text-primary font-medium text-sm" data-tab="general">
@@ -35,17 +32,14 @@
                     </nav>
                 </div>
 
-                <!-- Save Button (Sticky) -->
                 <div class="sticky top-20 z-30 flex justify-end mb-6">
                     <button type="submit" class="btn btn-success btn-lg shadow-lg">
                         <i class="bi bi-save mr-2"></i>Save Configuration
                     </button>
                 </div>
 
-                <!-- Tab Content Container -->
                 <div class="tab-content-container">
 
-                    <!-- General Tab Content -->
                     <div class="tab-content" data-tab-content="general">
                         <div class="space-y-6">
                             <h2 class="text-2xl font-bold flex items-center mb-6">
@@ -157,10 +151,123 @@
                                     </div>
                                 </div>
                             </div>
+
+                            <!-- Authentication Settings Section -->
+                            <div class="divider">
+                                <span class="text-lg font-semibold">Authentication Settings</span>
+                            </div>
+
+                            <div class="card bg-base-200">
+                                <div class="card-body">
+                                    <div class="space-y-6">
+                                        <div class="flex justify-between items-start">
+                                            <div class="flex-1">
+                                                <h3 class="text-lg font-semibold mb-2">Authentication Settings</h3>
+                                                <p class="text-sm text-base-content/70">Configure username/password authentication and API token for programmatic access.</p>
+                                            </div>
+                                        </div>
+
+                                        <!-- Username/Password Section -->
+                                        <div class="space-y-4">
+                                            <h4 class="font-semibold text-base">Web Authentication</h4>
+                                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                                <div class="form-control">
+                                                    <label class="label">
+                                                        <span class="label-text font-medium">Username</span>
+                                                    </label>
+                                                    <input type="text" 
+                                                           id="auth-username" 
+                                                           name="auth_username"
+                                                           class="input input-bordered" 
+                                                           placeholder="Enter username (leave empty to disable auth)">
+                                                    <div class="label">
+                                                        <span class="label-text-alt">Leave empty to disable authentication</span>
+                                                    </div>
+                                                </div>
+                                                <div class="form-control">
+                                                    <label class="label">
+                                                        <span class="label-text font-medium">Password</span>
+                                                    </label>
+                                                    <div class="password-toggle-container">
+                                                        <input type="password" 
+                                                               id="auth-password" 
+                                                               name="auth_password"
+                                                               class="input input-bordered input-has-toggle" 
+                                                               placeholder="Enter password">
+                                                        <button type="button" class="password-toggle-btn">
+                                                            <i class="bi bi-eye"></i>
+                                                        </button>
+                                                    </div>
+                                                    <div class="label">
+                                                        <span class="label-text-alt">Leave empty to disable authentication</span>
+                                                    </div>
+                                                </div>
+                                                <div class="form-control">
+                                                    <label class="label">
+                                                        <span class="label-text font-medium">Confirm Password</span>
+                                                    </label>
+                                                    <div class="password-toggle-container">
+                                                        <input type="password"
+                                                               id="auth-password-confirm"
+                                                               name="auth_password_confirm"
+                                                               class="input input-bordered input-has-toggle"
+                                                               placeholder="Confirm password">
+                                                        <button type="button" class="password-toggle-btn">
+                                                            <i class="bi bi-eye"></i>
+                                                        </button>
+                                                    </div>
+                                                    <div class="label">
+                                                        <span class="label-text-alt" id="password-match-indicator"></span>
+                                                    </div>
+                                                </div>
+                                                <div class="form-control">
+                                                    <label class="label">
+                                                        <span class="label-text font-medium">Current Token</span>
+                                                    </label>
+                                                    <div class="join">
+                                                        <input type="text"
+                                                               id="api-token-display"
+                                                               class="input input-bordered join-item flex-1 font-mono"
+                                                               placeholder="No token generated"
+                                                               readonly>
+                                                        <button type="button"
+                                                                id="copy-token-btn"
+                                                                class="btn btn-outline join-item"
+                                                                onclick="copyAPIToken();">
+                                                            <i class="bi bi-copy"></i>
+                                                        </button>
+                                                        <button type="button"
+                                                                id="refresh-token-btn"
+                                                                class="btn btn-outline btn-secondary join-item"
+                                                                onclick="refreshAPIToken();">
+                                                            <i class="bi bi-arrow-clockwise"></i>
+                                                        </button>
+                                                    </div>
+                                                    <div class="label">
+                                                        <span class="label-text-alt">Click refresh to generate or update your API token</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="flex justify-end items-center mt-5">
+                                                <button type="button"
+                                                        id="update-auth-btn"
+                                                        class="btn btn-primary"
+                                                        onclick="updateAuthSettings();">
+                                                    <i class="bi bi-shield-check mr-2"></i>Update Authentication
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="space-y-4">
+                                            <p class="text-sm text-base-content/70">Use this token for API authentication instead of session cookies. Perfect for automation and scripts.</p>
+
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
+                    </div>
 
-                    <!-- Debrid Tab Content -->
                     <div class="tab-content hidden" data-tab-content="debrid">
                         <div class="space-y-6">
                             <div class="flex justify-between items-center">
@@ -173,12 +280,10 @@
                             </div>
 
                             <div id="debridConfigs" class="space-y-4">
-                                <!-- Dynamic debrid configurations will be added here -->
                             </div>
                         </div>
                     </div>
 
-                    <!-- QBittorrent Tab Content -->
                     <div class="tab-content hidden" data-tab-content="qbittorrent">
                         <div class="space-y-6">
                             <h2 class="text-2xl font-bold flex items-center mb-6">
@@ -226,7 +331,6 @@
                         </div>
                     </div>
 
-                    <!-- Arrs Tab Content -->
                     <div class="tab-content hidden" data-tab-content="arrs">
                         <div class="space-y-6">
                             <div class="flex justify-between items-center">
@@ -239,12 +343,10 @@
                             </div>
 
                             <div id="arrConfigs" class="space-y-4">
-                                <!-- Dynamic arr configurations will be added here -->
                             </div>
                         </div>
                     </div>
 
-                    <!-- Repair Tab Content -->
                     <div class="tab-content hidden" data-tab-content="repair">
                         <div class="space-y-6">
                             <h2 class="text-2xl font-bold flex items-center mb-6">
@@ -332,7 +434,6 @@
                         </div>
                     </div>
 
-                    <!-- Rclone Tab Content -->
                     <div class="tab-content hidden" data-tab-content="rclone">
                         <div class="space-y-6">
                             <h2 class="text-2xl font-bold flex items-center mb-6">
@@ -349,7 +450,6 @@
                                 </label>
                             </div>
 
-                            <!-- Mount Path Section -->
                             <div class="card bg-base-200">
                                 <div class="card-body">
                                     <h3 class="text-lg font-semibold mb-4 flex items-center">
@@ -519,7 +619,6 @@
                                 </div>
                             </div>
 
-                            <!-- Advanced Settings Section -->
                             <div class="card bg-base-200">
                                 <div class="card-body">
                                     <h3 class="text-lg font-semibold mb-4 flex items-center">
@@ -551,13 +650,12 @@
                         </div>
                     </div>
 
-                </div> <!-- End tab-content-container -->
+                </div>
             </div>
         </div>
     </form>
 </div>
 
-<!-- Loading Overlay -->
 <div id="loadingOverlay" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden">
     <div class="flex items-center justify-center h-full">
         <div class="card bg-base-100 shadow-2xl">
@@ -634,5 +732,124 @@
             }
         });
     });
+
+    // Password confirmation validation
+    document.addEventListener('DOMContentLoaded', function() {
+        const password = document.getElementById('auth-password');
+        const confirmPassword = document.getElementById('auth-password-confirm');
+        const indicator = document.getElementById('password-match-indicator');
+
+        function validatePasswords() {
+            if (!password.value && !confirmPassword.value) {
+                indicator.textContent = '';
+                indicator.className = 'label-text-alt';
+                return;
+            }
+
+            if (password.value === confirmPassword.value) {
+                indicator.textContent = '✓ Passwords match';
+                indicator.className = 'label-text-alt text-success';
+            } else {
+                indicator.textContent = '✗ Passwords do not match';
+                indicator.className = 'label-text-alt text-error';
+            }
+        }
+
+        password?.addEventListener('input', validatePasswords);
+        confirmPassword?.addEventListener('input', validatePasswords);
+    });
+
+    // API Token Management Functions
+    async function refreshAPIToken() {
+        const refreshBtn = document.getElementById('refresh-token-btn');
+        const tokenDisplay = document.getElementById('api-token-display');
+
+        // Show loading state
+        window.decypharrUtils.setButtonLoading(refreshBtn, true, 'Refresh Token');
+
+        try {
+            const response = await window.decypharrUtils.fetcher('/api/refresh-token', {
+                method: 'POST'
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to refresh token');
+            }
+
+            const data = await response.json();
+            tokenDisplay.value = data.token;
+            window.decypharrUtils.createToast(data.message || 'Token refreshed successfully', 'success');
+
+        } catch (error) {
+            console.error('Error refreshing token:', error);
+            window.decypharrUtils.createToast('Failed to refresh token: ' + error.message, 'error');
+        } finally {
+            window.decypharrUtils.setButtonLoading(refreshBtn, false);
+        }
+    }
+
+    async function copyAPIToken() {
+        const tokenDisplay = document.getElementById('api-token-display');
+        const token = tokenDisplay.value;
+
+        if (!token || token === 'No token generated') {
+            window.decypharrUtils.createToast('No token to copy. Please refresh the token first.', 'warning');
+            return;
+        }
+
+        try {
+            await window.decypharrUtils.copyToClipboard(token);
+        } catch (error) {
+            console.error('Failed to copy token:', error);
+            window.decypharrUtils.createToast('Failed to copy token to clipboard', 'error');
+        }
+    }
+
+    async function updateAuthSettings() {
+        const username = document.getElementById('auth-username').value;
+        const password = document.getElementById('auth-password').value;
+        const confirmPassword = document.getElementById('auth-password-confirm').value;
+        const updateBtn = document.getElementById('update-auth-btn');
+
+        if (password !== confirmPassword) {
+            window.decypharrUtils.createToast('Passwords do not match', 'error');
+            return false;
+        }
+
+        // Show loading state
+        window.decypharrUtils.setButtonLoading(updateBtn, true, 'Update Authentication');
+
+        try {
+            const response = await window.decypharrUtils.fetcher('/api/update-auth', {
+                method: 'POST',
+                body: JSON.stringify({
+                    username: username,
+                    password: password,
+                    confirm_password: confirmPassword
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || 'Failed to update authentication settings');
+            }
+
+            const data = await response.json();
+            window.decypharrUtils.createToast(data.message, 'success');
+            
+            // Clear password fields for security
+            document.getElementById('auth-password').value = '';
+            document.getElementById('auth-password-confirm').value = '';
+            
+            return true;
+
+        } catch (error) {
+            console.error('Error updating auth settings:', error);
+            window.decypharrUtils.createToast('Failed to update authentication: ' + error.message, 'error');
+            return false;
+        } finally {
+            window.decypharrUtils.setButtonLoading(updateBtn, false);
+        }
+    }
 </script>
 {{ end }}

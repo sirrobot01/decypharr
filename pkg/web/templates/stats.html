@@ -8,15 +8,12 @@
         </button>
     </div>
 
-    <!-- Loading State -->
     <div id="loading-stats" class="text-center py-12">
         <div class="loading loading-spinner loading-lg text-primary"></div>
         <p class="mt-4 text-base-content/70">Loading system statistics...</p>
     </div>
 
-    <!-- Stats Content -->
     <div id="stats-content" class="space-y-6" style="display: none;">
-        <!-- System Overview -->
         <div class="card bg-base-100 shadow-xl">
             <div class="card-header p-6 pb-3">
                 <h2 class="card-title text-xl">
@@ -62,7 +59,17 @@
             </div>
         </div>
 
-        <!-- Rclone Stats -->
+        <div class="card bg-base-100 shadow-xl" id="debrid-card">
+            <div class="card-header p-6 pb-3">
+                <h2 class="card-title text-xl">
+                    <i class="bi bi-cloud-download text-secondary"></i>
+                    Debrid Services
+                </h2>
+            </div>
+            <div class="card-body p-6 pt-3" id="debrid-content">
+            </div>
+        </div>
+
         <div class="card bg-base-100 shadow-xl" id="rclone-card">
             <div class="card-header p-6 pb-3">
                 <h2 class="card-title text-xl">
@@ -72,44 +79,10 @@
                 <div class="badge" id="rclone-status">Unknown</div>
             </div>
             <div class="card-body p-6 pt-3" id="rclone-content">
-                <!-- Rclone stats will be populated here -->
-            </div>
-        </div>
-
-        <!-- Debrid Services -->
-        <div class="card bg-base-100 shadow-xl" id="debrid-card">
-            <div class="card-header p-6 pb-3">
-                <h2 class="card-title text-xl">
-                    <i class="bi bi-cloud-download text-secondary"></i>
-                    Debrid Services
-                </h2>
-            </div>
-            <div class="card-body p-6 pt-3" id="debrid-content">
-                <!-- Debrid stats will be populated here -->
-            </div>
-        </div>
-
-        <!-- Memory Details -->
-        <div class="card bg-base-100 shadow-xl">
-            <div class="card-header p-6 pb-3">
-                <h2 class="card-title text-xl">
-                    <i class="bi bi-bar-chart text-accent"></i>
-                    Memory Details
-                </h2>
-            </div>
-            <div class="card-body p-6 pt-3">
-                <div class="overflow-x-auto">
-                    <table class="table table-zebra w-full">
-                        <tbody id="memory-details">
-                            <!-- Memory details will be populated here -->
-                        </tbody>
-                    </table>
-                </div>
             </div>
         </div>
     </div>
 
-    <!-- Error State -->
     <div id="error-stats" class="alert alert-error" style="display: none;">
         <i class="bi bi-exclamation-triangle-fill"></i>
         <span id="error-message">Failed to load statistics</span>
@@ -121,232 +94,310 @@
 </div>
 
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    const loadingEl = document.getElementById('loading-stats');
-    const contentEl = document.getElementById('stats-content');
-    const errorEl = document.getElementById('error-stats');
-    const refreshBtn = document.getElementById('refresh-stats');
-    const retryBtn = document.getElementById('retry-stats');
+    document.addEventListener('DOMContentLoaded', function() {
+        const loadingEl = document.getElementById('loading-stats');
+        const contentEl = document.getElementById('stats-content');
+        const errorEl = document.getElementById('error-stats');
+        const refreshBtn = document.getElementById('refresh-stats');
+        const retryBtn = document.getElementById('retry-stats');
 
-    function formatBytes(bytes) {
-        if (bytes === 0) return '0 B';
-        const k = 1024;
-        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-    }
-
-    function formatNumber(num) {
-        return num.toLocaleString();
-    }
-
-    function showError(message) {
-        loadingEl.style.display = 'none';
-        contentEl.style.display = 'none';
-        errorEl.style.display = 'flex';
-        document.getElementById('error-message').textContent = message;
-    }
-
-    function showContent() {
-        loadingEl.style.display = 'none';
-        errorEl.style.display = 'none';
-        contentEl.style.display = 'block';
-    }
-
-    function showLoading() {
-        contentEl.style.display = 'none';
-        errorEl.style.display = 'none';
-        loadingEl.style.display = 'block';
-    }
-
-    function updateRcloneStats(rclone) {
-        const rcloneCard = document.getElementById('rclone-card');
-        const rcloneStatus = document.getElementById('rclone-status');
-        const rcloneContent = document.getElementById('rclone-content');
-
-        if (!rclone || !rclone.enabled) {
-            rcloneStatus.textContent = 'Disabled';
-            rcloneStatus.className = 'badge badge-error';
-            rcloneContent.innerHTML = '<p class="text-base-content/70">Rclone is not enabled or configured.</p>';
-            return;
+        function formatNumber(num) {
+            return num.toLocaleString();
         }
 
-        if (!rclone.server_ready) {
-            rcloneStatus.textContent = 'Not Ready';
-            rcloneStatus.className = 'badge badge-warning';
-            rcloneContent.innerHTML = '<p class="text-base-content/70">Rclone server is not ready.</p>';
-            return;
+        function showError(message) {
+            loadingEl.style.display = 'none';
+            contentEl.style.display = 'none';
+            errorEl.style.display = 'flex';
+            document.getElementById('error-message').textContent = message;
         }
 
-        rcloneStatus.textContent = 'Active';
-        rcloneStatus.className = 'badge badge-success';
-
-        let html = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">';
-        
-        if (rclone.core_stats) {
-            html += `
-                <div class="stat">
-                    <div class="stat-title">Core Version</div>
-                    <div class="stat-value text-sm">${rclone.version || 'Unknown'}</div>
-                </div>
-            `;
+        function showContent() {
+            loadingEl.style.display = 'none';
+            errorEl.style.display = 'none';
+            contentEl.style.display = 'block';
         }
 
-        if (rclone.transfer_stats) {
-            const ts = rclone.transfer_stats;
-            html += `
-                <div class="stat">
-                    <div class="stat-title">Transferred</div>
-                    <div class="stat-value text-primary">${formatBytes(ts.bytes || 0)}</div>
-                    <div class="stat-desc">Speed: ${formatBytes(ts.speed || 0)}/s</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-title">Transfers</div>
-                    <div class="stat-value text-info">${ts.transfers || 0}</div>
-                    <div class="stat-desc">Errors: ${ts.errors || 0}</div>
-                </div>
-            `;
+        function showLoading() {
+            contentEl.style.display = 'none';
+            errorEl.style.display = 'none';
+            loadingEl.style.display = 'block';
         }
 
-        if (rclone.memory_stats) {
-            const ms = rclone.memory_stats;
-            html += `
-                <div class="stat">
-                    <div class="stat-title">Rclone Memory</div>
-                    <div class="stat-value text-accent">${formatBytes(ms.sys || 0)}</div>
-                    <div class="stat-desc">Heap: ${formatBytes(ms.heap_alloc || 0)}</div>
-                </div>
-            `;
-        }
+        function updateRcloneStats(rclone) {
+            const rcloneCard = document.getElementById('rclone-card');
+            const rcloneStatus = document.getElementById('rclone-status');
+            const rcloneContent = document.getElementById('rclone-content');
 
-        html += '</div>';
-        rcloneContent.innerHTML = html;
-    }
+            if (!rclone || !rclone.enabled) {
+                rcloneStatus.textContent = 'Disabled';
+                rcloneStatus.className = 'badge badge-error';
+                rcloneContent.innerHTML = '<p class="text-base-content/70">Rclone is not enabled or configured.</p>';
+                return;
+            }
 
-    function updateDebridStats(debrids) {
-        const debridContent = document.getElementById('debrid-content');
+            if (!rclone.server_ready) {
+                rcloneStatus.textContent = 'Not Ready';
+                rcloneStatus.className = 'badge badge-warning';
+                rcloneContent.innerHTML = '<p class="text-base-content/70">Rclone server is not ready.</p>';
+                return;
+            }
 
-        if (!debrids || debrids.length === 0) {
-            debridContent.innerHTML = '<p class="text-base-content/70">No debrid services configured.</p>';
-            return;
-        }
+            rcloneStatus.textContent = 'Active';
+            rcloneStatus.className = 'badge badge-success';
 
-        let html = '<div class="space-y-4">';
-        debrids.forEach(debrid => {
-            html += `
-                <div class="card bg-base-200">
-                    <div class="card-body p-4">
-                        <div class="flex justify-between items-start">
-                            <div>
-                                <h3 class="card-title text-lg">${debrid.name || 'Unknown Service'}</h3>
-                                <p class="text-sm text-base-content/70">${debrid.username || 'No username'}</p>
-                            </div>
-                            <div class="text-right">
-                                <div class="text-sm font-mono">${formatBytes(debrid.points || 0)} points</div>
-                                <div class="text-xs text-base-content/70">Expires: ${debrid.expiration || 'Unknown'}</div>
+            let html = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">';
+
+            // Version info
+            if (rclone.version) {
+                html += `
+                    <div class="stat">
+                        <div class="stat-title">Rclone Version</div>
+                        <div class="stat-value text-sm">${rclone.version.version || 'Unknown'}</div>
+                        <div class="stat-desc">${rclone.version.arch || ''} ${rclone.version.os || ''}</div>
+                    </div>
+                `;
+            }
+
+            // Core stats contain transfer information
+            if (rclone.core) {
+                const cs = rclone.core;
+                html += `
+                    <div class="stat">
+                        <div class="stat-title">Transferred</div>
+                        <div class="stat-value text-primary">${window.decypharrUtils.formatBytes(cs.bytes || 0)}</div>
+                        <div class="stat-desc">Speed: ${window.decypharrUtils.formatBytes(cs.speed || 0)}/s</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-title">Transfers</div>
+                        <div class="stat-value text-info">${cs.transfers || 0}</div>
+                        <div class="stat-desc">Errors: ${cs.errors || 0}</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-title">Checks</div>
+                        <div class="stat-value text-secondary">${cs.checks || 0}</div>
+                        <div class="stat-desc">Total: ${cs.totalChecks || 0}</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-title">Elapsed Time</div>
+                        <div class="stat-value text-accent">${((cs.elapsedTime || 0) / 60).toFixed(1)}m</div>
+                        <div class="stat-desc">Transfer: ${((cs.transferTime || 0) / 60).toFixed(1)}m</div>
+                    </div>
+                `;
+            }
+
+            if (rclone.memory) {
+                const ms = rclone.memory;
+                html += `
+                    <div class="stat">
+                        <div class="stat-title">Rclone Memory</div>
+                        <div class="stat-value text-accent">${window.decypharrUtils.formatBytes(ms.Sys || 0)}</div>
+                        <div class="stat-desc">Heap: ${window.decypharrUtils.formatBytes(ms.TotalAlloc || 0)}</div>
+                    </div>
+                `;
+            }
+            html += '</div>';
+
+            // Add active transfers if available
+            if (rclone.core && rclone.core.transferring && rclone.core.transferring.length > 0) {
+                let transferring = rclone.core.transferring;
+                html += `
+                    <div class="mt-6">
+                        <h3 class="text-lg font-semibold mb-3">
+                            <i class="bi bi-arrow-down-up text-primary"></i>
+                            Active Transfers (${transferring.length})
+                        </h3>
+                        <div class="space-y-2 max-h-64 overflow-y-auto">
+                `;
+
+                transferring.forEach(transfer => {
+                    const progress = ((transfer.bytes || 0) / (transfer.size || 1)) * 100;
+                    html += `
+                        <div class="card bg-base-200 compact">
+                            <div class="card-body">
+                                <div class="flex justify-between items-start mb-2">
+                                    <h4 class="font-medium text-sm truncate flex-1 mr-2">${transfer.name || 'Unknown'}</h4>
+                                    <span class="text-xs text-base-content/70">${window.decypharrUtils.formatBytes(transfer.speed || 0)}/s</span>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    <progress class="progress progress-primary flex-1" value="${progress}" max="100"></progress>
+                                    <span class="text-xs font-mono">${progress.toFixed(1)}%</span>
+                                </div>
+                                <div class="flex justify-between text-xs text-base-content/60 mt-1">
+                                    <span>${window.decypharrUtils.formatBytes(transfer.bytes || 0)} / ${window.decypharrUtils.formatBytes(transfer.size || 0)}</span>
+                                    <span>ETA: ${transfer.eta ? Math.ceil(transfer.eta / 60) + 'm' : 'Unknown'}</span>
+                                </div>
                             </div>
                         </div>
-                        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
-                            <div class="stat">
-                                <div class="stat-title text-xs">Library Size</div>
-                                <div class="stat-value text-sm">${formatNumber(debrid.library_size || 0)}</div>
+                    `;
+                });
+
+                html += '</div></div>';
+            }
+
+            // Add mount information if available
+            if (rclone.mounts && Object.keys(rclone.mounts).length > 0) {
+                html += `
+                    <div class="mt-6">
+                        <h3 class="text-lg font-semibold mb-3">
+                            <i class="bi bi-hdd-stack text-primary"></i>
+                            Mounted Services
+                        </h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                `;
+                
+                Object.entries(rclone.mounts).forEach(([name, mount]) => {
+                    const statusBadge = mount.mounted ? 
+                        '<span class="badge badge-success badge-sm">Mounted</span>' : 
+                        '<span class="badge badge-error badge-sm">Not Mounted</span>';
+                    
+                    html += `
+                        <div class="card bg-base-200 compact">
+                            <div class="card-body">
+                                <div class="flex justify-between items-center">
+                                    <div>
+                                        <h4 class="font-medium">${mount.config_name || name}</h4>
+                                        <p class="text-xs text-base-content/70">${mount.provider || 'Unknown Provider'}</p>
+                                        ${mount.local_path ? `<p class="text-xs text-base-content/60 font-mono">${mount.local_path}</p>` : ''}
+                                    </div>
+                                    <div class="text-right">
+                                        ${statusBadge}
+                                        ${mount.mounted_at ? `<p class="text-xs text-base-content/60">Since: ${new Date(mount.mounted_at).toLocaleTimeString()}</p>` : ''}
+                                    </div>
+                                </div>
+                                ${mount.error ? `<div class="alert alert-error alert-sm mt-2"><span class="text-xs">${mount.error}</span></div>` : ''}
                             </div>
-                            <div class="stat">
-                                <div class="stat-title text-xs">Bad Torrents</div>
-                                <div class="stat-value text-sm text-error">${formatNumber(debrid.bad_torrents || 0)}</div>
+                        </div>
+                    `;
+                });
+                
+                html += '</div></div>';
+            }
+
+            // Add bandwidth stats if available
+            if (rclone.bandwidth && rclone.bandwidth.rate !== "off") {
+                html += `
+                    <div class="mt-6">
+                        <h3 class="text-lg font-semibold mb-3">
+                            <i class="bi bi-speedometer2 text-info"></i>
+                            Bandwidth Limits
+                        </h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                `;
+
+                html += `
+                    <div class="stat bg-base-200 rounded-lg p-3">
+                        <div class="stat-title text-xs">Bytes Per Seconds</div>
+                        <div class="stat-value text-sm">${window.decypharrUtils.formatBytes(rclone.bandwidth.bytesPerSecond)}</div>
+                    </div>
+                    <div class="stat bg-base-200 rounded-lg p-3">
+                        <div class="stat-title text-xs">Rate</div>
+                        <div class="stat-value text-sm">${window.decypharrUtils.formatBytes(rclone.bandwidth.rate)}</div>
+                    </div>
+                `;
+                
+                html += '</div></div>';
+            }
+
+            rcloneContent.innerHTML = html;
+        }
+
+        function updateDebridStats(debrids) {
+            const debridContent = document.getElementById('debrid-content');
+
+            if (!debrids || debrids.length === 0) {
+                debridContent.innerHTML = '<p class="text-base-content/70">No debrid services configured.</p>';
+                return;
+            }
+
+            let html = '<div class="space-y-4">';
+            debrids.forEach(debrid => {
+                html += `
+                    <div class="card bg-base-200">
+                        <div class="card-body p-4">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <h3 class="card-title text-lg">${debrid.name || 'Unknown Service'}</h3>
+                                    <p class="text-sm text-base-content/70">${debrid.username || 'No username'}</p>
+                                </div>
+                                <div class="text-right">
+                                    <div class="text-sm font-mono">${debrid.points} points</div>
+                                    <div class="text-xs text-base-content/70">Expires: ${debrid.expiration || 'Unknown'}</div>
+                                </div>
                             </div>
-                            <div class="stat">
-                                <div class="stat-title text-xs">Active Links</div>
-                                <div class="stat-value text-sm text-success">${formatNumber(debrid.active_links || 0)}</div>
-                            </div>
-                            <div class="stat">
-                                <div class="stat-title text-xs">Type</div>
-                                <div class="stat-value text-sm">${debrid.type || 'Unknown'}</div>
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
+                                <div class="stat">
+                                    <div class="stat-title text-xs">Library Size</div>
+                                    <div class="stat-value text-sm">${formatNumber(debrid.library_size || 0)}</div>
+                                </div>
+                                <div class="stat">
+                                    <div class="stat-title text-xs">Bad Torrents</div>
+                                    <div class="stat-value text-sm text-error">${formatNumber(debrid.bad_torrents || 0)}</div>
+                                </div>
+                                <div class="stat">
+                                    <div class="stat-title text-xs">Active Links</div>
+                                    <div class="stat-value text-sm text-success">${formatNumber(debrid.active_links || 0)}</div>
+                                </div>
+                                <div class="stat">
+                                    <div class="stat-title text-xs">Type</div>
+                                    <div class="stat-value text-sm">${debrid.type || 'Unknown'}</div>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            `;
-        });
-        html += '</div>';
-        debridContent.innerHTML = html;
-    }
-
-    function updateMemoryDetails(stats) {
-        const memoryDetails = document.getElementById('memory-details');
-        const details = [
-            ['Total Allocated', stats.total_alloc_mb || '-'],
-            ['Heap Allocated', stats.heap_alloc_mb || '-'],
-            ['System Memory', stats.memory_used || '-'],
-            ['GC Cycles', formatNumber(stats.gc_cycles || 0)],
-            ['Goroutines', formatNumber(stats.goroutines || 0)],
-            ['CPU Cores', stats.num_cpu || '-'],
-            ['OS/Arch', `${stats.os || 'Unknown'}/${stats.arch || 'Unknown'}`],
-            ['Go Version', stats.go_version || '-']
-        ];
-
-        let html = '';
-        details.forEach(([label, value]) => {
-            html += `
-                <tr>
-                    <td class="font-medium">${label}</td>
-                    <td class="font-mono">${value}</td>
-                </tr>
-            `;
-        });
-        memoryDetails.innerHTML = html;
-    }
-
-    function updateStats(stats) {
-        // System overview
-        document.getElementById('memory-used').textContent = stats.memory_used || '-';
-        document.getElementById('heap-alloc').textContent = `Heap: ${stats.heap_alloc_mb || '-'}`;
-        document.getElementById('goroutines').textContent = formatNumber(stats.goroutines || 0);
-        document.getElementById('gc-cycles').textContent = `GC: ${formatNumber(stats.gc_cycles || 0)} cycles`;
-        document.getElementById('num-cpu').textContent = stats.num_cpu || '-';
-        document.getElementById('arch').textContent = stats.arch || '-';
-        document.getElementById('os').textContent = stats.os || '-';
-        document.getElementById('go-version').textContent = stats.go_version || '-';
-
-        // Rclone stats
-        updateRcloneStats(stats.rclone);
-
-        // Debrid stats
-        updateDebridStats(stats.debrids);
-
-        // Memory details
-        updateMemoryDetails(stats);
-    }
-
-    function loadStats() {
-        showLoading();
-        
-        fetch(`${window.urlBase}debug/stats`)
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                return response.json();
-            })
-            .then(stats => {
-                updateStats(stats);
-                showContent();
-            })
-            .catch(error => {
-                console.error('Error loading stats:', error);
-                showError(error.message || 'Failed to load statistics');
+                `;
             });
-    }
+            html += '</div>';
+            debridContent.innerHTML = html;
+        }
 
-    // Event listeners
-    refreshBtn.addEventListener('click', loadStats);
-    retryBtn.addEventListener('click', loadStats);
+        function updateStats(stats) {
+            // System overview
+            document.getElementById('memory-used').textContent = stats.memory_used || '-';
+            document.getElementById('heap-alloc').textContent = `Heap: ${stats.heap_alloc_mb || '-'}`;
+            document.getElementById('goroutines').textContent = formatNumber(stats.goroutines || 0);
+            document.getElementById('gc-cycles').textContent = `GC: ${formatNumber(stats.gc_cycles || 0)} cycles`;
+            document.getElementById('num-cpu').textContent = stats.num_cpu || '-';
+            document.getElementById('arch').textContent = stats.arch || '-';
+            document.getElementById('os').textContent = stats.os || '-';
+            document.getElementById('go-version').textContent = stats.go_version || '-';
 
-    // Auto-refresh every 30 seconds
-    setInterval(loadStats, 30000);
+            // Rclone stats
+            updateRcloneStats(stats.rclone);
 
-    // Initial load
-    loadStats();
-});
+            // Debrid stats
+            updateDebridStats(stats.debrids);
+        }
+
+        function loadStats() {
+            showLoading();
+
+            fetch(`${window.urlBase}debug/stats`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return response.json();
+                })
+                .then(stats => {
+                    updateStats(stats);
+                    showContent();
+                })
+                .catch(error => {
+                    console.error('Error loading stats:', error);
+                    showError(error.message || 'Failed to load statistics');
+                });
+        }
+
+        // Event listeners
+        refreshBtn.addEventListener('click', loadStats);
+        retryBtn.addEventListener('click', loadStats);
+
+        // Auto-refresh every 30 seconds
+        setInterval(loadStats, 30000);
+
+        // Initial load
+        loadStats();
+    });
 </script>
 {{ end }}

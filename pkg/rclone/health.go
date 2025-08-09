@@ -49,7 +49,7 @@ func (m *Manager) checkMountHealth(provider string) bool {
 		},
 	}
 
-	_, err := m.makeRequest(req)
+	_, err := m.makeRequest(req, true)
 	return err == nil
 }
 

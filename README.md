@@ -12,9 +12,9 @@ Decypharr combines the power of QBittorrent with popular Debrid services to enha
 
 - Mock Qbittorent API that supports the Arrs (Sonarr, Radarr, Lidarr etc)
 - Full-fledged UI for managing torrents
-- Proxy support for filtering out un-cached Debrid torrents
 - Multiple Debrid providers support
 - WebDAV server support for each debrid provider
+- Optional mounting of WebDAV to your system(using [Rclone](https://rclone.org/))
 - Repair Worker for missing files
 
 ## Supported Debrid Providers
@@ -29,13 +29,12 @@ Decypharr combines the power of QBittorrent with popular Debrid services to enha
 ### Docker (Recommended)
 
 ```yaml
-version: '3.7'
 services:
   decypharr:
-    image: cy01/blackhole:latest # or cy01/blackhole:beta
+    image: cy01/blackhole:latest
     container_name: decypharr
     ports:
-      - "8282:8282" # qBittorrent
+      - "8282:8282"
     volumes:
       - /mnt/:/mnt:rshared
       - ./configs/:/app # config.json must be in this directory
@@ -63,7 +62,7 @@ The documentation includes:
 
 ## Basic Configuration
 
-You'll be able to configure Decypharr through the Web UI or by editing the `config.json` file directly.
+You can configure Decypharr through the Web UI or by editing the `config.json` file directly.
 
 ## Contributing
 

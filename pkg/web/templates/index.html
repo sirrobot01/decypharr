@@ -1,11 +1,9 @@
 {{ define "index" }}
 <div class="space-y-6">
 
-    <!-- Controls Section -->
     <div class="card bg-base-100 shadow-xl">
         <div class="card-body">
             <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
-                <!-- Batch Actions -->
                 <div class="flex items-center gap-2">
                     <button class="btn btn-secondary btn-sm hidden" id="batchDeleteBtn">
                         <i class="bi bi-trash"></i>
@@ -21,7 +19,6 @@
                     </button>
                 </div>
 
-                <!-- Filters -->
                 <div class="flex flex-wrap items-center gap-2 w-full lg:w-auto">
                     <select class="select select-bordered select-sm w-full sm:w-auto min-w-32" id="stateFilter">
                         <option value="">All States</option>
@@ -47,7 +44,6 @@
         </div>
     </div>
 
-    <!-- Torrents Table -->
     <div class="card bg-base-100 shadow-xl">
         <div class="card-body p-0">
             <div class="overflow-x-auto">
@@ -87,12 +83,10 @@
                     </tr>
                     </thead>
                     <tbody id="torrentsList">
-                    <!-- Dynamic content will be loaded here -->
                     </tbody>
                 </table>
             </div>
 
-            <!-- Pagination -->
             <div class="flex flex-col sm:flex-row justify-between items-center p-6 border-t border-base-200 gap-4">
                 <div class="text-sm text-base-content/70">
                     <span id="paginationInfo">Loading torrents...</span>
@@ -102,7 +96,6 @@
         </div>
     </div>
 
-    <!-- Empty State -->
     <div class="card bg-base-100 shadow-xl hidden" id="emptyState">
         <div class="card-body text-center py-16">
             <div class="text-6xl text-base-content/30 mb-4">
@@ -117,7 +110,6 @@
     </div>
 </div>
 
-<!-- Context Menu -->
 <ul class="menu bg-base-100 shadow-lg rounded-box context-menu hidden fixed z-50" id="torrentContextMenu">
     <li class="menu-title">
         <span class="torrent-name text-sm font-bold truncate max-w-48"></span>

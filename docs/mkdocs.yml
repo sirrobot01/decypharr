@@ -6,6 +6,9 @@ repo_name: sirrobot01/decypharr
 edit_uri: blob/main/docs
 
 
+extra_css:
+  - styles/styles.css
+
 theme:
   name: material
   logo: images/logo.png
@@ -59,22 +62,17 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Usage: usage.md
-  - Configuration:
-      - Overview: configuration/index.md
-      - General: configuration/general.md
-      - Debrid Providers: configuration/debrid.md
-      - qBittorrent: configuration/qbittorrent.md
-      - Arr Integration: configuration/arrs.md
+  - API Documentation: api.md
   - Features:
       - Overview: features/index.md
       - Repair Worker: features/repair-worker.md
-      - WebDAV: features/webdav.md
   - Guides:
       - Overview: guides/index.md
-      - Setting Up with Rclone: guides/rclone.md
-  - Changelog: changelog.md
+      - Manual Downloading: guides/downloading.md
+      - Internal Mounting: guides/internal-mounting.md
 
 
 plugins:
   - search
   - tags
+  - swagger-ui-tag

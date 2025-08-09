@@ -18,7 +18,6 @@ You can use either Docker Hub or GitHub Container Registry to pull the image:
 - `latest`: The latest stable release
 - `beta`: The latest beta release
 - `vX.Y.Z`: A specific version (e.g., `v0.1.0`)
-- `nightly`: The latest nightly build (usually unstable)
 - `experimental`: The latest experimental build (highly unstable)
 
 ### Docker CLI Setup
@@ -31,12 +30,13 @@ Run the Docker container:
 ```bash
 docker run -d \
   --name decypharr \
+  --restart unless-stopped \
   -p 8282:8282 \
-  -v /mnt/:/mnt \
+  -v /mnt/:/mnt:rshared \
   -v ./config/:/app \
-  -e PUID=1000 \
-  -e PGID=1000 \
-  -e UMASK=002 \
+  --device /dev/fuse:/dev/fuse:rwm \
+  --cap-add SYS_ADMIN \
+  --security-opt apparmor:unconfined \
   cy01/blackhole:latest
 ```
 
@@ -52,10 +52,15 @@ services:
     ports:
       - "8282:8282"
     volumes:
-      - /mnt/:/mnt:rslave # Mount your media directory
-      - ./config/:/app # config.json must be in this directory
-      - QBIT_PORT=8282 # qBittorrent Port (optional)
+      - /mnt/:/mnt:rshared
+      - ./config/:/app
     restart: unless-stopped
+    devices:
+      - /dev/fuse:/dev/fuse:rwm
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
 ```
 
 Run the Docker Compose setup:
@@ -67,7 +72,7 @@ docker-compose up -d
 ## Binary Installation
 If you prefer not to use Docker, you can download and run the binary directly.
 
-Download your OS-specific release from the [releases page](https://github.com/sirrobot01/decypharr/releases).
+Download your OS-specific release from the [release page](https://github.com/sirrobot01/decypharr/releases).
 Create a configuration file (see Configuration)
 Run the binary:
 
@@ -76,44 +81,15 @@ chmod +x decypharr
 ./decypharr --config /path/to/config/folder
 ```
 
-The config directory should contain your config.json file.
-
-## config.json
-
-The `config.json` file is where you configure Decypharr. You can find a sample configuration file in the `configs` directory of the repository.
-
-You can also configure Decypharr through the web interface, but it's recommended to start with the config file for initial setup.
-
-```json
-{
-  "debrids": [
-    {
-      "name": "realdebrid",
-      "api_key": "your_api_key_here",
-      "folder": "/mnt/remote/realdebrid/__all__/",
-      "use_webdav": true
-    }
-  ],
-  "qbittorrent": {
-    "download_folder": "/mnt/symlinks/",
-    "categories": ["sonarr", "radarr"]
-  },
-  "use_auth": false,
-  "log_level": "info",
-  "port": "8282"
-}
-```
-
 ### Notes for Docker Users
 
 - Ensure that the `/mnt/` directory is mounted correctly to access your media files.
-- The `./config/` directory should contain your `config.json` file.
 - You can adjust the `PUID` and `PGID` environment variables to match your user and group IDs for proper file permissions.
 - The `UMASK` environment variable can be set to control file permissions created by Decypharr.
 
 ##### Health Checks
 - Health checks are disabled by default. You can enable them by adding a `healthcheck` section in your `docker-compose.yml` file.
-- Health checks checks for availability of several parts of the application;
+- Health checks the availability of several parts of the application;
     - The main web interface
     - The qBittorrent API
     - The WebDAV server (if enabled). You should disable health checks for the initial indexes as they can take a long time to complete.
@@ -125,7 +101,7 @@ services:
     ...
     healthcheck:
       test: ["CMD", "/usr/bin/healthcheck", "--config", "/app/"]
-      interval: 5s
+      interval: 10s
       timeout: 10s
       retries: 3
 ```
