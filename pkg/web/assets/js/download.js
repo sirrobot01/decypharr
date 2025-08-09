@@ -166,13 +166,10 @@ class DownloadManager {
         // Create a modal or detailed view for errors
         const errorList = errors.map(error => `• ${error}`).join('\n');
         console.error('Download errors:', errorList);
-
-        // You could also show this in a modal for better UX
-        setTimeout(() => {
-            if (confirm('Some torrents failed to add. Would you like to see the details?')) {
-                alert(errorList);
-            }
-        }, 1000);
+        window.decypharrUtils.createToast(
+            `Errors occurred while adding torrents:\n${errorList}`,
+            'error'
+        );
     }
 
     clearForm() {

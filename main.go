@@ -6,8 +6,6 @@ import (
 	"github.com/sirrobot01/decypharr/cmd/decypharr"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"log"
-	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -26,15 +24,6 @@ func main() {
 	flag.Parse()
 	config.SetConfigPath(configPath)
 	config.Get()
-
-	if os.Getenv("ENABLE_PPROF") == "true" {
-		go func() {
-			log.Println("Starting pprof server on :6060")
-			if err := http.ListenAndServe(":6060", nil); err != nil {
-				log.Printf("pprof server error: %v", err)
-			}
-		}()
-	}
 
 	// Create a context canceled on SIGINT/SIGTERM
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

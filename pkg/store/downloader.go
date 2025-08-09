@@ -153,7 +153,7 @@ func (s *Store) downloadFiles(torrent *Torrent, debridTorrent *types.Torrent, pa
 func (s *Store) processSymlink(torrent *Torrent, debridTorrent *types.Torrent) (string, error) {
 	files := debridTorrent.Files
 	if len(files) == 0 {
-		return "", fmt.Errorf("no video files found")
+		return "", fmt.Errorf("no valid files found")
 	}
 	s.logger.Info().Msgf("Checking symlinks for %d files...", len(files))
 	rCloneBase := debridTorrent.MountPath

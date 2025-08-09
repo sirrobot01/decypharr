@@ -96,7 +96,9 @@ func (s *Store) trackAvailableSlots(ctx context.Context) {
 		return
 	}
 
-	for _, slots := range availableSlots {
+	for name, slots := range availableSlots {
+
+		s.logger.Debug().Msgf("Available slots for %s: %d", name, slots)
 		// If slots are available, process the next import request from the queue
 		for slots > 0 {
 			select {

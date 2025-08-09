@@ -157,7 +157,7 @@ func (wd *WebDav) mountHandlers(r chi.Router) {
 		r.Route("/"+h.Name, func(r chi.Router) {
 			r.Use(h.readinessMiddleware)
 			r.Mount("/", h)
-		})
+		}) // Mount to /name since router is already prefixed with /webdav
 	}
 }
 

@@ -511,7 +511,7 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent) (*types.Torrent, error) {
 		if status == "waiting_files_selection" {
 			t.Files = r.getTorrentFiles(t, data)
 			if len(t.Files) == 0 {
-				return t, fmt.Errorf("no video files found")
+				return t, fmt.Errorf("no valid files found")
 			}
 			filesId := make([]string, 0)
 			for _, f := range t.Files {
