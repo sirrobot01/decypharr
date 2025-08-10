@@ -18,7 +18,7 @@ func WasHardTerminated(err error) bool {
 		return false
 	}
 	// No Signaled() on Windows; consider "hard terminated" if not success.
-	return ws.ExitCode() != 0
+	return ws.ExitStatus() != 0 // Use the ExitStatus() method
 }
 
 // ExitCode returns the process exit code when available.
@@ -31,5 +31,5 @@ func ExitCode(err error) (int, bool) {
 	if !ok {
 		return 0, false
 	}
-	return ws.ExitCode(), true
+	return ws.ExitStatus(), true // Use the ExitStatus() method
 }
