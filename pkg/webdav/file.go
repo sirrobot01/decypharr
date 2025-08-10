@@ -106,6 +106,8 @@ func (f *File) getDownloadByteRange() (*[2]int64, error) {
 	return byteRange, nil
 }
 
+// setVideoStreamingHeaders sets the necessary headers for video streaming
+// It returns error and a boolean indicating if the request is a range request
 func (f *File) servePreloadedContent(w http.ResponseWriter, r *http.Request) error {
 	content := f.content
 	size := int64(len(content))
@@ -195,12 +197,28 @@ func (f *File) streamWithRetry(w http.ResponseWriter, r *http.Request, retryCoun
 		return retryErr
 	}
 
-	setVideoResponseHeaders(w, resp, isRangeRequest == 1)
+	// Determine status code based on range request
+	statusCode := http.StatusOK
+	if isRangeRequest == 1 {
+		statusCode = http.StatusPartialContent
+	}
 
-	return f.streamBuffer(w, resp.Body)
+	// Set headers before streaming
+	if contentLength := resp.Header.Get("Content-Length"); contentLength != "" {
+		w.Header().Set("Content-Length", contentLength)
+	}
+
+	if contentRange := resp.Header.Get("Content-Range"); contentRange != "" && isRangeRequest == 1 {
+		w.Header().Set("Content-Range", contentRange)
+	}
+
+	if err := f.streamBuffer(w, resp.Body, statusCode); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (f *File) streamBuffer(w http.ResponseWriter, src io.Reader) error {
+func (f *File) streamBuffer(w http.ResponseWriter, src io.Reader, statusCode int) error {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return fmt.Errorf("response does not support flushing")
@@ -208,12 +226,19 @@ func (f *File) streamBuffer(w http.ResponseWriter, src io.Reader) error {
 
 	smallBuf := make([]byte, 64*1024) // 64 KB
 	if n, err := src.Read(smallBuf); n > 0 {
+		// Write status code just before first successful write
+		w.WriteHeader(statusCode)
+		
 		if _, werr := w.Write(smallBuf[:n]); werr != nil {
-			return werr
+			if isClientDisconnection(werr) {
+				return &streamError{Err: werr, StatusCode: 0, IsClientDisconnection: true}
+			}
+			// Headers already sent, can't send HTTP error response
+			return &streamError{Err: werr, StatusCode: 0, IsClientDisconnection: false}
 		}
 		flusher.Flush()
 	} else if err != nil && err != io.EOF {
-		return err
+		return &streamError{Err: err, StatusCode: http.StatusInternalServerError}
 	}
 
 	buf := make([]byte, 256*1024) // 256 KB
@@ -224,7 +249,8 @@ func (f *File) streamBuffer(w http.ResponseWriter, src io.Reader) error {
 				if isClientDisconnection(writeErr) {
 					return &streamError{Err: writeErr, StatusCode: 0, IsClientDisconnection: true}
 				}
-				return writeErr
+				// Headers already sent, can't send HTTP error response
+				return &streamError{Err: writeErr, StatusCode: 0, IsClientDisconnection: false}
 			}
 			flusher.Flush()
 		}

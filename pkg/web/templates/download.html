@@ -1,185 +1,143 @@
 {{ define "download" }}
-    <div class="container mt-4">
-        <div class="card">
-            <div class="card-header">
-                <h4 class="mb-0"><i class="bi bi-cloud-download me-2"></i>Add New Download</h4>
-            </div>
-            <div class="card-body">
-                <form id="downloadForm" enctype="multipart/form-data">
-                    <div class="mb-2">
-                        <label for="magnetURI" class="form-label">Torrent(s)</label>
-                        <textarea class="form-control" id="magnetURI" name="urls" rows="8" placeholder="Paste your magnet links or torrent URLs here, one per line..."></textarea>
+<div class="space-y-6">
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-body">
+            <form id="downloadForm" enctype="multipart/form-data" class="space-y-3">
+                <div class="space-y-2">
+                    <div class="form-control">
+                        <label class="label" for="magnetURI">
+                            <span class="label-text font-semibold">
+                                <i class="bi bi-magnet mr-2 text-primary"></i>Torrent Links
+                            </span>
+                            <span class="label-text-alt">Paste magnet links or URLs</span>
+                        </label>
+                        <textarea class="textarea textarea-bordered h-32 font-mono text-sm"
+                                  id="magnetURI"
+                                  name="urls"
+                                  placeholder="Paste your magnet links or torrent URLs here, one per line..."></textarea>
                     </div>
 
-                    <div class="mb-3">
-                        <input type="file" class="form-control" id="torrentFiles" name="torrents" multiple accept=".torrent,.magnet">
+                    <div class="divider">OR</div>
+
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text font-semibold">
+                                <i class="bi bi-file-earmark-arrow-up mr-2 text-secondary"></i>Upload Torrent Files
+                            </span>
+                            <span class="label-text-alt">Select .torrent files</span>
+                        </label>
+                        <input type="file"
+                               class="file-input file-input-bordered w-full"
+                               id="torrentFiles"
+                               name="torrents"
+                               multiple
+                               accept=".torrent">
+                        <div class="label">
+                            <span class="label-text-alt">
+                                <i class="bi bi-info-circle mr-1"></i>You can select multiple files at once
+                            </span>
+                        </div>
                     </div>
+                </div>
 
-                    <hr />
+                <div class="divider"></div>
 
-                    <div class="row mb-3">
-                        <div class="col">
-                            <label for="downloadAction" class="form-label">Post Download Action</label>
-                            <select class="form-select" id="downloadAction" name="downloadAction">
-                                <option value="symlink" selected>Symlink</option>
-                                <option value="download">Download</option>
-                                <option value="none">None</option>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    <div class="space-y-2">
+                        <h3 class="text-lg font-semibold flex items-center">
+                            <i class="bi bi-gear mr-2 text-info"></i>Download Settings
+                        </h3>
+
+                        <div class="form-control">
+                            <label class="label" for="downloadAction">
+                                <span class="label-text">Post Download Action</span>
+                            </label>
+                            <select class="select select-bordered" id="downloadAction" name="downloadAction">
+                                <option value="symlink" selected>Create Symlink</option>
+                                <option value="download">Download Files</option>
+                                <option value="none">No Action</option>
                             </select>
-                            <small class="text-muted">Choose how to handle the added torrent (Default to symlinks)</small>
-                        </div>
-                       <div class="col">
-                           <label for="downloadFolder" class="form-label">Download Folder</label>
-                           <input type="text" class="form-control" id="downloadFolder" name="downloadFolder" placeholder="Enter Download Folder (e.g /downloads/torrents)">
-                           <small class="text-muted">Default is your qbittorent download_folder</small>
-                       </div>
-                        <div class="col">
-                            <label for="arr" class="form-label">Arr (if any)</label>
-                            <input type="text" class="form-control" id="arr" name="arr" placeholder="Enter Category (e.g sonarr, radarr, radarr4k)">
-                            <small class="text-muted">Optional, leave empty if not using Arr</small>
-                        </div>
-                    </div>
-
-                    {{ if .HasMultiDebrid }}
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label for="debrid" class="form-label">Select Debrid</label>
-                            <select class="form-select" id="debrid" name="debrid">
-                                {{ range $index, $debrid := .Debrids }}
-                                <option value="{{ $debrid }}" {{ if eq $index 0 }}selected{{end}}>{{ $debrid }}</option>
-                                {{ end }}
-                            </select>
-                            <small class="text-muted">Select a debrid service to use for this download</small>
-                        </div>
-                    </div>
-                    {{ end }}
-
-                    <div class="row mb-3">
-                        <div class="col-md-2 mb-3">
-                            <div class="form-check d-inline-block">
-                                <input type="checkbox" class="form-check-input" name="downloadUncached" id="downloadUncached">
-                                <label class="form-check-label" for="downloadUncached">Download Uncached</label>
+                            <div class="label">
+                                <span class="label-text-alt">How to handle files after download completion</span>
                             </div>
                         </div>
 
-
+                        <div class="form-control">
+                            <label class="label" for="downloadFolder">
+                                <span class="label-text">Download Folder</span>
+                            </label>
+                            <input type="text"
+                                   class="input input-bordered"
+                                   id="downloadFolder"
+                                   name="downloadFolder"
+                                   placeholder="/downloads/torrents">
+                            <div class="label">
+                                <span class="label-text-alt">Leave empty to use default qBittorrent folder</span>
+                            </div>
+                        </div>
                     </div>
 
-                    <button type="submit" class="btn btn-primary" id="submitDownload">
-                        <i class="bi bi-cloud-upload me-2"></i>Add to Download Queue
+                    <div class="space-y-2">
+                        <h3 class="text-lg font-semibold flex items-center">
+                            <i class="bi bi-tags mr-2 text-warning"></i>Categorization
+                        </h3>
+
+                        <div class="form-control">
+                            <label class="label" for="arr">
+                                <span class="label-text">Arr Category</span>
+                            </label>
+                            <input type="text"
+                                   class="input input-bordered"
+                                   id="arr"
+                                   name="arr"
+                                   placeholder="sonarr, radarr, etc.">
+                            <div class="label">
+                                <span class="label-text-alt">Optional: Specify which Arr service should handle this</span>
+                            </div>
+                        </div>
+
+                        {{ if .HasMultiDebrid }}
+                        <div class="form-control">
+                            <label class="label" for="debrid">
+                                <span class="label-text">Debrid Service</span>
+                            </label>
+                            <select class="select select-bordered" id="debrid" name="debrid">
+                                {{ range $index, $debrid := .Debrids }}
+                                <option value="{{ $debrid }}" {{ if eq $index 0 }}selected{{end}}>
+                                    {{ $debrid }}
+                                </option>
+                                {{ end }}
+                            </select>
+                            <div class="label">
+                                <span class="label-text-alt">Choose which debrid service to use</span>
+                            </div>
+                        </div>
+                        {{ end }}
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input type="checkbox" class="checkbox" name="downloadUncached" id="downloadUncached">
+                            <div>
+                                <span class="label-text font-medium">Download Uncached Content</span>
+                                <div class="label-text-alt">Allow downloading of content not cached by debrid service</div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-control">
+                    <button type="submit" class="btn btn-primary btn-lg" id="submitDownload">
+                        <i class="bi bi-cloud-upload mr-2"></i>Add to Download Queue
                     </button>
-                </form>
-            </div>
+                </div>
+            </form>
         </div>
     </div>
-
-    <script>
-        let downloadFolder = '{{ .DownloadFolder }}';
-        document.addEventListener('DOMContentLoaded', () => {
-            const loadSavedDownloadOptions = () => {
-                const savedCategory = localStorage.getItem('downloadCategory');
-                const savedAction = localStorage.getItem('downloadAction');
-                const savedDownloadUncached = localStorage.getItem('downloadUncached');
-                document.getElementById('arr').value = savedCategory || '';
-                document.getElementById('downloadAction').value = savedAction || 'symlink';
-                document.getElementById('downloadUncached').checked = savedDownloadUncached === 'true';
-                document.getElementById('downloadFolder').value = localStorage.getItem('downloadFolder') || downloadFolder || '';
-            };
-
-            const saveCurrentDownloadOptions = () => {
-                const arr = document.getElementById('arr').value;
-                const downloadAction = document.getElementById('downloadAction').value;
-                const downloadUncached = document.getElementById('downloadUncached').checked;
-                const downloadFolder = document.getElementById('downloadFolder').value;
-                localStorage.setItem('downloadCategory', arr);
-                localStorage.setItem('downloadAction', downloadAction);
-                localStorage.setItem('downloadUncached', downloadUncached.toString());
-                localStorage.setItem('downloadFolder', downloadFolder);
-            };
-
-            // Load the last used download options from local storage
-            loadSavedDownloadOptions();
-
-            // Handle form submission
-            document.getElementById('downloadForm').addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const submitBtn = document.getElementById('submitDownload');
-                const originalText = submitBtn.innerHTML;
-
-                submitBtn.disabled = true;
-                submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Adding...';
-
-                try {
-                    const formData = new FormData();
-                    
-                    // Add URLs if present
-                    const urls = document.getElementById('magnetURI').value
-                        .split('\n')
-                        .map(url => url.trim())
-                        .filter(url => url.length > 0);
-
-                    if (urls.length > 0) {
-                        formData.append('urls', urls.join('\n'));
-                    }
-
-                    // Add torrent files if present
-                    const fileInput = document.getElementById('torrentFiles');
-                    for (let i = 0; i < fileInput.files.length; i++) {
-                        formData.append('files', fileInput.files[i]);
-                    }
-
-                    if (urls.length + fileInput.files.length === 0) {
-                        createToast('Please submit at least one torrent', 'warning');
-                        return;
-                    }
-
-                    if (urls.length + fileInput.files.length > 100) {
-                        createToast('Please submit up to 100 torrents at a time', 'warning');
-                        return;
-                    }
-
-                    formData.append('arr', document.getElementById('arr').value);
-                    formData.append('downloadFolder', document.getElementById('downloadFolder').value);
-                    formData.append('action', document.getElementById('downloadAction').value);
-                    formData.append('downloadUncached', document.getElementById('downloadUncached').checked);
-                    formData.append('debrid', document.getElementById('debrid') ? document.getElementById('debrid').value : '');
-
-                    const response = await fetcher('/api/add', {
-                        method: 'POST',
-                        body: formData
-                    });
-
-                    const result = await response.json();
-                    if (!response.ok) throw new Error(result.error || 'Unknown error');
-                    if (result.errors && result.errors.length > 0) {
-                        if (result.results.length > 0) {
-                            createToast(`Added ${result.results.length} torrents with ${result.errors.length} errors:\n${result.errors.join('\n')}`, 'warning');
-                        } else {
-                            createToast(`Failed to add torrents:\n${result.errors.join('\n')}`, 'error');
-                        }
-                    } else {
-                        createToast(`Successfully added ${result.results.length} torrents!`);
-                        document.getElementById('magnetURI').value = '';
-                        document.getElementById('torrentFiles').value = '';
-                    }
-                } catch (error) {
-                    createToast(`Error adding downloads: ${error.message}`, 'error');
-                } finally {
-                    submitBtn.disabled = false;
-                    submitBtn.innerHTML = originalText;
-                }
-            });
-
-            // Save the download options to local storage when they change
-            document.getElementById('arr').addEventListener('change', saveCurrentDownloadOptions);
-            document.getElementById('downloadAction').addEventListener('change', saveCurrentDownloadOptions);
-
-            // Read the URL parameters for a magnet link and add it to the download queue if found
-            const urlParams = new URLSearchParams(window.location.search);
-            const magnetURI = urlParams.get('magnet');
-            if (magnetURI) {
-                document.getElementById('magnetURI').value = magnetURI;
-                history.replaceState({}, document.title, window.location.pathname);
-            }
-        });
-    </script>
+</div>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        let downloadFolder = "{{ .DownloadFolder }}" || '';
+        window.downloadManager = new DownloadManager(downloadFolder);
+    });
+</script>
 {{ end }}

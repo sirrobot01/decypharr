@@ -19,6 +19,7 @@ func (q *QBit) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err := _arr.Validate(); err != nil {
 		q.logger.Error().Err(err).Msgf("Error validating arr")
 		http.Error(w, "Invalid arr configuration", http.StatusBadRequest)
+		return
 	}
 	_, _ = w.Write([]byte("Ok."))
 }

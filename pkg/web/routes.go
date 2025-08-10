@@ -2,11 +2,25 @@ package web
 
 import (
 	"github.com/go-chi/chi/v5"
+	"io/fs"
 	"net/http"
 )
 
 func (wb *Web) Routes() http.Handler {
 	r := chi.NewRouter()
+
+	// Load static files from embedded filesystem
+	staticFS, err := fs.Sub(assetsEmbed, "assets/build")
+	if err != nil {
+		panic(err)
+	}
+	imagesFS, err := fs.Sub(imagesEmbed, "assets/images")
+	if err != nil {
+		panic(err)
+	}
+
+	r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.FS(staticFS))))
+	r.Handle("/images/*", http.StripPrefix("/images/", http.FileServer(http.FS(imagesFS))))
 
 	r.Get("/login", wb.LoginHandler)
 	r.Post("/login", wb.LoginHandler)
@@ -21,6 +35,7 @@ func (wb *Web) Routes() http.Handler {
 		r.Get("/", wb.IndexHandler)
 		r.Get("/download", wb.DownloadHandler)
 		r.Get("/repair", wb.RepairHandler)
+		r.Get("/stats", wb.StatsHandler)
 		r.Get("/config", wb.ConfigHandler)
 		r.Route("/api", func(r chi.Router) {
 			r.Get("/arrs", wb.handleGetArrs)
@@ -35,6 +50,8 @@ func (wb *Web) Routes() http.Handler {
 			r.Delete("/torrents/", wb.handleDeleteTorrents)
 			r.Get("/config", wb.handleGetConfig)
 			r.Post("/config", wb.handleUpdateConfig)
+			r.Post("/refresh-token", wb.handleRefreshAPIToken)
+			r.Post("/update-auth", wb.handleUpdateAuth)
 		})
 	})
 

@@ -25,8 +25,10 @@ The Decypharr user interface provides:
 
 Decypharr includes several advanced features that extend its capabilities:
 
-- [Repair Worker](repair-worker.md): Identifies and fixes issues with your media files
-- [WebDAV Server](webdav.md): Provides direct access to your Debrid files
+- [Repair Support](repair-worker.md): Identifies and fixes issues with your media files
+- WebDav Server: Provides direct access to your Debrid files
+- Mounting Support: Allows you to mount Debrid services using [rclone](https://rclone.org), making it easy to access your files directly from your system
+- Multiple Debrid Providers: Supports Real Debrid, Torbox, Debrid Link, and All Debrid, allowing you to choose the best service for your needs
 
 ## Supported Debrid Providers
 
@@ -36,5 +38,7 @@ Decypharr supports multiple Debrid providers:
 - Torbox
 - Debrid Link
 - All Debrid
+- Premiumize(Coming Soon)
+- Usenet(Coming Soon)
 
 Each provider can be configured separately, allowing you to use one or multiple services simultaneously.

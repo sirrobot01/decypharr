@@ -29,40 +29,37 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go build -trimpath -ldflags="-w -s" \
     -o /healthcheck cmd/healthcheck/main.go
 
-# Stage 2: Create directory structure
-FROM alpine:3.19 as dirsetup
-RUN mkdir -p /app/logs && \
-    mkdir -p /app/cache && \
-    chmod 777 /app/logs && \
-    touch /app/logs/decypharr.log && \
-    chmod 666 /app/logs/decypharr.log
+# Stage 2: Final image
+FROM alpine:latest
 
-# Stage 3: Final image
-FROM gcr.io/distroless/static-debian12:nonroot
+ARG VERSION=0.0.0
+ARG CHANNEL=dev
 
 LABEL version = "${VERSION}-${CHANNEL}"
-
 LABEL org.opencontainers.image.source = "https://github.com/sirrobot01/decypharr"
 LABEL org.opencontainers.image.title = "decypharr"
 LABEL org.opencontainers.image.authors = "sirrobot01"
 LABEL org.opencontainers.image.documentation = "https://github.com/sirrobot01/decypharr/blob/main/README.md"
 
-# Copy binaries
-COPY --from=builder --chown=nonroot:nonroot /decypharr /usr/bin/decypharr
-COPY --from=builder --chown=nonroot:nonroot /healthcheck /usr/bin/healthcheck
+# Install dependencies including rclone
+RUN apk add --no-cache fuse3 ca-certificates su-exec shadow rclone && \
+    echo "user_allow_other" >> /etc/fuse.conf
 
-# Copy pre-made directory structure
-COPY --from=dirsetup --chown=nonroot:nonroot /app /app
+# Copy binaries and entrypoint
+COPY --from=builder /decypharr /usr/bin/decypharr
+COPY --from=builder /healthcheck /usr/bin/healthcheck
+COPY scripts/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-
-# Metadata
+# Set environment variables
+ENV PUID=1000
+ENV PGID=1000
 ENV LOG_PATH=/app/logs
+
 EXPOSE 8282
 VOLUME ["/app"]
-USER nonroot:nonroot
 
+HEALTHCHECK --interval=10s --retries=10 CMD ["/usr/bin/healthcheck", "--config", "/app", "--basic"]
 
-# Base healthcheck
-HEALTHCHECK --interval=3s --retries=10 CMD ["/usr/bin/healthcheck", "--config", "/app", "--basic"]
-
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/usr/bin/decypharr", "--config", "/app"]

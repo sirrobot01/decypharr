@@ -1,27 +1,25 @@
 {{ define "login" }}
-<div class="container mt-5">
-    <div class="row justify-content-center">
-        <div class="col-md-6 col-lg-4">
-            <div class="card">
-                <div class="card-header">
-                    <h4 class="mb-0 text-center">Login</h4>
+<div class="flex min-h-screen items-center justify-center bg-base-200">
+    <div class="card w-full max-w-sm bg-base-100 shadow-xl">
+        <div class="card-body">
+            <h2 class="card-title justify-center mb-6">Login</h2>
+            <form id="loginForm" class="space-y-4">
+                <div class="form-control">
+                    <label class="label" for="username">
+                        <span class="label-text">Username</span>
+                    </label>
+                    <input type="text" class="input input-bordered w-full" id="username" name="username" required>
                 </div>
-                <div class="card-body">
-                    <form id="loginForm">
-                        <div class="mb-3">
-                            <label for="username" class="form-label">Username</label>
-                            <input type="text" class="form-control" id="username" name="username" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="password" class="form-label">Password</label>
-                            <input type="password" class="form-control" id="password" name="password" required>
-                        </div>
-                        <div class="d-grid">
-                            <button type="submit" class="btn btn-primary">Login</button>
-                        </div>
-                    </form>
+                <div class="form-control">
+                    <label class="label" for="password">
+                        <span class="label-text">Password</span>
+                    </label>
+                    <input type="password" class="input input-bordered w-full" id="password" name="password" required>
                 </div>
-            </div>
+                <div class="form-control mt-6">
+                    <button type="submit" class="btn btn-primary w-full">Login</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
@@ -29,6 +27,7 @@
 <script>
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
         e.preventDefault();
+        let loginBtn = document.querySelector('#loginForm button[type="submit"]');
 
         const formData = {
             username: document.getElementById('username').value,
@@ -36,7 +35,7 @@
         };
 
         try {
-            const response = await fetcher('/login', {
+            const response = await window.decypharrUtils.fetcher('/login', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -45,13 +44,21 @@
             });
 
             if (response.ok) {
-                window.location.href = '/';
+                window.decypharrUtils.createToast('Login successful! Redirecting...', 'success');
+
+                // Redirect after a short delay
+                setTimeout(() => {
+                    window.location.href = window.urlBase || '/';
+                }, 1000);
             } else {
-                createToast('Invalid credentials', 'error');
+                const errorText = await response.text();
+                throw new Error(errorText || 'Invalid credentials');
             }
         } catch (error) {
             console.error('Login error:', error);
-            createToast('Login failed', 'error');
+            window.decypharrUtils.createToast(error.message || 'Login failed. Please try again.', 'error');
+        } finally {
+            window.decypharrUtils.setButtonLoading(loginBtn, false);
         }
     });
 </script>

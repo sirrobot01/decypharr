@@ -5,14 +5,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/sirrobot01/decypharr/internal/request"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"math"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/sirrobot01/decypharr/internal/request"
+	"github.com/sirrobot01/decypharr/internal/utils"
+	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid"
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 )
 
 func (s *Store) AddTorrent(ctx context.Context, importReq *ImportRequest) error {
@@ -64,6 +65,11 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 		s.logger.Debug().Msgf("%s <- (%s) Download Progress: %.2f%%", debridTorrent.Debrid, debridTorrent.Name, debridTorrent.Progress)
 		dbT, err := client.CheckStatus(debridTorrent)
 		if err != nil {
+			s.logger.Error().
+				Str("torrent_id", debridTorrent.Id).
+				Str("torrent_name", debridTorrent.Name).
+				Err(err).
+				Msg("Error checking torrent status")
 			if dbT != nil && dbT.Id != "" {
 				// Delete the torrent if it was not downloaded
 				go func() {

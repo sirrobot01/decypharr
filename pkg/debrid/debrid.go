@@ -12,22 +12,29 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/debrid/providers/debrid_link"
 	"github.com/sirrobot01/decypharr/pkg/debrid/providers/realdebrid"
 	"github.com/sirrobot01/decypharr/pkg/debrid/providers/torbox"
-	"github.com/sirrobot01/decypharr/pkg/debrid/store"
+	debridStore "github.com/sirrobot01/decypharr/pkg/debrid/store"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"github.com/sirrobot01/decypharr/pkg/rclone"
 	"sync"
 )
 
 type Debrid struct {
-	cache  *store.Cache // Could be nil if not using WebDAV
-	client types.Client // HTTP client for making requests to the debrid service
+	cache  *debridStore.Cache // Could be nil if not using WebDAV
+	client types.Client       // HTTP client for making requests to the debrid service
 }
 
 func (de *Debrid) Client() types.Client {
 	return de.client
 }
 
-func (de *Debrid) Cache() *store.Cache {
+func (de *Debrid) Cache() *debridStore.Cache {
 	return de.cache
+}
+
+func (de *Debrid) Reset() {
+	if de.cache != nil {
+		de.cache.Reset()
+	}
 }
 
 type Storage struct {
@@ -36,12 +43,18 @@ type Storage struct {
 	lastUsed string
 }
 
-func NewStorage() *Storage {
+func NewStorage(rcManager *rclone.Manager) *Storage {
 	cfg := config.Get()
 
 	_logger := logger.Default()
 
 	debrids := make(map[string]*Debrid)
+
+	bindAddress := cfg.BindAddress
+	if bindAddress == "" {
+		bindAddress = "localhost"
+	}
+	webdavUrl := fmt.Sprintf("http://%s:%s%s/webdav", bindAddress, cfg.Port, cfg.URLBase)
 
 	for _, dc := range cfg.Debrids {
 		client, err := createDebridClient(dc)
@@ -49,10 +62,16 @@ func NewStorage() *Storage {
 			_logger.Error().Err(err).Str("Debrid", dc.Name).Msg("failed to connect to debrid client")
 			continue
 		}
-		var cache *store.Cache
+		var (
+			cache   *debridStore.Cache
+			mounter *rclone.Mount
+		)
 		_log := client.Logger()
 		if dc.UseWebDav {
-			cache = store.NewDebridCache(dc, client)
+			if cfg.Rclone.Enabled && rcManager != nil {
+				mounter = rclone.NewMount(dc.Name, webdavUrl, rcManager)
+			}
+			cache = debridStore.NewDebridCache(dc, client, mounter)
 			_log.Info().Msg("Debrid Service started with WebDAV")
 		} else {
 			_log.Info().Msg("Debrid Service started")
@@ -102,8 +121,17 @@ func (d *Storage) Client(name string) types.Client {
 
 func (d *Storage) Reset() {
 	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Reset all debrid clients and caches
+	for _, debrid := range d.debrids {
+		if debrid != nil {
+			debrid.Reset()
+		}
+	}
+
+	// Reinitialize the debrids map
 	d.debrids = make(map[string]*Debrid)
-	d.mu.Unlock()
 	d.lastUsed = ""
 }
 
@@ -119,10 +147,10 @@ func (d *Storage) Clients() map[string]types.Client {
 	return clientsCopy
 }
 
-func (d *Storage) Caches() map[string]*store.Cache {
+func (d *Storage) Caches() map[string]*debridStore.Cache {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	cachesCopy := make(map[string]*store.Cache)
+	cachesCopy := make(map[string]*debridStore.Cache)
 	for name, debrid := range d.debrids {
 		if debrid != nil && debrid.cache != nil {
 			cachesCopy[name] = debrid.cache
@@ -193,7 +221,7 @@ func Process(ctx context.Context, store *Storage, selectedDebrid string, magnet 
 		debridTorrent.DownloadUncached = false
 	}
 
-	for index, db := range clients {
+	for _, db := range clients {
 		_logger := db.Logger()
 		_logger.Info().
 			Str("Debrid", db.Name()).
@@ -214,7 +242,7 @@ func Process(ctx context.Context, store *Storage, selectedDebrid string, magnet 
 		}
 		dbt.Arr = a
 		_logger.Info().Str("id", dbt.Id).Msgf("Torrent: %s submitted to %s", dbt.Name, db.Name())
-		store.lastUsed = index
+		store.lastUsed = db.Name()
 
 		torrent, err := db.CheckStatus(dbt)
 		if err != nil && torrent != nil && torrent.Id != "" {

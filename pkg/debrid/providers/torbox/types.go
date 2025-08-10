@@ -57,7 +57,7 @@ type torboxInfo struct {
 	} `json:"files"`
 	DownloadPath     string      `json:"download_path"`
 	InactiveCheck    int         `json:"inactive_check"`
-	Availability     int         `json:"availability"`
+	Availability     float64     `json:"availability"`
 	DownloadFinished bool        `json:"download_finished"`
 	Tracker          interface{} `json:"tracker"`
 	TotalUploaded    int         `json:"total_uploaded"`
@@ -73,3 +73,5 @@ type torboxInfo struct {
 type InfoResponse APIResponse[torboxInfo]
 
 type DownloadLinksResponse APIResponse[string]
+
+type TorrentsListResponse APIResponse[[]torboxInfo]

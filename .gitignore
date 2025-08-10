@@ -13,3 +13,8 @@ torrents.json
 logs/**
 auth.json
 .ven/
+.env
+node_modules/
+.venv/
+.stignore
+.stfolder/**

@@ -1,32 +1,32 @@
 {{ define "register" }}
-<div class="container mt-5">
-    <div class="row justify-content-center">
-        <div class="col-md-6 col-lg-4">
-            <div class="card">
-                <div class="card-header">
-                    <h4 class="mb-0 text-center">First Time Auth Setup</h4>
+<div class="flex min-h-screen items-center justify-center bg-base-200">
+    <div class="card w-full max-w-md bg-base-100 shadow-xl">
+        <div class="card-body">
+            <h2 class="card-title justify-center mb-6">First Time Auth Setup</h2>
+            <form id="authForm" class="space-y-4">
+                <div class="form-control">
+                    <label class="label" for="username">
+                        <span class="label-text">Username</span>
+                    </label>
+                    <input type="text" class="input input-bordered w-full" id="username" name="username" required>
                 </div>
-                <div class="card-body">
-                    <form id="authForm">
-                        <div class="mb-3">
-                            <label for="username" class="form-label">Username</label>
-                            <input type="text" class="form-control" id="username" name="username" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="password" class="form-label">Password</label>
-                            <input type="password" class="form-control" id="password" name="password" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="confirmPassword" class="form-label">Confirm Password</label>
-                            <input type="password" class="form-control" id="confirmPassword" name="confirmPassword" required>
-                        </div>
-                        <div class="d-grid gap-2">
-                            <button type="submit" class="btn btn-primary mb-2">Save</button>
-                            <button type="button" id="skipAuthBtn" class="btn btn-secondary">Skip</button>
-                        </div>
-                    </form>
+                <div class="form-control">
+                    <label class="label" for="password">
+                        <span class="label-text">Password</span>
+                    </label>
+                    <input type="password" class="input input-bordered w-full" id="password" name="password" required>
                 </div>
-            </div>
+                <div class="form-control">
+                    <label class="label" for="confirmPassword">
+                        <span class="label-text">Confirm Password</span>
+                    </label>
+                    <input type="password" class="input input-bordered w-full" id="confirmPassword" name="confirmPassword" required>
+                </div>
+                <div class="form-control mt-6 space-y-2">
+                    <button type="submit" class="btn btn-primary w-full">Save</button>
+                    <button type="button" id="skipAuthBtn" class="btn btn-secondary w-full">Skip</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
@@ -61,10 +61,10 @@
                     if (!response.ok) {
                         return response.text().then(errorText => {
                             // Throw an error with the response text
-                            createToast(errorText || 'Registration failed', 'error');
+                            window.decypharrUtils.createToast(errorText || 'Registration failed', 'error');
                         });
                     } else {
-                        window.location.href = joinURL(window.urlBase, '/');
+                        window.location.href = window.decypharrUtils.joinURL(window.urlBase, '/');
                     }
 
                 })
@@ -75,10 +75,10 @@
 
         // Handle skip auth button
         skipAuthBtn.addEventListener('click', function() {
-            fetcher('/skip-auth', { method: 'GET' })
+            window.decypharrUtils.fetcher('/skip-auth', { method: 'GET' })
                 .then(response => {
                     if (response.ok) {
-                        window.location.href = joinURL(window.urlBase, '/');
+                        window.location.href = window.decypharrUtils.joinURL(window.urlBase, '/');
                     } else {
                         throw new Error('Failed to skip authentication');
                     }

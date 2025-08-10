@@ -1,0 +1,729 @@
+@import './css/bootstrap-icons.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+* {
+    transition: transform 0.2s ease-in-out,
+    opacity 0.2s ease-in-out,
+    box-shadow 0.2s ease-in-out,
+    border-color 0.2s ease-in-out,
+    background-color 0.2s ease-in-out;
+}
+
+:root {
+    --warning-color: rgb(245 158 11); /* amber-500 */
+}
+
+[data-theme="dark"] {
+    --warning-color: rgb(251 191 36); /* amber-400 - lighter for dark theme */
+}
+
+
+/* Context menu styles */
+.context-menu {
+    position: absolute;
+    z-index: 1000;
+    backdrop-filter: blur(8px);
+    border: 1px solid hsl(var(--bc) / 0.2);
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+.context-menu.hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.95) translateY(-5px);
+}
+
+.context-menu:not(.hidden) {
+    opacity: 1;
+    pointer-events: all;
+    transform: scale(1) translateY(0);
+    animation: contextMenuAppear 0.15s ease-out;
+}
+
+@keyframes contextMenuAppear {
+    from {
+        opacity: 0;
+        transform: scale(0.95) translateY(-5px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+/* Smooth progress bar animations */
+.progress {
+    transition: all 0.3s ease-in-out;
+}
+
+.progress::-webkit-progress-value {
+    transition: width 0.5s ease-in-out;
+}
+
+.progress::-moz-progress-bar {
+    transition: width 0.5s ease-in-out;
+}
+
+/* Enhanced button animations */
+.btn {
+    transition: all 0.2s ease-in-out;
+    transform: translateY(0);
+}
+
+.btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.btn:active:not(:disabled) {
+    transform: translateY(0);
+    transition: all 0.1s ease-in-out;
+}
+
+/* Card hover effects */
+.card {
+    transition: all 0.3s ease-in-out;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+/* Table row animations */
+.table tbody tr {
+    transition: all 0.2s ease-in-out;
+}
+
+.table tbody tr:hover {
+    background-color: hsl(var(--b2));
+    transform: scale(1.005);
+}
+
+/* Item selection styles */
+.item-row.selected {
+    background-color: hsl(var(--p) / 0.1) !important;
+    border-left: 4px solid hsl(var(--p));
+}
+
+.item-row {
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+}
+
+/* Stepper navigation */
+.stepper-nav .nav-link {
+    transition: all 0.2s ease-in-out;
+    position: relative;
+    overflow: hidden;
+}
+
+.stepper-nav .nav-link::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+    transition: left 0.5s ease-in-out;
+}
+
+.stepper-nav .nav-link:hover::before {
+    left: 100%;
+}
+
+/* Modal animations */
+.modal {
+    transition: all 0.3s ease-in-out;
+}
+
+.modal-box {
+    animation: modalSlideIn 0.3s ease-out;
+}
+
+@keyframes modalSlideIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9) translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+/* Toast animations */
+.toast-container .alert {
+    animation: toastSlideIn 0.3s ease-out;
+}
+
+@keyframes toastSlideIn {
+    from {
+        opacity: 0;
+        transform: translateX(100%);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* Loading spinner improvements */
+.loading {
+    transition: all 0.2s ease-in-out;
+}
+
+/* Badge animations */
+.badge {
+    transition: all 0.2s ease-in-out;
+}
+
+.badge:hover {
+    transform: scale(1.05);
+}
+
+/* Form focus improvements */
+.form-control input:focus,
+.form-control textarea:focus,
+.form-control select:focus {
+    transform: scale(1.02);
+    box-shadow: 0 0 0 3px hsl(var(--p) / 0.2);
+}
+
+/* Pagination smooth transitions */
+.join .btn {
+    transition: all 0.2s ease-in-out;
+}
+
+.join .btn:not(.btn-active):hover {
+    background-color: hsl(var(--b3));
+    transform: translateY(-1px);
+}
+
+/* Password Toggle */
+/* Password toggle styles */
+.password-toggle-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.password-toggle-btn {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 40px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    z-index: 10;
+    color: hsl(var(--bc) / 0.6);
+    transition: all 0.2s ease-in-out;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-top-right-radius: var(--rounded-btn, 0.5rem);
+    border-bottom-right-radius: var(--rounded-btn, 0.5rem);
+}
+
+.password-toggle-btn:hover {
+    background-color: hsl(var(--bc) / 0.1);
+    color: hsl(var(--bc) / 0.8);
+}
+
+/* Input password fields - make room for the button */
+.input.input-has-toggle {
+    padding-right: 40px !important;
+    width: 100%;
+}
+
+/* Textarea password fields */
+.textarea.has-toggle {
+    padding-right: 40px !important;
+    font-family: 'JetBrains Mono', 'Consolas', 'Monaco', 'Courier New', monospace !important;
+    line-height: 1.4;
+    resize: vertical;
+}
+
+/* Specific positioning for textarea toggles */
+.password-toggle-btn.textarea-toggle {
+    top: 0;
+    right: 0;
+    bottom: auto;
+    height: 40px;
+    border-radius: 0;
+    border-top-right-radius: var(--rounded-btn, 0.5rem);
+}
+
+/* Better masking for textareas */
+.textarea.has-toggle[data-password-visible="false"],
+.textarea.has-toggle:not([data-password-visible="true"]) {
+    -webkit-text-security: disc;
+    text-security: disc;
+    font-family: monospace !important;
+    letter-spacing: 2px;
+}
+
+.textarea.has-toggle[data-password-visible="true"] {
+    -webkit-text-security: none;
+    text-security: none;
+    font-family: 'JetBrains Mono', 'Consolas', 'Monaco', 'Courier New', monospace !important;
+    letter-spacing: normal;
+}
+
+/* Input password field styling */
+.input[type="password"] {
+    font-family: 'Courier New', monospace;
+    letter-spacing: 1px;
+}
+
+.input[type="text"].was-password {
+    font-family: 'JetBrains Mono', 'Consolas', 'Monaco', 'Courier New', monospace;
+    letter-spacing: normal;
+}
+
+/* Dark mode button styling */
+[data-theme="dark"] .password-toggle-btn {
+    color: hsl(var(--bc) / 0.6);
+    background-color: transparent;
+}
+
+[data-theme="dark"] .password-toggle-btn:hover {
+    background-color: hsl(var(--bc) / 0.15);
+    color: hsl(var(--bc) / 0.9);
+}
+
+/* Light mode button styling */
+[data-theme="light"] .password-toggle-btn {
+    color: hsl(var(--bc) / 0.7);
+    background-color: transparent;
+}
+
+[data-theme="light"] .password-toggle-btn:hover {
+    background-color: hsl(var(--bc) / 0.1);
+    color: hsl(var(--bc) / 0.9);
+}
+
+/* Icon sizing */
+.password-toggle-btn i {
+    font-size: 14px;
+    line-height: 1;
+}
+
+/* Make sure the container fills the width */
+.password-toggle-container {
+    width: 100%;
+}
+
+.password-toggle-container .input,
+.password-toggle-container .textarea {
+    width: 100%;
+}
+
+/* Drawer animations */
+.drawer-side {
+    transition: transform 0.3s ease-in-out;
+}
+
+/* Dropdown animations */
+.dropdown-content {
+    animation: dropdownSlideIn 0.2s ease-out;
+}
+
+@keyframes dropdownSlideIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95) translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+/* Enhanced filter UI */
+.filters-container .filter-item {
+    animation: filterItemAppear 0.2s ease-out;
+    transition: all 0.2s ease-in-out;
+}
+
+@keyframes filterItemAppear {
+    from {
+        opacity: 0;
+        transform: translateX(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.filter-item:hover {
+    background-color: hsl(var(--b2));
+    border-radius: 4px;
+    padding: 4px;
+    margin: -4px;
+}
+
+/* Dark mode specific improvements */
+[data-theme="dark"] .glass {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Fix input text colors in dark mode */
+[data-theme="dark"] .input,
+[data-theme="dark"] .textarea,
+[data-theme="dark"] .select {
+    color: #ffffff !important; /* Force white text for values */
+    background-color: hsl(var(--b1));
+}
+
+/* Keep placeholders dim and distinguishable */
+[data-theme="dark"] .input::placeholder,
+[data-theme="dark"] .textarea::placeholder {
+    color: #6b7280 !important; /* Gray-500 equivalent */
+    opacity: 1 !important;
+    font-style: italic;
+}
+
+/* Focus states */
+[data-theme="dark"] .input:focus,
+[data-theme="dark"] .textarea:focus,
+[data-theme="dark"] .select:focus {
+    color: #ffffff !important;
+    background-color: hsl(var(--b1));
+    border-color: hsl(var(--p));
+    outline: none;
+    box-shadow: 0 0 0 2px hsl(var(--p) / 0.2);
+}
+
+/* Select options - Enhanced dark mode support */
+[data-theme="dark"] .select option {
+    background-color: hsl(var(--b1)) !important;
+    color: #ffffff !important;
+}
+
+/* Force dark styling for select dropdowns even when OS is in light mode */
+[data-theme="dark"] .select {
+    color-scheme: dark !important;
+}
+
+/* Additional browser-specific overrides for select options */
+[data-theme="dark"] select option {
+    background-color: hsl(var(--b1)) !important;
+    color: #ffffff !important;
+    border: none !important;
+}
+
+[data-theme="dark"] select optgroup {
+    background-color: hsl(var(--b1)) !important;
+    color: #ffffff !important;
+}
+
+/* WebKit-specific styling for select dropdown */
+[data-theme="dark"] select::-webkit-scrollbar {
+    width: 8px;
+    background-color: hsl(var(--b2));
+}
+
+[data-theme="dark"] select::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--bc) / 0.3);
+    border-radius: 4px;
+}
+
+/* Firefox-specific select styling */
+@-moz-document url-prefix() {
+    [data-theme="dark"] select option {
+        background-color: hsl(var(--b1)) !important;
+        color: #ffffff !important;
+    }
+}
+
+/* Disabled inputs */
+[data-theme="dark"] .input:disabled,
+[data-theme="dark"] .textarea:disabled,
+[data-theme="dark"] .select:disabled {
+    color: #9ca3af !important; /* Gray-400 */
+    background-color: hsl(var(--b2));
+    border-color: hsl(var(--bc) / 0.2);
+}
+
+[data-theme="dark"] .input:disabled::placeholder,
+[data-theme="dark"] .textarea:disabled::placeholder {
+    color: #6b7280 !important;
+}
+
+/* Readonly inputs (like auto-detected configs) */
+[data-theme="dark"] .input[readonly],
+[data-theme="dark"] .textarea[readonly],
+[data-theme="dark"] .select[readonly] {
+    color: #d1d5db !important; /* Gray-300 */
+    background-color: hsl(var(--b2));
+    border-color: hsl(var(--bc) / 0.15);
+}
+
+/* Password fields with monospace */
+[data-theme="dark"] .password-toggle-container .input {
+    color: #ffffff !important;
+}
+
+[data-theme="dark"] .password-toggle-container .textarea {
+    color: #ffffff !important;
+    font-family: 'JetBrains Mono', 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+/* Form labels */
+[data-theme="dark"] .label-text {
+    color: #f3f4f6; /* Gray-100 */
+}
+
+[data-theme="dark"] .label-text-alt {
+    color: #9ca3af; /* Gray-400 */
+}
+
+.text-warning,
+[data-theme="dark"] .text-warning,
+[data-theme="dark"] .label-text-alt.text-warning {
+    color: var(--warning-color) !important;
+}
+
+/* File input */
+[data-theme="dark"] .file-input {
+    color: #ffffff !important;
+}
+
+[data-theme="dark"] .file-input::file-selector-button {
+    background-color: hsl(var(--b3));
+    color: #ffffff;
+    border: none;
+    border-right: 1px solid hsl(var(--bc) / 0.2);
+}
+
+/* Search inputs */
+[data-theme="dark"] input[type="search"] {
+    color: #ffffff !important;
+}
+
+[data-theme="dark"] input[type="search"]::placeholder {
+    color: #6b7280 !important;
+    font-style: italic;
+}
+
+/* Number inputs */
+[data-theme="dark"] input[type="number"] {
+    color: #ffffff !important;
+}
+
+/* URL inputs */
+[data-theme="dark"] input[type="url"] {
+    color: #ffffff !important;
+}
+
+/* Email inputs */
+[data-theme="dark"] input[type="email"] {
+    color: #ffffff !important;
+}
+
+/* Date/time inputs */
+[data-theme="dark"] input[type="date"],
+[data-theme="dark"] input[type="time"],
+[data-theme="dark"] input[type="datetime-local"] {
+    color: #ffffff !important;
+}
+
+/* Fix autofill in dark mode */
+[data-theme="dark"] .input:-webkit-autofill,
+[data-theme="dark"] .input:-webkit-autofill:hover,
+[data-theme="dark"] .input:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 1000px hsl(var(--b1)) inset !important;
+    -webkit-text-fill-color: #ffffff !important;
+    transition: background-color 5000s ease-in-out 0s;
+}
+
+/* Error states */
+[data-theme="dark"] .input-error {
+    color: #ffffff !important;
+    border-color: hsl(var(--er));
+    background-color: hsl(var(--er) / 0.1);
+}
+
+[data-theme="dark"] .input-error::placeholder {
+    color: #ef4444 !important; /* Red placeholder for errors */
+}
+
+/* Responsive improvements */
+@media (max-width: 768px) {
+    .card:hover {
+        transform: none;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    }
+
+    .btn:hover:not(:disabled) {
+        transform: none;
+    }
+
+    .table tbody tr:hover {
+        transform: none;
+    }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: hsl(var(--b1));
+}
+
+::-webkit-scrollbar-thumb {
+    background: hsl(var(--bc) / 0.3);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--bc) / 0.5);
+}
+
+/* Tabs */
+/* Tab Navigation Styles */
+.tab-button {
+    transition: all 0.2s ease-in-out;
+    white-space: nowrap;
+    cursor: pointer;
+    background: none;
+    border: none;
+    outline: none;
+}
+
+.tab-button.active {
+    color: hsl(var(--p)) !important;
+    border-color: hsl(var(--p)) !important;
+}
+
+.tab-button:not(.active) {
+    color: hsl(var(--bc) / 0.7);
+    border-color: transparent;
+}
+
+.tab-button:not(.active):hover {
+    color: hsl(var(--bc));
+    border-color: hsl(var(--bc) / 0.3);
+}
+
+/* Tab content styling */
+.tab-content {
+    min-height: 400px;
+}
+
+.tab-content.hidden {
+    display: none !important;
+}
+
+.tab-content:not(.hidden) {
+    display: block;
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+    .tab-button {
+        padding: 12px 8px;
+        font-size: 12px;
+    }
+
+    .tab-button i {
+        font-size: 16px;
+    }
+
+    nav[aria-label="Configuration Tabs"] {
+        overflow-x: auto;
+        white-space: nowrap;
+        padding-bottom: 8px;
+    }
+
+    nav[aria-label="Configuration Tabs"]::-webkit-scrollbar {
+        height: 4px;
+    }
+
+    nav[aria-label="Configuration Tabs"]::-webkit-scrollbar-track {
+        background: hsl(var(--b2));
+    }
+
+    nav[aria-label="Configuration Tabs"]::-webkit-scrollbar-thumb {
+        background: hsl(var(--bc) / 0.3);
+        border-radius: 2px;
+    }
+}
+
+/* Dark mode specific styling */
+[data-theme="dark"] .tab-button:not(.active) {
+    color: hsl(var(--bc) / 0.6);
+}
+
+[data-theme="dark"] .tab-button:not(.active):hover {
+    color: hsl(var(--bc) / 0.9);
+    border-color: hsl(var(--bc) / 0.3);
+}
+
+/* Light mode specific styling */
+[data-theme="light"] .tab-button:not(.active) {
+    color: hsl(var(--bc) / 0.7);
+}
+
+[data-theme="light"] .tab-button:not(.active):hover {
+    color: hsl(var(--bc) / 0.9);
+    border-color: hsl(var(--bc) / 0.4);
+}
+
+/* Enhanced border styling */
+.tab-button {
+    border-bottom-width: 2px;
+    border-bottom-style: solid;
+}
+
+/* Make sure the nav container has proper spacing */
+nav[aria-label="Configuration Tabs"] {
+    display: flex;
+    gap: 2rem;
+    min-height: 60px;
+    align-items: end;
+}
+
+/* Icon and text alignment */
+.tab-button .flex {
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+/* Focus states for accessibility */
+.tab-button:focus {
+    outline: 2px solid hsl(var(--p));
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+.tab-button:focus:not(:focus-visible) {
+    outline: none;
+}

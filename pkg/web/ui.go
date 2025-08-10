@@ -156,3 +156,13 @@ func (wb *Web) ConfigHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = wb.templates.ExecuteTemplate(w, "layout", data)
 }
+
+func (wb *Web) StatsHandler(w http.ResponseWriter, r *http.Request) {
+	cfg := config.Get()
+	data := map[string]interface{}{
+		"URLBase": cfg.URLBase,
+		"Page":    "stats",
+		"Title":   "Statistics",
+	}
+	_ = wb.templates.ExecuteTemplate(w, "layout", data)
+}

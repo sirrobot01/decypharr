@@ -127,10 +127,21 @@ func (c *Cache) refreshTorrents(ctx context.Context) {
 
 func (c *Cache) refreshRclone() error {
 	cfg := c.config
-
-	if cfg.RcUrl == "" {
-		return nil
+	dirs := strings.FieldsFunc(cfg.RcRefreshDirs, func(r rune) bool {
+		return r == ',' || r == '&'
+	})
+	if len(dirs) == 0 {
+		dirs = []string{"__all__"}
 	}
+	if c.mounter != nil {
+		return c.mounter.RefreshDir(dirs)
+	} else {
+		return c.refreshRcloneWithRC(dirs)
+	}
+}
+
+func (c *Cache) refreshRcloneWithRC(dirs []string) error {
+	cfg := c.config
 
 	if cfg.RcUrl == "" {
 		return nil
@@ -138,7 +149,7 @@ func (c *Cache) refreshRclone() error {
 
 	client := http.DefaultClient
 	// Create form data
-	data := c.buildRcloneRequestData()
+	data := c.buildRcloneRequestData(dirs)
 
 	if err := c.sendRcloneRequest(client, "vfs/forget", data); err != nil {
 		c.logger.Error().Err(err).Msg("Failed to send rclone vfs/forget request")
@@ -151,16 +162,7 @@ func (c *Cache) refreshRclone() error {
 	return nil
 }
 
-func (c *Cache) buildRcloneRequestData() string {
-	cfg := c.config
-	dirs := strings.FieldsFunc(cfg.RcRefreshDirs, func(r rune) bool {
-		return r == ',' || r == '&'
-	})
-
-	if len(dirs) == 0 {
-		return "dir=__all__"
-	}
-
+func (c *Cache) buildRcloneRequestData(dirs []string) string {
 	var data strings.Builder
 	for index, dir := range dirs {
 		if dir != "" {

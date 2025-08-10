@@ -534,17 +534,21 @@ func (r *Repair) checkMountUp(media []arr.Content) error {
 	if len(files) == 0 {
 		return fmt.Errorf("no files found in media %s", firstMedia.Title)
 	}
-	firstFile := files[0]
-	symlinkPath := getSymlinkTarget(firstFile.Path)
-
-	if symlinkPath == "" {
-		return fmt.Errorf("no symlink target found for %s", firstFile.Path)
-	}
-	r.logger.Debug().Msgf("Checking symlink parent directory for %s", symlinkPath)
-
-	parentSymlink := filepath.Dir(filepath.Dir(symlinkPath)) // /mnt/zurg/torrents/movie/movie.mkv -> /mnt/zurg/torrents
-	if _, err := os.Stat(parentSymlink); os.IsNotExist(err) {
-		return fmt.Errorf("parent directory %s not accessible for %s", parentSymlink, firstFile.Path)
+	for _, file := range files {
+		if _, err := os.Stat(file.Path); os.IsNotExist(err) {
+			// If the file does not exist, we can't check the symlink target
+			r.logger.Debug().Msgf("File %s does not exist, skipping repair", file.Path)
+			return fmt.Errorf("file %s does not exist, skipping repair", file.Path)
+		}
+		// Get the symlink target
+		symlinkPath := getSymlinkTarget(file.Path)
+		if symlinkPath != "" {
+			r.logger.Trace().Msgf("Found symlink target for %s: %s", file.Path, symlinkPath)
+			if _, err := os.Stat(symlinkPath); os.IsNotExist(err) {
+				r.logger.Debug().Msgf("Symlink target %s does not exist, skipping repair", symlinkPath)
+				return fmt.Errorf("symlink target %s does not exist for %s. skipping repair", symlinkPath, file.Path)
+			}
+		}
 	}
 	return nil
 }

@@ -5,8 +5,10 @@ import (
 	"encoding/base64"
 	"fmt"
 	"github.com/go-chi/chi/v5"
+	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/pkg/arr"
 	"github.com/sirrobot01/decypharr/pkg/store"
+	"golang.org/x/crypto/bcrypt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -125,6 +127,7 @@ func (q *QBit) categoryContext(next http.Handler) http.Handler {
 // Only a valid host and token will be added to the context/config. The rest are manual
 func (q *QBit) authContext(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cfg := config.Get()
 		host, token, err := decodeAuthHeader(r.Header.Get("Authorization"))
 		category := getCategory(r.Context())
 		arrs := store.Get().Arr()
@@ -145,12 +148,22 @@ func (q *QBit) authContext(next http.Handler) http.Handler {
 				a.Token = token
 			}
 		}
-		a.Source = "auto"
-		if err := validateServiceURL(a.Host); err != nil {
-			// Return silently, no need to raise a problem. Just do not add the Arr to the context/config.json
-			next.ServeHTTP(w, r)
-			return
+		if cfg.NeedsAuth() {
+			if a.Host == "" || a.Token == "" {
+				http.Error(w, "Unauthorized: Host and token are required for authentication", http.StatusUnauthorized)
+				return
+			}
+			// try to use either Arr validate, or user auth validation
+			if err := a.Validate(); err != nil {
+				// If this failed, try to use user auth validation
+				if !verifyAuth(host, token) {
+					http.Error(w, "Unauthorized: Invalid host or token", http.StatusUnauthorized)
+					return
+				}
+			}
 		}
+
+		a.Source = "auto"
 		arrs.AddOrUpdate(a)
 		ctx := context.WithValue(r.Context(), arrKey, a)
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -175,4 +188,20 @@ func hashesContext(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), hashesKey, hashes)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func verifyAuth(username, password string) bool {
+	// If you're storing hashed password, use bcrypt to compare
+	if username == "" {
+		return false
+	}
+	auth := config.Get().GetAuth()
+	if auth == nil {
+		return false
+	}
+	if username != auth.Username {
+		return false
+	}
+	err := bcrypt.CompareHashAndPassword([]byte(auth.Password), []byte(password))
+	return err == nil
 }

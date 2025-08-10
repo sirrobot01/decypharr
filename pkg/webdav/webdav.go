@@ -90,7 +90,9 @@ type WebDav struct {
 }
 
 func New() *WebDav {
-	urlBase := config.Get().URLBase
+	cfg := config.Get()
+	urlBase := cfg.URLBase
+
 	w := &WebDav{
 		Handlers: make([]*Handler, 0),
 		URLBase:  urlBase,

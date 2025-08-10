@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"golang.org/x/net/webdav"
-	"io"
 	"mime"
 	"net/http"
 	"os"
@@ -469,40 +468,27 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 			if errors.As(err, &streamErr) {
 				// Handle client disconnections silently (just debug log)
 				if errors.Is(streamErr.Err, context.Canceled) || errors.Is(streamErr.Err, context.DeadlineExceeded) || streamErr.IsClientDisconnection {
-					return // Don't log as error or try to write response
+					return
 				}
-
-				if streamErr.StatusCode > 0 && !hasHeadersWritten(w) {
+				if streamErr.StatusCode > 0 {
+					h.logger.Trace().Err(err).Msgf("Error streaming %s", fi.Name())
 					http.Error(w, streamErr.Error(), streamErr.StatusCode)
+					return
 				} else {
-					h.logger.Error().
-						Err(streamErr.Err).
-						Str("path", r.URL.Path).
-						Msg("Stream error")
+					// We've already written a status code, just log the error
+					h.logger.Error().Err(streamErr.Err).Msg("Streaming error")
+					return
 				}
 			} else {
 				// Generic error
-				if !hasHeadersWritten(w) {
-					http.Error(w, "Stream error", http.StatusInternalServerError)
-				} else {
-					h.logger.Error().
-						Err(err).
-						Str("path", r.URL.Path).
-						Msg("Stream error after headers written")
-				}
+				h.logger.Error().Err(err).Msgf("Error streaming file %s", fi.Name())
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
 			}
 		}
 		return
 	}
-
-	// Fallback to ServeContent for other webdav.File implementations
-	if rs, ok := fRaw.(io.ReadSeeker); ok {
-		http.ServeContent(w, r, fi.Name(), fi.ModTime(), rs)
-	} else {
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", fi.Size()))
-		w.WriteHeader(http.StatusOK)
-		_, _ = io.Copy(w, fRaw)
-	}
+	return
 }
 
 func (h *Handler) handleHead(w http.ResponseWriter, r *http.Request) {

@@ -46,7 +46,7 @@ type RealDebrid struct {
 	addSamples      bool
 	Profile         *types.Profile
 	minimumFreeSlot int // Minimum number of active pots to maintain (used for cached stuffs, etc.)
-
+	limit           int
 }
 
 func New(dc config.Debrid) (*RealDebrid, error) {
@@ -101,6 +101,7 @@ func New(dc config.Debrid) (*RealDebrid, error) {
 		checkCached:     dc.CheckCached,
 		addSamples:      dc.AddSamples,
 		minimumFreeSlot: dc.MinimumFreeSlot,
+		limit:           dc.Limit,
 	}
 
 	if _, err := r.GetProfile(); err != nil {
@@ -510,7 +511,7 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent) (*types.Torrent, error) {
 		if status == "waiting_files_selection" {
 			t.Files = r.getTorrentFiles(t, data)
 			if len(t.Files) == 0 {
-				return t, fmt.Errorf("no video files found")
+				return t, fmt.Errorf("no valid files found")
 			}
 			filesId := make([]string, 0)
 			for _, f := range t.Files {
@@ -794,6 +795,10 @@ func (r *RealDebrid) getTorrents(offset int, limit int) (int, []*types.Torrent, 
 
 func (r *RealDebrid) GetTorrents() ([]*types.Torrent, error) {
 	limit := 5000
+	if r.limit != 0 {
+		limit = r.limit
+	}
+	hardLimit := r.limit
 
 	// Get first batch and total count
 	allTorrents := make([]*types.Torrent, 0)
@@ -812,6 +817,10 @@ func (r *RealDebrid) GetTorrents() ([]*types.Torrent, error) {
 		}
 		allTorrents = append(allTorrents, torrents...)
 		offset += totalTorrents
+		if hardLimit != 0 && len(allTorrents) >= hardLimit {
+			// If hard limit is set, stop fetching more torrents
+			break
+		}
 	}
 
 	if fetchError != nil {

@@ -105,6 +105,11 @@ func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (*type
 	downloadLink, err := c.client.GetDownloadLink(ct.Torrent, &file)
 	if err != nil {
 		if errors.Is(err, utils.HosterUnavailableError) {
+			c.logger.Trace().
+				Str("filename", filename).
+				Str("torrent_id", ct.Id).
+				Msg("Hoster unavailable, attempting to reinsert torrent")
+
 			newCt, err := c.reInsertTorrent(ct)
 			if err != nil {
 				return nil, fmt.Errorf("failed to reinsert torrent: %w", err)
@@ -117,10 +122,10 @@ func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (*type
 			// Retry getting the download link
 			downloadLink, err = c.client.GetDownloadLink(ct.Torrent, &file)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("retry failed to get download link: %w", err)
 			}
 			if downloadLink == nil {
-				return nil, fmt.Errorf("download link is empty for")
+				return nil, fmt.Errorf("download link is empty after retry")
 			}
 			return nil, nil
 		} else if errors.Is(err, utils.TrafficExceededError) {

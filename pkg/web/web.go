@@ -50,6 +50,12 @@ type RepairRequest struct {
 //go:embed templates/*
 var content embed.FS
 
+//go:embed assets/build/*
+var assetsEmbed embed.FS
+
+//go:embed assets/images/*
+var imagesEmbed embed.FS
+
 type Web struct {
 	logger    zerolog.Logger
 	cookie    *sessions.CookieStore
@@ -64,6 +70,7 @@ func New() *Web {
 		"templates/index.html",
 		"templates/download.html",
 		"templates/repair.html",
+		"templates/stats.html",
 		"templates/config.html",
 		"templates/login.html",
 		"templates/register.html",

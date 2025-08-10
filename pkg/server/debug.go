@@ -118,5 +118,25 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		profiles = append(profiles, profile)
 	}
 	stats["debrids"] = profiles
+
+	// Add rclone stats if available
+	if rcManager := store.Get().RcloneManager(); rcManager != nil && rcManager.IsReady() {
+		rcStats, err := rcManager.GetStats()
+		if err != nil {
+			s.logger.Error().Err(err).Msg("Failed to get rclone stats")
+			stats["rclone"] = map[string]interface{}{
+				"enabled":      true,
+				"server_ready": false,
+			}
+		} else {
+			stats["rclone"] = rcStats
+		}
+	} else {
+		stats["rclone"] = map[string]interface{}{
+			"enabled":      false,
+			"server_ready": false,
+		}
+	}
+
 	request.JSONResponse(w, stats, http.StatusOK)
 }

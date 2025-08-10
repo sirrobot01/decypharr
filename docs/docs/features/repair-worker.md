@@ -15,27 +15,4 @@ The Repair Worker performs the following tasks:
 
 ## Configuration
 
-To enable and configure the Repair Worker, add the following to your `config.json`:
-
-```json
-"repair": {
-  "enabled": true,
-  "interval": "12h",
-  "use_webdav": false,
-  "zurg_url": "http://localhost:9999",
-  "auto_process": true
-}
-```
-
-### Configuration Options
-
-- `enabled`: Set to `true` to enable the Repair Worker.
-- `interval`: The time interval for the Repair Worker to run (e.g., `12h`, `1d`).
-- `use_webdav`: If set to `true`, the Repair Worker will use WebDAV for file operations.
-- `zurg_url`: The URL for the Zurg service (if using).
-- `auto_process`: If set to `true`, the Repair Worker will automatically process files that it finds issues with.
-
-
-### Performance Tips
-- For users of the WebDAV server, enable `use_webdav` for exponentially faster repair processes
-- If using Zurg, set the `zurg_url` parameter to greatly improve repair speed
+You can enable and configure the Repair Worker in the Decypharr settings. It can be set to run at regular intervals, such as every 12 hours or daily.

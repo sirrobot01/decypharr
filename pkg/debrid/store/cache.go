@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"github.com/sirrobot01/decypharr/pkg/rclone"
 	"os"
 	"path"
 	"path/filepath"
@@ -17,13 +17,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+
 	"encoding/json"
+	_ "time/tzdata"
+
 	"github.com/go-co-op/gocron/v2"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/utils"
-	_ "time/tzdata"
 )
 
 type WebDavFolderNaming string
@@ -104,9 +107,10 @@ type Cache struct {
 
 	config        config.Debrid
 	customFolders []string
+	mounter       *rclone.Mount
 }
 
-func NewDebridCache(dc config.Debrid, client types.Client) *Cache {
+func NewDebridCache(dc config.Debrid, client types.Client, mounter *rclone.Mount) *Cache {
 	cfg := config.Get()
 	cet, err := time.LoadLocation("CET")
 	if err != nil {
@@ -161,6 +165,7 @@ func NewDebridCache(dc config.Debrid, client types.Client) *Cache {
 
 		config:        dc,
 		customFolders: customFolders,
+		mounter:       mounter,
 
 		ready: make(chan struct{}),
 	}
@@ -184,6 +189,15 @@ func (c *Cache) StreamWithRclone() bool {
 // and before you discard the instance on a restart.
 func (c *Cache) Reset() {
 
+	// Unmount first
+	if c.mounter != nil && c.mounter.IsMounted() {
+		if err := c.mounter.Unmount(); err != nil {
+			c.logger.Error().Err(err).Msgf("Failed to unmount %s", c.config.Name)
+		} else {
+			c.logger.Info().Msgf("Unmounted %s", c.config.Name)
+		}
+	}
+
 	if err := c.scheduler.StopJobs(); err != nil {
 		c.logger.Error().Err(err).Msg("Failed to stop scheduler jobs")
 	}
@@ -196,7 +210,9 @@ func (c *Cache) Reset() {
 	c.listingDebouncer.Stop()
 
 	// Close the repair channel
-	close(c.repairChan)
+	if c.repairChan != nil {
+		close(c.repairChan)
+	}
 
 	// 1. Reset torrent storage
 	c.torrents.reset()
@@ -217,6 +233,9 @@ func (c *Cache) Reset() {
 
 	// 6. Reset repair channel so the next Start() can spin it up
 	c.repairChan = make(chan RepairRequest, 100)
+
+	// Reset the ready channel
+	c.ready = make(chan struct{})
 }
 
 func (c *Cache) Start(ctx context.Context) error {
@@ -248,10 +267,13 @@ func (c *Cache) Start(ctx context.Context) error {
 	addr := cfg.BindAddress + ":" + cfg.Port + cfg.URLBase + "webdav/" + name + "/"
 	c.logger.Info().Msgf("%s WebDav server running at %s", name, addr)
 
-	<-ctx.Done()
-	c.logger.Info().Msgf("Stopping %s WebDav server", name)
-	c.Reset()
-
+	if c.mounter != nil {
+		if err := c.mounter.Mount(ctx); err != nil {
+			c.logger.Error().Err(err).Msgf("Failed to mount %s", c.config.Name)
+		}
+	} else {
+		c.logger.Warn().Msgf("Mounting is disabled for %s", c.config.Name)
+	}
 	return nil
 }
 
@@ -682,8 +704,13 @@ func (c *Cache) ProcessTorrent(t *types.Torrent) error {
 	}
 
 	if !isComplete(t.Files) {
-		c.logger.Debug().Msgf("Torrent %s is still not complete. Triggering a reinsert(disabled)", t.Id)
+		c.logger.Debug().
+			Str("torrent_id", t.Id).
+			Str("torrent_name", t.Name).
+			Int("total_files", len(t.Files)).
+			Msg("Torrent still not complete after refresh")
 	} else {
+
 		addedOn, err := time.Parse(time.RFC3339, t.Added)
 		if err != nil {
 			addedOn = time.Now()
@@ -873,4 +900,8 @@ func (c *Cache) RemoveFile(torrentId string, filename string) error {
 
 func (c *Cache) Logger() zerolog.Logger {
 	return c.logger
+}
+
+func (c *Cache) GetConfig() config.Debrid {
+	return c.config
 }

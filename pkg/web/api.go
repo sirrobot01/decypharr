@@ -3,6 +3,7 @@ package web
 import (
 	"fmt"
 	"github.com/sirrobot01/decypharr/pkg/store"
+	"golang.org/x/crypto/bcrypt"
 	"net/http"
 	"strings"
 	"time"
@@ -214,7 +215,26 @@ func (wb *Web) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	for _, a := range unique {
 		cfg.Arrs = append(cfg.Arrs, a)
 	}
-	request.JSONResponse(w, cfg, http.StatusOK)
+
+	// Create response with API token info
+	type ConfigResponse struct {
+		*config.Config
+		APIToken     string `json:"api_token,omitempty"`
+		AuthUsername string `json:"auth_username,omitempty"`
+	}
+
+	response := &ConfigResponse{Config: cfg}
+
+	// Add API token and auth information
+	auth := cfg.GetAuth()
+	if auth != nil {
+		if auth.APIToken != "" {
+			response.APIToken = auth.APIToken
+		}
+		response.AuthUsername = auth.Username
+	}
+
+	request.JSONResponse(w, response, http.StatusOK)
 }
 
 func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
@@ -247,6 +267,7 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 
 	// Update Repair config
 	currentConfig.Repair = updatedConfig.Repair
+	currentConfig.Rclone = updatedConfig.Rclone
 
 	// Update Debrids
 	if len(updatedConfig.Debrids) > 0 {
@@ -358,4 +379,104 @@ func (wb *Web) handleStopRepairJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (wb *Web) handleRefreshAPIToken(w http.ResponseWriter, _ *http.Request) {
+	token, err := wb.refreshAPIToken()
+	if err != nil {
+		wb.logger.Error().Err(err).Msg("Failed to refresh API token")
+		http.Error(w, "Failed to refresh token: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	request.JSONResponse(w, map[string]interface{}{
+		"token":   token,
+		"message": "API token refreshed successfully",
+	}, http.StatusOK)
+}
+
+func (wb *Web) handleUpdateAuth(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username        string `json:"username"`
+		Password        string `json:"password"`
+		ConfirmPassword string `json:"confirm_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	cfg := config.Get()
+	auth := cfg.GetAuth()
+	if auth == nil {
+		auth = &config.Auth{}
+	}
+
+	// Check if trying to disable authentication (both empty)
+	if req.Username == "" && req.Password == "" {
+		// Disable authentication
+		cfg.UseAuth = false
+		auth.Username = ""
+		auth.Password = ""
+		if err := cfg.SaveAuth(auth); err != nil {
+			wb.logger.Error().Err(err).Msg("Failed to save auth config")
+			http.Error(w, "Failed to save authentication settings", http.StatusInternalServerError)
+			return
+		}
+		if err := cfg.Save(); err != nil {
+			wb.logger.Error().Err(err).Msg("Failed to save config")
+			http.Error(w, "Failed to save configuration", http.StatusInternalServerError)
+			return
+		}
+
+		request.JSONResponse(w, map[string]string{
+			"message": "Authentication disabled successfully",
+		}, http.StatusOK)
+		return
+	}
+
+	// Validate required fields
+	if req.Username == "" {
+		http.Error(w, "Username is required", http.StatusBadRequest)
+		return
+	}
+	if req.Password == "" {
+		http.Error(w, "Password is required", http.StatusBadRequest)
+		return
+	}
+	if req.Password != req.ConfirmPassword {
+		http.Error(w, "Passwords do not match", http.StatusBadRequest)
+		return
+	}
+
+	// Hash the password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		wb.logger.Error().Err(err).Msg("Failed to hash password")
+		http.Error(w, "Failed to process password", http.StatusInternalServerError)
+		return
+	}
+
+	// Update auth settings
+	auth.Username = req.Username
+	auth.Password = string(hashedPassword)
+	cfg.UseAuth = true
+
+	// Save auth config
+	if err := cfg.SaveAuth(auth); err != nil {
+		wb.logger.Error().Err(err).Msg("Failed to save auth config")
+		http.Error(w, "Failed to save authentication settings", http.StatusInternalServerError)
+		return
+	}
+
+	// Save main config
+	if err := cfg.Save(); err != nil {
+		wb.logger.Error().Err(err).Msg("Failed to save config")
+		http.Error(w, "Failed to save configuration", http.StatusInternalServerError)
+		return
+	}
+
+	request.JSONResponse(w, map[string]string{
+		"message": "Authentication settings updated successfully",
+	}, http.StatusOK)
 }
