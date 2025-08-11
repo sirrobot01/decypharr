@@ -64,6 +64,20 @@ The documentation includes:
 
 You can configure Decypharr through the Web UI or by editing the `config.json` file directly.
 
+# ⚡️ Easy Mode (ElfHosted)
+
+❤️ Decypharr is proudly [sponsored by ElfHosted](https://github.com/sponsors/sirrobot01) (*along with many more excellent [open-source sponsees](https://docs.elfhosted.com/sponsorship/)*!)
+
+## What is ElfHosted? 
+
+[ElfHosted](https://store.elfhosted.com/elf/sirrobot01/) is "easy mode" for self-hosting - an [open-source](https://docs.elfhosted.com/open/) PaaS which runs runs over 100 popular self-hostable apps for you, reliably and securely. They take responsibility for the painful stuff (*hardware, security, configuration, automation and updates*), so you sit back and enjoy the fun stuff! (*actually **using** your applications!*)
+
+Popular [streaming bundles](https://store.elfhosted.com/product-category/streaming-bundles/elf/sirrobot01/) are available with Plex, Jellyfin, or Emby, integrated with cloud storage like RealDebrid, Premiumize, etc, and leveraging Decypharr for automation.
+
+ElfHosted have an ["excellent" ⭐️⭐️⭐️⭐️⭐️ rating on TrustPilot](https://www.trustpilot.com/review/elfhosted.com), a well-moderated [Discord](https://discord.elfhosted.com) community (*[highly praised](https://docs.elfhosted.com/testimonials/) for support and friendliness*), and [comprehensive documentation and guides](https://docs.elfhosted.com) resource.
+
+Grab a [7-day trial for only $1](https://store.elfhosted.com/elf/sirrobot01/), and experience ElfHosted for yourself! 🎉
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
