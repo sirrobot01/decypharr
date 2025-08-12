@@ -105,6 +105,11 @@ func (m *Manager) Start(ctx context.Context) error {
 		"--config", filepath.Join(m.configDir, "rclone.conf"),
 		"--log-level", "INFO",
 	}
+	if cfg.Rclone.CacheDir != "" {
+		if err := os.MkdirAll(cfg.Rclone.CacheDir, 0755); err == nil {
+			args = append(args, "--cache-dir", cfg.Rclone.CacheDir)
+		}
+	}
 	m.cmd = exec.CommandContext(ctx, "rclone", args...)
 	m.cmd.Dir = m.configDir
 

@@ -44,7 +44,7 @@ func (m *Manager) checkMountHealth(provider string) bool {
 	req := RCRequest{
 		Command: "operations/list",
 		Args: map[string]interface{}{
-			"fs":     fmt.Sprintf("decypharr-%s:", provider),
+			"fs":     fmt.Sprintf("%s:", provider),
 			"remote": "/",
 		},
 	}

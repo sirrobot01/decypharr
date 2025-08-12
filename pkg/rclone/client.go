@@ -52,10 +52,6 @@ func (m *Manager) mountWithRetry(provider, webdavURL string, maxRetries int) err
 func (m *Manager) performMount(provider, webdavURL string) error {
 	cfg := config.Get()
 	mountPath := filepath.Join(cfg.Rclone.MountPath, provider)
-	cacheDir := ""
-	if cfg.Rclone.CacheDir != "" {
-		cacheDir = filepath.Join(cfg.Rclone.CacheDir, provider)
-	}
 
 	// Create mount directory
 	if err := os.MkdirAll(mountPath, 0755); err != nil {
@@ -78,14 +74,13 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 	}
 
 	// Create rclone config for this provider
-	configName := fmt.Sprintf("decypharr-%s", provider)
-	if err := m.createConfig(configName, webdavURL); err != nil {
+	if err := m.createConfig(provider, webdavURL); err != nil {
 		return fmt.Errorf("failed to create rclone config: %w", err)
 	}
 
 	// Prepare mount arguments
 	mountArgs := map[string]interface{}{
-		"fs":         fmt.Sprintf("%s:", configName),
+		"fs":         fmt.Sprintf("%s:", provider),
 		"mountPoint": mountPath,
 		"mountType":  "mount", // Use standard FUSE mount
 		"mountOpt": map[string]interface{}{
@@ -101,15 +96,6 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 
 	if cfg.Rclone.BufferSize != "" {
 		configOpts["BufferSize"] = cfg.Rclone.BufferSize
-	}
-
-	if cacheDir != "" {
-		// Create cache directory if specified
-		if err := os.MkdirAll(cacheDir, 0755); err != nil {
-			m.logger.Warn().Str("cacheDir", cacheDir).Msg("Failed to create cache directory")
-		} else {
-			configOpts["CacheDir"] = cacheDir
-		}
 	}
 
 	if len(configOpts) > 0 {
@@ -180,7 +166,7 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 		WebDAVURL:  webdavURL,
 		Mounted:    true,
 		MountedAt:  time.Now().Format(time.RFC3339),
-		ConfigName: configName,
+		ConfigName: provider,
 	}
 
 	m.mountsMutex.Lock()
@@ -319,7 +305,7 @@ func (m *Manager) RefreshDir(provider string, dirs []string) error {
 		dirs = []string{"/"}
 	}
 	args := map[string]interface{}{
-		"fs": fmt.Sprintf("decypharr-%s:", provider),
+		"fs": fmt.Sprintf("%s:", provider),
 	}
 	for i, dir := range dirs {
 		if dir != "" {

@@ -180,8 +180,8 @@
                     </div>
                     <div class="stat">
                         <div class="stat-title">Elapsed Time</div>
-                        <div class="stat-value text-accent">${((cs.elapsedTime || 0) / 60).toFixed(1)}m</div>
-                        <div class="stat-desc">Transfer: ${((cs.transferTime || 0) / 60).toFixed(1)}m</div>
+                        <div class="stat-value text-accent">${window.decypharrUtils.formatDuration(cs.elapsedTime)}</div>
+                        <div class="stat-desc">Transfer: ${window.decypharrUtils.formatDuration(cs.transferTime)}m</div>
                     </div>
                 `;
             }
@@ -225,7 +225,7 @@
                                 </div>
                                 <div class="flex justify-between text-xs text-base-content/60 mt-1">
                                     <span>${window.decypharrUtils.formatBytes(transfer.bytes || 0)} / ${window.decypharrUtils.formatBytes(transfer.size || 0)}</span>
-                                    <span>ETA: ${transfer.eta ? Math.ceil(transfer.eta / 60) + 'm' : 'Unknown'}</span>
+                                    <span>ETA: ${transfer.eta ? window.decypharrUtils.formatDuration(transfer.eta) : 'Unknown'}</span>
                                 </div>
                             </div>
                         </div>
