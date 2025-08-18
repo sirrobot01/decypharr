@@ -70,7 +70,10 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 
 	// Clean up any stale mount first
 	if exists && !existingMount.Mounted {
-		m.forceUnmountPath(mountPath)
+		err := m.forceUnmountPath(mountPath)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Create rclone config for this provider
@@ -82,14 +85,13 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 	mountArgs := map[string]interface{}{
 		"fs":         fmt.Sprintf("%s:", provider),
 		"mountPoint": mountPath,
-		"mountType":  "mount", // Use standard FUSE mount
-		"mountOpt": map[string]interface{}{
-			"AllowNonEmpty": true,
-			"AllowOther":    true,
-			"DebugFUSE":     false,
-			"DeviceName":    fmt.Sprintf("decypharr-%s", provider),
-			"VolumeName":    fmt.Sprintf("decypharr-%s", provider),
-		},
+	}
+	mountOpt := map[string]interface{}{
+		"AllowNonEmpty": true,
+		"AllowOther":    true,
+		"DebugFUSE":     false,
+		"DeviceName":    fmt.Sprintf("decypharr-%s", provider),
+		"VolumeName":    fmt.Sprintf("decypharr-%s", provider),
 	}
 
 	configOpts := make(map[string]interface{})
@@ -102,12 +104,13 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 		// Only add _config if there are options to set
 		mountArgs["_config"] = configOpts
 	}
+	vfsOpt := map[string]interface{}{
+		"CacheMode": cfg.Rclone.VfsCacheMode,
+	}
+	vfsOpt["PollInterval"] = 0 // Poll interval not supported for webdav, set to 0
 
 	// Add VFS options if caching is enabled
 	if cfg.Rclone.VfsCacheMode != "off" {
-		vfsOpt := map[string]interface{}{
-			"CacheMode": cfg.Rclone.VfsCacheMode,
-		}
 
 		if cfg.Rclone.VfsCacheMaxAge != "" {
 			vfsOpt["CacheMaxAge"] = cfg.Rclone.VfsCacheMaxAge
@@ -130,22 +133,23 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 		if cfg.Rclone.NoModTime {
 			vfsOpt["NoModTime"] = cfg.Rclone.NoModTime
 		}
-
-		mountArgs["vfsOpt"] = vfsOpt
 	}
 
 	// Add mount options based on configuration
 	if cfg.Rclone.UID != 0 {
-		mountArgs["mountOpt"].(map[string]interface{})["UID"] = cfg.Rclone.UID
+		mountOpt["UID"] = cfg.Rclone.UID
 	}
 	if cfg.Rclone.GID != 0 {
-		mountArgs["mountOpt"].(map[string]interface{})["GID"] = cfg.Rclone.GID
+		mountOpt["GID"] = cfg.Rclone.GID
 	}
 	if cfg.Rclone.AttrTimeout != "" {
 		if attrTimeout, err := time.ParseDuration(cfg.Rclone.AttrTimeout); err == nil {
-			mountArgs["mountOpt"].(map[string]interface{})["AttrTimeout"] = attrTimeout.String()
+			mountOpt["AttrTimeout"] = attrTimeout.String()
 		}
 	}
+
+	mountArgs["vfsOpt"] = vfsOpt
+	mountArgs["mountOpt"] = mountOpt
 	// Make the mount request
 	req := RCRequest{
 		Command: "mount/mount",

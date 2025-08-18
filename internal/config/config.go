@@ -32,6 +32,7 @@ type Debrid struct {
 	APIKey            string   `json:"api_key,omitempty"`
 	DownloadAPIKeys   []string `json:"download_api_keys,omitempty"`
 	Folder            string   `json:"folder,omitempty"`
+	RcloneMountPath   string   `json:"rclone_mount_path,omitempty"` // Custom rclone mount path for this debrid service
 	DownloadUncached  bool     `json:"download_uncached,omitempty"`
 	CheckCached       bool     `json:"check_cached,omitempty"`
 	RateLimit         string   `json:"rate_limit,omitempty"` // 200/minute or 10/second
@@ -117,6 +118,8 @@ type Rclone struct {
 	// Performance settings
 	NoModTime  bool `json:"no_modtime,omitempty"`  // Don't read/write modification time
 	NoChecksum bool `json:"no_checksum,omitempty"` // Don't checksum files on upload
+
+	LogLevel string `json:"log_level,omitempty"`
 }
 
 type Config struct {
@@ -430,6 +433,7 @@ func (c *Config) setDefaults() {
 			c.Rclone.VfsCachePollInterval = cmp.Or(c.Rclone.VfsCachePollInterval, "1m") // Clean cache every minute
 		}
 		c.Rclone.DirCacheTime = cmp.Or(c.Rclone.DirCacheTime, "5m")
+		c.Rclone.LogLevel = cmp.Or(c.Rclone.LogLevel, "INFO")
 	}
 	// Load the auth file
 	c.Auth = c.GetAuth()

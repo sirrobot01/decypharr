@@ -190,7 +190,7 @@ func (s *Storage) GetAll() []*Arr {
 	return arrs
 }
 
-func (s *Storage) StartSchedule(ctx context.Context) error {
+func (s *Storage) StartWorker(ctx context.Context) error {
 
 	ticker := time.NewTicker(10 * time.Second)
 

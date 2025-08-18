@@ -114,19 +114,27 @@ type IngestData struct {
 	Size   int64  `json:"size"`
 }
 
+type LibraryStats struct {
+	Total       int `json:"total"`
+	Bad         int `json:"bad"`
+	ActiveLinks int `json:"active_links"`
+}
+
+type Stats struct {
+	Profile  *Profile         `json:"profile"`
+	Library  LibraryStats     `json:"library"`
+	Accounts []map[string]any `json:"accounts"`
+}
+
 type Profile struct {
 	Name       string    `json:"name"`
 	Id         int64     `json:"id"`
 	Username   string    `json:"username"`
 	Email      string    `json:"email"`
-	Points     int64     `json:"points"`
+	Points     int       `json:"points"`
 	Type       string    `json:"type"`
-	Premium    int       `json:"premium"`
+	Premium    int64     `json:"premium"`
 	Expiration time.Time `json:"expiration"`
-
-	LibrarySize int `json:"library_size"`
-	BadTorrents int `json:"bad_torrents"`
-	ActiveLinks int `json:"active_links"`
 }
 
 type DownloadLink struct {

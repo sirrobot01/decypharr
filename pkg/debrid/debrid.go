@@ -9,13 +9,14 @@ import (
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/arr"
 	"github.com/sirrobot01/decypharr/pkg/debrid/providers/alldebrid"
-	"github.com/sirrobot01/decypharr/pkg/debrid/providers/debrid_link"
+	"github.com/sirrobot01/decypharr/pkg/debrid/providers/debridlink"
 	"github.com/sirrobot01/decypharr/pkg/debrid/providers/realdebrid"
 	"github.com/sirrobot01/decypharr/pkg/debrid/providers/torbox"
 	debridStore "github.com/sirrobot01/decypharr/pkg/debrid/store"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/rclone"
 	"sync"
+	"time"
 )
 
 type Debrid struct {
@@ -69,7 +70,7 @@ func NewStorage(rcManager *rclone.Manager) *Storage {
 		_log := client.Logger()
 		if dc.UseWebDav {
 			if cfg.Rclone.Enabled && rcManager != nil {
-				mounter = rclone.NewMount(dc.Name, webdavUrl, rcManager)
+				mounter = rclone.NewMount(dc.Name, dc.RcloneMountPath, webdavUrl, rcManager)
 			}
 			cache = debridStore.NewDebridCache(dc, client, mounter)
 			_log.Info().Msg("Debrid Service started with WebDAV")
@@ -94,6 +95,47 @@ func (d *Storage) Debrid(name string) *Debrid {
 	defer d.mu.RUnlock()
 	if debrid, exists := d.debrids[name]; exists {
 		return debrid
+	}
+	return nil
+}
+
+func (d *Storage) StartWorker(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	// Start all debrid syncAccounts
+	// Runs every 1m
+	if err := d.syncAccounts(); err != nil {
+		return err
+	}
+	ticker := time.NewTicker(5 * time.Minute)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_ = d.syncAccounts()
+			}
+		}
+	}()
+	return nil
+}
+
+func (d *Storage) syncAccounts() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	for name, debrid := range d.debrids {
+		if debrid == nil || debrid.client == nil {
+			continue
+		}
+		_log := debrid.client.Logger()
+		if err := debrid.client.SyncAccounts(); err != nil {
+			_log.Error().Err(err).Msgf("Failed to sync account for %s", name)
+			continue
+		}
 	}
 	return nil
 }
@@ -178,7 +220,7 @@ func createDebridClient(dc config.Debrid) (types.Client, error) {
 	case "torbox":
 		return torbox.New(dc)
 	case "debridlink":
-		return debrid_link.New(dc)
+		return debridlink.New(dc)
 	case "alldebrid":
 		return alldebrid.New(dc)
 	default:

@@ -25,4 +25,5 @@ type Client interface {
 	DeleteDownloadLink(linkId string) error
 	GetProfile() (*Profile, error)
 	GetAvailableSlots() (int, error)
+	SyncAccounts() error // Updates each accounts details(like traffic, username, etc.)
 }

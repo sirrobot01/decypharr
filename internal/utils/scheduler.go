@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"context"
 	"fmt"
 	"github.com/go-co-op/gocron/v2"
 	"github.com/robfig/cron/v3"
@@ -9,25 +8,6 @@ import (
 	"strings"
 	"time"
 )
-
-func ScheduleJob(ctx context.Context, interval string, loc *time.Location, jobFunc func()) (gocron.Scheduler, error) {
-	if loc == nil {
-		loc = time.Local
-	}
-	s, err := gocron.NewScheduler(gocron.WithLocation(loc))
-	if err != nil {
-		return s, fmt.Errorf("failed to create scheduler: %w", err)
-	}
-	jd, err := ConvertToJobDef(interval)
-	if err != nil {
-		return s, fmt.Errorf("failed to convert interval to job definition: %w", err)
-	}
-	// Schedule the job
-	if _, err = s.NewJob(jd, gocron.NewTask(jobFunc), gocron.WithContext(ctx)); err != nil {
-		return s, fmt.Errorf("failed to create job: %w", err)
-	}
-	return s, nil
-}
 
 // ConvertToJobDef converts a string interval to a gocron.JobDefinition.
 func ConvertToJobDef(interval string) (gocron.JobDefinition, error) {

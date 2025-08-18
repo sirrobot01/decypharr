@@ -40,6 +40,7 @@ func Start(ctx context.Context) error {
 	svcCtx, cancelSvc := context.WithCancel(ctx)
 	defer cancelSvc()
 
+	// Create the logger path if it doesn't exist
 	for {
 		cfg := config.Get()
 		_log := logger.Default()
@@ -157,14 +158,6 @@ func startServices(ctx context.Context, cancelSvc context.CancelFunc, wd *webdav
 		return rcManager.Start(ctx)
 	})
 
-	safeGo(func() error {
-		arr := store.Get().Arr()
-		if arr == nil {
-			return nil
-		}
-		return arr.StartSchedule(ctx)
-	})
-
 	if cfg := config.Get(); cfg.Repair.Enabled {
 		safeGo(func() error {
 			repair := store.Get().Repair()
@@ -178,7 +171,8 @@ func startServices(ctx context.Context, cancelSvc context.CancelFunc, wd *webdav
 	}
 
 	safeGo(func() error {
-		return store.Get().StartQueueSchedule(ctx)
+		store.Get().StartWorkers(ctx)
+		return nil
 	})
 
 	go func() {

@@ -24,7 +24,7 @@ type Manager struct {
 	rcPort        string
 	rcUser        string
 	rcPass        string
-	configDir     string
+	rcloneDir     string
 	mounts        map[string]*MountInfo
 	mountsMutex   sync.RWMutex
 	logger        zerolog.Logger
@@ -61,10 +61,10 @@ func NewManager() *Manager {
 	cfg := config.Get()
 
 	rcPort := "5572"
-	configDir := filepath.Join(cfg.Path, "rclone")
+	rcloneDir := filepath.Join(cfg.Path, "rclone")
 
 	// Ensure config directory exists
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(rcloneDir, 0755); err != nil {
 		_logger := logger.New("rclone")
 		_logger.Error().Err(err).Msg("Failed to create rclone config directory")
 	}
@@ -73,7 +73,7 @@ func NewManager() *Manager {
 
 	return &Manager{
 		rcPort:      rcPort,
-		configDir:   configDir,
+		rcloneDir:   rcloneDir,
 		mounts:      make(map[string]*MountInfo),
 		logger:      logger.New("rclone"),
 		ctx:         ctx,
@@ -98,12 +98,22 @@ func (m *Manager) Start(ctx context.Context) error {
 		return nil
 	}
 
+	logFile := filepath.Join(logger.GetLogPath(), "rclone.log")
+
+	// Delete old log file if it exists
+	if _, err := os.Stat(logFile); err == nil {
+		if err := os.Remove(logFile); err != nil {
+			return fmt.Errorf("failed to remove old rclone log file: %w", err)
+		}
+	}
+
 	args := []string{
 		"rcd",
 		"--rc-addr", ":" + m.rcPort,
 		"--rc-no-auth", // We'll handle auth at the application level
-		"--config", filepath.Join(m.configDir, "rclone.conf"),
-		"--log-level", "INFO",
+		"--config", filepath.Join(m.rcloneDir, "rclone.conf"),
+		"--log-level", cfg.Rclone.LogLevel,
+		"--log-file", logFile,
 	}
 	if cfg.Rclone.CacheDir != "" {
 		if err := os.MkdirAll(cfg.Rclone.CacheDir, 0755); err == nil {
@@ -111,7 +121,6 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 	}
 	m.cmd = exec.CommandContext(ctx, "rclone", args...)
-	m.cmd.Dir = m.configDir
 
 	// Capture output for debugging
 	var stdout, stderr bytes.Buffer
@@ -119,9 +128,10 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.cmd.Stderr = &stderr
 
 	if err := m.cmd.Start(); err != nil {
+		m.logger.Error().Str("stderr", stderr.String()).Str("stdout", stdout.String()).
+			Err(err).Msg("Failed to start rclone RC server")
 		return fmt.Errorf("failed to start rclone RC server: %w", err)
 	}
-
 	m.serverStarted = true
 
 	// Wait for server to be ready in a goroutine

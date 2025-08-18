@@ -1,4 +1,4 @@
-package debrid_link
+package debridlink
 
 type APIResponse[T any] struct {
 	Success bool `json:"success"`
@@ -43,3 +43,12 @@ type _torrentInfo struct {
 type torrentInfo APIResponse[[]_torrentInfo]
 
 type SubmitTorrentInfo APIResponse[_torrentInfo]
+
+type UserInfo APIResponse[struct {
+	Username     string `json:"username"`
+	Email        string `json:"email"`
+	AccountType  int    `json:"accountType"`
+	PremiumLeft  int64  `json:"premiumLeft"`
+	Points       int    `json:"pts"`
+	Trafficshare int    `json:"trafficshare"`
+}]

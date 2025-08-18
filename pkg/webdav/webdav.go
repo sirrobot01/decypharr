@@ -198,7 +198,7 @@ func (wd *WebDav) handleGetRoot() http.HandlerFunc {
 func (wd *WebDav) handleWebdavRoot() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fi := &FileInfo{
-			name:    "/",
+			name:    "",
 			size:    0,
 			mode:    0755 | os.ModeDir,
 			modTime: time.Now(),

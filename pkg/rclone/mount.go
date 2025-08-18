@@ -7,6 +7,7 @@ import (
 	"github.com/sirrobot01/decypharr/internal/config"
 	"net/url"
 	"path/filepath"
+	"strings"
 )
 
 // Mount represents a mount using the rclone RC client
@@ -19,13 +20,22 @@ type Mount struct {
 }
 
 // NewMount creates a new RC-based mount
-func NewMount(provider, webdavURL string, rcManager *Manager) *Mount {
+func NewMount(provider, customRcloneMount, webdavURL string, rcManager *Manager) *Mount {
 	cfg := config.Get()
-	mountPath := filepath.Join(cfg.Rclone.MountPath, provider)
+	var mountPath string
+	if customRcloneMount != "" {
+		mountPath = customRcloneMount
+	} else {
+		mountPath = filepath.Join(cfg.Rclone.MountPath, provider)
+	}
 
 	_url, err := url.JoinPath(webdavURL, provider)
 	if err != nil {
 		_url = fmt.Sprintf("%s/%s", webdavURL, provider)
+	}
+
+	if !strings.HasSuffix(_url, "/") {
+		_url += "/"
 	}
 
 	return &Mount{

@@ -6,11 +6,11 @@ import (
 	"github.com/sirrobot01/decypharr/internal/utils"
 )
 
-func (c *Cache) StartSchedule(ctx context.Context) error {
+func (c *Cache) StartWorker(ctx context.Context) error {
 	// For now, we just want to refresh the listing and download links
 
 	// Stop any existing jobs before starting new ones
-	c.scheduler.RemoveByTags("decypharr")
+	c.scheduler.RemoveByTags("decypharr-%s", c.GetConfig().Name)
 
 	// Schedule download link refresh job
 	if jd, err := utils.ConvertToJobDef(c.downloadLinksRefreshInterval); err != nil {
@@ -19,7 +19,7 @@ func (c *Cache) StartSchedule(ctx context.Context) error {
 		// Schedule the job
 		if _, err := c.scheduler.NewJob(jd, gocron.NewTask(func() {
 			c.refreshDownloadLinks(ctx)
-		}), gocron.WithContext(ctx), gocron.WithTags("decypharr")); err != nil {
+		}), gocron.WithContext(ctx)); err != nil {
 			c.logger.Error().Err(err).Msg("Failed to create download link refresh job")
 		} else {
 			c.logger.Debug().Msgf("Download link refresh job scheduled for every %s", c.downloadLinksRefreshInterval)
@@ -33,7 +33,7 @@ func (c *Cache) StartSchedule(ctx context.Context) error {
 		// Schedule the job
 		if _, err := c.scheduler.NewJob(jd, gocron.NewTask(func() {
 			c.refreshTorrents(ctx)
-		}), gocron.WithContext(ctx), gocron.WithTags("decypharr")); err != nil {
+		}), gocron.WithContext(ctx)); err != nil {
 			c.logger.Error().Err(err).Msg("Failed to create torrent refresh job")
 		} else {
 			c.logger.Debug().Msgf("Torrent refresh job scheduled for every %s", c.torrentRefreshInterval)
@@ -49,7 +49,7 @@ func (c *Cache) StartSchedule(ctx context.Context) error {
 		// Schedule the job
 		if _, err := c.cetScheduler.NewJob(jd, gocron.NewTask(func() {
 			c.resetInvalidLinks(ctx)
-		}), gocron.WithContext(ctx), gocron.WithTags("decypharr")); err != nil {
+		}), gocron.WithContext(ctx)); err != nil {
 			c.logger.Error().Err(err).Msg("Failed to create link reset job")
 		} else {
 			c.logger.Debug().Msgf("Link reset job scheduled for every midnight, CET")

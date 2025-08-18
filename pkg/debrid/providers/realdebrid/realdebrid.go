@@ -161,6 +161,23 @@ func (r *RealDebrid) getSelectedFiles(t *types.Torrent, data torrentInfo) (map[s
 	return files, nil
 }
 
+func (r *RealDebrid) handleRarFallback(t *types.Torrent, data torrentInfo) (map[string]types.File, error) {
+	files := make(map[string]types.File)
+	file := types.File{
+		TorrentId: t.Id,
+		Id:        "0",
+		Name:      t.Name + ".rar",
+		Size:      data.Bytes,
+		IsRar:     true,
+		ByteRange: nil,
+		Path:      t.Name + ".rar",
+		Link:      data.Links[0],
+		Generated: time.Now(),
+	}
+	files[file.Name] = file
+	return files, nil
+}
+
 // handleRarArchive processes RAR archives with multiple files
 func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, selectedFiles []types.File) (map[string]types.File, error) {
 	// This will block if 2 RAR operations are already in progress
@@ -172,21 +189,8 @@ func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, select
 	files := make(map[string]types.File)
 
 	if !r.UnpackRar {
-		r.logger.Debug().Msgf("RAR file detected, but unpacking is disabled: %s", t.Name)
-		// Create a single file representing the RAR archive
-		file := types.File{
-			TorrentId: t.Id,
-			Id:        "0",
-			Name:      t.Name + ".rar",
-			Size:      0,
-			IsRar:     true,
-			ByteRange: nil,
-			Path:      t.Name + ".rar",
-			Link:      data.Links[0],
-			Generated: time.Now(),
-		}
-		files[file.Name] = file
-		return files, nil
+		r.logger.Debug().Msgf("RAR file detected, but unpacking is disabled: %s. Falling back to single file representation.", t.Name)
+		return r.handleRarFallback(t, data)
 	}
 
 	r.logger.Info().Msgf("RAR file detected, unpacking: %s", t.Name)
@@ -194,20 +198,23 @@ func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, select
 	downloadLinkObj, err := r.GetDownloadLink(t, linkFile)
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to get download link for RAR file: %w", err)
+		r.logger.Debug().Err(err).Msgf("Error getting download link for RAR file: %s. Falling back to single file representation.", t.Name)
+		return r.handleRarFallback(t, data)
 	}
 
 	dlLink := downloadLinkObj.DownloadLink
 	reader, err := rar.NewReader(dlLink)
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to create RAR reader: %w", err)
+		r.logger.Debug().Err(err).Msgf("Error creating RAR reader for %s. Falling back to single file representation.", t.Name)
+		return r.handleRarFallback(t, data)
 	}
 
 	rarFiles, err := reader.GetFiles()
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to read RAR files: %w", err)
+		r.logger.Debug().Err(err).Msgf("Error reading RAR files for %s. Falling back to single file representation.", t.Name)
+		return r.handleRarFallback(t, data)
 	}
 
 	// Create lookup map for faster matching
@@ -232,7 +239,11 @@ func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, select
 			r.logger.Warn().Msgf("RAR file %s not found in torrent files", rarFile.Name())
 		}
 	}
-
+	if len(files) == 0 {
+		r.logger.Warn().Msgf("No valid files found in RAR archive for torrent: %s", t.Name)
+		return r.handleRarFallback(t, data)
+	}
+	r.logger.Info().Msgf("Unpacked RAR archive for torrent: %s with %d files", t.Name, len(files))
 	return files, nil
 }
 
@@ -700,7 +711,7 @@ func (r *RealDebrid) _getDownloadLink(file *types.File) (*types.DownloadLink, er
 
 func (r *RealDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types.DownloadLink, error) {
 
-	accounts := r.accounts.All()
+	accounts := r.accounts.Active()
 
 	for _, account := range accounts {
 		r.downloadClient.SetHeader("Authorization", fmt.Sprintf("Bearer %s", account.Token))
@@ -835,7 +846,7 @@ func (r *RealDebrid) GetDownloadLinks() (map[string]*types.DownloadLink, error) 
 	offset := 0
 	limit := 1000
 
-	accounts := r.accounts.All()
+	accounts := r.accounts.Active()
 
 	if len(accounts) < 1 {
 		// No active download keys. It's likely that the key has reached bandwidth limit
@@ -933,6 +944,7 @@ func (r *RealDebrid) GetProfile() (*types.Profile, error) {
 		return nil, err
 	}
 	profile := &types.Profile{
+		Name:       r.name,
 		Id:         data.Id,
 		Username:   data.Username,
 		Email:      data.Email,
@@ -961,4 +973,72 @@ func (r *RealDebrid) GetAvailableSlots() (int, error) {
 
 func (r *RealDebrid) Accounts() *types.Accounts {
 	return r.accounts
+}
+
+func (r *RealDebrid) SyncAccounts() error {
+	// Sync accounts with the current configuration
+	if len(r.accounts.Active()) == 0 {
+		return nil
+	}
+	for idx, account := range r.accounts.Active() {
+		if err := r.syncAccount(idx, account); err != nil {
+			r.logger.Error().Err(err).Msgf("Error syncing account %s", account.Username)
+			continue // Skip this account and continue with the next
+		}
+	}
+	return nil
+}
+
+func (r *RealDebrid) syncAccount(index int, account *types.Account) error {
+	if account.Token == "" {
+		return fmt.Errorf("account %s has no token", account.Username)
+	}
+	client := http.DefaultClient
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/user", r.Host), nil)
+	if err != nil {
+		return fmt.Errorf("error creating request for account %s: %w", account.Username, err)
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", account.Token))
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("error checking account %s: %w", account.Username, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return fmt.Errorf("account %s is not valid, status code: %d", account.Username, resp.StatusCode)
+	}
+	defer resp.Body.Close()
+	var profile profileResponse
+	if err := json.NewDecoder(resp.Body).Decode(&profile); err != nil {
+		return fmt.Errorf("error decoding profile for account %s: %w", account.Username, err)
+	}
+	account.Username = profile.Username
+
+	// Get traffic usage
+	trafficReq, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/traffic/details", r.Host), nil)
+	if err != nil {
+		return fmt.Errorf("error creating request for traffic details for account %s: %w", account.Username, err)
+	}
+	trafficReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", account.Token))
+	trafficResp, err := client.Do(trafficReq)
+	if err != nil {
+		return fmt.Errorf("error checking traffic for account %s: %w", account.Username, err)
+	}
+	if trafficResp.StatusCode != http.StatusOK {
+		trafficResp.Body.Close()
+		return fmt.Errorf("error checking traffic for account %s, status code: %d", account.Username, trafficResp.StatusCode)
+	}
+
+	defer trafficResp.Body.Close()
+	var trafficData TrafficResponse
+	if err := json.NewDecoder(trafficResp.Body).Decode(&trafficData); err != nil {
+		return fmt.Errorf("error decoding traffic details for account %s: %w", account.Username, err)
+	}
+	today := time.Now().Format(time.DateOnly)
+	if todayData, exists := trafficData[today]; exists {
+		account.TrafficUsed = todayData.Bytes
+	}
+
+	r.accounts.Update(index, account)
+	return nil
 }

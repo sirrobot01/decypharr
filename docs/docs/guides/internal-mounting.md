@@ -51,8 +51,12 @@ services:
       - /dev/fuse:/dev/fuse:rwm
     cap_add:
       - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
     environment:
       - UMASK=002
+      - PUID=1000  # Change to your user ID
+      - PGID=1000  # Change to your group ID
 ```
 
 **Important Docker Notes:**

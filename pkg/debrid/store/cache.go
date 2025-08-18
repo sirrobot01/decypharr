@@ -122,9 +122,13 @@ func NewDebridCache(dc config.Debrid, client types.Client, mounter *rclone.Mount
 	cetSc, err := gocron.NewScheduler(gocron.WithLocation(cet))
 	if err != nil {
 		// If we can't create a CET scheduler, fallback to local time
-		cetSc, _ = gocron.NewScheduler(gocron.WithLocation(time.Local))
+		cetSc, _ = gocron.NewScheduler(gocron.WithLocation(time.Local), gocron.WithGlobalJobOptions(
+			gocron.WithTags("decypharr-"+dc.Name)))
 	}
-	scheduler, err := gocron.NewScheduler(gocron.WithLocation(time.Local))
+	scheduler, err := gocron.NewScheduler(
+		gocron.WithLocation(time.Local),
+		gocron.WithGlobalJobOptions(
+			gocron.WithTags("decypharr-"+dc.Name)))
 	if err != nil {
 		// If we can't create a local scheduler, fallback to CET
 		scheduler = cetSc
@@ -254,11 +258,6 @@ func (c *Cache) Start(ctx context.Context) error {
 
 	// initial download links
 	go c.refreshDownloadLinks(ctx)
-
-	if err := c.StartSchedule(ctx); err != nil {
-		c.logger.Error().Err(err).Msg("Failed to start cache worker")
-	}
-
 	c.repairChan = make(chan RepairRequest, 100) // Initialize the repair channel, max 100 requests buffered
 	go c.repairWorker(ctx)
 
@@ -708,7 +707,7 @@ func (c *Cache) ProcessTorrent(t *types.Torrent) error {
 			Str("torrent_id", t.Id).
 			Str("torrent_name", t.Name).
 			Int("total_files", len(t.Files)).
-			Msg("Torrent still not complete after refresh")
+			Msg("Torrent still not complete after refresh, marking as bad")
 	} else {
 
 		addedOn, err := time.Parse(time.RFC3339, t.Added)

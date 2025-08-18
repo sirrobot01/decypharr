@@ -26,7 +26,7 @@ func GetLogPath() string {
 		}
 	}
 
-	return filepath.Join(logsDir, "decypharr.log")
+	return logsDir
 }
 
 func New(prefix string) zerolog.Logger {
@@ -34,7 +34,7 @@ func New(prefix string) zerolog.Logger {
 	level := config.Get().LogLevel
 
 	rotatingLogFile := &lumberjack.Logger{
-		Filename: GetLogPath(),
+		Filename: filepath.Join(GetLogPath(), "decypharr.log"),
 		MaxSize:  10,
 		MaxAge:   15,
 		Compress: true,

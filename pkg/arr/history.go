@@ -133,7 +133,7 @@ func (a *Arr) CleanupQueue() error {
 			messages := q.StatusMessages
 			if len(messages) > 0 {
 				for _, m := range messages {
-					if strings.Contains(strings.Join(m.Messages, " "), "No files found are eligible for import in") {
+					if strings.Contains(strings.Join(m.Messages, " "), "No files found are eligible") {
 						isMessedUp = true
 						break
 					}

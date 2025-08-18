@@ -40,10 +40,6 @@ type Torbox struct {
 	addSamples  bool
 }
 
-func (tb *Torbox) GetProfile() (*types.Profile, error) {
-	return nil, nil
-}
-
 func New(dc config.Debrid) (*Torbox, error) {
 	rl := request.ParseRateLimit(dc.RateLimit)
 
@@ -632,6 +628,14 @@ func (tb *Torbox) GetAvailableSlots() (int, error) {
 	return 0, fmt.Errorf("not implemented")
 }
 
+func (tb *Torbox) GetProfile() (*types.Profile, error) {
+	return nil, nil
+}
+
 func (tb *Torbox) Accounts() *types.Accounts {
 	return tb.accounts
+}
+
+func (tb *Torbox) SyncAccounts() error {
+	return nil
 }

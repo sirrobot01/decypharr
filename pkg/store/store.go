@@ -3,6 +3,7 @@ package store
 import (
 	"cmp"
 	"context"
+	"github.com/go-co-op/gocron/v2"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
@@ -26,6 +27,7 @@ type Store struct {
 	skipPreCache       bool
 	downloadSemaphore  chan struct{}
 	removeStalledAfter time.Duration // Duration after which stalled torrents are removed
+	scheduler          gocron.Scheduler
 }
 
 var (
@@ -49,6 +51,11 @@ func Get() *Store {
 		arrs := arr.NewStorage()
 		deb := debrid.NewStorage(rcManager)
 
+		scheduler, err := gocron.NewScheduler(gocron.WithLocation(time.Local), gocron.WithGlobalJobOptions(gocron.WithTags("decypharr-store")))
+		if err != nil {
+			scheduler, _ = gocron.NewScheduler(gocron.WithGlobalJobOptions(gocron.WithTags("decypharr-store")))
+		}
+
 		instance = &Store{
 			repair:            repair.New(arrs, deb),
 			arr:               arrs,
@@ -56,10 +63,11 @@ func Get() *Store {
 			rcloneManager:     rcManager,
 			torrents:          newTorrentStorage(cfg.TorrentsFile()),
 			logger:            logger.Default(), // Use default logger [decypharr]
-			refreshInterval:   time.Duration(cmp.Or(qbitCfg.RefreshInterval, 10)) * time.Minute,
+			refreshInterval:   time.Duration(cmp.Or(qbitCfg.RefreshInterval, 30)) * time.Second,
 			skipPreCache:      qbitCfg.SkipPreCache,
 			downloadSemaphore: make(chan struct{}, cmp.Or(qbitCfg.MaxDownloads, 5)),
 			importsQueue:      NewImportQueue(context.Background(), 1000),
+			scheduler:         scheduler,
 		}
 		if cfg.RemoveStalledAfter != "" {
 			removeStalledAfter, err := time.ParseDuration(cfg.RemoveStalledAfter)
@@ -88,6 +96,11 @@ func Reset() {
 			// Close the semaphore channel to
 			close(instance.downloadSemaphore)
 		}
+
+		if instance.scheduler != nil {
+			_ = instance.scheduler.StopJobs()
+			_ = instance.scheduler.Shutdown()
+		}
 	}
 	once = sync.Once{}
 	instance = nil
@@ -107,4 +120,8 @@ func (s *Store) Torrents() *TorrentStorage {
 }
 func (s *Store) RcloneManager() *rclone.Manager {
 	return s.rcloneManager
+}
+
+func (s *Store) Scheduler() gocron.Scheduler {
+	return s.scheduler
 }

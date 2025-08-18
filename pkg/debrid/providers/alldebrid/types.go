@@ -112,3 +112,22 @@ func (m *Magnets) UnmarshalJSON(data []byte) error {
 	}
 	return fmt.Errorf("magnets: unsupported JSON format")
 }
+
+type UserProfileResponse struct {
+	Status string         `json:"status"`
+	Error  *errorResponse `json:"error"`
+	Data   struct {
+		User struct {
+			Username             string         `json:"username"`
+			Email                string         `json:"email"`
+			IsPremium            bool           `json:"isPremium"`
+			IsSubscribed         bool           `json:"isSubscribed"`
+			IsTrial              bool           `json:"isTrial"`
+			PremiumUntil         int64          `json:"premiumUntil"`
+			Lang                 string         `json:"lang"`
+			FidelityPoints       int            `json:"fidelityPoints"`
+			LimitedHostersQuotas map[string]int `json:"limitedHostersQuotas"`
+			Notifications        []string       `json:"notifications"`
+		} `json:"user"`
+	} `json:"data"`
+}

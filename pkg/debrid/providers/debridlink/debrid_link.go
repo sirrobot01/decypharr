@@ -1,4 +1,4 @@
-package debrid_link
+package debridlink
 
 import (
 	"bytes"
@@ -30,6 +30,8 @@ type DebridLink struct {
 	logger      zerolog.Logger
 	checkCached bool
 	addSamples  bool
+
+	Profile *types.Profile `json:"profile,omitempty"`
 }
 
 func New(dc config.Debrid) (*DebridLink, error) {
@@ -64,10 +66,6 @@ func New(dc config.Debrid) (*DebridLink, error) {
 		checkCached:           dc.CheckCached,
 		addSamples:            dc.AddSamples,
 	}, nil
-}
-
-func (dl *DebridLink) GetProfile() (*types.Profile, error) {
-	return nil, nil
 }
 
 func (dl *DebridLink) Name() string {
@@ -476,6 +474,55 @@ func (dl *DebridLink) GetAvailableSlots() (int, error) {
 	return 0, fmt.Errorf("GetAvailableSlots not implemented for DebridLink")
 }
 
+func (dl *DebridLink) GetProfile() (*types.Profile, error) {
+	if dl.Profile != nil {
+		return dl.Profile, nil
+	}
+	url := fmt.Sprintf("%s/account/infos", dl.Host)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := dl.client.MakeRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	var res UserInfo
+	err = json.Unmarshal(resp, &res)
+	if err != nil {
+		dl.logger.Error().Err(err).Msgf("Error unmarshalling user info")
+		return nil, err
+	}
+	if !res.Success || res.Value == nil {
+		return nil, fmt.Errorf("error getting user info")
+	}
+	data := *res.Value
+	expiration := time.Unix(data.PremiumLeft, 0)
+	profile := &types.Profile{
+		Id:         1,
+		Username:   data.Username,
+		Name:       dl.name,
+		Email:      data.Email,
+		Points:     data.Points,
+		Premium:    data.PremiumLeft,
+		Expiration: expiration,
+	}
+	if expiration.IsZero() {
+		profile.Expiration = time.Now().AddDate(1, 0, 0) // Default to 1 year if no expiration
+	}
+	if data.PremiumLeft > 0 {
+		profile.Type = "premium"
+	} else {
+		profile.Type = "free"
+	}
+	dl.Profile = profile
+	return profile, nil
+}
+
 func (dl *DebridLink) Accounts() *types.Accounts {
 	return dl.accounts
+}
+
+func (dl *DebridLink) SyncAccounts() error {
+	return nil
 }

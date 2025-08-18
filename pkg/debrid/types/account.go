@@ -33,15 +33,17 @@ func NewAccounts(debridConf config.Debrid) *Accounts {
 }
 
 type Account struct {
-	Debrid   string // e.g., "realdebrid", "torbox", etc.
-	Order    int
-	Disabled bool
-	Token    string
-	links    map[string]*DownloadLink
-	mu       sync.RWMutex
+	Debrid      string // e.g., "realdebrid", "torbox", etc.
+	Order       int
+	Disabled    bool
+	Token       string `json:"token"`
+	links       map[string]*DownloadLink
+	mu          sync.RWMutex
+	TrafficUsed int64  `json:"traffic_used"` // Traffic used in bytes
+	Username    string `json:"username"`     // Username for the account
 }
 
-func (a *Accounts) All() []*Account {
+func (a *Accounts) Active() []*Account {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	activeAccounts := make([]*Account, 0)
@@ -51,6 +53,12 @@ func (a *Accounts) All() []*Account {
 		}
 	}
 	return activeAccounts
+}
+
+func (a *Accounts) All() []*Account {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.accounts
 }
 
 func (a *Accounts) Current() *Account {
@@ -177,6 +185,23 @@ func (a *Accounts) SetDownloadLinks(links map[string]*DownloadLink) {
 	a.Current().setLinks(links)
 }
 
+func (a *Accounts) Update(index int, account *Account) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if index < 0 || index >= len(a.accounts) {
+		return // Index out of bounds
+	}
+
+	// Update the account at the specified index
+	a.accounts[index] = account
+
+	// If the updated account is the current one, update the current reference
+	if a.current == nil || a.current.Order == index {
+		a.current = account
+	}
+}
+
 func newAccount(debridName, token string, index int) *Account {
 	return &Account{
 		Debrid: debridName,
@@ -213,7 +238,6 @@ func (a *Account) LinksCount() int {
 	defer a.mu.RUnlock()
 	return len(a.links)
 }
-
 func (a *Account) disable() {
 	a.Disabled = true
 }

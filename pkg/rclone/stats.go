@@ -76,7 +76,7 @@ func (m *Manager) GetStats() (*Stats, error) {
 	}
 	// Get bandwidth stats
 	bwStats, err := m.GetBandwidthStats()
-	if err == nil {
+	if err == nil && bwStats != nil {
 		stats.Bandwidth = *bwStats
 	} else {
 		fmt.Println("Failed to get rclone stats", err)

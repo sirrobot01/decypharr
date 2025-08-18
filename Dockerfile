@@ -42,8 +42,20 @@ LABEL org.opencontainers.image.authors = "sirrobot01"
 LABEL org.opencontainers.image.documentation = "https://github.com/sirrobot01/decypharr/blob/main/README.md"
 
 # Install dependencies including rclone
-RUN apk add --no-cache fuse3 ca-certificates su-exec shadow rclone && \
-    echo "user_allow_other" >> /etc/fuse.conf
+RUN apk add --no-cache fuse3 ca-certificates su-exec shadow curl unzip && \
+    echo "user_allow_other" >> /etc/fuse.conf && \
+    case "$(uname -m)" in \
+        x86_64) ARCH=amd64 ;; \
+        aarch64) ARCH=arm64 ;; \
+        armv7l) ARCH=arm ;; \
+        *) echo "Unsupported architecture: $(uname -m)" && exit 1 ;; \
+    esac && \
+    curl -O "https://downloads.rclone.org/rclone-current-linux-${ARCH}.zip" && \
+    unzip "rclone-current-linux-${ARCH}.zip" && \
+    cp rclone-*/rclone /usr/local/bin/ && \
+    chmod +x /usr/local/bin/rclone && \
+    rm -rf rclone-* && \
+    apk del curl unzip
 
 # Copy binaries and entrypoint
 COPY --from=builder /decypharr /usr/bin/decypharr

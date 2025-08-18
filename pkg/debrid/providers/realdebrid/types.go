@@ -144,11 +144,11 @@ type profileResponse struct {
 	Id         int64     `json:"id"`
 	Username   string    `json:"username"`
 	Email      string    `json:"email"`
-	Points     int64     `json:"points"`
+	Points     int       `json:"points"`
 	Locale     string    `json:"locale"`
 	Avatar     string    `json:"avatar"`
 	Type       string    `json:"type"`
-	Premium    int       `json:"premium"`
+	Premium    int64     `json:"premium"`
 	Expiration time.Time `json:"expiration"`
 }
 
@@ -156,3 +156,10 @@ type AvailableSlotsResponse struct {
 	ActiveSlots int `json:"nb"`
 	TotalSlots  int `json:"limit"`
 }
+
+type hostData struct {
+	Host  map[string]int64 `json:"host"`
+	Bytes int64            `json:"bytes"`
+}
+
+type TrafficResponse map[string]hostData

@@ -152,7 +152,7 @@ class ConfigManager {
             'enabled', 'mount_path', 'cache_dir', 'vfs_cache_mode', 'vfs_cache_max_size', 'vfs_cache_max_age',
             'vfs_cache_poll_interval', 'vfs_read_chunk_size', 'vfs_read_chunk_size_limit', 'buffer_size',
             'uid', 'gid', 'vfs_read_ahead', 'attr_timeout', 'dir_cache_time', 'poll_interval', 'umask',
-            'no_modtime', 'no_checksum'
+            'no_modtime', 'no_checksum', 'log_level'
         ];
 
         fields.forEach(field => {
@@ -246,7 +246,7 @@ class ConfigManager {
                             <select class="select select-bordered" name="debrid[${index}].name" id="debrid[${index}].name" required>
                                 <option value="realdebrid">Real Debrid</option>
                                 <option value="alldebrid">AllDebrid</option>
-                                <option value="debrid_link">Debrid Link</option>
+                                <option value="debridlink">Debrid Link</option>
                                 <option value="torbox">Torbox</option>
                             </select>
                         </div>
@@ -313,6 +313,19 @@ class ConfigManager {
                                 <span class="label-text-alt">API rate limit for this service</span>
                             </div>
                         </div>
+                        <div class="form-control">
+                              <label class="label" for="debrid[${index}].rclone_mount_path">
+                                  <span class="label-text font-medium">Custom Rclone Mount Path</span>
+                                  <span class="badge badge-ghost badge-sm">Optional</span>
+                              </label>
+                              <input type="text" class="input input-bordered" 
+                                     name="debrid[${index}].rclone_mount_path" id="debrid[${index}].rclone_mount_path" 
+                                     placeholder="/custom/mount/path (leave empty for global mount path)">
+                              <div class="label">
+                                  <span class="label-text-alt">Custom mount path for this debrid service. If empty, uses global rclone mount path.</span>
+                              </div>
+                          </div>
+
                         <div class="form-control">
                             <label class="label" for="debrid[${index}].proxy">
                                 <span class="label-text font-medium">Proxy</span>
@@ -531,11 +544,6 @@ class ConfigManager {
 
         if (toggle.checked || forceShow) {
             webdavSection.classList.remove('hidden');
-            // Add required attributes to key fields
-            webdavSection.querySelectorAll('input[name$=".torrents_refresh_interval"]').forEach(el => el.required = true);
-            webdavSection.querySelectorAll('input[name$=".download_links_refresh_interval"]').forEach(el => el.required = true);
-            webdavSection.querySelectorAll('input[name$=".auto_expire_links_after"]').forEach(el => el.required = true);
-            webdavSection.querySelectorAll('input[name$=".workers"]').forEach(el => el.required = true);
         } else {
             webdavSection.classList.add('hidden');
             // Remove required attributes
@@ -923,7 +931,7 @@ class ConfigManager {
                                 <option value="" selected>Auto-select</option>
                                 <option value="realdebrid">Real Debrid</option>
                                 <option value="alldebrid">AllDebrid</option>
-                                <option value="debrid_link">Debrid Link</option>
+                                <option value="debridlink">Debrid Link</option>
                                 <option value="torbox">Torbox</option>
                             </select>
                             <div class="label">
@@ -1094,6 +1102,7 @@ class ConfigManager {
                 api_key: document.querySelector(`[name="debrid[${i}].api_key"]`).value,
                 folder: document.querySelector(`[name="debrid[${i}].folder"]`).value,
                 rate_limit: document.querySelector(`[name="debrid[${i}].rate_limit"]`).value,
+                rclone_mount_path: document.querySelector(`[name="debrid[${i}].rclone_mount_path"]`).value,
                 proxy: document.querySelector(`[name="debrid[${i}].proxy"]`).value,
                 download_uncached: document.querySelector(`[name="debrid[${i}].download_uncached"]`).checked,
                 unpack_rar: document.querySelector(`[name="debrid[${i}].unpack_rar"]`).checked,
@@ -1239,6 +1248,7 @@ class ConfigManager {
             dir_cache_time: getElementValue('dir_cache_time', '5m'),
             no_modtime: getElementValue('no_modtime', false),
             no_checksum: getElementValue('no_checksum', false),
+            log_level: getElementValue('log_level', 'INFO'),
         };
     }
 

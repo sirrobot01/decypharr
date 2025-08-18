@@ -72,10 +72,16 @@
 
         <div class="card bg-base-100 shadow-xl" id="rclone-card">
             <div class="card-header p-6 pb-3">
-                <h2 class="card-title text-xl">
-                    <i class="bi bi-cloud-arrow-up text-primary"></i>
-                    Rclone Statistics
-                </h2>
+                <div class="card-title text-xl justify-between items-center">
+                    <h2>
+                        <i class="bi bi-cloud-arrow-up text-primary"></i>
+                        Rclone Statistics
+                    </h2>
+                    <a href="{{.URLBase}}debug/logs/rclone" class="btn btn-sm btn-outline" target="_blank">
+                        <i class="bi bi-arrow-right"></i>
+                        View Rclone Logs
+                    </a>
+                </div>
                 <div class="badge" id="rclone-status">Unknown</div>
             </div>
             <div class="card-body p-6 pt-3" id="rclone-content">
@@ -179,9 +185,9 @@
                         <div class="stat-desc">Total: ${cs.totalChecks || 0}</div>
                     </div>
                     <div class="stat">
-                        <div class="stat-title">Elapsed Time</div>
+                        <div class="stat-title">Uptime</div>
                         <div class="stat-value text-accent">${window.decypharrUtils.formatDuration(cs.elapsedTime)}</div>
-                        <div class="stat-desc">Transfer: ${window.decypharrUtils.formatDuration(cs.transferTime)}m</div>
+                        <div class="stat-desc">Transfer: ${window.decypharrUtils.formatDuration(cs.transferTime)}</div>
                     </div>
                 `;
             }
@@ -312,37 +318,96 @@
 
             let html = '<div class="space-y-4">';
             debrids.forEach(debrid => {
+                const profile = debrid.profile || {};
+                const library = debrid.library || {};
+                const accounts = debrid.accounts || [];
+                
                 html += `
                     <div class="card bg-base-200">
                         <div class="card-body p-4">
                             <div class="flex justify-between items-start">
                                 <div>
-                                    <h3 class="card-title text-lg">${debrid.name || 'Unknown Service'}</h3>
-                                    <p class="text-sm text-base-content/70">${debrid.username || 'No username'}</p>
+                                    <h3 class="card-title text-lg">${profile.name || 'Unknown Service'}</h3>
+                                    <p class="text-sm text-base-content/70">${profile.username || 'No username'}</p>
                                 </div>
                                 <div class="text-right">
-                                    <div class="text-sm font-mono">${debrid.points} points</div>
-                                    <div class="text-xs text-base-content/70">Expires: ${debrid.expiration || 'Unknown'}</div>
+                                    <div class="text-sm font-mono">${formatNumber(profile.points || 0)} points</div>
+                                    <div class="text-xs text-base-content/70">Type: ${profile.type || 'Unknown'}</div>
+                                    <div class="text-xs text-base-content/70">Expires: ${profile.expiration ? new Date(profile.expiration).toLocaleDateString() : 'Unknown'}</div>
                                 </div>
                             </div>
                             <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
                                 <div class="stat">
                                     <div class="stat-title text-xs">Library Size</div>
-                                    <div class="stat-value text-sm">${formatNumber(debrid.library_size || 0)}</div>
+                                    <div class="stat-value text-sm">${formatNumber(library.total || 0)}</div>
                                 </div>
                                 <div class="stat">
                                     <div class="stat-title text-xs">Bad Torrents</div>
-                                    <div class="stat-value text-sm text-error">${formatNumber(debrid.bad_torrents || 0)}</div>
+                                    <div class="stat-value text-sm text-error">${formatNumber(library.bad || 0)}</div>
                                 </div>
                                 <div class="stat">
                                     <div class="stat-title text-xs">Active Links</div>
-                                    <div class="stat-value text-sm text-success">${formatNumber(debrid.active_links || 0)}</div>
+                                    <div class="stat-value text-sm text-success">${formatNumber(library.active_links || 0)}</div>
                                 </div>
                                 <div class="stat">
-                                    <div class="stat-title text-xs">Type</div>
-                                    <div class="stat-value text-sm">${debrid.type || 'Unknown'}</div>
+                                    <div class="stat-title text-xs">Total Accounts</div>
+                                    <div class="stat-value text-sm text-info">${accounts.length}</div>
                                 </div>
                             </div>
+                `;
+                
+                // Add accounts section if there are accounts
+                if (accounts && accounts.length > 0) {
+                    html += `
+                        <div class="mt-6">
+                            <h4 class="text-lg font-semibold mb-3">
+                                <i class="bi bi-person-lines-fill text-primary"></i>
+                                Accounts
+                            </h4>
+                            <div class="grid grid-cols-2 md:grid-cols-2 gap-2">
+                    `;
+                    
+                    accounts.forEach((account, index) => {
+                        const statusBadge = account.disabled ? 
+                            '<span class="badge badge-error badge-sm">Disabled</span>' : 
+                            '<span class="badge badge-success badge-sm">Active</span>';
+                        
+                        html += `
+                            <div class="card bg-base-100 compact">
+                                <div class="card-body p-3">
+                                    <div class="flex justify-between items-start mb-2">
+                                        <div class="flex-1">
+                                            <div class="flex items-center gap-2">
+                                                <h5 class="font-medium text-sm">Account #${account.order + 1}</h5>
+                                                ${statusBadge}
+                                            </div>
+                                            <p class="text-xs text-base-content/70 mt-1">${account.username || 'No username'}</p>
+                                        </div>
+                                        <div class="text-right">
+                                            <div class="text-xs font-mono text-base-content/80">
+                                                Token: ${account.token_masked || '****'}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="grid grid-cols-2 md:grid-cols-2 gap-2">
+                                        <div class="stat bg-base-200 rounded p-2">
+                                            <div class="stat-title text-xs">Traffic Used</div>
+                                            <div class="stat-value text-xs">${window.decypharrUtils.formatBytes(account.traffic_used || 0)}</div>
+                                        </div>
+                                        <div class="stat bg-base-200 rounded p-2">
+                                            <div class="stat-title text-xs">Links Count</div>
+                                            <div class="stat-value text-xs">${formatNumber(account.links_count || 0)}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    html += '</div></div>';
+                }
+                
+                html += `
                         </div>
                     </div>
                 `;

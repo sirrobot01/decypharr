@@ -25,16 +25,13 @@ type AllDebrid struct {
 	autoExpiresLinksAfter time.Duration
 	DownloadUncached      bool
 	client                *request.Client
+	Profile               *types.Profile `json:"profile"`
 
 	MountPath       string
 	logger          zerolog.Logger
 	checkCached     bool
 	addSamples      bool
 	minimumFreeSlot int
-}
-
-func (ad *AllDebrid) GetProfile() (*types.Profile, error) {
-	return nil, nil
 }
 
 func New(dc config.Debrid) (*AllDebrid, error) {
@@ -449,6 +446,58 @@ func (ad *AllDebrid) GetAvailableSlots() (int, error) {
 	return 0, fmt.Errorf("GetAvailableSlots not implemented for AllDebrid")
 }
 
+func (ad *AllDebrid) GetProfile() (*types.Profile, error) {
+	if ad.Profile != nil {
+		return ad.Profile, nil
+	}
+	url := fmt.Sprintf("%s/user", ad.Host)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := ad.client.MakeRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	var res UserProfileResponse
+	err = json.Unmarshal(resp, &res)
+	if err != nil {
+		ad.logger.Error().Err(err).Msgf("Error unmarshalling user profile")
+		return nil, err
+	}
+	if res.Status != "success" {
+		message := "unknown error"
+		if res.Error != nil {
+			message = res.Error.Message
+		}
+		return nil, fmt.Errorf("error getting user profile: %s", message)
+	}
+	userData := res.Data.User
+	expiration := time.Unix(userData.PremiumUntil, 0)
+	profile := &types.Profile{
+		Id:         1,
+		Name:       ad.name,
+		Username:   userData.Username,
+		Email:      userData.Email,
+		Points:     userData.FidelityPoints,
+		Premium:    userData.PremiumUntil,
+		Expiration: expiration,
+	}
+	if userData.IsPremium {
+		profile.Type = "premium"
+	} else if userData.IsTrial {
+		profile.Type = "trial"
+	} else {
+		profile.Type = "free"
+	}
+	ad.Profile = profile
+	return profile, nil
+}
+
 func (ad *AllDebrid) Accounts() *types.Accounts {
 	return ad.accounts
+}
+
+func (ad *AllDebrid) SyncAccounts() error {
+	return nil
 }

@@ -71,7 +71,7 @@ func (m *Manager) RecoverMount(provider string) error {
 	}
 
 	// Wait a moment
-	time.Sleep(2 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	// Try to remount
 	if err := m.Mount(provider, mountInfo.WebDAVURL); err != nil {

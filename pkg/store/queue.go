@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"fmt"
+	"github.com/go-co-op/gocron/v2"
+	"github.com/sirrobot01/decypharr/internal/utils"
 	"time"
 )
 
@@ -25,58 +27,51 @@ func (s *Store) addToQueue(importReq *ImportRequest) error {
 	return nil
 }
 
-func (s *Store) StartQueueSchedule(ctx context.Context) error {
-	// Start the slots processing in a separate goroutine
-	go func() {
-		if err := s.processSlotsQueue(ctx); err != nil {
-			s.logger.Error().Err(err).Msg("Error processing slots queue")
-		}
-	}()
+func (s *Store) StartQueueWorkers(ctx context.Context) error {
+	// This function is responsible for starting the scheduled tasks
 
-	// Start the remove stalled torrents processing in a separate goroutine
-	go func() {
-		if err := s.processRemoveStalledTorrents(ctx); err != nil {
-			s.logger.Error().Err(err).Msg("Error processing remove stalled torrents")
-		}
-	}()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
-	return nil
-}
+	s.scheduler.RemoveByTags("decypharr-store")
 
-func (s *Store) processSlotsQueue(ctx context.Context) error {
-	s.trackAvailableSlots(ctx) // Initial tracking of available slots
-
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
+	if jd, err := utils.ConvertToJobDef("30s"); err != nil {
+		s.logger.Error().Err(err).Msg("Failed to convert slots tracking interval to job definition")
+	} else {
+		// Schedule the job
+		if _, err := s.scheduler.NewJob(jd, gocron.NewTask(func() {
 			s.trackAvailableSlots(ctx)
+		}), gocron.WithContext(ctx)); err != nil {
+			s.logger.Error().Err(err).Msg("Failed to create slots tracking job")
+		} else {
+			s.logger.Trace().Msgf("Download link refresh job scheduled for every %s", "30s")
 		}
 	}
-}
 
-func (s *Store) processRemoveStalledTorrents(ctx context.Context) error {
-	if s.removeStalledAfter <= 0 {
-		return nil // No need to remove stalled torrents if the duration is not set
-	}
-
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-			if err := s.removeStalledTorrents(ctx); err != nil {
-				s.logger.Error().Err(err).Msg("Error removing stalled torrents")
+	if s.removeStalledAfter > 0 {
+		// Stalled torrents removal job
+		if jd, err := utils.ConvertToJobDef("1m"); err != nil {
+			s.logger.Error().Err(err).Msg("Failed to convert remove stalled torrents interval to job definition")
+		} else {
+			// Schedule the job
+			if _, err := s.scheduler.NewJob(jd, gocron.NewTask(func() {
+				err := s.removeStalledTorrents(ctx)
+				if err != nil {
+					s.logger.Error().Err(err).Msg("Failed to process remove stalled torrents")
+				}
+			}), gocron.WithContext(ctx)); err != nil {
+				s.logger.Error().Err(err).Msg("Failed to create remove stalled torrents job")
+			} else {
+				s.logger.Trace().Msgf("Remove stalled torrents job scheduled for every %s", "1m")
 			}
 		}
 	}
+
+	// Start the scheduler
+	s.scheduler.Start()
+	s.logger.Debug().Msg("Store worker started")
+	return nil
 }
 
 func (s *Store) trackAvailableSlots(ctx context.Context) {
