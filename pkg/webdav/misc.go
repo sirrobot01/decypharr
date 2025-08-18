@@ -55,39 +55,29 @@ type entry struct {
 }
 
 func filesToXML(urlPath string, fi os.FileInfo, children []os.FileInfo) stringbuf.StringBuf {
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	entries := make([]entry, 0, len(children)+1)
 
-	// Current directory - use relative paths
-	var currentHref, currentName string
-	if urlPath == "/webdav" {
-		currentHref = "" // Root has empty href
-		currentName = "" // Root has empty displayname
-	} else {
-		// For other paths, this shouldn't be called, but handle gracefully
-		currentName = path.Base(urlPath)
-		currentHref = currentName + "/"
-	}
-
-	// Add the current directory
+	// Add the current file itself
 	entries = append(entries, entry{
-		escHref: xmlEscape(fastEscapePath(currentHref)),
-		escName: xmlEscape(currentName),
+		escHref: xmlEscape(fastEscapePath(urlPath)),
+		escName: xmlEscape(fi.Name()),
 		isDir:   fi.IsDir(),
 		size:    fi.Size(),
 		modTime: fi.ModTime().Format(time.RFC3339),
 	})
-
-	// Add children - just use the name
 	for _, info := range children {
+
 		nm := info.Name()
-		childHref := nm
+		// build raw href
+		href := path.Join("/", urlPath, nm)
 		if info.IsDir() {
-			childHref += "/"
+			href += "/"
 		}
 
 		entries = append(entries, entry{
-			escHref: xmlEscape(fastEscapePath(childHref)),
+			escHref: xmlEscape(fastEscapePath(href)),
 			escName: xmlEscape(nm),
 			isDir:   info.IsDir(),
 			size:    info.Size(),
@@ -95,11 +85,13 @@ func filesToXML(urlPath string, fi os.FileInfo, children []os.FileInfo) stringbu
 		})
 	}
 
-	// ... rest of XML generation stays the same ...
 	sb := stringbuf.New("")
+
+	// XML header and main element
 	_, _ = sb.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
 	_, _ = sb.WriteString(`<d:multistatus xmlns:d="DAV:">`)
 
+	// Add responses for each entry
 	for _, e := range entries {
 		_, _ = sb.WriteString(`<d:response>`)
 		_, _ = sb.WriteString(`<d:href>`)
@@ -120,15 +112,18 @@ func filesToXML(urlPath string, fi os.FileInfo, children []os.FileInfo) stringbu
 		_, _ = sb.WriteString(`<d:getlastmodified>`)
 		_, _ = sb.WriteString(now)
 		_, _ = sb.WriteString(`</d:getlastmodified>`)
+
 		_, _ = sb.WriteString(`<d:displayname>`)
 		_, _ = sb.WriteString(e.escName)
 		_, _ = sb.WriteString(`</d:displayname>`)
+
 		_, _ = sb.WriteString(`</d:prop>`)
 		_, _ = sb.WriteString(`<d:status>HTTP/1.1 200 OK</d:status>`)
 		_, _ = sb.WriteString(`</d:propstat>`)
 		_, _ = sb.WriteString(`</d:response>`)
 	}
 
+	// Close root element
 	_, _ = sb.WriteString(`</d:multistatus>`)
 	return sb
 }

@@ -27,7 +27,7 @@ func (h *Handler) handlePropfind(w http.ResponseWriter, r *http.Request) {
 
 	// Build the list of entries
 	type entry struct {
-		escHref string
+		escHref string // already XML-safe + percent-escaped
 		escName string
 		size    int64
 		isDir   bool
@@ -56,42 +56,25 @@ func (h *Handler) handlePropfind(w http.ResponseWriter, r *http.Request) {
 	}
 
 	entries := make([]entry, 0, len(rawEntries)+1)
-
-	// Current directory name
-	var currentDirName string
-	if cleanPath == "/" {
-		currentDirName = h.Name
-	} else {
-		currentDirName = path.Base(cleanPath)
-	}
-
-	// Current directory href - simple logic
-	var currentHref string
-	if cleanPath == "/" {
-		currentHref = "" // Root is empty
-	} else {
-		currentHref = currentDirName + "/" // Subdirs are just "dirname/"
-	}
-
-	// Add current directory
+	// Add the current file itself
 	entries = append(entries, entry{
-		escHref: xmlEscape(fastEscapePath(currentHref)),
-		escName: xmlEscape(currentDirName),
+		escHref: xmlEscape(fastEscapePath(cleanPath)),
+		escName: xmlEscape(fi.Name()),
 		isDir:   fi.IsDir(),
 		size:    fi.Size(),
 		modTime: fi.ModTime().Format(time.RFC3339),
 	})
-
-	// Add children - always just the name
 	for _, info := range rawEntries {
+
 		nm := info.Name()
-		childHref := nm
+		// build raw href
+		href := path.Join("/", cleanPath, nm)
 		if info.IsDir() {
-			childHref += "/"
+			href += "/"
 		}
 
 		entries = append(entries, entry{
-			escHref: xmlEscape(fastEscapePath(childHref)),
+			escHref: xmlEscape(fastEscapePath(href)),
 			escName: xmlEscape(nm),
 			isDir:   info.IsDir(),
 			size:    info.Size(),
@@ -99,17 +82,20 @@ func (h *Handler) handlePropfind(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Generate XML
 	sb := stringbuf.New("")
+
+	// XML header and main element
 	_, _ = sb.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
 	_, _ = sb.WriteString(`<d:multistatus xmlns:d="DAV:">`)
 
+	// Add responses for each entry
 	for _, e := range entries {
 		_, _ = sb.WriteString(`<d:response>`)
 		_, _ = sb.WriteString(`<d:href>`)
 		_, _ = sb.WriteString(e.escHref)
 		_, _ = sb.WriteString(`</d:href>`)
-		_, _ = sb.WriteString(`<d:propstat><d:prop>`)
+		_, _ = sb.WriteString(`<d:propstat>`)
+		_, _ = sb.WriteString(`<d:prop>`)
 
 		if e.isDir {
 			_, _ = sb.WriteString(`<d:resourcetype><d:collection/></d:resourcetype>`)
@@ -123,22 +109,30 @@ func (h *Handler) handlePropfind(w http.ResponseWriter, r *http.Request) {
 		_, _ = sb.WriteString(`<d:getlastmodified>`)
 		_, _ = sb.WriteString(e.modTime)
 		_, _ = sb.WriteString(`</d:getlastmodified>`)
+
 		_, _ = sb.WriteString(`<d:displayname>`)
 		_, _ = sb.WriteString(e.escName)
 		_, _ = sb.WriteString(`</d:displayname>`)
+
 		_, _ = sb.WriteString(`</d:prop>`)
 		_, _ = sb.WriteString(`<d:status>HTTP/1.1 200 OK</d:status>`)
-		_, _ = sb.WriteString(`</d:propstat></d:response>`)
+		_, _ = sb.WriteString(`</d:propstat>`)
+		_, _ = sb.WriteString(`</d:response>`)
 	}
 
+	// Close root element
 	_, _ = sb.WriteString(`</d:multistatus>`)
 
+	// Set headers
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.Header().Set("Vary", "Accept-Encoding")
-	w.WriteHeader(http.StatusMultiStatus)
+
+	// Set status code and write response
+	w.WriteHeader(http.StatusMultiStatus) // 207 MultiStatus
 	_, _ = w.Write(sb.Bytes())
 }
 
+// Basic XML escaping function
 func xmlEscape(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))

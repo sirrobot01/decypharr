@@ -45,7 +45,7 @@ func (m *Manager) checkMountHealth(provider string) bool {
 		Command: "operations/list",
 		Args: map[string]interface{}{
 			"fs":     fmt.Sprintf("%s:", provider),
-			"remote": "/",
+			"remote": "",
 		},
 	}
 
