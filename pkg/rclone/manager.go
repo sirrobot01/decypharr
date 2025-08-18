@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -98,23 +99,30 @@ func (m *Manager) Start(ctx context.Context) error {
 		return nil
 	}
 
-	logFile := filepath.Join(logger.GetLogPath(), "rclone.log")
-
-	// Delete old log file if it exists
-	if _, err := os.Stat(logFile); err == nil {
-		if err := os.Remove(logFile); err != nil {
-			return fmt.Errorf("failed to remove old rclone log file: %w", err)
-		}
-	}
-
 	args := []string{
 		"rcd",
 		"--rc-addr", ":" + m.rcPort,
 		"--rc-no-auth", // We'll handle auth at the application level
 		"--config", filepath.Join(m.rcloneDir, "rclone.conf"),
-		"--log-level", cfg.Rclone.LogLevel,
-		"--log-file", logFile,
 	}
+
+	logLevel := cfg.Rclone.LogLevel
+	if logLevel != "" {
+		if !slices.Contains([]string{"DEBUG", "INFO", "NOTICE", "ERROR"}, logLevel) {
+			logLevel = "INFO"
+		}
+		args = append(args, "--log-level", logLevel)
+	}
+
+	logFile := filepath.Join(logger.GetLogPath(), "rclone.log")
+
+	// Delete old log file if it exists
+	if fileInfo, err := os.Stat(logFile); err == nil && !fileInfo.IsDir() {
+		_ = os.Remove(logFile) // Ignore error, we just want to delete the old log
+		// Set log file
+		args = append(args, "--log-file", logFile)
+	}
+
 	if cfg.Rclone.CacheDir != "" {
 		if err := os.MkdirAll(cfg.Rclone.CacheDir, 0755); err == nil {
 			args = append(args, "--cache-dir", cfg.Rclone.CacheDir)
@@ -170,9 +178,12 @@ func (m *Manager) Start(ctx context.Context) error {
 		default:
 			if code, ok := ExitCode(err); ok {
 				m.logger.Debug().Int("exit_code", code).Err(err).
+					Str("stderr", stderr.String()).
+					Str("stdout", stdout.String()).
 					Msg("Rclone RC server error")
 			} else {
-				m.logger.Debug().Err(err).Msg("Rclone RC server error (no exit code)")
+				m.logger.Debug().Err(err).Str("stderr", stderr.String()).
+					Str("stdout", stdout.String()).Msg("Rclone RC server error (no exit code)")
 			}
 		}
 	}()
