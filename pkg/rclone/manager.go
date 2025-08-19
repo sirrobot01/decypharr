@@ -99,11 +99,21 @@ func (m *Manager) Start(ctx context.Context) error {
 		return nil
 	}
 
+	logFile := filepath.Join(logger.GetLogPath(), "rclone.log")
+
+	// Delete old log file if it exists
+	if _, err := os.Stat(logFile); err == nil {
+		if err := os.Remove(logFile); err != nil {
+			return fmt.Errorf("failed to remove old rclone log file: %w", err)
+		}
+	}
+
 	args := []string{
 		"rcd",
 		"--rc-addr", ":" + m.rcPort,
 		"--rc-no-auth", // We'll handle auth at the application level
 		"--config", filepath.Join(m.rcloneDir, "rclone.conf"),
+		"--log-file", logFile,
 	}
 
 	logLevel := cfg.Rclone.LogLevel
@@ -112,15 +122,6 @@ func (m *Manager) Start(ctx context.Context) error {
 			logLevel = "INFO"
 		}
 		args = append(args, "--log-level", logLevel)
-	}
-
-	logFile := filepath.Join(logger.GetLogPath(), "rclone.log")
-
-	// Delete old log file if it exists
-	if fileInfo, err := os.Stat(logFile); err == nil && !fileInfo.IsDir() {
-		_ = os.Remove(logFile) // Ignore error, we just want to delete the old log
-		// Set log file
-		args = append(args, "--log-file", logFile)
 	}
 
 	if cfg.Rclone.CacheDir != "" {
