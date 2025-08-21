@@ -534,7 +534,7 @@ func (c *Cache) setTorrent(t CachedTorrent, callback func(torrent CachedTorrent)
 		mergedFiles := mergeFiles(o, updatedTorrent) // Useful for merging files across multiple torrents, while keeping the most recent
 		updatedTorrent.Files = mergedFiles
 	}
-	c.torrents.set(torrentName, t, updatedTorrent)
+	c.torrents.set(torrentName, t)
 	go c.SaveTorrent(t)
 	if callback != nil {
 		go callback(updatedTorrent)
@@ -550,7 +550,7 @@ func (c *Cache) setTorrents(torrents map[string]CachedTorrent, callback func()) 
 			mergedFiles := mergeFiles(o, updatedTorrent)
 			updatedTorrent.Files = mergedFiles
 		}
-		c.torrents.set(torrentName, t, updatedTorrent)
+		c.torrents.set(torrentName, t)
 	}
 	c.SaveTorrents()
 	if callback != nil {

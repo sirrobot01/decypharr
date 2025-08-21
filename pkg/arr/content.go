@@ -234,6 +234,35 @@ func (a *Arr) searchRadarr(files []ContentFile) error {
 }
 
 func (a *Arr) SearchMissing(files []ContentFile) error {
+	if len(files) == 0 {
+		return nil
+	}
+	return a.batchSearchMissing(files)
+}
+
+func (a *Arr) batchSearchMissing(files []ContentFile) error {
+	if len(files) == 0 {
+		return nil
+	}
+	BatchSize := 50
+	// Batch search for missing files
+	if len(files) > BatchSize {
+		for i := 0; i < len(files); i += BatchSize {
+			end := i + BatchSize
+			if end > len(files) {
+				end = len(files)
+			}
+			if err := a.searchMissing(files[i:end]); err != nil {
+				// continue searching the rest of the files
+				continue
+			}
+		}
+		return nil
+	}
+	return a.searchMissing(files)
+}
+
+func (a *Arr) searchMissing(files []ContentFile) error {
 	switch a.Type {
 	case Sonarr:
 		return a.searchSonarr(files)
@@ -245,6 +274,28 @@ func (a *Arr) SearchMissing(files []ContentFile) error {
 }
 
 func (a *Arr) DeleteFiles(files []ContentFile) error {
+	if len(files) == 0 {
+		return nil
+	}
+	BatchSize := 50
+	// Batch delete files
+	if len(files) > BatchSize {
+		for i := 0; i < len(files); i += BatchSize {
+			end := i + BatchSize
+			if end > len(files) {
+				end = len(files)
+			}
+			if err := a.batchDeleteFiles(files[i:end]); err != nil {
+				// continue deleting the rest of the files
+				continue
+			}
+		}
+		return nil
+	}
+	return a.batchDeleteFiles(files)
+}
+
+func (a *Arr) batchDeleteFiles(files []ContentFile) error {
 	ids := make([]int, 0)
 	for _, f := range files {
 		ids = append(ids, f.FileId)
