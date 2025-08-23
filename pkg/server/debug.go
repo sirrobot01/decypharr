@@ -5,14 +5,14 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/sirrobot01/decypharr/internal/request"
 	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"github.com/sirrobot01/decypharr/pkg/store"
+	"github.com/sirrobot01/decypharr/pkg/wire"
 	"net/http"
 	"runtime"
 )
 
 func (s *Server) handleIngests(w http.ResponseWriter, r *http.Request) {
 	ingests := make([]debridTypes.IngestData, 0)
-	_store := store.Get()
+	_store := wire.Get()
 	debrids := _store.Debrid()
 	if debrids == nil {
 		http.Error(w, "Debrid service is not enabled", http.StatusInternalServerError)
@@ -42,7 +42,7 @@ func (s *Server) handleIngestsByDebrid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_store := store.Get()
+	_store := wire.Get()
 	debrids := _store.Debrid()
 
 	if debrids == nil {
@@ -92,7 +92,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		"go_version": runtime.Version(),
 	}
 
-	debrids := store.Get().Debrid()
+	debrids := wire.Get().Debrid()
 	if debrids == nil {
 		request.JSONResponse(w, stats, http.StatusOK)
 		return
@@ -121,7 +121,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 
 		}
 		debridStat.Library = libraryStat
-		
+
 		// Get detailed account information
 		accounts := client.Accounts().All()
 		accountDetails := make([]map[string]any, 0)
@@ -135,7 +135,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 			} else {
 				maskedToken = "****"
 			}
-			
+
 			accountDetail := map[string]any{
 				"order":        account.Order,
 				"disabled":     account.Disabled,
@@ -153,7 +153,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	stats["debrids"] = debridStats
 
 	// Add rclone stats if available
-	if rcManager := store.Get().RcloneManager(); rcManager != nil && rcManager.IsReady() {
+	if rcManager := wire.Get().RcloneManager(); rcManager != nil && rcManager.IsReady() {
 		rcStats, err := rcManager.GetStats()
 		if err != nil {
 			s.logger.Error().Err(err).Msg("Failed to get rclone stats")

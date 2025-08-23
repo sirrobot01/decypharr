@@ -4,7 +4,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/pkg/store"
+	"github.com/sirrobot01/decypharr/pkg/wire"
 )
 
 type QBit struct {
@@ -12,7 +12,7 @@ type QBit struct {
 	Password       string
 	DownloadFolder string
 	Categories     []string
-	storage        *store.TorrentStorage
+	storage        *wire.TorrentStorage
 	logger         zerolog.Logger
 	Tags           []string
 }
@@ -25,7 +25,7 @@ func New() *QBit {
 		Password:       cfg.Password,
 		DownloadFolder: cfg.DownloadFolder,
 		Categories:     cfg.Categories,
-		storage:        store.Get().Torrents(),
+		storage:        wire.Get().Torrents(),
 		logger:         logger.New("qbit"),
 	}
 }

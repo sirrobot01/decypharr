@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -261,48 +263,33 @@ func (m *Manager) Stop() error {
 		case err := <-done:
 			if err != nil && !errors.Is(err, context.Canceled) && !WasHardTerminated(err) {
 				m.logger.Warn().Err(err).Msg("Rclone process exited with error")
+			} else {
+				m.logger.Info().Msg("Rclone process exited gracefully")
 			}
-		case <-time.After(10 * time.Second):
+		case <-time.After(2 * time.Second):
 			m.logger.Warn().Msg("Timeout waiting for rclone to exit, force killing")
 			if err := m.cmd.Process.Kill(); err != nil {
-				m.logger.Error().Err(err).Msg("Failed to force kill rclone process")
-				return err
+				// Check if the process already finished
+				if !strings.Contains(err.Error(), "process already finished") {
+					m.logger.Error().Err(err).Msg("Failed to force kill rclone process")
+					return err
+				}
+				m.logger.Info().Msg("Process already finished during kill attempt")
 			}
-			// Wait a bit more for the kill to take effect
+
+			// Still wait for the Wait() to complete to clean up the process
 			select {
 			case <-done:
-				m.logger.Info().Msg("Rclone process killed successfully")
+				m.logger.Info().Msg("Rclone process cleanup completed")
 			case <-time.After(5 * time.Second):
-				m.logger.Error().Msg("Process may still be running after kill")
+				m.logger.Error().Msg("Process cleanup timeout")
 			}
 		}
-	}
-
-	// Clean up any remaining mount directories
-	cfg := config.Get()
-	if cfg.Rclone.MountPath != "" {
-		m.cleanupMountDirectories(cfg.Rclone.MountPath)
 	}
 
 	m.serverStarted = false
 	m.logger.Info().Msg("Rclone RC server stopped")
 	return nil
-}
-
-// cleanupMountDirectories removes empty mount directories
-func (m *Manager) cleanupMountDirectories(_ string) {
-	m.mountsMutex.RLock()
-	defer m.mountsMutex.RUnlock()
-
-	for _, mount := range m.mounts {
-		if mount.LocalPath != "" {
-			// Try to remove the directory if it's empty
-			if err := os.Remove(mount.LocalPath); err == nil {
-				m.logger.Debug().Str("path", mount.LocalPath).Msg("Removed empty mount directory")
-			}
-			// Don't log errors here as the directory might not be empty, which is fine
-		}
-	}
 }
 
 // waitForServer waits for the RC server to become available
@@ -352,7 +339,12 @@ func (m *Manager) makeRequest(req RCRequest, close bool) (*http.Response, error)
 
 	if resp.StatusCode != http.StatusOK {
 		// Read the response body to get more details
-		defer resp.Body.Close()
+		defer func(Body io.ReadCloser) {
+			err := Body.Close()
+			if err != nil {
+				m.logger.Debug().Err(err).Msg("Failed to close response body")
+			}
+		}(resp.Body)
 		var errorResp RCResponse
 		if err := json.NewDecoder(resp.Body).Decode(&errorResp); err != nil {
 			return nil, fmt.Errorf("request failed with status %s, but could not decode error response: %w", resp.Status, err)

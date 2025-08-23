@@ -7,7 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/pkg/store"
+	"github.com/sirrobot01/decypharr/pkg/wire"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -97,7 +97,7 @@ func New() *WebDav {
 		Handlers: make([]*Handler, 0),
 		URLBase:  urlBase,
 	}
-	for name, c := range store.Get().Debrid().Caches() {
+	for name, c := range wire.Get().Debrid().Caches() {
 		h := NewHandler(name, urlBase, c, c.Logger())
 		w.Handlers = append(w.Handlers, h)
 	}

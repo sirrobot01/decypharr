@@ -2,7 +2,7 @@ package web
 
 import (
 	"fmt"
-	"github.com/sirrobot01/decypharr/pkg/store"
+	"github.com/sirrobot01/decypharr/pkg/wire"
 	"golang.org/x/crypto/bcrypt"
 	"net/http"
 	"strings"
@@ -18,7 +18,7 @@ import (
 )
 
 func (wb *Web) handleGetArrs(w http.ResponseWriter, r *http.Request) {
-	_store := store.Get()
+	_store := wire.Get()
 	request.JSONResponse(w, _store.Arr().GetAll(), http.StatusOK)
 }
 
@@ -28,9 +28,9 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	_store := store.Get()
+	_store := wire.Get()
 
-	results := make([]*store.ImportRequest, 0)
+	results := make([]*wire.ImportRequest, 0)
 	errs := make([]string, 0)
 
 	arrName := r.FormValue("arr")
@@ -66,7 +66,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			importReq := store.NewImportRequest(debridName, downloadFolder, magnet, _arr, action, downloadUncached, callbackUrl, store.ImportTypeAPI)
+			importReq := wire.NewImportRequest(debridName, downloadFolder, magnet, _arr, action, downloadUncached, callbackUrl, wire.ImportTypeAPI)
 			if err := _store.AddTorrent(ctx, importReq); err != nil {
 				wb.logger.Error().Err(err).Str("url", url).Msg("Failed to add torrent")
 				errs = append(errs, fmt.Sprintf("URL %s: %v", url, err))
@@ -91,7 +91,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			importReq := store.NewImportRequest(debridName, downloadFolder, magnet, _arr, action, downloadUncached, callbackUrl, store.ImportTypeAPI)
+			importReq := wire.NewImportRequest(debridName, downloadFolder, magnet, _arr, action, downloadUncached, callbackUrl, wire.ImportTypeAPI)
 			err = _store.AddTorrent(ctx, importReq)
 			if err != nil {
 				wb.logger.Error().Err(err).Str("file", fileHeader.Filename).Msg("Failed to add torrent")
@@ -103,8 +103,8 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	request.JSONResponse(w, struct {
-		Results []*store.ImportRequest `json:"results"`
-		Errors  []string               `json:"errors,omitempty"`
+		Results []*wire.ImportRequest `json:"results"`
+		Errors  []string              `json:"errors,omitempty"`
 	}{
 		Results: results,
 		Errors:  errs,
@@ -118,7 +118,7 @@ func (wb *Web) handleRepairMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_store := store.Get()
+	_store := wire.Get()
 
 	var arrs []string
 
@@ -186,7 +186,7 @@ func (wb *Web) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	// Merge config arrs, with arr Storage
 	unique := map[string]config.Arr{}
 	cfg := config.Get()
-	arrStorage := store.Get().Arr()
+	arrStorage := wire.Get().Arr()
 
 	// Add existing Arrs from storage
 	for _, a := range arrStorage.GetAll() {
@@ -276,7 +276,7 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update Arrs through the service
-	storage := store.Get()
+	storage := wire.Get()
 	arrStorage := storage.Arr()
 
 	newConfigArrs := make([]config.Arr, 0)
@@ -330,7 +330,7 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (wb *Web) handleGetRepairJobs(w http.ResponseWriter, r *http.Request) {
-	_store := store.Get()
+	_store := wire.Get()
 	request.JSONResponse(w, _store.Repair().GetJobs(), http.StatusOK)
 }
 
@@ -340,7 +340,7 @@ func (wb *Web) handleProcessRepairJob(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "No job ID provided", http.StatusBadRequest)
 		return
 	}
-	_store := store.Get()
+	_store := wire.Get()
 	if err := _store.Repair().ProcessJob(id); err != nil {
 		wb.logger.Error().Err(err).Msg("Failed to process repair job")
 	}
@@ -361,7 +361,7 @@ func (wb *Web) handleDeleteRepairJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_store := store.Get()
+	_store := wire.Get()
 	_store.Repair().DeleteJobs(req.IDs)
 	w.WriteHeader(http.StatusOK)
 }
@@ -372,7 +372,7 @@ func (wb *Web) handleStopRepairJob(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "No job ID provided", http.StatusBadRequest)
 		return
 	}
-	_store := store.Get()
+	_store := wire.Get()
 	if err := _store.Repair().StopJob(id); err != nil {
 		wb.logger.Error().Err(err).Msg("Failed to stop repair job")
 		http.Error(w, "Failed to stop job: "+err.Error(), http.StatusInternalServerError)

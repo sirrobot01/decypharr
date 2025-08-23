@@ -1,4 +1,4 @@
-package store
+package wire
 
 import (
 	"fmt"
@@ -310,7 +310,6 @@ func (s *Store) getTorrentPath(rclonePath string, debridTorrent *types.Torrent) 
 	for {
 		torrentPath, err := debridTorrent.GetMountFolder(rclonePath)
 		if err == nil {
-			s.logger.Debug().Msgf("Found torrent path: %s", torrentPath)
 			return torrentPath, err
 		}
 		time.Sleep(100 * time.Millisecond)

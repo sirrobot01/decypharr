@@ -7,7 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/pkg/arr"
-	"github.com/sirrobot01/decypharr/pkg/store"
+	"github.com/sirrobot01/decypharr/pkg/wire"
 	"golang.org/x/crypto/bcrypt"
 	"net/http"
 	"net/url"
@@ -130,7 +130,7 @@ func (q *QBit) authContext(next http.Handler) http.Handler {
 		cfg := config.Get()
 		host, token, err := decodeAuthHeader(r.Header.Get("Authorization"))
 		category := getCategory(r.Context())
-		arrs := store.Get().Arr()
+		arrs := wire.Get().Arr()
 		// Check if arr exists
 		a := arrs.Get(category)
 		if a == nil {

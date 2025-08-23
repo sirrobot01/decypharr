@@ -91,6 +91,7 @@ type Rclone struct {
 	// Global mount folder where all providers will be mounted as subfolders
 	Enabled   bool   `json:"enabled,omitempty"`
 	MountPath string `json:"mount_path,omitempty"`
+	RcPort    string `json:"rc_port,omitempty"`
 
 	// Cache settings
 	CacheDir string `json:"cache_dir,omitempty"`
@@ -98,6 +99,7 @@ type Rclone struct {
 	// VFS settings
 	VfsCacheMode          string `json:"vfs_cache_mode,omitempty"`            // off, minimal, writes, full
 	VfsCacheMaxAge        string `json:"vfs_cache_max_age,omitempty"`         // Maximum age of objects in the cache (default 1h)
+	VfsDiskSpaceTotal     string `json:"vfs_disk_space_total,omitempty"`      // Total disk space available for the cache (default off)
 	VfsCacheMaxSize       string `json:"vfs_cache_max_size,omitempty"`        // Maximum size of the cache (default off)
 	VfsCachePollInterval  string `json:"vfs_cache_poll_interval,omitempty"`   // How often to poll for changes (default 1m)
 	VfsReadChunkSize      string `json:"vfs_read_chunk_size,omitempty"`       // Read chunk size (default 128M)
@@ -105,6 +107,13 @@ type Rclone struct {
 	VfsReadAhead          string `json:"vfs_read_ahead,omitempty"`            // read ahead size
 	VfsPollInterval       string `json:"vfs_poll_interval,omitempty"`         // How often to rclone cleans the cache (default 1m)
 	BufferSize            string `json:"buffer_size,omitempty"`               // Buffer size for reading files (default 16M)
+
+	VfsCacheMinFreeSpace string `json:"vfs_cache_min_free_space,omitempty"`
+	VfsFastFingerprint   bool   `json:"vfs_fast_fingerprint,omitempty"`
+	VfsReadChunkStreams  int    `json:"vfs_read_chunk_streams,omitempty"`
+	AsyncRead            *bool  `json:"async_read,omitempty"` // Use async read for files
+	Transfers            int    `json:"transfers,omitempty"`  // Number of transfers to use (default 4)
+	UseMmap              bool   `json:"use_mmap,omitempty"`
 
 	// File system settings
 	UID   uint32 `json:"uid,omitempty"` // User ID for mounted files
@@ -417,6 +426,11 @@ func (c *Config) setDefaults() {
 
 	// Rclone defaults
 	if c.Rclone.Enabled {
+		c.Rclone.RcPort = cmp.Or(c.Rclone.RcPort, "5572")
+		if c.Rclone.AsyncRead == nil {
+			_asyncTrue := true
+			c.Rclone.AsyncRead = &_asyncTrue
+		}
 		c.Rclone.VfsCacheMode = cmp.Or(c.Rclone.VfsCacheMode, "off")
 		if c.Rclone.UID == 0 {
 			c.Rclone.UID = uint32(os.Getuid())
@@ -428,6 +442,9 @@ func (c *Config) setDefaults() {
 			} else {
 				c.Rclone.GID = uint32(os.Getgid())
 			}
+		}
+		if c.Rclone.Transfers == 0 {
+			c.Rclone.Transfers = 4 // Default number of transfers
 		}
 		if c.Rclone.VfsCacheMode != "off" {
 			c.Rclone.VfsCachePollInterval = cmp.Or(c.Rclone.VfsCachePollInterval, "1m") // Clean cache every minute

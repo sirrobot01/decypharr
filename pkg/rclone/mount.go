@@ -65,7 +65,7 @@ func (m *Mount) Mount(ctx context.Context) error {
 		Str("mount_path", m.LocalPath).
 		Msg("Creating mount via RC")
 
-	if err := m.rcManager.Mount(m.Provider, m.WebDAVURL); err != nil {
+	if err := m.rcManager.Mount(m.LocalPath, m.Provider, m.WebDAVURL); err != nil {
 		m.logger.Error().Str("provider", m.Provider).Msg("Mount operation failed")
 		return fmt.Errorf("mount failed for %s", m.Provider)
 	}

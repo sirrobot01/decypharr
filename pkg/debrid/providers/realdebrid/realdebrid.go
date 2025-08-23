@@ -958,8 +958,7 @@ func (r *RealDebrid) GetProfile() (*types.Profile, error) {
 }
 
 func (r *RealDebrid) GetAvailableSlots() (int, error) {
-	url := fmt.Sprintf("%s/torrents/activeCount", r.Host)
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/torrents/activeCount", r.Host), nil)
 	resp, err := r.client.MakeRequest(req)
 	if err != nil {
 		return 0, nil

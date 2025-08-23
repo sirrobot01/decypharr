@@ -4,19 +4,18 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"time"
 
 	"github.com/sirrobot01/decypharr/internal/config"
 )
 
 // Mount creates a mount using the rclone RC API with retry logic
-func (m *Manager) Mount(provider, webdavURL string) error {
-	return m.mountWithRetry(provider, webdavURL, 3)
+func (m *Manager) Mount(mountPath, provider, webdavURL string) error {
+	return m.mountWithRetry(mountPath, provider, webdavURL, 3)
 }
 
 // mountWithRetry attempts to mount with retry logic
-func (m *Manager) mountWithRetry(provider, webdavURL string, maxRetries int) error {
+func (m *Manager) mountWithRetry(mountPath, provider, webdavURL string, maxRetries int) error {
 	if !m.IsReady() {
 		if err := m.WaitForReady(30 * time.Second); err != nil {
 			return fmt.Errorf("rclone RC server not ready: %w", err)
@@ -34,7 +33,7 @@ func (m *Manager) mountWithRetry(provider, webdavURL string, maxRetries int) err
 			time.Sleep(wait)
 		}
 
-		if err := m.performMount(provider, webdavURL); err != nil {
+		if err := m.performMount(mountPath, provider, webdavURL); err != nil {
 			m.logger.Error().
 				Err(err).
 				Str("provider", provider).
@@ -49,9 +48,8 @@ func (m *Manager) mountWithRetry(provider, webdavURL string, maxRetries int) err
 }
 
 // performMount performs a single mount attempt
-func (m *Manager) performMount(provider, webdavURL string) error {
+func (m *Manager) performMount(mountPath, provider, webdavURL string) error {
 	cfg := config.Get()
-	mountPath := filepath.Join(cfg.Rclone.MountPath, provider)
 
 	// Create mount directory
 	if err := os.MkdirAll(mountPath, 0755); err != nil {
@@ -94,6 +92,18 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 		"VolumeName":    fmt.Sprintf("decypharr-%s", provider),
 	}
 
+	if cfg.Rclone.AsyncRead != nil {
+		mountOpt["AsyncRead"] = *cfg.Rclone.AsyncRead
+	}
+
+	if cfg.Rclone.UseMmap {
+		mountOpt["UseMmap"] = cfg.Rclone.UseMmap
+	}
+
+	if cfg.Rclone.Transfers != 0 {
+		mountOpt["Transfers"] = cfg.Rclone.Transfers
+	}
+
 	configOpts := make(map[string]interface{})
 
 	if cfg.Rclone.BufferSize != "" {
@@ -127,6 +137,19 @@ func (m *Manager) performMount(provider, webdavURL string) error {
 		if cfg.Rclone.VfsReadAhead != "" {
 			vfsOpt["ReadAhead"] = cfg.Rclone.VfsReadAhead
 		}
+
+		if cfg.Rclone.VfsCacheMinFreeSpace != "" {
+			vfsOpt["CacheMinFreeSpace"] = cfg.Rclone.VfsCacheMinFreeSpace
+		}
+
+		if cfg.Rclone.VfsFastFingerprint {
+			vfsOpt["FastFingerprint"] = cfg.Rclone.VfsFastFingerprint
+		}
+
+		if cfg.Rclone.VfsReadChunkStreams != 0 {
+			vfsOpt["ReadChunkStreams"] = cfg.Rclone.VfsReadChunkStreams
+		}
+
 		if cfg.Rclone.NoChecksum {
 			vfsOpt["NoChecksum"] = cfg.Rclone.NoChecksum
 		}

@@ -6,7 +6,7 @@ import (
 	"github.com/gorilla/sessions"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/pkg/store"
+	"github.com/sirrobot01/decypharr/pkg/wire"
 	"html/template"
 	"os"
 )
@@ -60,7 +60,7 @@ type Web struct {
 	logger    zerolog.Logger
 	cookie    *sessions.CookieStore
 	templates *template.Template
-	torrents  *store.TorrentStorage
+	torrents  *wire.TorrentStorage
 }
 
 func New() *Web {
@@ -86,6 +86,6 @@ func New() *Web {
 		logger:    logger.New("ui"),
 		templates: templates,
 		cookie:    cookieStore,
-		torrents:  store.Get().Torrents(),
+		torrents:  wire.Get().Torrents(),
 	}
 }

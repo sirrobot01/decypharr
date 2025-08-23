@@ -467,6 +467,13 @@
                                         </div>
 
                                         <div class="form-control">
+                                            <label class="label" for="rclone.rc_port">
+                                                <span class="label-text font-medium">RC Port</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered" name="rclone.rc_port" id="rclone.rc_port">
+                                        </div>
+
+                                        <div class="form-control">
                                             <label class="label" for="rclone.log_level">
                                                 <span class="label-text font-medium">Log Level</span>
                                             </label>
@@ -522,6 +529,15 @@
                                             <input type="text" class="input input-bordered" name="rclone.attr_timeout" id="rclone.attr_timeout" placeholder="1s">
                                             <div class="label">
                                                 <span class="label-text-alt">How long the kernel caches the attributes (size, modification time, etc.)</span>
+                                            </div>
+                                        </div>
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.transfers">
+                                                <span class="label-text font-medium">Transfers</span>
+                                            </label>
+                                            <input type="number" class="input input-bordered" name="rclone.transfers" id="rclone.transfers" placeholder="8" min="1">
+                                            <div class="label">
+                                                <span class="label-text-alt">Number of file transfers to run in parallel</span>
                                             </div>
                                         </div>
                                     </div>
@@ -627,6 +643,36 @@
                                                 <span class="label-text-alt">How often VFS cache dir gets cleaned</span>
                                             </div>
                                         </div>
+
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.vfs_cache_min_free_space">
+                                                <span class="label-text font-medium">VFS Cache Min Free Space</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered" name="rclone.vfs_cache_min_free_space" id="rclone.vfs_cache_min_free_space" placeholder="1G">
+                                            <div class="label">
+                                                <span class="label-text-alt">Target minimum free space on the disk containing the cache</span>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.vfs_disk_space_total">
+                                                <span class="label-text font-medium">VFS Disk Space Total</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered" name="rclone.vfs_disk_space_total" id="rclone.vfs_disk_space_total" placeholder="1G">
+                                            <div class="label">
+                                                <span class="label-text-alt">Specify the total space of disk</span>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.vfs_read_chunk_streams">
+                                                <span class="label-text font-medium">VFS Read Chunk Streams</span>
+                                            </label>
+                                            <input type="number" class="input input-bordered" name="rclone.vfs_read_chunk_streams" id="rclone.vfs_read_chunk_streams" placeholder="4" min="0">
+                                            <div class="label">
+                                                <span class="label-text-alt">The number of parallel streams to read at once</span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -636,7 +682,7 @@
                                     <h3 class="text-lg font-semibold mb-4 flex items-center">
                                         <i class="bi bi-gear mr-2"></i>Advanced Settings
                                     </h3>
-                                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                    <div class="grid grid-cols-2 lg:grid-cols-3 gap-4">
                                         <div class="form-control">
                                             <label class="label cursor-pointer justify-start gap-3">
                                                 <input type="checkbox" class="checkbox" name="rclone.no_modtime" id="rclone.no_modtime">
@@ -653,6 +699,36 @@
                                                 <div>
                                                     <span class="label-text font-medium">No Checksum</span>
                                                     <div class="label-text-alt">Don't checksum files on upload</div>
+                                                </div>
+                                            </label>
+                                        </div>
+
+                                        <div class="form-control">
+                                            <label class="label cursor-pointer justify-start gap-3" for="rclone.async_read">
+                                                <input type="checkbox" class="checkbox" name="rclone.async_read" id="rclone.async_read">
+                                                <div>
+                                                    <span class="label-text font-medium">Async Read</span>
+                                                    <div class="label-text-alt">Use asynchronous reads</div>
+                                                </div>
+                                            </label>
+                                        </div>
+
+                                        <div class="form-control">
+                                            <label class="label cursor-pointer justify-start gap-3" for="rclone.vfs_fast_fingerprint">
+                                                <input type="checkbox" class="checkbox" name="rclone.vfs_fast_fingerprint" id="rclone.vfs_fast_fingerprint">
+                                                <div>
+                                                    <span class="label-text font-medium">VFS Fast Fingerprint</span>
+                                                    <div class="label-text-alt">Use fast (less accurate) fingerprints for change detection</div>
+                                                </div>
+                                            </label>
+                                        </div>
+
+                                        <div class="form-control">
+                                            <label class="label cursor-pointer justify-start gap-3" for="rclone.use_mmap">
+                                                <input type="checkbox" class="checkbox" name="rclone.use_mmap" id="rclone.use_mmap">
+                                                <div>
+                                                    <span class="label-text font-medium">Use Mmap</span>
+                                                    <div class="label-text-alt">Use fast (less accurate) fingerprints for change detection</div>
                                                 </div>
                                             </label>
                                         </div>

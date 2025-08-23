@@ -1,4 +1,4 @@
-package store
+package wire
 
 import (
 	"context"
@@ -29,7 +29,6 @@ func (s *Store) addToQueue(importReq *ImportRequest) error {
 
 func (s *Store) StartQueueWorkers(ctx context.Context) error {
 	// This function is responsible for starting the scheduled tasks
-
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -45,7 +44,7 @@ func (s *Store) StartQueueWorkers(ctx context.Context) error {
 		}), gocron.WithContext(ctx)); err != nil {
 			s.logger.Error().Err(err).Msg("Failed to create slots tracking job")
 		} else {
-			s.logger.Trace().Msgf("Download link refresh job scheduled for every %s", "30s")
+			s.logger.Trace().Msgf("Slots tracking job scheduled for every %s", "30s")
 		}
 	}
 
@@ -86,13 +85,17 @@ func (s *Store) trackAvailableSlots(ctx context.Context) {
 		availableSlots[name] = slots
 	}
 
+	if len(availableSlots) == 0 {
+		s.logger.Debug().Msg("No debrid clients available or no slots found")
+		return // No debrid clients or slots available, nothing to process
+	}
+
 	if s.importsQueue.Size() <= 0 {
 		// Queue is empty, no need to process
 		return
 	}
 
 	for name, slots := range availableSlots {
-
 		s.logger.Debug().Msgf("Available slots for %s: %d", name, slots)
 		// If slots are available, process the next import request from the queue
 		for slots > 0 {

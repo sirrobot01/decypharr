@@ -1,4 +1,4 @@
-package store
+package wire
 
 import (
 	"cmp"
@@ -86,7 +86,10 @@ func Reset() {
 		}
 
 		if instance.rcloneManager != nil {
-			instance.rcloneManager.Stop()
+			err := instance.rcloneManager.Stop()
+			if err != nil {
+				instance.logger.Error().Err(err).Msg("Failed to stop rclone manager")
+			}
 		}
 
 		if instance.importsQueue != nil {

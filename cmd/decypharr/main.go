@@ -7,10 +7,10 @@ import (
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/pkg/qbit"
 	"github.com/sirrobot01/decypharr/pkg/server"
-	"github.com/sirrobot01/decypharr/pkg/store"
 	"github.com/sirrobot01/decypharr/pkg/version"
 	"github.com/sirrobot01/decypharr/pkg/web"
 	"github.com/sirrobot01/decypharr/pkg/webdav"
+	"github.com/sirrobot01/decypharr/pkg/wire"
 	"net/http"
 	"os"
 	"runtime"
@@ -77,7 +77,7 @@ func Start(ctx context.Context) error {
 		reset := func() {
 			// Reset the store and services
 			qb.Reset()
-			store.Reset()
+			wire.Reset()
 			// refresh GC
 			runtime.GC()
 		}
@@ -151,7 +151,7 @@ func startServices(ctx context.Context, cancelSvc context.CancelFunc, wd *webdav
 
 	// Start rclone RC server if enabled
 	safeGo(func() error {
-		rcManager := store.Get().RcloneManager()
+		rcManager := wire.Get().RcloneManager()
 		if rcManager == nil {
 			return nil
 		}
@@ -160,7 +160,7 @@ func startServices(ctx context.Context, cancelSvc context.CancelFunc, wd *webdav
 
 	if cfg := config.Get(); cfg.Repair.Enabled {
 		safeGo(func() error {
-			repair := store.Get().Repair()
+			repair := wire.Get().Repair()
 			if repair != nil {
 				if err := repair.Start(ctx); err != nil {
 					_log.Error().Err(err).Msg("repair failed")
@@ -171,7 +171,7 @@ func startServices(ctx context.Context, cancelSvc context.CancelFunc, wd *webdav
 	}
 
 	safeGo(func() error {
-		store.Get().StartWorkers(ctx)
+		wire.Get().StartWorkers(ctx)
 		return nil
 	})
 

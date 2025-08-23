@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/arr"
-	"github.com/sirrobot01/decypharr/pkg/store"
+	"github.com/sirrobot01/decypharr/pkg/wire"
 	"io"
 	"mime/multipart"
 	"strings"
@@ -18,9 +18,9 @@ func (q *QBit) addMagnet(ctx context.Context, url string, arr *arr.Arr, debrid s
 	if err != nil {
 		return fmt.Errorf("error parsing magnet link: %w", err)
 	}
-	_store := store.Get()
+	_store := wire.Get()
 
-	importReq := store.NewImportRequest(debrid, q.DownloadFolder, magnet, arr, action, false, "", store.ImportTypeQBitTorrent)
+	importReq := wire.NewImportRequest(debrid, q.DownloadFolder, magnet, arr, action, false, "", wire.ImportTypeQBitTorrent)
 
 	err = _store.AddTorrent(ctx, importReq)
 	if err != nil {
@@ -37,8 +37,8 @@ func (q *QBit) addTorrent(ctx context.Context, fileHeader *multipart.FileHeader,
 	if err != nil {
 		return fmt.Errorf("error reading file: %s \n %w", fileHeader.Filename, err)
 	}
-	_store := store.Get()
-	importReq := store.NewImportRequest(debrid, q.DownloadFolder, magnet, arr, action, false, "", store.ImportTypeQBitTorrent)
+	_store := wire.Get()
+	importReq := wire.NewImportRequest(debrid, q.DownloadFolder, magnet, arr, action, false, "", wire.ImportTypeQBitTorrent)
 	err = _store.AddTorrent(ctx, importReq)
 	if err != nil {
 		return fmt.Errorf("failed to process torrent: %w", err)
@@ -46,19 +46,19 @@ func (q *QBit) addTorrent(ctx context.Context, fileHeader *multipart.FileHeader,
 	return nil
 }
 
-func (q *QBit) ResumeTorrent(t *store.Torrent) bool {
+func (q *QBit) ResumeTorrent(t *wire.Torrent) bool {
 	return true
 }
 
-func (q *QBit) PauseTorrent(t *store.Torrent) bool {
+func (q *QBit) PauseTorrent(t *wire.Torrent) bool {
 	return true
 }
 
-func (q *QBit) RefreshTorrent(t *store.Torrent) bool {
+func (q *QBit) RefreshTorrent(t *wire.Torrent) bool {
 	return true
 }
 
-func (q *QBit) GetTorrentProperties(t *store.Torrent) *TorrentProperties {
+func (q *QBit) GetTorrentProperties(t *wire.Torrent) *TorrentProperties {
 	return &TorrentProperties{
 		AdditionDate:           t.AddedOn,
 		Comment:                "Debrid Blackhole <https://github.com/sirrobot01/decypharr>",
@@ -83,7 +83,7 @@ func (q *QBit) GetTorrentProperties(t *store.Torrent) *TorrentProperties {
 	}
 }
 
-func (q *QBit) setTorrentTags(t *store.Torrent, tags []string) bool {
+func (q *QBit) setTorrentTags(t *wire.Torrent, tags []string) bool {
 	torrentTags := strings.Split(t.Tags, ",")
 	for _, tag := range tags {
 		if tag == "" {
@@ -101,7 +101,7 @@ func (q *QBit) setTorrentTags(t *store.Torrent, tags []string) bool {
 	return true
 }
 
-func (q *QBit) removeTorrentTags(t *store.Torrent, tags []string) bool {
+func (q *QBit) removeTorrentTags(t *wire.Torrent, tags []string) bool {
 	torrentTags := strings.Split(t.Tags, ",")
 	newTorrentTags := utils.RemoveItem(torrentTags, tags...)
 	q.Tags = utils.RemoveItem(q.Tags, tags...)
