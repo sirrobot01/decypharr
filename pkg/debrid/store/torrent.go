@@ -40,19 +40,27 @@ type directoryFilter struct {
 	ageThreshold  time.Duration  // only for last_added
 }
 
-type torrents struct {
-	sync.RWMutex
-	storage map[string]CachedTorrent // id to CachedTorrent
-	byName  map[string]string        // name to id
-}
-
 type folders struct {
 	sync.RWMutex
 	listing map[string][]os.FileInfo // folder name to file listing
 }
 
+type CachedTorrentEntry struct {
+	CachedTorrent
+	deleted bool // Tombstone flag
+}
+
 type torrentCache struct {
-	torrents torrents
+	mu       sync.RWMutex
+	torrents []CachedTorrentEntry // Changed to store entries with tombstone
+
+	// Lookup indices
+	idIndex   map[string]int
+	nameIndex map[string]int
+
+	// Compaction tracking
+	deletedCount     atomic.Int32
+	compactThreshold int // Trigger compaction when deletedCount exceeds this
 
 	listing            atomic.Value
 	folders            folders
@@ -69,12 +77,11 @@ type sortableFile struct {
 }
 
 func newTorrentCache(dirFilters map[string][]directoryFilter) *torrentCache {
-
 	tc := &torrentCache{
-		torrents: torrents{
-			storage: make(map[string]CachedTorrent), // id to CachedTorrent
-			byName:  make(map[string]string),
-		},
+		torrents:         []CachedTorrentEntry{},
+		idIndex:          make(map[string]int),
+		nameIndex:        make(map[string]int),
+		compactThreshold: 100, // Compact when 100+ deleted entries
 		folders: folders{
 			listing: make(map[string][]os.FileInfo),
 		},
@@ -87,10 +94,12 @@ func newTorrentCache(dirFilters map[string][]directoryFilter) *torrentCache {
 }
 
 func (tc *torrentCache) reset() {
-	tc.torrents.Lock()
-	tc.torrents.byName = make(map[string]string)
-	tc.torrents.storage = make(map[string]CachedTorrent) // Reset the storage map
-	tc.torrents.Unlock()
+	tc.mu.Lock()
+	tc.torrents = tc.torrents[:0]       // Clear the slice
+	tc.idIndex = make(map[string]int)   // Reset the ID index
+	tc.nameIndex = make(map[string]int) // Reset the name index
+	tc.deletedCount.Store(0)
+	tc.mu.Unlock()
 
 	// reset the sorted listing
 	tc.sortNeeded.Store(false)
@@ -103,70 +112,183 @@ func (tc *torrentCache) reset() {
 }
 
 func (tc *torrentCache) getByID(id string) (CachedTorrent, bool) {
-	tc.torrents.RLock()
-	defer tc.torrents.RUnlock()
-	torrent, exists := tc.torrents.storage[id]
-	return torrent, exists
+	tc.mu.RLock()
+	defer tc.mu.RUnlock()
+
+	if index, exists := tc.idIndex[id]; exists && index < len(tc.torrents) {
+		entry := tc.torrents[index]
+		if !entry.deleted {
+			return entry.CachedTorrent, true
+		}
+	}
+	return CachedTorrent{}, false
 }
 
 func (tc *torrentCache) getByName(name string) (CachedTorrent, bool) {
-	tc.torrents.RLock()
-	defer tc.torrents.RUnlock()
-	torrentID, exists := tc.torrents.byName[name]
-	if !exists {
-		return CachedTorrent{}, false
+	tc.mu.RLock()
+	defer tc.mu.RUnlock()
+
+	if index, exists := tc.nameIndex[name]; exists && index < len(tc.torrents) {
+		entry := tc.torrents[index]
+		if !entry.deleted {
+			return entry.CachedTorrent, true
+		}
 	}
-	torrent, exists := tc.torrents.storage[torrentID]
-	return torrent, exists
+	return CachedTorrent{}, false
 }
 
 func (tc *torrentCache) set(name string, torrent CachedTorrent) {
-	tc.torrents.Lock()
-	// Set the id first
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
 
-	tc.torrents.byName[name] = torrent.Id
-	tc.torrents.storage[torrent.Id] = torrent
-	tc.torrents.Unlock()
+	// Check if this torrent already exists (update case)
+	if existingIndex, exists := tc.idIndex[torrent.Id]; exists && existingIndex < len(tc.torrents) {
+		if !tc.torrents[existingIndex].deleted {
+			// Update existing entry
+			tc.torrents[existingIndex].CachedTorrent = torrent
+			tc.sortNeeded.Store(true)
+			return
+		}
+	}
+
+	// Add new torrent
+	entry := CachedTorrentEntry{
+		CachedTorrent: torrent,
+		deleted:       false,
+	}
+
+	tc.torrents = append(tc.torrents, entry)
+	index := len(tc.torrents) - 1
+
+	tc.idIndex[torrent.Id] = index
+	tc.nameIndex[name] = index
 	tc.sortNeeded.Store(true)
 }
 
-func (tc *torrentCache) getListing() []os.FileInfo {
-	// Fast path: if we have a sorted list and no changes since last sort
-	if !tc.sortNeeded.Load() {
-		return tc.listing.Load().([]os.FileInfo)
-	}
+func (tc *torrentCache) removeId(id string) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
 
-	// Slow path: need to sort
-	tc.refreshListing()
-	return tc.listing.Load().([]os.FileInfo)
+	if index, exists := tc.idIndex[id]; exists && index < len(tc.torrents) {
+		if !tc.torrents[index].deleted {
+			// Mark as deleted (tombstone)
+			tc.torrents[index].deleted = true
+			tc.deletedCount.Add(1)
+
+			// Remove from indices
+			delete(tc.idIndex, id)
+
+			// Find and remove from name index
+			for name, idx := range tc.nameIndex {
+				if idx == index {
+					delete(tc.nameIndex, name)
+					break
+				}
+			}
+
+			tc.sortNeeded.Store(true)
+
+			// Trigger compaction if threshold exceeded
+			if tc.deletedCount.Load() > int32(tc.compactThreshold) {
+				go tc.compact()
+			}
+		}
+	}
 }
 
-func (tc *torrentCache) getFolderListing(folderName string) []os.FileInfo {
-	tc.folders.RLock()
-	defer tc.folders.RUnlock()
-	if folderName == "" {
-		return tc.getListing()
+func (tc *torrentCache) remove(name string) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+
+	if index, exists := tc.nameIndex[name]; exists && index < len(tc.torrents) {
+		if !tc.torrents[index].deleted {
+			// Mark as deleted (tombstone)
+			torrentID := tc.torrents[index].CachedTorrent.Id
+			tc.torrents[index].deleted = true
+			tc.deletedCount.Add(1)
+
+			// Remove from indices
+			delete(tc.nameIndex, name)
+			delete(tc.idIndex, torrentID)
+
+			tc.sortNeeded.Store(true)
+
+			// Trigger compaction if threshold exceeded
+			if tc.deletedCount.Load() > int32(tc.compactThreshold) {
+				go tc.compact()
+			}
+		}
 	}
-	if folder, ok := tc.folders.listing[folderName]; ok {
-		return folder
+}
+
+// Compact removes tombstoned entries and rebuilds indices
+func (tc *torrentCache) compact() {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+
+	deletedCount := tc.deletedCount.Load()
+	if deletedCount == 0 {
+		return // Nothing to compact
 	}
-	// If folder not found, return empty slice
-	return []os.FileInfo{}
+
+	// Create new slice with only non-deleted entries
+	newTorrents := make([]CachedTorrentEntry, 0, len(tc.torrents)-int(deletedCount))
+	newIdIndex := make(map[string]int, len(tc.idIndex))
+	newNameIndex := make(map[string]int, len(tc.nameIndex))
+
+	// Copy non-deleted entries
+	for oldIndex, entry := range tc.torrents {
+		if !entry.deleted {
+			newIndex := len(newTorrents)
+			newTorrents = append(newTorrents, entry)
+
+			// Find the name for this torrent (reverse lookup)
+			for name, nameIndex := range tc.nameIndex {
+				if nameIndex == oldIndex {
+					newNameIndex[name] = newIndex
+					break
+				}
+			}
+
+			newIdIndex[entry.CachedTorrent.Id] = newIndex
+		}
+	}
+
+	// Replace old data with compacted data
+	tc.torrents = newTorrents
+	tc.idIndex = newIdIndex
+	tc.nameIndex = newNameIndex
+
+	tc.deletedCount.Store(0)
+	tc.sortNeeded.Store(true)
+}
+
+func (tc *torrentCache) ForceCompact() {
+	tc.compact()
+}
+
+func (tc *torrentCache) GetStats() (total, active, deleted int) {
+	tc.mu.RLock()
+	defer tc.mu.RUnlock()
+
+	total = len(tc.torrents)
+	deleted = int(tc.deletedCount.Load())
+	active = total - deleted
+
+	return total, active, deleted
 }
 
 func (tc *torrentCache) refreshListing() {
-
-	tc.torrents.RLock()
-	all := make([]sortableFile, 0, len(tc.torrents.byName))
-	for name, torrentID := range tc.torrents.byName {
-		t, exists := tc.torrents.storage[torrentID]
-		if !exists {
-			continue // Skip if torrent not found
+	tc.mu.RLock()
+	all := make([]sortableFile, 0, len(tc.nameIndex))
+	for name, index := range tc.nameIndex {
+		if index < len(tc.torrents) && !tc.torrents[index].deleted {
+			t := tc.torrents[index].CachedTorrent
+			all = append(all, sortableFile{t.Id, name, t.AddedOn, t.Bytes, t.Bad})
 		}
-		all = append(all, sortableFile{t.Id, name, t.AddedOn, t.Bytes, t.Bad})
 	}
 	tc.sortNeeded.Store(false)
-	tc.torrents.RUnlock()
+	tc.mu.RUnlock()
 
 	sort.Slice(all, func(i, j int) bool {
 		if all[i].name != all[j].name {
@@ -242,8 +364,31 @@ func (tc *torrentCache) refreshListing() {
 	wg.Wait()
 }
 
-func (tc *torrentCache) torrentMatchDirectory(filters []directoryFilter, file sortableFile, now time.Time) bool {
+func (tc *torrentCache) getListing() []os.FileInfo {
+	// Fast path: if we have a sorted list and no changes since last sort
+	if !tc.sortNeeded.Load() {
+		return tc.listing.Load().([]os.FileInfo)
+	}
 
+	// Slow path: need to sort
+	tc.refreshListing()
+	return tc.listing.Load().([]os.FileInfo)
+}
+
+func (tc *torrentCache) getFolderListing(folderName string) []os.FileInfo {
+	tc.folders.RLock()
+	defer tc.folders.RUnlock()
+	if folderName == "" {
+		return tc.getListing()
+	}
+	if folder, ok := tc.folders.listing[folderName]; ok {
+		return folder
+	}
+	// If folder not found, return empty slice
+	return []os.FileInfo{}
+}
+
+func (tc *torrentCache) torrentMatchDirectory(filters []directoryFilter, file sortableFile, now time.Time) bool {
 	torrentName := strings.ToLower(file.name)
 	for _, filter := range filters {
 		matched := false
@@ -286,55 +431,46 @@ func (tc *torrentCache) torrentMatchDirectory(filters []directoryFilter, file so
 }
 
 func (tc *torrentCache) getAll() map[string]CachedTorrent {
-	tc.torrents.RLock()
-	defer tc.torrents.RUnlock()
-	result := make(map[string]CachedTorrent, len(tc.torrents.storage))
-	for torrentID, torrent := range tc.torrents.storage {
-		result[torrentID] = torrent
+	tc.mu.RLock()
+	defer tc.mu.RUnlock()
+
+	result := make(map[string]CachedTorrent)
+	for _, entry := range tc.torrents {
+		if !entry.deleted {
+			result[entry.CachedTorrent.Id] = entry.CachedTorrent
+		}
 	}
 	return result
 }
 
 func (tc *torrentCache) getAllCount() int {
-	tc.torrents.RLock()
-	defer tc.torrents.RUnlock()
-	return len(tc.torrents.storage)
+	tc.mu.RLock()
+	defer tc.mu.RUnlock()
+	return len(tc.torrents) - int(tc.deletedCount.Load())
 }
 
 func (tc *torrentCache) getAllByName() map[string]CachedTorrent {
-	tc.torrents.RLock()
-	defer tc.torrents.RUnlock()
-	results := make(map[string]CachedTorrent, len(tc.torrents.byName))
-	for name, torrentID := range tc.torrents.byName {
-		torrent, exists := tc.torrents.storage[torrentID]
-		if !exists {
-			continue // Skip if torrent not found
+	tc.mu.RLock()
+	defer tc.mu.RUnlock()
+
+	results := make(map[string]CachedTorrent, len(tc.nameIndex))
+	for name, index := range tc.nameIndex {
+		if index < len(tc.torrents) && !tc.torrents[index].deleted {
+			results[name] = tc.torrents[index].CachedTorrent
 		}
-		results[name] = torrent
 	}
 	return results
 }
 
 func (tc *torrentCache) getIdMaps() map[string]struct{} {
-	tc.torrents.RLock()
-	defer tc.torrents.RUnlock()
-	res := make(map[string]struct{}, len(tc.torrents.storage))
-	for id := range tc.torrents.storage {
-		res[id] = struct{}{}
+	tc.mu.RLock()
+	defer tc.mu.RUnlock()
+
+	res := make(map[string]struct{}, len(tc.idIndex))
+	for id, index := range tc.idIndex {
+		if index < len(tc.torrents) && !tc.torrents[index].deleted {
+			res[id] = struct{}{}
+		}
 	}
 	return res
-}
-
-func (tc *torrentCache) removeId(id string) {
-	tc.torrents.Lock()
-	defer tc.torrents.Unlock()
-	delete(tc.torrents.storage, id)
-	tc.sortNeeded.Store(true)
-}
-
-func (tc *torrentCache) remove(name string) {
-	tc.torrents.Lock()
-	defer tc.torrents.Unlock()
-	delete(tc.torrents.byName, name)
-	tc.sortNeeded.Store(true)
 }

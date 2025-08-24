@@ -19,12 +19,11 @@ var streamingTransport = &http.Transport{
 	MaxConnsPerHost:       200,
 	IdleConnTimeout:       90 * time.Second,
 	TLSHandshakeTimeout:   10 * time.Second,
-	ResponseHeaderTimeout: 60 * time.Second, // give the upstream a minute to send headers
+	ResponseHeaderTimeout: 60 * time.Second,
 	ExpectContinueTimeout: 1 * time.Second,
-	DisableKeepAlives:     true,  // close after each request
-	ForceAttemptHTTP2:     false, // don’t speak HTTP/2
-	// this line is what truly blocks HTTP/2:
-	TLSNextProto: make(map[string]func(string, *tls.Conn) http.RoundTripper),
+	DisableKeepAlives:     true,
+	ForceAttemptHTTP2:     false,
+	TLSNextProto:          make(map[string]func(string, *tls.Conn) http.RoundTripper),
 }
 
 var sharedClient = &http.Client{
@@ -228,7 +227,7 @@ func (f *File) streamBuffer(w http.ResponseWriter, src io.Reader, statusCode int
 	if n, err := src.Read(smallBuf); n > 0 {
 		// Write status code just before first successful write
 		w.WriteHeader(statusCode)
-		
+
 		if _, werr := w.Write(smallBuf[:n]); werr != nil {
 			if isClientDisconnection(werr) {
 				return &streamError{Err: werr, StatusCode: 0, IsClientDisconnection: true}

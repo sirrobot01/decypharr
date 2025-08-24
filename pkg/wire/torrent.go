@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -99,8 +98,7 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 			backoff.Reset(nextInterval)
 		}
 	}
-	var torrentSymlinkPath string
-	var err error
+	var torrentSymlinkPath, torrentRclonePath string
 	debridTorrent.Arr = _arr
 
 	// Check if debrid supports webdav by checking cache
@@ -134,11 +132,20 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 		}()
 	}
 
+	// Check for multi-season torrent support
+	isMultiSeason, seasons, err := s.detectMultiSeason(debridTorrent)
+	if err != nil {
+		s.logger.Warn().Msgf("Error detecting multi-season for %s: %v", debridTorrent.Name, err)
+		// Continue with normal processing if detection fails
+		isMultiSeason = false
+	}
+
 	switch importReq.Action {
 	case "symlink":
 		// Symlink action, we will create a symlink to the torrent
 		s.logger.Debug().Msgf("Post-Download Action: Symlink")
 		cache := deb.Cache()
+
 		if cache != nil {
 			s.logger.Info().Msgf("Using internal webdav for %s", debridTorrent.Debrid)
 			// Use webdav to download the file
@@ -146,14 +153,45 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 				onFailed(err)
 				return
 			}
+		}
 
-			rclonePath := filepath.Join(debridTorrent.MountPath, cache.GetTorrentFolder(debridTorrent)) // /mnt/remote/realdebrid/MyTVShow
-			torrentFolderNoExt := utils.RemoveExtension(debridTorrent.Name)
-			torrentSymlinkPath, err = s.createSymlinksWebdav(torrent, debridTorrent, rclonePath, torrentFolderNoExt) // /mnt/symlinks/{category}/MyTVShow/
+		if isMultiSeason {
+			s.logger.Info().Msgf("Processing multi-season torrent with %d seasons", len(seasons))
+
+			// Remove any torrent already added
+			err := s.processMultiSeasonSymlinks(torrent, debridTorrent, seasons, importReq)
+			if err == nil {
+				// If an error occurred during multi-season processing, send it to normal processing
+				s.logger.Info().Msgf("Adding %s took %s", debridTorrent.Name, time.Since(timer))
+
+				go importReq.markAsCompleted(torrent, debridTorrent) // Mark the import request as completed, send callback if needed
+				go func() {
+					if err := request.SendDiscordMessage("download_complete", "success", torrent.discordContext()); err != nil {
+						s.logger.Error().Msgf("Error sending discord message: %v", err)
+					}
+				}()
+				go func() {
+					_arr.Refresh()
+				}()
+				return
+			}
+		}
+
+		if cache != nil {
+			torrentRclonePath = filepath.Join(debridTorrent.MountPath, cache.GetTorrentFolder(debridTorrent)) // /mnt/remote/realdebrid/MyTVShow
+			torrentSymlinkPath = filepath.Join(torrent.SavePath, utils.RemoveExtension(debridTorrent.Name))   // /mnt/symlinks/{category}/MyTVShow/
+
 		} else {
 			// User is using either zurg or debrid webdav
-			torrentSymlinkPath, err = s.processSymlink(torrent, debridTorrent) // /mnt/symlinks/{category}/MyTVShow/
+			torrentRclonePath, torrentSymlinkPath, err = s.getTorrentPaths(torrent.SavePath, debridTorrent)
+			if err != nil {
+				onFailed(err)
+				return
+			}
 		}
+
+		torrentSymlinkPath, err = s.processSymlink(debridTorrent, torrentRclonePath, torrentSymlinkPath)
+
 		if err != nil {
 			onFailed(err)
 			return
@@ -168,6 +206,19 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 		// Download action, we will download the torrent to the specified folder
 		// Generate download links
 		s.logger.Debug().Msgf("Post-Download Action: Download")
+
+		if isMultiSeason {
+			s.logger.Info().Msgf("Processing multi-season download with %d seasons", len(seasons))
+			err := s.processMultiSeasonDownloads(torrent, debridTorrent, seasons, importReq)
+			if err != nil {
+				onFailed(err)
+				return
+			}
+			// Multi-season processing completed successfully
+			onSuccess(torrent.SavePath)
+			return
+		}
+
 		if err := client.GetFileDownloadLinks(debridTorrent); err != nil {
 			onFailed(err)
 			return
@@ -252,7 +303,6 @@ func (s *Store) partialTorrentUpdate(t *Torrent, debridTorrent *types.Torrent) *
 	t.Eta = eta
 	t.Dlspeed = speed
 	t.Upspeed = speed
-	t.ContentPath = filepath.Join(t.SavePath, t.Name) + string(os.PathSeparator)
 	return t
 }
 
@@ -267,7 +317,7 @@ func (s *Store) updateTorrent(t *Torrent, debridTorrent *types.Torrent) *Torrent
 		}
 	}
 	t = s.partialTorrentUpdate(t, debridTorrent)
-	t.ContentPath = t.TorrentPath + string(os.PathSeparator)
+	t.ContentPath = t.TorrentPath
 
 	if t.IsReady() {
 		t.State = "pausedUP"

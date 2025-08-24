@@ -2,34 +2,33 @@ package types
 
 import (
 	"github.com/sirrobot01/decypharr/internal/config"
+	"slices"
 	"sync"
 	"time"
 )
 
 type Accounts struct {
 	current  *Account
-	accounts []*Account
-	mu       sync.RWMutex
+	accounts sync.Map // map[string]*Account // key is token
 }
 
 func NewAccounts(debridConf config.Debrid) *Accounts {
-	accounts := make([]*Account, 0)
+	a := &Accounts{
+		accounts: sync.Map{},
+	}
+	var current *Account
 	for idx, token := range debridConf.DownloadAPIKeys {
 		if token == "" {
 			continue
 		}
 		account := newAccount(debridConf.Name, token, idx)
-		accounts = append(accounts, account)
+		a.accounts.Store(token, account)
+		if current == nil {
+			current = account
+		}
 	}
-
-	var current *Account
-	if len(accounts) > 0 {
-		current = accounts[0]
-	}
-	return &Accounts{
-		accounts: accounts,
-		current:  current,
-	}
+	a.current = current
+	return a
 }
 
 type Account struct {
@@ -44,82 +43,85 @@ type Account struct {
 }
 
 func (a *Accounts) Active() []*Account {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
 	activeAccounts := make([]*Account, 0)
-	for _, acc := range a.accounts {
-		if !acc.Disabled {
+	a.accounts.Range(func(key, value interface{}) bool {
+		acc, ok := value.(*Account)
+		if ok && !acc.Disabled {
 			activeAccounts = append(activeAccounts, acc)
 		}
-	}
+		return true
+	})
+
+	// Sort active accounts by their Order field
+	slices.SortFunc(activeAccounts, func(i, j *Account) int {
+		return i.Order - j.Order
+	})
 	return activeAccounts
 }
 
 func (a *Accounts) All() []*Account {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.accounts
+	allAccounts := make([]*Account, 0)
+	a.accounts.Range(func(key, value interface{}) bool {
+		acc, ok := value.(*Account)
+		if ok {
+			allAccounts = append(allAccounts, acc)
+		}
+		return true
+	})
+	// Sort all accounts by their Order field
+	slices.SortFunc(allAccounts, func(i, j *Account) int {
+		return i.Order - j.Order
+	})
+	return allAccounts
 }
 
 func (a *Accounts) Current() *Account {
-	a.mu.RLock()
-	if a.current != nil {
+	if a.current != nil && !a.current.Disabled {
 		current := a.current
-		a.mu.RUnlock()
 		return current
 	}
-	a.mu.RUnlock()
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	// Double-check after acquiring write lock
-	if a.current != nil {
+	activeAccounts := a.Active()
+	if len(activeAccounts) == 0 {
 		return a.current
 	}
+	a.current = activeAccounts[0]
 
-	activeAccounts := make([]*Account, 0)
-	for _, acc := range a.accounts {
-		if !acc.Disabled {
-			activeAccounts = append(activeAccounts, acc)
-		}
-	}
-
-	if len(activeAccounts) > 0 {
-		a.current = activeAccounts[0]
-	}
 	return a.current
 }
 
 func (a *Accounts) Disable(account *Account) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	account.disable()
+	account.Disabled = true
+	a.accounts.Store(account.Token, account)
 
-	if a.current == account {
+	if a.current.Equals(account) {
 		var newCurrent *Account
-		for _, acc := range a.accounts {
-			if !acc.Disabled {
+
+		a.accounts.Range(func(key, value interface{}) bool {
+			acc, ok := value.(*Account)
+			if ok && !acc.Disabled {
 				newCurrent = acc
-				break
+				return false // Break the loop
 			}
-		}
+			return true // Continue the loop
+		})
 		a.current = newCurrent
 	}
 }
 
 func (a *Accounts) Reset() {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	for _, acc := range a.accounts {
-		acc.resetDownloadLinks()
-		acc.Disabled = false
-	}
-	if len(a.accounts) > 0 {
-		a.current = a.accounts[0]
-	} else {
-		a.current = nil
-	}
+	a.accounts.Range(func(key, value interface{}) bool {
+		acc, ok := value.(*Account)
+		if ok {
+			acc.resetDownloadLinks()
+			acc.Disabled = false
+			a.accounts.Store(key, acc)
+			if a.current == nil {
+				a.current = acc
+			}
+
+		}
+		return true
+	})
 }
 
 func (a *Accounts) GetDownloadLink(fileLink string) (*DownloadLink, error) {
@@ -185,21 +187,11 @@ func (a *Accounts) SetDownloadLinks(links map[string]*DownloadLink) {
 	a.Current().setLinks(links)
 }
 
-func (a *Accounts) Update(index int, account *Account) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if index < 0 || index >= len(a.accounts) {
-		return // Index out of bounds
+func (a *Accounts) Update(account *Account) {
+	if account == nil {
+		return
 	}
-
-	// Update the account at the specified index
-	a.accounts[index] = account
-
-	// If the updated account is the current one, update the current reference
-	if a.current == nil || a.current.Order == index {
-		a.current = account
-	}
+	a.accounts.Store(account.Token, account)
 }
 
 func newAccount(debridName, token string, index int) *Account {
@@ -209,6 +201,13 @@ func newAccount(debridName, token string, index int) *Account {
 		Order:  index,
 		links:  make(map[string]*DownloadLink),
 	}
+}
+
+func (a *Account) Equals(other *Account) bool {
+	if other == nil {
+		return false
+	}
+	return a.Token == other.Token && a.Debrid == other.Debrid
 }
 
 func (a *Account) getLink(fileLink string) (*DownloadLink, bool) {
@@ -237,9 +236,6 @@ func (a *Account) LinksCount() int {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return len(a.links)
-}
-func (a *Account) disable() {
-	a.Disabled = true
 }
 
 func (a *Account) setLinks(links map[string]*DownloadLink) {

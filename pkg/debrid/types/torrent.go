@@ -42,6 +42,38 @@ type Torrent struct {
 	sync.Mutex
 }
 
+func (t *Torrent) Copy() *Torrent {
+	t.Lock()
+	defer t.Unlock()
+
+	newFiles := make(map[string]File, len(t.Files))
+	for k, v := range t.Files {
+		newFiles[k] = v
+	}
+
+	return &Torrent{
+		Id:               t.Id,
+		InfoHash:         t.InfoHash,
+		Name:             t.Name,
+		Folder:           t.Folder,
+		Filename:         t.Filename,
+		OriginalFilename: t.OriginalFilename,
+		Size:             t.Size,
+		Bytes:            t.Bytes,
+		Magnet:           t.Magnet,
+		Files:            newFiles,
+		Status:           t.Status,
+		Added:            t.Added,
+		Progress:         t.Progress,
+		Speed:            t.Speed,
+		Seeders:          t.Seeders,
+		Links:            append([]string{}, t.Links...),
+		MountPath:        t.MountPath,
+		Debrid:           t.Debrid,
+		Arr:              t.Arr,
+	}
+}
+
 func (t *Torrent) GetSymlinkFolder(parent string) string {
 	return filepath.Join(parent, t.Arr.Name, t.Folder)
 }

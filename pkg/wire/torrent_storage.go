@@ -167,44 +167,33 @@ func (ts *TorrentStorage) Update(torrent *Torrent) {
 func (ts *TorrentStorage) Delete(hash, category string, removeFromDebrid bool) {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
-	key := keyPair(hash, category)
-	torrent, exists := ts.torrents[key]
-	if !exists && category == "" {
-		// Remove the torrent without knowing the category
-		for k, t := range ts.torrents {
-			if t.Hash == hash {
-				key = k
-				torrent = t
-				break
+
+	wireStore := Get()
+	for key, torrent := range ts.torrents {
+		if torrent == nil {
+			continue
+		}
+		if torrent.Hash == hash && (category == "" || torrent.Category == category) {
+			if torrent.State == "queued" && torrent.ID != "" {
+				// Remove the torrent from the import queue if it exists
+				wireStore.importsQueue.Delete(torrent.ID)
 			}
-		}
-	}
+			if removeFromDebrid && torrent.DebridID != "" && torrent.Debrid != "" {
+				dbClient := wireStore.debrid.Client(torrent.Debrid)
+				if dbClient != nil {
+					_ = dbClient.DeleteTorrent(torrent.DebridID)
+				}
+			}
+			delete(ts.torrents, key)
 
-	if torrent == nil {
-		return
-	}
-	st := Get()
-	// Check if torrent is queued for download
-
-	if torrent.State == "queued" && torrent.ID != "" {
-		// Remove the torrent from the import queue if it exists
-		st.importsQueue.Delete(torrent.ID)
-	}
-
-	if removeFromDebrid && torrent.DebridID != "" && torrent.Debrid != "" {
-		dbClient := st.debrid.Client(torrent.Debrid)
-		if dbClient != nil {
-			_ = dbClient.DeleteTorrent(torrent.DebridID)
-		}
-	}
-
-	delete(ts.torrents, key)
-
-	// Delete the torrent folder
-	if torrent.ContentPath != "" {
-		err := os.RemoveAll(torrent.ContentPath)
-		if err != nil {
-			return
+			// Delete the torrent folder
+			if torrent.ContentPath != "" {
+				err := os.RemoveAll(torrent.ContentPath)
+				if err != nil {
+					return
+				}
+			}
+			break
 		}
 	}
 	go func() {
@@ -227,12 +216,11 @@ func (ts *TorrentStorage) DeleteMultiple(hashes []string, removeFromDebrid bool)
 			if torrent == nil {
 				continue
 			}
-
-			if torrent.State == "queued" && torrent.ID != "" {
-				// Remove the torrent from the import queue if it exists
-				st.importsQueue.Delete(torrent.ID)
-			}
 			if torrent.Hash == hash {
+				if torrent.State == "queued" && torrent.ID != "" {
+					// Remove the torrent from the import queue if it exists
+					st.importsQueue.Delete(torrent.ID)
+				}
 				if removeFromDebrid && torrent.DebridID != "" && torrent.Debrid != "" {
 					toDelete[torrent.DebridID] = torrent.Debrid
 				}
@@ -243,6 +231,7 @@ func (ts *TorrentStorage) DeleteMultiple(hashes []string, removeFromDebrid bool)
 						return
 					}
 				}
+				break
 			}
 		}
 	}

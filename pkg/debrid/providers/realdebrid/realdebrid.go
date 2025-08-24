@@ -979,8 +979,8 @@ func (r *RealDebrid) SyncAccounts() error {
 	if len(r.accounts.Active()) == 0 {
 		return nil
 	}
-	for idx, account := range r.accounts.Active() {
-		if err := r.syncAccount(idx, account); err != nil {
+	for _, account := range r.accounts.All() {
+		if err := r.syncAccount(account); err != nil {
 			r.logger.Error().Err(err).Msgf("Error syncing account %s", account.Username)
 			continue // Skip this account and continue with the next
 		}
@@ -988,7 +988,7 @@ func (r *RealDebrid) SyncAccounts() error {
 	return nil
 }
 
-func (r *RealDebrid) syncAccount(index int, account *types.Account) error {
+func (r *RealDebrid) syncAccount(account *types.Account) error {
 	if account.Token == "" {
 		return fmt.Errorf("account %s has no token", account.Username)
 	}
@@ -1038,6 +1038,6 @@ func (r *RealDebrid) syncAccount(index int, account *types.Account) error {
 		account.TrafficUsed = todayData.Bytes
 	}
 
-	r.accounts.Update(index, account)
+	r.accounts.Update(account)
 	return nil
 }

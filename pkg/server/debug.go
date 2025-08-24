@@ -93,64 +93,62 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	debrids := wire.Get().Debrid()
-	if debrids == nil {
-		request.JSONResponse(w, stats, http.StatusOK)
-		return
+	if debrids != nil {
+		clients := debrids.Clients()
+		caches := debrids.Caches()
+		debridStats := make([]debridTypes.Stats, 0)
+		for debridName, client := range clients {
+			debridStat := debridTypes.Stats{}
+			libraryStat := debridTypes.LibraryStats{}
+			profile, err := client.GetProfile()
+			if err != nil {
+				s.logger.Error().Err(err).Str("debrid", debridName).Msg("Failed to get debrid profile")
+				profile = &debridTypes.Profile{
+					Name: debridName,
+				}
+			}
+			profile.Name = debridName
+			debridStat.Profile = profile
+			cache, ok := caches[debridName]
+			if ok {
+				// Get torrent data
+				libraryStat.Total = cache.TotalTorrents()
+				libraryStat.Bad = len(cache.GetListing("__bad__"))
+				libraryStat.ActiveLinks = cache.GetTotalActiveDownloadLinks()
+
+			}
+			debridStat.Library = libraryStat
+
+			// Get detailed account information
+			accounts := client.Accounts().All()
+			accountDetails := make([]map[string]any, 0)
+			for _, account := range accounts {
+				// Mask token - show first 8 characters and last 4 characters
+				maskedToken := ""
+				if len(account.Token) > 12 {
+					maskedToken = account.Token[:8] + "****" + account.Token[len(account.Token)-4:]
+				} else if len(account.Token) > 8 {
+					maskedToken = account.Token[:4] + "****" + account.Token[len(account.Token)-2:]
+				} else {
+					maskedToken = "****"
+				}
+
+				accountDetail := map[string]any{
+					"order":        account.Order,
+					"disabled":     account.Disabled,
+					"token_masked": maskedToken,
+					"username":     account.Username,
+					"traffic_used": account.TrafficUsed,
+					"links_count":  account.LinksCount(),
+					"debrid":       account.Debrid,
+				}
+				accountDetails = append(accountDetails, accountDetail)
+			}
+			debridStat.Accounts = accountDetails
+			debridStats = append(debridStats, debridStat)
+		}
+		stats["debrids"] = debridStats
 	}
-	clients := debrids.Clients()
-	caches := debrids.Caches()
-	debridStats := make([]debridTypes.Stats, 0)
-	for debridName, client := range clients {
-		debridStat := debridTypes.Stats{}
-		libraryStat := debridTypes.LibraryStats{}
-		profile, err := client.GetProfile()
-		if err != nil {
-			s.logger.Error().Err(err).Str("debrid", debridName).Msg("Failed to get debrid profile")
-			profile = &debridTypes.Profile{
-				Name: debridName,
-			}
-		}
-		profile.Name = debridName
-		debridStat.Profile = profile
-		cache, ok := caches[debridName]
-		if ok {
-			// Get torrent data
-			libraryStat.Total = cache.TotalTorrents()
-			libraryStat.Bad = len(cache.GetListing("__bad__"))
-			libraryStat.ActiveLinks = cache.GetTotalActiveDownloadLinks()
-
-		}
-		debridStat.Library = libraryStat
-
-		// Get detailed account information
-		accounts := client.Accounts().All()
-		accountDetails := make([]map[string]any, 0)
-		for _, account := range accounts {
-			// Mask token - show first 8 characters and last 4 characters
-			maskedToken := ""
-			if len(account.Token) > 12 {
-				maskedToken = account.Token[:8] + "****" + account.Token[len(account.Token)-4:]
-			} else if len(account.Token) > 8 {
-				maskedToken = account.Token[:4] + "****" + account.Token[len(account.Token)-2:]
-			} else {
-				maskedToken = "****"
-			}
-
-			accountDetail := map[string]any{
-				"order":        account.Order,
-				"disabled":     account.Disabled,
-				"token_masked": maskedToken,
-				"username":     account.Username,
-				"traffic_used": account.TrafficUsed,
-				"links_count":  account.LinksCount(),
-				"debrid":       account.Debrid,
-			}
-			accountDetails = append(accountDetails, accountDetail)
-		}
-		debridStat.Accounts = accountDetails
-		debridStats = append(debridStats, debridStat)
-	}
-	stats["debrids"] = debridStats
 
 	// Add rclone stats if available
 	if rcManager := wire.Get().RcloneManager(); rcManager != nil && rcManager.IsReady() {
