@@ -195,7 +195,7 @@ func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, select
 
 	r.logger.Info().Msgf("RAR file detected, unpacking: %s", t.Name)
 	linkFile := &types.File{TorrentId: t.Id, Link: data.Links[0]}
-	downloadLinkObj, err := r.GetDownloadLink(t, linkFile)
+	downloadLinkObj, account, err := r.GetDownloadLink(t, linkFile)
 
 	if err != nil {
 		r.logger.Debug().Err(err).Msgf("Error getting download link for RAR file: %s. Falling back to single file representation.", t.Name)
@@ -244,6 +244,7 @@ func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, select
 		return r.handleRarFallback(t, data)
 	}
 	r.logger.Info().Msgf("Unpacked RAR archive for torrent: %s with %d files", t.Name, len(files))
+	r.accounts.SetDownloadLink(account, downloadLinkObj)
 	return files, nil
 }
 
@@ -588,7 +589,7 @@ func (r *RealDebrid) GetFileDownloadLinks(t *types.Torrent) error {
 		go func(file types.File) {
 			defer wg.Done()
 
-			link, err := r.GetDownloadLink(t, &file)
+			link, account, err := r.GetDownloadLink(t, &file)
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
@@ -607,6 +608,7 @@ func (r *RealDebrid) GetFileDownloadLinks(t *types.Torrent) error {
 			}
 
 			file.DownloadLink = link
+			r.accounts.SetDownloadLink(account, link)
 
 			mu.Lock()
 			files[file.Name] = file
@@ -622,7 +624,6 @@ func (r *RealDebrid) GetFileDownloadLinks(t *types.Torrent) error {
 	}
 
 	// Add links to cache
-	r.accounts.SetDownloadLinks(links)
 	t.Files = files
 	return nil
 }
@@ -643,7 +644,7 @@ func (r *RealDebrid) CheckLink(link string) error {
 	return nil
 }
 
-func (r *RealDebrid) _getDownloadLink(file *types.File) (*types.DownloadLink, error) {
+func (r *RealDebrid) getDownloadLink(account *types.Account, file *types.File) (*types.DownloadLink, error) {
 	url := fmt.Sprintf("%s/unrestrict/link/", r.Host)
 	_link := file.Link
 	if strings.HasPrefix(file.Link, "https://real-debrid.com/d/") && len(file.Link) > 39 {
@@ -653,6 +654,7 @@ func (r *RealDebrid) _getDownloadLink(file *types.File) (*types.DownloadLink, er
 		"link": {_link},
 	}
 	req, _ := http.NewRequest(http.MethodPost, url, strings.NewReader(payload.Encode()))
+	r.downloadClient.SetHeader("Authorization", fmt.Sprintf("Bearer %s", account.Token))
 	resp, err := r.downloadClient.Do(req)
 
 	if err != nil {
@@ -709,16 +711,14 @@ func (r *RealDebrid) _getDownloadLink(file *types.File) (*types.DownloadLink, er
 
 }
 
-func (r *RealDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types.DownloadLink, error) {
+func (r *RealDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types.DownloadLink, *types.Account, error) {
 
 	accounts := r.accounts.Active()
-
 	for _, account := range accounts {
-		r.downloadClient.SetHeader("Authorization", fmt.Sprintf("Bearer %s", account.Token))
-		downloadLink, err := r._getDownloadLink(file)
+		downloadLink, err := r.getDownloadLink(account, file)
 
 		if err == nil {
-			return downloadLink, nil
+			return downloadLink, account, nil
 		}
 
 		retries := 0
@@ -727,16 +727,16 @@ func (r *RealDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types
 			retries = 5
 		} else {
 			// If the error is not traffic exceeded, return the error
-			return nil, err
+			return nil, account, err
 		}
 		backOff := 1 * time.Second
 		for retries > 0 {
-			downloadLink, err = r._getDownloadLink(file)
+			downloadLink, err = r.getDownloadLink(account, file)
 			if err == nil {
-				return downloadLink, nil
+				return downloadLink, account, nil
 			}
 			if !errors.Is(err, utils.TrafficExceededError) {
-				return nil, err
+				return nil, account, err
 			}
 			// Add a delay before retrying
 			time.Sleep(backOff)
@@ -744,7 +744,7 @@ func (r *RealDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types
 			retries--
 		}
 	}
-	return nil, fmt.Errorf("realdebrid API error: download link not found")
+	return nil, nil, fmt.Errorf("realdebrid API error: download link not found")
 }
 
 func (r *RealDebrid) getTorrents(offset int, limit int) (int, []*types.Torrent, error) {
@@ -841,48 +841,47 @@ func (r *RealDebrid) GetTorrents() ([]*types.Torrent, error) {
 	return allTorrents, nil
 }
 
-func (r *RealDebrid) GetDownloadLinks() (map[string]*types.DownloadLink, error) {
-	links := make(map[string]*types.DownloadLink)
-	offset := 0
-	limit := 1000
+func (r *RealDebrid) RefreshDownloadLinks() error {
+	accounts := r.accounts.All()
 
-	accounts := r.accounts.Active()
-
-	if len(accounts) < 1 {
-		// No active download keys. It's likely that the key has reached bandwidth limit
-		return links, fmt.Errorf("no active download keys")
-	}
-	activeAccount := accounts[0]
-	r.downloadClient.SetHeader("Authorization", fmt.Sprintf("Bearer %s", activeAccount.Token))
-	for {
-		dl, err := r._getDownloads(offset, limit)
-		if err != nil {
-			break
+	for _, account := range accounts {
+		if account == nil || account.Token == "" {
+			continue
 		}
-		if len(dl) == 0 {
-			break
-		}
-
-		for _, d := range dl {
-			if _, exists := links[d.Link]; exists {
-				// This is ordered by date, so we can skip the rest
-				continue
+		offset := 0
+		limit := 1000
+		links := make(map[string]*types.DownloadLink)
+		for {
+			dl, err := r.getDownloadLinks(account, offset, limit)
+			if err != nil {
+				break
 			}
-			links[d.Link] = &d
+			if len(dl) == 0 {
+				break
+			}
+
+			for _, d := range dl {
+				if _, exists := links[d.Link]; exists {
+					// This is ordered by date, so we can skip the rest
+					continue
+				}
+				links[d.Link] = &d
+			}
+
+			offset += len(dl)
 		}
-
-		offset += len(dl)
+		r.accounts.SetDownloadLinks(account, links)
 	}
-
-	return links, nil
+	return nil
 }
 
-func (r *RealDebrid) _getDownloads(offset int, limit int) ([]types.DownloadLink, error) {
+func (r *RealDebrid) getDownloadLinks(account *types.Account, offset int, limit int) ([]types.DownloadLink, error) {
 	url := fmt.Sprintf("%s/downloads?limit=%d", r.Host, limit)
 	if offset > 0 {
 		url = fmt.Sprintf("%s&offset=%d", url, offset)
 	}
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	r.downloadClient.SetHeader("Authorization", fmt.Sprintf("Bearer %s", account.Token))
 	resp, err := r.downloadClient.MakeRequest(req)
 	if err != nil {
 		return nil, err

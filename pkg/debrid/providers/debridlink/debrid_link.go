@@ -247,7 +247,7 @@ func (dl *DebridLink) UpdateTorrent(t *types.Torrent) error {
 		t.Files[f.Name] = file
 	}
 
-	dl.accounts.SetDownloadLinks(links)
+	dl.accounts.SetDownloadLinks(nil, links)
 	return nil
 }
 
@@ -308,8 +308,7 @@ func (dl *DebridLink) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
 		file.DownloadLink = link
 		t.Files[f.Name] = file
 	}
-
-	dl.accounts.SetDownloadLinks(links)
+	dl.accounts.SetDownloadLinks(nil, links)
 
 	return t, nil
 }
@@ -353,11 +352,11 @@ func (dl *DebridLink) GetFileDownloadLinks(t *types.Torrent) error {
 	return nil
 }
 
-func (dl *DebridLink) GetDownloadLinks() (map[string]*types.DownloadLink, error) {
-	return nil, nil
+func (dl *DebridLink) RefreshDownloadLinks() error {
+	return nil
 }
 
-func (dl *DebridLink) GetDownloadLink(t *types.Torrent, file *types.File) (*types.DownloadLink, error) {
+func (dl *DebridLink) GetDownloadLink(t *types.Torrent, file *types.File) (*types.DownloadLink, *types.Account, error) {
 	return dl.accounts.GetDownloadLink(file.Link)
 }
 
@@ -452,7 +451,7 @@ func (dl *DebridLink) getTorrents(page, perPage int) ([]*types.Torrent, error) {
 		}
 		torrents = append(torrents, torrent)
 	}
-	dl.accounts.SetDownloadLinks(links)
+	dl.accounts.SetDownloadLinks(nil, links)
 
 	return torrents, nil
 }

@@ -136,6 +136,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 				accountDetail := map[string]any{
 					"order":        account.Order,
 					"disabled":     account.Disabled,
+					"in_use":       account.InUse,
 					"token_masked": maskedToken,
 					"username":     account.Username,
 					"traffic_used": account.TrafficUsed,

@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"cmp"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
+	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/pkg/rclone"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -39,6 +42,20 @@ const (
 	WebDavUseID                WebDavFolderNaming = "id"
 	WebdavUseHash              WebDavFolderNaming = "infohash"
 )
+
+var streamingTransport = &http.Transport{
+	TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
+	MaxIdleConns:          200,
+	MaxIdleConnsPerHost:   100,
+	MaxConnsPerHost:       200,
+	IdleConnTimeout:       90 * time.Second,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ResponseHeaderTimeout: 60 * time.Second,
+	ExpectContinueTimeout: 1 * time.Second,
+	DisableKeepAlives:     true,
+	ForceAttemptHTTP2:     false,
+	TLSNextProto:          make(map[string]func(string, *tls.Conn) http.RoundTripper),
+}
 
 type CachedTorrent struct {
 	*types.Torrent
@@ -81,9 +98,8 @@ type Cache struct {
 
 	listingDebouncer *utils.Debouncer[bool]
 	// monitors
-	repairRequest        sync.Map
-	failedToReinsert     sync.Map
-	downloadLinkRequests sync.Map
+	repairRequest    sync.Map
+	failedToReinsert sync.Map
 
 	// repair
 	repairChan chan RepairRequest
@@ -108,6 +124,7 @@ type Cache struct {
 	config        config.Debrid
 	customFolders []string
 	mounter       *rclone.Mount
+	httpClient    *http.Client
 }
 
 func NewDebridCache(dc config.Debrid, client types.Client, mounter *rclone.Mount) *Cache {
@@ -153,6 +170,16 @@ func NewDebridCache(dc config.Debrid, client types.Client, mounter *rclone.Mount
 
 	}
 	_log := logger.New(fmt.Sprintf("%s-webdav", client.Name()))
+	if dc.Proxy != "" {
+
+	}
+	transport := streamingTransport
+	request.SetProxy(transport, dc.Proxy)
+	httpClient := &http.Client{
+		Transport: transport,
+		Timeout:   0,
+	}
+
 	c := &Cache{
 		dir: filepath.Join(cfg.Path, "cache", dc.Name), // path to save cache files
 
@@ -171,7 +198,8 @@ func NewDebridCache(dc config.Debrid, client types.Client, mounter *rclone.Mount
 		customFolders: customFolders,
 		mounter:       mounter,
 
-		ready: make(chan struct{}),
+		ready:      make(chan struct{}),
+		httpClient: httpClient,
 	}
 
 	c.listingDebouncer = utils.NewDebouncer[bool](100*time.Millisecond, func(refreshRclone bool) {
@@ -225,7 +253,6 @@ func (c *Cache) Reset() {
 	c.invalidDownloadLinks = sync.Map{}
 	c.repairRequest = sync.Map{}
 	c.failedToReinsert = sync.Map{}
-	c.downloadLinkRequests = sync.Map{}
 
 	// 5. Rebuild the listing debouncer
 	c.listingDebouncer = utils.NewDebouncer[bool](
@@ -903,4 +930,8 @@ func (c *Cache) Logger() zerolog.Logger {
 
 func (c *Cache) GetConfig() config.Debrid {
 	return c.config
+}
+
+func (c *Cache) Download(req *http.Request) (*http.Response, error) {
+	return c.httpClient.Do(req)
 }

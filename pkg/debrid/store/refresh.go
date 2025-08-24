@@ -243,14 +243,10 @@ func (c *Cache) refreshDownloadLinks(ctx context.Context) {
 	}
 	defer c.downloadLinksRefreshMu.Unlock()
 
-	links, err := c.client.GetDownloadLinks()
-
-	if err != nil {
+	if err := c.client.RefreshDownloadLinks(); err != nil {
 		c.logger.Error().Err(err).Msg("Failed to get download links")
 		return
 	}
-
-	c.client.Accounts().SetDownloadLinks(links)
 
 	c.logger.Debug().Msgf("Refreshed download %d links", c.client.Accounts().GetLinksCount())
 }

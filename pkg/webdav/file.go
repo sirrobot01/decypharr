@@ -1,7 +1,6 @@
 package webdav
 
 import (
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,25 +10,6 @@ import (
 
 	"github.com/sirrobot01/decypharr/pkg/debrid/store"
 )
-
-var streamingTransport = &http.Transport{
-	TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
-	MaxIdleConns:          200,
-	MaxIdleConnsPerHost:   100,
-	MaxConnsPerHost:       200,
-	IdleConnTimeout:       90 * time.Second,
-	TLSHandshakeTimeout:   10 * time.Second,
-	ResponseHeaderTimeout: 60 * time.Second,
-	ExpectContinueTimeout: 1 * time.Second,
-	DisableKeepAlives:     true,
-	ForceAttemptHTTP2:     false,
-	TLSNextProto:          make(map[string]func(string, *tls.Conn) http.RoundTripper),
-}
-
-var sharedClient = &http.Client{
-	Transport: streamingTransport,
-	Timeout:   0,
-}
 
 type streamError struct {
 	Err                   error
@@ -176,7 +156,7 @@ func (f *File) streamWithRetry(w http.ResponseWriter, r *http.Request, retryCoun
 		return &streamError{Err: fmt.Errorf("invalid range"), StatusCode: http.StatusRequestedRangeNotSatisfiable}
 	}
 
-	resp, err := sharedClient.Do(upstreamReq)
+	resp, err := f.cache.Download(upstreamReq)
 	if err != nil {
 		return &streamError{Err: err, StatusCode: http.StatusServiceUnavailable}
 	}

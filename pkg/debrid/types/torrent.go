@@ -179,6 +179,16 @@ type DownloadLink struct {
 	ExpiresAt    time.Time
 }
 
-func (d *DownloadLink) String() string {
-	return d.DownloadLink
+func (dl *DownloadLink) Valid() error {
+	if dl.DownloadLink == "" {
+		return EmptyDownloadLinkError
+	}
+	if dl.ExpiresAt.IsZero() || dl.ExpiresAt.Before(time.Now()) {
+		return DownloadLinkExpiredError
+	}
+	return nil
+}
+
+func (dl *DownloadLink) String() string {
+	return dl.DownloadLink
 }
