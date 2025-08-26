@@ -8,7 +8,7 @@ type Client interface {
 	SubmitMagnet(tr *Torrent) (*Torrent, error)
 	CheckStatus(tr *Torrent) (*Torrent, error)
 	GetFileDownloadLinks(tr *Torrent) error
-	GetDownloadLink(tr *Torrent, file *File) (*DownloadLink, *Account, error)
+	GetDownloadLink(tr *Torrent, file *File) (*DownloadLink, error)
 	DeleteTorrent(torrentId string) error
 	IsAvailable(infohashes []string) map[string]bool
 	GetDownloadUncached() bool

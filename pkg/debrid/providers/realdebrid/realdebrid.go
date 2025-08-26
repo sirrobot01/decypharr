@@ -195,7 +195,7 @@ func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, select
 
 	r.logger.Info().Msgf("RAR file detected, unpacking: %s", t.Name)
 	linkFile := &types.File{TorrentId: t.Id, Link: data.Links[0]}
-	downloadLinkObj, account, err := r.GetDownloadLink(t, linkFile)
+	downloadLinkObj, err := r.GetDownloadLink(t, linkFile)
 
 	if err != nil {
 		r.logger.Debug().Err(err).Msgf("Error getting download link for RAR file: %s. Falling back to single file representation.", t.Name)
@@ -244,7 +244,7 @@ func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, select
 		return r.handleRarFallback(t, data)
 	}
 	r.logger.Info().Msgf("Unpacked RAR archive for torrent: %s with %d files", t.Name, len(files))
-	r.accounts.SetDownloadLink(account, downloadLinkObj)
+	r.accounts.SetDownloadLink(downloadLinkObj)
 	return files, nil
 }
 
@@ -589,7 +589,7 @@ func (r *RealDebrid) GetFileDownloadLinks(t *types.Torrent) error {
 		go func(file types.File) {
 			defer wg.Done()
 
-			link, account, err := r.GetDownloadLink(t, &file)
+			link, err := r.GetDownloadLink(t, &file)
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
@@ -608,7 +608,7 @@ func (r *RealDebrid) GetFileDownloadLinks(t *types.Torrent) error {
 			}
 
 			file.DownloadLink = link
-			r.accounts.SetDownloadLink(account, link)
+			r.accounts.SetDownloadLink(link)
 
 			mu.Lock()
 			files[file.Name] = file
@@ -701,6 +701,8 @@ func (r *RealDebrid) getDownloadLink(account *types.Account, file *types.File) (
 	}
 	now := time.Now()
 	return &types.DownloadLink{
+		MaskedToken:  account.MaskedToken,
+		Token:        account.Token,
 		Filename:     data.Filename,
 		Size:         data.Filesize,
 		Link:         data.Link,
@@ -711,14 +713,13 @@ func (r *RealDebrid) getDownloadLink(account *types.Account, file *types.File) (
 
 }
 
-func (r *RealDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types.DownloadLink, *types.Account, error) {
-
+func (r *RealDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types.DownloadLink, error) {
 	accounts := r.accounts.Active()
 	for _, account := range accounts {
 		downloadLink, err := r.getDownloadLink(account, file)
 
 		if err == nil {
-			return downloadLink, account, nil
+			return downloadLink, nil
 		}
 
 		retries := 0
@@ -727,16 +728,16 @@ func (r *RealDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types
 			retries = 5
 		} else {
 			// If the error is not traffic exceeded, return the error
-			return nil, account, err
+			return nil, err
 		}
 		backOff := 1 * time.Second
 		for retries > 0 {
 			downloadLink, err = r.getDownloadLink(account, file)
 			if err == nil {
-				return downloadLink, account, nil
+				return downloadLink, nil
 			}
 			if !errors.Is(err, utils.TrafficExceededError) {
-				return nil, account, err
+				return nil, err
 			}
 			// Add a delay before retrying
 			time.Sleep(backOff)
@@ -744,7 +745,7 @@ func (r *RealDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types
 			retries--
 		}
 	}
-	return nil, nil, fmt.Errorf("realdebrid API error: download link not found")
+	return nil, fmt.Errorf("realdebrid API error: download link not found")
 }
 
 func (r *RealDebrid) getTorrents(offset int, limit int) (int, []*types.Torrent, error) {
@@ -870,7 +871,7 @@ func (r *RealDebrid) RefreshDownloadLinks() error {
 
 			offset += len(dl)
 		}
-		r.accounts.SetDownloadLinks(account, links)
+		r.accounts.SetDownloadLinks(links)
 	}
 	return nil
 }
@@ -980,7 +981,7 @@ func (r *RealDebrid) SyncAccounts() error {
 	}
 	for _, account := range r.accounts.All() {
 		if err := r.syncAccount(account); err != nil {
-			r.logger.Error().Err(err).Msgf("Error syncing account %s", account.Username)
+			r.logger.Error().Err(err).Str("account", account.MaskedToken).Msgf("Error syncing account %s", account.Username)
 			continue // Skip this account and continue with the next
 		}
 	}

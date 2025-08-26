@@ -411,7 +411,7 @@ func (tb *Torbox) GetFileDownloadLinks(t *types.Torrent) error {
 	for _, file := range t.Files {
 		go func() {
 			defer wg.Done()
-			link, _, err := tb.GetDownloadLink(t, &file)
+			link, err := tb.GetDownloadLink(t, &file)
 			if err != nil {
 				errCh <- err
 				return
@@ -439,7 +439,7 @@ func (tb *Torbox) GetFileDownloadLinks(t *types.Torrent) error {
 	// Collect download links
 	for link := range linkCh {
 		if link != nil {
-			tb.accounts.SetDownloadLink(nil, link)
+			tb.accounts.SetDownloadLink(link)
 		}
 	}
 
@@ -454,7 +454,7 @@ func (tb *Torbox) GetFileDownloadLinks(t *types.Torrent) error {
 	return nil
 }
 
-func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (*types.DownloadLink, *types.Account, error) {
+func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (*types.DownloadLink, error) {
 	url := fmt.Sprintf("%s/api/torrents/requestdl/", tb.Host)
 	query := gourl.Values{}
 	query.Add("torrent_id", t.Id)
@@ -470,7 +470,7 @@ func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (*types.Do
 			Str("torrent_id", t.Id).
 			Str("file_id", file.Id).
 			Msg("Failed to make request to Torbox API")
-		return nil, nil, err
+		return nil, err
 	}
 
 	var data DownloadLinksResponse
@@ -480,7 +480,7 @@ func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (*types.Do
 			Str("torrent_id", t.Id).
 			Str("file_id", file.Id).
 			Msg("Failed to unmarshal Torbox API response")
-		return nil, nil, err
+		return nil, err
 	}
 
 	if data.Data == nil {
@@ -491,7 +491,7 @@ func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (*types.Do
 			Interface("error", data.Error).
 			Str("detail", data.Detail).
 			Msg("Torbox API returned no data")
-		return nil, nil, fmt.Errorf("error getting download links")
+		return nil, fmt.Errorf("error getting download links")
 	}
 
 	link := *data.Data
@@ -500,7 +500,7 @@ func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (*types.Do
 			Str("torrent_id", t.Id).
 			Str("file_id", file.Id).
 			Msg("Torbox API returned empty download link")
-		return nil, nil, fmt.Errorf("error getting download links")
+		return nil, fmt.Errorf("error getting download links")
 	}
 
 	now := time.Now()
@@ -510,9 +510,11 @@ func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (*types.Do
 		Id:           file.Id,
 		Generated:    now,
 		ExpiresAt:    now.Add(tb.autoExpiresLinksAfter),
+		Token:        tb.APIKey,
+		MaskedToken:  utils.Mask(tb.APIKey),
 	}
 
-	return downloadLink, nil, nil
+	return downloadLink, nil
 }
 
 func (tb *Torbox) GetDownloadingStatus() []string {

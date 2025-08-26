@@ -301,7 +301,7 @@ func (ad *AllDebrid) GetFileDownloadLinks(t *types.Torrent) error {
 	for _, file := range t.Files {
 		go func(file types.File) {
 			defer wg.Done()
-			link, _, err := ad.GetDownloadLink(t, &file)
+			link, err := ad.GetDownloadLink(t, &file)
 			if err != nil {
 				errCh <- err
 				return
@@ -336,7 +336,7 @@ func (ad *AllDebrid) GetFileDownloadLinks(t *types.Torrent) error {
 		links[link.Link] = link
 	}
 	// Update the files with download links
-	ad.accounts.SetDownloadLinks(nil, links)
+	ad.accounts.SetDownloadLinks(links)
 
 	// Check for errors
 	for err := range errCh {
@@ -349,7 +349,7 @@ func (ad *AllDebrid) GetFileDownloadLinks(t *types.Torrent) error {
 	return nil
 }
 
-func (ad *AllDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types.DownloadLink, *types.Account, error) {
+func (ad *AllDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types.DownloadLink, error) {
 	url := fmt.Sprintf("%s/link/unlock", ad.Host)
 	query := gourl.Values{}
 	query.Add("link", file.Link)
@@ -357,21 +357,22 @@ func (ad *AllDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
 	resp, err := ad.client.MakeRequest(req)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	var data DownloadLink
 	if err = json.Unmarshal(resp, &data); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	if data.Error != nil {
-		return nil, nil, fmt.Errorf("error getting download link: %s", data.Error.Message)
+		return nil, fmt.Errorf("error getting download link: %s", data.Error.Message)
 	}
 	link := data.Data.Link
 	if link == "" {
-		return nil, nil, fmt.Errorf("download link is empty")
+		return nil, fmt.Errorf("download link is empty")
 	}
 	now := time.Now()
+	account := ad.accounts.Current()
 	return &types.DownloadLink{
 		Link:         file.Link,
 		DownloadLink: link,
@@ -380,7 +381,9 @@ func (ad *AllDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types
 		Filename:     file.Name,
 		Generated:    now,
 		ExpiresAt:    now.Add(ad.autoExpiresLinksAfter),
-	}, nil, nil
+		Token:        account.Token,
+		MaskedToken:  account.MaskedToken,
+	}, nil
 }
 
 func (ad *AllDebrid) GetTorrents() ([]*types.Torrent, error) {

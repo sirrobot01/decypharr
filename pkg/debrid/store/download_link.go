@@ -30,22 +30,21 @@ func (r *downloadLinkRequest) Wait() (string, error) {
 	return r.result, r.err
 }
 
-func (c *Cache) GetDownloadLink(torrentName, filename, fileLink string) (string, error) {
+func (c *Cache) GetDownloadLink(torrentName, filename, fileLink string) (*types.DownloadLink, error) {
 	// Check link cache
-	if dl, err := c.checkDownloadLink(fileLink); dl != "" && err == nil {
+	if dl, err := c.checkDownloadLink(fileLink); dl != nil && err == nil {
 		return dl, nil
 	}
 
 	dl, err := c.fetchDownloadLink(torrentName, filename, fileLink)
 	if err != nil {
-		return "", err
+		return dl, err
 	}
 
 	if dl == nil || dl.DownloadLink == "" {
-		err = fmt.Errorf("download link is empty for %s in torrent %s", filename, torrentName)
-		return "", err
+		return nil, fmt.Errorf("download link is empty for %s in torrent %s", filename, torrentName)
 	}
-	return dl.DownloadLink, err
+	return dl, nil
 }
 
 func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (*types.DownloadLink, error) {
@@ -86,11 +85,11 @@ func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (*type
 	}
 
 	c.logger.Trace().Msgf("Getting download link for %s(%s)", filename, file.Link)
-	downloadLink, account, err := c.client.GetDownloadLink(ct.Torrent, &file)
+	downloadLink, err := c.client.GetDownloadLink(ct.Torrent, &file)
 	if err != nil {
 		if errors.Is(err, utils.HosterUnavailableError) {
 			c.logger.Trace().
-				Str("account", account.Username).
+				Str("account", downloadLink.MaskedToken).
 				Str("filename", filename).
 				Str("torrent_id", ct.Id).
 				Msg("Hoster unavailable, attempting to reinsert torrent")
@@ -105,7 +104,7 @@ func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (*type
 				return nil, fmt.Errorf("file %s not found in reinserted torrent %s", filename, torrentName)
 			}
 			// Retry getting the download link
-			downloadLink, account, err = c.client.GetDownloadLink(ct.Torrent, &file)
+			downloadLink, err = c.client.GetDownloadLink(ct.Torrent, &file)
 			if err != nil {
 				return nil, fmt.Errorf("retry failed to get download link: %w", err)
 			}
@@ -125,7 +124,7 @@ func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (*type
 	}
 
 	// Set link to cache
-	go c.client.Accounts().SetDownloadLink(account, downloadLink)
+	go c.client.Accounts().SetDownloadLink(downloadLink)
 	return downloadLink, nil
 }
 
@@ -136,25 +135,30 @@ func (c *Cache) GetFileDownloadLinks(t CachedTorrent) {
 	}
 }
 
-func (c *Cache) checkDownloadLink(link string) (string, error) {
+func (c *Cache) checkDownloadLink(link string) (*types.DownloadLink, error) {
 
-	dl, _, err := c.client.Accounts().GetDownloadLink(link)
+	dl, err := c.client.Accounts().GetDownloadLink(link)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if !c.downloadLinkIsInvalid(dl.DownloadLink) {
-		return dl.DownloadLink, nil
+		return dl, nil
 	}
-	return "", fmt.Errorf("download link not found for %s", link)
+	return nil, fmt.Errorf("download link not found for %s", link)
 }
 
-func (c *Cache) MarkDownloadLinkAsInvalid(link, downloadLink, reason string) {
-	c.invalidDownloadLinks.Store(downloadLink, reason)
+func (c *Cache) MarkDownloadLinkAsInvalid(link string, downloadLink *types.DownloadLink, reason string) {
+	c.invalidDownloadLinks.Store(downloadLink.DownloadLink, reason)
 	// Remove the download api key from active
 	if reason == "bandwidth_exceeded" {
 		// Disable the account
 		account, err := c.client.Accounts().GetAccountFromLink(link)
 		if err != nil {
+			maskedToken := ""
+			if account != nil {
+				maskedToken = account.MaskedToken
+			}
+			c.logger.Warn().Err(err).Str("account", maskedToken).Str("link", link).Msg("Failed to mark download link as invalid")
 			return
 		}
 		c.client.Accounts().Disable(account)

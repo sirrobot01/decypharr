@@ -22,3 +22,15 @@ func Contains(slice []string, value string) bool {
 	}
 	return false
 }
+
+func Mask(text string) string {
+	res := ""
+	if len(text) > 12 {
+		res = text[:8] + "****" + text[len(text)-4:]
+	} else if len(text) > 8 {
+		res = text[:4] + "****" + text[len(text)-2:]
+	} else {
+		res = "****"
+	}
+	return res
+}
