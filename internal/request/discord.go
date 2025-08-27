@@ -45,6 +45,8 @@ func getDiscordHeader(event string) string {
 		return "[Decypharr] Repair Completed, Awaiting action"
 	case "repair_complete":
 		return "[Decypharr] Repair Complete"
+	case "repair_cancelled":
+		return "[Decypharr] Repair Cancelled"
 	default:
 		// split the event string and capitalize the first letter of each word
 		evs := strings.Split(event, "_")

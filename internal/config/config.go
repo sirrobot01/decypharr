@@ -152,6 +152,7 @@ type Config struct {
 	Auth               *Auth       `json:"-"`
 	DiscordWebhook     string      `json:"discord_webhook_url,omitempty"`
 	RemoveStalledAfter string      `json:"remove_stalled_after,omitzero"`
+	CallbackURL        string      `json:"callback_url,omitempty"`
 }
 
 func (c *Config) JsonFile() string {

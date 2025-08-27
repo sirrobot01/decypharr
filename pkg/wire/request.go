@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/arr"
@@ -43,6 +44,8 @@ type ImportRequest struct {
 }
 
 func NewImportRequest(debrid string, downloadFolder string, magnet *utils.Magnet, arr *arr.Arr, action string, downloadUncached bool, callBackUrl string, importType ImportType) *ImportRequest {
+	cfg := config.Get()
+	callBackUrl = cmp.Or(callBackUrl, cfg.CallbackURL)
 	return &ImportRequest{
 		Id:               uuid.New().String(),
 		Status:           "started",

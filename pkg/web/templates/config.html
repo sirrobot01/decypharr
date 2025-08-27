@@ -120,7 +120,7 @@
                                 </div>
                             </div>
 
-                            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                                 <div class="form-control">
                                     <label class="label" for="minFileSize">
                                         <span class="label-text font-medium">Minimum File Size</span>
@@ -148,6 +148,15 @@
                                     <input type="text" class="input input-bordered" id="removeStalledAfter" name="remove_stalled_after" placeholder="1h">
                                     <div class="label">
                                         <span class="label-text-alt">Duration before removing stalled torrents</span>
+                                    </div>
+                                </div>
+                                <div class="form-control">
+                                    <label class="label" for="callbackUrl">
+                                        <span class="label-text font-medium">Callback URL</span>
+                                    </label>
+                                    <input type="text" class="input input-bordered" id="callbackUrl" name="callback_url" placeholder="http://example.com/callback">
+                                    <div class="label">
+                                        <span class="label-text-alt">Optional callback URL for download status updates</span>
                                     </div>
                                 </div>
                             </div>
@@ -364,71 +373,68 @@
                             </div>
 
                             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                                <div class="space-y-4">
-                                    <div class="form-control">
-                                        <label class="label" for="repair.interval">
-                                            <span class="label-text font-medium">Repair Interval</span>
-                                        </label>
-                                        <input type="text" class="input input-bordered" name="repair.interval" id="repair.interval" placeholder="24h">
-                                        <div class="label">
-                                            <span class="label-text-alt">How often to run repair (e.g., 24h, 1d, 03:00, or crontab)</span>
-                                        </div>
-                                    </div>
-
-                                    <div class="form-control">
-                                        <label class="label" for="repair.workers">
-                                            <span class="label-text font-medium">Worker Threads</span>
-                                        </label>
-                                        <input type="number" class="input input-bordered" name="repair.workers" id="repair.workers" min="1" placeholder="40">
-                                        <div class="label">
-                                            <span class="label-text-alt">Number of concurrent repair workers</span>
-                                        </div>
-                                    </div>
-
-                                    <div class="form-control">
-                                        <label class="label" for="repair.strategy">
-                                            <span class="label-text font-medium">Repair Strategy</span>
-                                        </label>
-                                        <select class="select select-bordered" name="repair.strategy" id="repair.strategy">
-                                            <option value="per_torrent" selected>Per Torrent</option>
-                                            <option value="per_file">Per File</option>
-                                        </select>
-                                        <div class="label">
-                                            <span class="label-text-alt">How to handle repairs</span>
-                                        </div>
+                                <div class="form-control">
+                                    <label class="label" for="repair.interval">
+                                        <span class="label-text font-medium">Repair Interval</span>
+                                    </label>
+                                    <input type="text" class="input input-bordered" name="repair.interval" id="repair.interval" placeholder="24h">
+                                    <div class="label">
+                                        <span class="label-text-alt">How often to run repair (e.g., 24h, 1d, 03:00, or crontab)</span>
                                     </div>
                                 </div>
 
-                                <div class="space-y-4">
-                                    <div class="form-control">
-                                        <label class="label" for="repair.zurg_url">
-                                            <span class="label-text font-medium">Zurg URL</span>
-                                        </label>
-                                        <input type="url" class="input input-bordered" name="repair.zurg_url" id="repair.zurg_url" placeholder="http://zurg:9999">
-                                        <div class="label">
-                                            <span class="label-text-alt">Optional Zurg instance to speed up repairs</span>
+                                <div class="form-control">
+                                    <label class="label" for="repair.workers">
+                                        <span class="label-text font-medium">Worker Threads</span>
+                                    </label>
+                                    <input type="number" class="input input-bordered" name="repair.workers" id="repair.workers" min="1" placeholder="40">
+                                    <div class="label">
+                                        <span class="label-text-alt">Number of concurrent repair workers</span>
+                                    </div>
+                                </div>
+
+                                <div class="form-control">
+                                    <label class="label" for="repair.strategy">
+                                        <span class="label-text font-medium">Repair Strategy</span>
+                                    </label>
+                                    <select class="select select-bordered" name="repair.strategy" id="repair.strategy">
+                                        <option value="per_torrent" selected>Per Torrent</option>
+                                        <option value="per_file">Per File</option>
+                                    </select>
+                                    <div class="label">
+                                        <span class="label-text-alt">How to handle repairs</span>
+                                    </div>
+                                </div>
+                                <div class="form-control">
+                                    <label class="label" for="repair.zurg_url">
+                                        <span class="label-text font-medium">Zurg URL</span>
+                                    </label>
+                                    <input type="url" class="input input-bordered" name="repair.zurg_url" id="repair.zurg_url" placeholder="http://zurg:9999">
+                                    <div class="label">
+                                        <span class="label-text-alt">Optional Zurg instance to speed up repairs</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                                <div class="form-control">
+                                    <label class="label cursor-pointer justify-start gap-3">
+                                        <input type="checkbox" class="checkbox" name="repair.use_webdav" id="repair.use_webdav">
+                                        <div>
+                                            <span class="label-text font-medium">Use WebDAV</span>
+                                            <div class="label-text-alt">Use internal WebDAV for repairs</div>
                                         </div>
-                                    </div>
+                                    </label>
+                                </div>
 
-                                    <div class="form-control">
-                                        <label class="label cursor-pointer justify-start gap-3">
-                                            <input type="checkbox" class="checkbox" name="repair.use_webdav" id="repair.use_webdav">
-                                            <div>
-                                                <span class="label-text font-medium">Use WebDAV</span>
-                                                <div class="label-text-alt">Use internal WebDAV for repairs</div>
-                                            </div>
-                                        </label>
-                                    </div>
-
-                                    <div class="form-control">
-                                        <label class="label cursor-pointer justify-start gap-3">
-                                            <input type="checkbox" class="checkbox" name="repair.auto_process" id="repair.auto_process">
-                                            <div>
-                                                <span class="label-text font-medium">Auto Process</span>
-                                                <div class="label-text-alt">Automatically delete broken symlinks and re-search</div>
-                                            </div>
-                                        </label>
-                                    </div>
+                                <div class="form-control">
+                                    <label class="label cursor-pointer justify-start gap-3">
+                                        <input type="checkbox" class="checkbox" name="repair.auto_process" id="repair.auto_process">
+                                        <div>
+                                            <span class="label-text font-medium">Auto Process</span>
+                                            <div class="label-text-alt">Automatically delete broken symlinks and re-search</div>
+                                        </div>
+                                    </label>
                                 </div>
                             </div>
                         </div>

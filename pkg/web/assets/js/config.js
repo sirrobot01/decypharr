@@ -1085,6 +1085,7 @@ class ConfigManager {
             min_file_size: document.getElementById('minFileSize').value,
             max_file_size: document.getElementById('maxFileSize').value,
             remove_stalled_after: document.getElementById('removeStalledAfter').value,
+            callback_url: document.getElementById('callbackUrl').value,
 
             // Debrid configurations
             debrids: this.collectDebridConfigs(),

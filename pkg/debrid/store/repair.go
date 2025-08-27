@@ -59,6 +59,8 @@ func (c *Cache) markAsSuccessfullyReinserted(torrentId string) {
 	}
 }
 
+// GetBrokenFiles checks the files in the torrent for broken links.
+// It also attempts to reinsert the torrent if any files are broken.
 func (c *Cache) GetBrokenFiles(t *CachedTorrent, filenames []string) []string {
 	files := make(map[string]types.File)
 	repairStrategy := config.Get().Repair.Strategy

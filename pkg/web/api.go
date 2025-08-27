@@ -246,35 +246,6 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get the current configuration
-	currentConfig := config.Get()
-
-	// Update fields that can be changed
-	currentConfig.LogLevel = updatedConfig.LogLevel
-	currentConfig.MinFileSize = updatedConfig.MinFileSize
-	currentConfig.MaxFileSize = updatedConfig.MaxFileSize
-	currentConfig.RemoveStalledAfter = updatedConfig.RemoveStalledAfter
-	currentConfig.AllowedExt = updatedConfig.AllowedExt
-	currentConfig.DiscordWebhook = updatedConfig.DiscordWebhook
-
-	// Should this be added?
-	currentConfig.URLBase = updatedConfig.URLBase
-	currentConfig.BindAddress = updatedConfig.BindAddress
-	currentConfig.Port = updatedConfig.Port
-
-	// Update QBitTorrent config
-	currentConfig.QBitTorrent = updatedConfig.QBitTorrent
-
-	// Update Repair config
-	currentConfig.Repair = updatedConfig.Repair
-	currentConfig.Rclone = updatedConfig.Rclone
-
-	// Update Debrids
-	if len(updatedConfig.Debrids) > 0 {
-		currentConfig.Debrids = updatedConfig.Debrids
-		// Clear legacy single debrid if using array
-	}
-
 	// Update Arrs through the service
 	storage := wire.Get()
 	arrStorage := storage.Arr()
@@ -287,10 +258,10 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		newConfigArrs = append(newConfigArrs, a)
 	}
-	currentConfig.Arrs = newConfigArrs
+	updatedConfig.Arrs = newConfigArrs
 
 	// Add config arr into the config
-	for _, a := range currentConfig.Arrs {
+	for _, a := range updatedConfig.Arrs {
 		if a.Host == "" || a.Token == "" {
 			continue // Skip empty arrs
 		}
@@ -312,7 +283,7 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := currentConfig.Save(); err != nil {
+	if err := updatedConfig.Save(); err != nil {
 		http.Error(w, "Error saving config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
