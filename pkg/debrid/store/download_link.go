@@ -89,7 +89,6 @@ func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (*type
 	if err != nil {
 		if errors.Is(err, utils.HosterUnavailableError) {
 			c.logger.Trace().
-				Str("account", downloadLink.MaskedToken).
 				Str("filename", filename).
 				Str("torrent_id", ct.Id).
 				Msg("Hoster unavailable, attempting to reinsert torrent")

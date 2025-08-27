@@ -898,7 +898,7 @@ class ConfigManager {
 
                     <input type="hidden" name="arr[${index}].source" value="${data.source || ''}">
 
-                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         <div class="form-control">
                             <label class="label" for="arr[${index}].name">
                                 <span class="label-text font-medium">Service Name</span>
@@ -933,9 +933,7 @@ class ConfigManager {
                                 </button>
                             </div>
                         </div>
-                    </div>
-
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+                        
                         <div class="form-control">
                             <label class="label" for="arr[${index}].selected_debrid">
                                 <span class="label-text font-medium">Preferred Debrid Service</span>
@@ -951,33 +949,31 @@ class ConfigManager {
                                 <span class="label-text-alt">Which debrid service this Arr should prefer</span>
                             </div>
                         </div>
+                    </div>
 
-                        <div class="flex flex-col justify-end">
-                            <div class="grid grid-cols-3 gap-2">
-                                <div class="form-control">
-                                    <label class="label cursor-pointer justify-start gap-2">
-                                        <input type="checkbox" class="checkbox checkbox-sm" 
-                                               name="arr[${index}].cleanup" id="arr[${index}].cleanup">
-                                        <span class="label-text text-sm">Cleanup Queue</span>
-                                    </label>
-                                </div>
+                    <div class="grid grid-cols-3 gap-4">
+                        <div class="form-control">
+                            <label class="label cursor-pointer justify-start gap-2">
+                                <input type="checkbox" class="checkbox checkbox-sm" 
+                                       name="arr[${index}].cleanup" id="arr[${index}].cleanup">
+                                <span class="label-text text-sm">Cleanup Queue</span>
+                            </label>
+                        </div>
 
-                                <div class="form-control">
-                                    <label class="label cursor-pointer justify-start gap-2">
-                                        <input type="checkbox" class="checkbox checkbox-sm" 
-                                               name="arr[${index}].skip_repair" id="arr[${index}].skip_repair">
-                                        <span class="label-text text-sm">Skip Repair</span>
-                                    </label>
-                                </div>
+                        <div class="form-control">
+                            <label class="label cursor-pointer justify-start gap-2">
+                                <input type="checkbox" class="checkbox checkbox-sm" 
+                                       name="arr[${index}].skip_repair" id="arr[${index}].skip_repair">
+                                <span class="label-text text-sm">Skip Repair</span>
+                            </label>
+                        </div>
 
-                                <div class="form-control">
-                                    <label class="label cursor-pointer justify-start gap-2">
-                                        <input type="checkbox" class="checkbox checkbox-sm" 
-                                               name="arr[${index}].download_uncached" id="arr[${index}].download_uncached">
-                                        <span class="label-text text-sm">Download Uncached</span>
-                                    </label>
-                                </div>
-                            </div>
+                        <div class="form-control">
+                            <label class="label cursor-pointer justify-start gap-2">
+                                <input type="checkbox" class="checkbox checkbox-sm" 
+                                       name="arr[${index}].download_uncached" id="arr[${index}].download_uncached">
+                                <span class="label-text text-sm">Download Uncached</span>
+                            </label>
                         </div>
                     </div>
                 </div>
