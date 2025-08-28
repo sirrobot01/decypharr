@@ -81,7 +81,7 @@ func NewManager() *Manager {
 		logger:      logger.New("rclone"),
 		ctx:         ctx,
 		cancel:      cancel,
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		httpClient:  &http.Client{Timeout: 60 * time.Second},
 		serverReady: make(chan struct{}),
 	}
 }

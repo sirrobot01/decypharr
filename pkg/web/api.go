@@ -246,6 +246,36 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get the current configuration
+	currentConfig := config.Get()
+
+	// Update fields that can be changed
+	currentConfig.LogLevel = updatedConfig.LogLevel
+	currentConfig.MinFileSize = updatedConfig.MinFileSize
+	currentConfig.MaxFileSize = updatedConfig.MaxFileSize
+	currentConfig.RemoveStalledAfter = updatedConfig.RemoveStalledAfter
+	currentConfig.AllowedExt = updatedConfig.AllowedExt
+	currentConfig.DiscordWebhook = updatedConfig.DiscordWebhook
+	currentConfig.CallbackURL = updatedConfig.CallbackURL
+
+	// Should this be added?
+	currentConfig.URLBase = updatedConfig.URLBase
+	currentConfig.BindAddress = updatedConfig.BindAddress
+	currentConfig.Port = updatedConfig.Port
+
+	// Update QBitTorrent config
+	currentConfig.QBitTorrent = updatedConfig.QBitTorrent
+
+	// Update Repair config
+	currentConfig.Repair = updatedConfig.Repair
+	currentConfig.Rclone = updatedConfig.Rclone
+
+	// Update Debrids
+	if len(updatedConfig.Debrids) > 0 {
+		currentConfig.Debrids = updatedConfig.Debrids
+		// Clear legacy single debrid if using array
+	}
+
 	// Update Arrs through the service
 	storage := wire.Get()
 	arrStorage := storage.Arr()
@@ -258,10 +288,10 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		newConfigArrs = append(newConfigArrs, a)
 	}
-	updatedConfig.Arrs = newConfigArrs
+	currentConfig.Arrs = newConfigArrs
 
 	// Add config arr into the config
-	for _, a := range updatedConfig.Arrs {
+	for _, a := range currentConfig.Arrs {
 		if a.Host == "" || a.Token == "" {
 			continue // Skip empty arrs
 		}
@@ -283,7 +313,7 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := updatedConfig.Save(); err != nil {
+	if err := currentConfig.Save(); err != nil {
 		http.Error(w, "Error saving config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -291,7 +321,7 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	if restartFunc != nil {
 		go func() {
 			// Small delay to ensure the response is sent
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(200 * time.Millisecond)
 			restartFunc()
 		}()
 	}
