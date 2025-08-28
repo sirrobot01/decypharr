@@ -372,6 +372,7 @@ func (r *RealDebrid) addTorrent(t *types.Torrent) (*types.Torrent, error) {
 	t.Id = data.Id
 	t.Debrid = r.name
 	t.MountPath = r.MountPath
+	t.Added = time.Now().Format(time.RFC3339)
 	return t, nil
 }
 
@@ -407,6 +408,7 @@ func (r *RealDebrid) addMagnet(t *types.Torrent) (*types.Torrent, error) {
 	t.Id = data.Id
 	t.Debrid = r.name
 	t.MountPath = r.MountPath
+	t.Added = time.Now().Format(time.RFC3339)
 	return t, nil
 }
 
@@ -488,7 +490,6 @@ func (r *RealDebrid) UpdateTorrent(t *types.Torrent) error {
 	t.Links = data.Links
 	t.MountPath = r.MountPath
 	t.Debrid = r.name
-	t.Added = data.Added
 	t.Files, _ = r.getSelectedFiles(t, data) // Get selected files
 
 	return nil
@@ -520,6 +521,7 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent) (*types.Torrent, error) {
 		t.Status = status
 		t.Debrid = r.name
 		t.MountPath = r.MountPath
+		t.Added = data.Added
 		if status == "waiting_files_selection" {
 			t.Files = r.getTorrentFiles(t, data)
 			if len(t.Files) == 0 {

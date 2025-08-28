@@ -107,6 +107,7 @@ func (ad *AllDebrid) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error
 	magnet := magnets[0]
 	torrentId := strconv.Itoa(magnet.ID)
 	torrent.Id = torrentId
+	torrent.Added = time.Now().Format(time.RFC3339)
 
 	return torrent, nil
 }

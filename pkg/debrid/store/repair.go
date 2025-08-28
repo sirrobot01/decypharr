@@ -262,7 +262,7 @@ func (c *Cache) reInsertTorrent(ct *CachedTorrent) (*CachedTorrent, error) {
 			_ = c.client.DeleteTorrent(newTorrent.Id)
 		}
 		c.markAsFailedToReinsert(oldID)
-		return ct, err
+		return ct, fmt.Errorf("failed to check torrent: %w", err)
 	}
 
 	// Update the torrent in the cache
@@ -295,7 +295,7 @@ func (c *Cache) reInsertTorrent(ct *CachedTorrent) (*CachedTorrent, error) {
 		}
 	}
 
-	req.Complete(ct, err)
+	req.Complete(ct, nil)
 	c.markAsSuccessfullyReinserted(oldID)
 
 	c.logger.Debug().Str("torrentId", torrent.Id).Msg("Torrent successfully reinserted")

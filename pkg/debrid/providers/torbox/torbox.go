@@ -161,6 +161,7 @@ func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
 	torrent.Id = torrentId
 	torrent.MountPath = tb.MountPath
 	torrent.Debrid = tb.name
+	torrent.Added = time.Now().Format(time.RFC3339)
 
 	return torrent, nil
 }
