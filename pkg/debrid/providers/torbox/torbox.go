@@ -430,17 +430,18 @@ func (tb *Torbox) GetFileDownloadLinks(t *types.Torrent) error {
 		close(errCh)
 	}()
 
-	// Collect results
-	files := make(map[string]types.File, len(t.Files))
-	for file := range filesCh {
-		files[file.Name] = file
-	}
-
-	// Collect download links
+	// Collect download links before files to ensure all download operations are completed
+	// and available before updating the files map. This order prevents potential race conditions
+	// and ensures proper completion of download operations. See issue #123 for details.
 	for link := range linkCh {
 		if link != nil {
 			tb.accounts.SetDownloadLink(link.Link, link)
 		}
+	}
+
+	files := make(map[string]types.File, len(t.Files))
+	for file := range filesCh {
+		files[file.Name] = file
 	}
 
 	// Check for errors
