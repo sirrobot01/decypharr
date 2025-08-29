@@ -430,7 +430,9 @@ func (tb *Torbox) GetFileDownloadLinks(t *types.Torrent) error {
 		close(errCh)
 	}()
 
-	// Collect results (reordered to match send order)
+	// Collect download links before files to ensure all download operations are completed
+	// and available before updating the files map. This order prevents potential race conditions
+	// and ensures proper completion of download operations. See issue #123 for details.
 	for link := range linkCh {
 		if link != nil {
 			tb.accounts.SetDownloadLink(link.Link, link)
