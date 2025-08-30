@@ -384,13 +384,12 @@
                                             <div class="flex items-center gap-2">
                                                 <h5 class="font-medium text-sm">Account #${account.order + 1}</h5>
                                                 ${statusBadge}
-                                                ${inUseBadge}
                                             </div>
                                             <p class="text-xs text-base-content/70 mt-1">${account.username || 'No username'}</p>
                                         </div>
                                         <div class="text-right">
                                             <div class="text-xs font-mono text-base-content/80">
-                                                Token: ${account.masked_token || '****'}
+                                                Token: ${account.token_masked || '****'}
                                             </div>
                                         </div>
                                     </div>

@@ -247,7 +247,7 @@ func (dl *DebridLink) UpdateTorrent(t *types.Torrent) error {
 		t.Files[f.Name] = file
 	}
 
-	dl.accounts.SetDownloadLinks(links)
+	dl.accounts.SetDownloadLinks(nil, links)
 	return nil
 }
 
@@ -287,7 +287,6 @@ func (dl *DebridLink) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
 
 	links := make(map[string]*types.DownloadLink)
 	now := time.Now()
-	account := dl.accounts.Current()
 	for _, f := range data.Files {
 		file := types.File{
 			TorrentId: t.Id,
@@ -304,14 +303,12 @@ func (dl *DebridLink) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
 			DownloadLink: f.DownloadURL,
 			Generated:    now,
 			ExpiresAt:    now.Add(dl.autoExpiresLinksAfter),
-			Token:        account.Token,
-			MaskedToken:  account.MaskedToken,
 		}
 		links[file.Link] = link
 		file.DownloadLink = link
 		t.Files[f.Name] = file
 	}
-	dl.accounts.SetDownloadLinks(links)
+	dl.accounts.SetDownloadLinks(nil, links)
 
 	return t, nil
 }
@@ -359,7 +356,7 @@ func (dl *DebridLink) RefreshDownloadLinks() error {
 	return nil
 }
 
-func (dl *DebridLink) GetDownloadLink(t *types.Torrent, file *types.File) (*types.DownloadLink, error) {
+func (dl *DebridLink) GetDownloadLink(t *types.Torrent, file *types.File) (*types.DownloadLink, *types.Account, error) {
 	return dl.accounts.GetDownloadLink(file.Link)
 }
 
@@ -410,7 +407,6 @@ func (dl *DebridLink) getTorrents(page, perPage int) ([]*types.Torrent, error) {
 	if len(data) == 0 {
 		return torrents, nil
 	}
-	account := dl.accounts.Current()
 	for _, t := range data {
 		if t.Status != 100 {
 			continue
@@ -448,8 +444,6 @@ func (dl *DebridLink) getTorrents(page, perPage int) ([]*types.Torrent, error) {
 				DownloadLink: f.DownloadURL,
 				Generated:    now,
 				ExpiresAt:    now.Add(dl.autoExpiresLinksAfter),
-				Token:        account.Token,
-				MaskedToken:  account.MaskedToken,
 			}
 			links[file.Link] = link
 			file.DownloadLink = link
@@ -457,7 +451,7 @@ func (dl *DebridLink) getTorrents(page, perPage int) ([]*types.Torrent, error) {
 		}
 		torrents = append(torrents, torrent)
 	}
-	dl.accounts.SetDownloadLinks(links)
+	dl.accounts.SetDownloadLinks(nil, links)
 
 	return torrents, nil
 }

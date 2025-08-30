@@ -123,11 +123,21 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 			accounts := client.Accounts().All()
 			accountDetails := make([]map[string]any, 0)
 			for _, account := range accounts {
+				// Mask token - show first 8 characters and last 4 characters
+				maskedToken := ""
+				if len(account.Token) > 12 {
+					maskedToken = account.Token[:8] + "****" + account.Token[len(account.Token)-4:]
+				} else if len(account.Token) > 8 {
+					maskedToken = account.Token[:4] + "****" + account.Token[len(account.Token)-2:]
+				} else {
+					maskedToken = "****"
+				}
+
 				accountDetail := map[string]any{
 					"order":        account.Order,
 					"disabled":     account.Disabled,
 					"in_use":       account.InUse,
-					"masked_token": account.MaskedToken,
+					"token_masked": maskedToken,
 					"username":     account.Username,
 					"traffic_used": account.TrafficUsed,
 					"links_count":  account.LinksCount(),

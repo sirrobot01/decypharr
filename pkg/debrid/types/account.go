@@ -1,9 +1,7 @@
 package types
 
 import (
-	"fmt"
 	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/utils"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -39,7 +37,6 @@ type Account struct {
 	Disabled    bool
 	InUse       bool
 	Token       string `json:"token"`
-	MaskedToken string `json:"masked_token"`
 	links       map[string]*DownloadLink
 	mu          sync.RWMutex
 	TrafficUsed int64  `json:"traffic_used"` // Traffic used in bytes
@@ -98,12 +95,13 @@ func (a *Accounts) Current() *Account {
 		return current
 	}
 	current = activeAccounts[0]
-	return a.setCurrent(current)
+	a.setCurrent(current)
+	return current
 }
 
-func (a *Accounts) setCurrent(account *Account) *Account {
+func (a *Accounts) setCurrent(account *Account) {
 	if account == nil {
-		return nil
+		return
 	}
 	// Set every account InUse to false
 	a.accounts.Range(func(key, value interface{}) bool {
@@ -116,24 +114,25 @@ func (a *Accounts) setCurrent(account *Account) *Account {
 	})
 	account.InUse = true
 	a.current.Store(account)
-	return account
 }
 
 func (a *Accounts) Disable(account *Account) {
 	account.Disabled = true
-	account.InUse = false
 	a.accounts.Store(account.Token, account)
 
 	current := a.getCurrent()
 
 	if current.Equals(account) {
 		var newCurrent *Account
-		activeAccounts := a.Active()
-		if len(activeAccounts) > 0 {
-			newCurrent = activeAccounts[0]
-		} else {
-			newCurrent = a.All()[0]
-		}
+
+		a.accounts.Range(func(key, value interface{}) bool {
+			acc, ok := value.(*Account)
+			if ok && !acc.Disabled {
+				newCurrent = acc
+				return false // Break the loop
+			}
+			return true // Continue the loop
+		})
 		a.setCurrent(newCurrent)
 	}
 }
@@ -156,20 +155,19 @@ func (a *Accounts) Reset() {
 	a.setCurrent(current)
 }
 
-func (a *Accounts) GetDownloadLink(fileLink string) (*DownloadLink, error) {
+func (a *Accounts) GetDownloadLink(fileLink string) (*DownloadLink, *Account, error) {
 	current := a.Current()
 	if current == nil {
-		return nil, NoActiveAccountsError
+		return nil, nil, NoActiveAccountsError
 	}
-	dl, ok := current.GetDownloadLink(fileLink)
+	dl, ok := current.getLink(fileLink)
 	if !ok {
-		return nil, NoDownloadLinkError
+		return nil, current, NoDownloadLinkError
 	}
-	if !dl.Valid() {
-		return nil, fmt.Errorf("invalid download link: %s", dl.Link)
+	if err := dl.Valid(); err != nil {
+		return nil, current, err
 	}
-	dl.Token = current.Token
-	return dl, nil
+	return dl, current, nil
 }
 
 func (a *Accounts) GetAccountFromLink(fileLink string) (*Account, error) {
@@ -177,7 +175,7 @@ func (a *Accounts) GetAccountFromLink(fileLink string) (*Account, error) {
 	if currentAccount == nil {
 		return nil, NoActiveAccountsError
 	}
-	dl, ok := currentAccount.GetDownloadLink(fileLink)
+	dl, ok := currentAccount.getLink(fileLink)
 	if !ok {
 		return nil, NoDownloadLinkError
 	}
@@ -188,22 +186,13 @@ func (a *Accounts) GetAccountFromLink(fileLink string) (*Account, error) {
 }
 
 // SetDownloadLink sets the download link for the current account
-func (a *Accounts) SetDownloadLink(dl *DownloadLink) {
+func (a *Accounts) SetDownloadLink(account *Account, dl *DownloadLink) {
 	if dl == nil {
 		return
-	}
-	var account *Account
-	// Get account from link token
-	if dl.Token != "" {
-
-		if acc, ok := a.accounts.Load(dl.Token); ok {
-			account = acc.(*Account)
-		}
 	}
 	if account == nil {
 		account = a.getCurrent()
 	}
-
 	account.setLink(dl.Link, dl)
 }
 
@@ -221,11 +210,12 @@ func (a *Accounts) GetLinksCount() int {
 	return a.Current().LinksCount()
 }
 
-func (a *Accounts) SetDownloadLinks(links map[string]*DownloadLink) {
-	if a.Current() == nil {
-		return
+func (a *Accounts) SetDownloadLinks(account *Account, links map[string]*DownloadLink) {
+	if account == nil {
+		account = a.Current()
 	}
-	a.Current().setLinks(links)
+	account.setLinks(links)
+	a.accounts.Store(account.Token, account)
 }
 
 func (a *Accounts) Update(account *Account) {
@@ -237,11 +227,10 @@ func (a *Accounts) Update(account *Account) {
 
 func newAccount(debridName, token string, index int) *Account {
 	return &Account{
-		Debrid:      debridName,
-		Token:       token,
-		MaskedToken: utils.Mask(token),
-		Order:       index,
-		links:       make(map[string]*DownloadLink),
+		Debrid: debridName,
+		Token:  token,
+		Order:  index,
+		links:  make(map[string]*DownloadLink),
 	}
 }
 
@@ -252,7 +241,7 @@ func (a *Account) Equals(other *Account) bool {
 	return a.Token == other.Token && a.Debrid == other.Debrid
 }
 
-func (a *Account) GetDownloadLink(fileLink string) (*DownloadLink, bool) {
+func (a *Account) getLink(fileLink string) (*DownloadLink, bool) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	dl, ok := a.links[a.sliceFileLink(fileLink)]
@@ -284,7 +273,7 @@ func (a *Account) setLinks(links map[string]*DownloadLink) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, dl := range links {
-		if !dl.Valid() {
+		if err := dl.Valid(); err != nil {
 			continue
 		}
 		a.links[a.sliceFileLink(dl.Link)] = dl

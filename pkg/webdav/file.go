@@ -2,7 +2,6 @@ package webdav
 
 import (
 	"fmt"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"io"
 	"net/http"
 	"os"
@@ -30,7 +29,7 @@ type File struct {
 	name         string
 	torrentName  string
 	link         string
-	downloadLink *types.DownloadLink
+	downloadLink string
 	size         int64
 	isDir        bool
 	fileId       string
@@ -56,26 +55,26 @@ func (f *File) Close() error {
 	// This is just to satisfy the os.File interface
 	f.content = nil
 	f.children = nil
-	f.downloadLink = nil
+	f.downloadLink = ""
 	f.readOffset = 0
 	return nil
 }
 
-func (f *File) getDownloadLink() (*types.DownloadLink, error) {
+func (f *File) getDownloadLink() (string, error) {
 	// Check if we already have a final URL cached
 
-	if f.downloadLink != nil && isValidURL(f.downloadLink.DownloadLink) {
+	if f.downloadLink != "" && isValidURL(f.downloadLink) {
 		return f.downloadLink, nil
 	}
 	downloadLink, err := f.cache.GetDownloadLink(f.torrentName, f.name, f.link)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	if downloadLink != nil && isValidURL(downloadLink.DownloadLink) {
+	if downloadLink != "" && isValidURL(downloadLink) {
 		f.downloadLink = downloadLink
 		return downloadLink, nil
 	}
-	return nil, os.ErrNotExist
+	return "", os.ErrNotExist
 }
 
 func (f *File) getDownloadByteRange() (*[2]int64, error) {
@@ -139,12 +138,12 @@ func (f *File) streamWithRetry(w http.ResponseWriter, r *http.Request, retryCoun
 		return &streamError{Err: err, StatusCode: http.StatusPreconditionFailed}
 	}
 
-	if downloadLink == nil {
+	if downloadLink == "" {
 		return &streamError{Err: fmt.Errorf("empty download link"), StatusCode: http.StatusNotFound}
 	}
 
 	// Create upstream request with streaming optimizations
-	upstreamReq, err := http.NewRequest("GET", downloadLink.DownloadLink, nil)
+	upstreamReq, err := http.NewRequest("GET", downloadLink, nil)
 	if err != nil {
 		return &streamError{Err: err, StatusCode: http.StatusInternalServerError}
 	}
@@ -169,7 +168,6 @@ func (f *File) streamWithRetry(w http.ResponseWriter, r *http.Request, retryCoun
 		// Retry with new download link
 		_log.Debug().
 			Int("retry_count", retryCount+1).
-			Str("account", downloadLink.MaskedToken).
 			Str("file", f.name).
 			Msg("Retrying stream request")
 		return f.streamWithRetry(w, r, retryCount+1)
@@ -281,7 +279,6 @@ func (f *File) handleUpstream(resp *http.Response, retryCount, maxRetries int) (
 			_log.Debug().
 				Str("file", f.name).
 				Int("retry_count", retryCount).
-				Str("account", f.downloadLink.MaskedToken).
 				Msg("Bandwidth exceeded. Marking link as invalid")
 
 			f.cache.MarkDownloadLinkAsInvalid(f.link, f.downloadLink, "bandwidth_exceeded")
@@ -292,7 +289,7 @@ func (f *File) handleUpstream(resp *http.Response, retryCount, maxRetries int) (
 			}
 
 			return false, &streamError{
-				Err:        fmt.Errorf("bandwidth exceeded for %s after %d retries", f.downloadLink.MaskedToken, retryCount),
+				Err:        fmt.Errorf("bandwidth exceeded after %d retries", retryCount),
 				StatusCode: http.StatusServiceUnavailable,
 			}
 		}
@@ -315,7 +312,7 @@ func (f *File) handleUpstream(resp *http.Response, retryCount, maxRetries int) (
 		// Try to regenerate download link if we haven't exceeded retries
 		if retryCount < maxRetries {
 			// Clear cached link to force regeneration
-			f.downloadLink = nil
+			f.downloadLink = ""
 			return true, nil
 		}
 

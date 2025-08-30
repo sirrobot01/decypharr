@@ -176,19 +176,17 @@ type DownloadLink struct {
 	Generated    time.Time `json:"generated"`
 	Size         int64     `json:"size"`
 	Id           string    `json:"id"`
-	ExpiresAt    time.Time `json:"expires_at"`
-	MaskedToken  string    `json:"masked_token"`
-	Token        string    `json:"token"` // The token or api key used to generate this link
+	ExpiresAt    time.Time
 }
 
-func (dl *DownloadLink) Valid() bool {
+func (dl *DownloadLink) Valid() error {
 	if dl.DownloadLink == "" {
-		return false
+		return EmptyDownloadLinkError
 	}
 	if dl.ExpiresAt.IsZero() || dl.ExpiresAt.Before(time.Now()) {
-		return false
+		return DownloadLinkExpiredError
 	}
-	return true
+	return nil
 }
 
 func (dl *DownloadLink) String() string {
