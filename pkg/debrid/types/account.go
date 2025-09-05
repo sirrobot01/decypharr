@@ -1,10 +1,11 @@
 package types
 
 import (
-	"github.com/sirrobot01/decypharr/internal/config"
 	"slices"
 	"sync"
 	"sync/atomic"
+
+	"github.com/sirrobot01/decypharr/internal/config"
 )
 
 type Accounts struct {
@@ -35,7 +36,6 @@ type Account struct {
 	Debrid      string // e.g., "realdebrid", "torbox", etc.
 	Order       int
 	Disabled    bool
-	InUse       bool
 	Token       string `json:"token"`
 	links       map[string]*DownloadLink
 	mu          sync.RWMutex
@@ -103,16 +103,6 @@ func (a *Accounts) setCurrent(account *Account) {
 	if account == nil {
 		return
 	}
-	// Set every account InUse to false
-	a.accounts.Range(func(key, value interface{}) bool {
-		acc, ok := value.(*Account)
-		if ok {
-			acc.InUse = false
-			a.accounts.Store(key, acc)
-		}
-		return true
-	})
-	account.InUse = true
 	a.current.Store(account)
 }
 

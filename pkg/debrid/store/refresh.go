@@ -3,13 +3,14 @@ package store
 import (
 	"context"
 	"fmt"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"io"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 )
 
 type fileInfo struct {
@@ -120,7 +121,7 @@ func (c *Cache) refreshTorrents(ctx context.Context) {
 	close(workChan)
 	wg.Wait()
 
-	c.listingDebouncer.Call(false)
+	c.listingDebouncer.Call(true)
 
 	c.logger.Debug().Msgf("Processed %d new torrents", counter)
 }

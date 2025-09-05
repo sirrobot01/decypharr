@@ -3,11 +3,12 @@ package rclone
 import (
 	"context"
 	"fmt"
-	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/config"
 	"net/url"
 	"path/filepath"
 	"strings"
+
+	"github.com/rs/zerolog"
+	"github.com/sirrobot01/decypharr/internal/config"
 )
 
 // Mount represents a mount using the rclone RC client

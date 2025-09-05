@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"time"
 
 	"github.com/sirrobot01/decypharr/internal/config"
@@ -115,7 +116,8 @@ func (m *Manager) performMount(mountPath, provider, webdavURL string) error {
 		mountArgs["_config"] = configOpts
 	}
 	vfsOpt := map[string]interface{}{
-		"CacheMode": cfg.Rclone.VfsCacheMode,
+		"CacheMode":    cfg.Rclone.VfsCacheMode,
+		"DirCacheTime": cfg.Rclone.DirCacheTime,
 	}
 	vfsOpt["PollInterval"] = 0 // Poll interval not supported for webdav, set to 0
 
@@ -125,6 +127,13 @@ func (m *Manager) performMount(mountPath, provider, webdavURL string) error {
 		if cfg.Rclone.VfsCacheMaxAge != "" {
 			vfsOpt["CacheMaxAge"] = cfg.Rclone.VfsCacheMaxAge
 		}
+		if cfg.Rclone.VfsDiskSpaceTotal != "" {
+			vfsOpt["DiskSpaceTotalSize"] = cfg.Rclone.VfsDiskSpaceTotal
+		}
+		if cfg.Rclone.VfsReadChunkSizeLimit != "" {
+			vfsOpt["ChunkSizeLimit"] = cfg.Rclone.VfsReadChunkSizeLimit
+		}
+
 		if cfg.Rclone.VfsCacheMaxSize != "" {
 			vfsOpt["CacheMaxSize"] = cfg.Rclone.VfsCacheMaxSize
 		}
@@ -147,7 +156,7 @@ func (m *Manager) performMount(mountPath, provider, webdavURL string) error {
 		}
 
 		if cfg.Rclone.VfsReadChunkStreams != 0 {
-			vfsOpt["ReadChunkStreams"] = cfg.Rclone.VfsReadChunkStreams
+			vfsOpt["ChunkStreams"] = cfg.Rclone.VfsReadChunkStreams
 		}
 
 		if cfg.Rclone.NoChecksum {
@@ -160,11 +169,19 @@ func (m *Manager) performMount(mountPath, provider, webdavURL string) error {
 
 	// Add mount options based on configuration
 	if cfg.Rclone.UID != 0 {
-		mountOpt["UID"] = cfg.Rclone.UID
+		vfsOpt["UID"] = cfg.Rclone.UID
 	}
 	if cfg.Rclone.GID != 0 {
-		mountOpt["GID"] = cfg.Rclone.GID
+		vfsOpt["GID"] = cfg.Rclone.GID
 	}
+
+	if cfg.Rclone.Umask != "" {
+		umask, err := strconv.ParseInt(cfg.Rclone.Umask, 8, 32)
+		if err == nil {
+			vfsOpt["Umask"] = uint32(umask)
+		}
+	}
+
 	if cfg.Rclone.AttrTimeout != "" {
 		if attrTimeout, err := time.ParseDuration(cfg.Rclone.AttrTimeout); err == nil {
 			mountOpt["AttrTimeout"] = attrTimeout.String()
@@ -182,7 +199,7 @@ func (m *Manager) performMount(mountPath, provider, webdavURL string) error {
 	_, err := m.makeRequest(req, true)
 	if err != nil {
 		// Clean up mount point on failure
-		m.forceUnmountPath(mountPath)
+		_ = m.forceUnmountPath(mountPath)
 		return fmt.Errorf("failed to create mount for %s: %w", provider, err)
 	}
 

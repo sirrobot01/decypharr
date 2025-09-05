@@ -105,7 +105,6 @@ type Rclone struct {
 	VfsReadChunkSize      string `json:"vfs_read_chunk_size,omitempty"`       // Read chunk size (default 128M)
 	VfsReadChunkSizeLimit string `json:"vfs_read_chunk_size_limit,omitempty"` // Max chunk size (default off)
 	VfsReadAhead          string `json:"vfs_read_ahead,omitempty"`            // read ahead size
-	VfsPollInterval       string `json:"vfs_poll_interval,omitempty"`         // How often to rclone cleans the cache (default 1m)
 	BufferSize            string `json:"buffer_size,omitempty"`               // Buffer size for reading files (default 16M)
 
 	VfsCacheMinFreeSpace string `json:"vfs_cache_min_free_space,omitempty"`

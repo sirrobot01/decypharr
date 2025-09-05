@@ -6,15 +6,16 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/internal/request"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/logger"
+	"github.com/sirrobot01/decypharr/internal/request"
 )
 
 // Type is a type of arr
@@ -109,7 +110,7 @@ func (a *Arr) Request(method, endpoint string, payload interface{}) (*http.Respo
 
 func (a *Arr) Validate() error {
 	if a.Token == "" || a.Host == "" {
-		return fmt.Errorf("arr not configured: %s", a.Name)
+		return nil
 	}
 	resp, err := a.Request("GET", "/api/v3/health", nil)
 	if err != nil {
