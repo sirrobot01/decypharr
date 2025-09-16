@@ -2,21 +2,15 @@ package webdav
 
 import (
 	"fmt"
-	"github.com/stanNthe5/stringbuf"
 	"net/http"
-	"net/url"
 	"os"
 	"path"
 	"strconv"
 	"strings"
 	"time"
-)
 
-func isValidURL(str string) bool {
-	u, err := url.Parse(str)
-	// A valid URL should parse without error, and have a non-empty scheme and host.
-	return err == nil && u.Scheme != "" && u.Host != ""
-}
+	"github.com/stanNthe5/stringbuf"
+)
 
 var pctHex = "0123456789ABCDEF"
 

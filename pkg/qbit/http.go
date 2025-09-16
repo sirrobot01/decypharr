@@ -1,25 +1,33 @@
 package qbit
 
 import (
-	"github.com/sirrobot01/decypharr/internal/request"
-	"github.com/sirrobot01/decypharr/pkg/arr"
 	"net/http"
 	"path/filepath"
 	"strings"
+
+	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/request"
+	"github.com/sirrobot01/decypharr/pkg/arr"
 )
 
 func (q *QBit) handleLogin(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	_arr := getArrFromContext(ctx)
-	if _arr == nil {
-		// Arr not in context, return OK
-		_, _ = w.Write([]byte("Ok."))
+	cfg := config.Get()
+	username := r.FormValue("username")
+	password := r.FormValue("password")
+	a, err := q.authenticate(getCategory(ctx), username, password)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
-	if err := _arr.Validate(); err != nil {
-		q.logger.Error().Err(err).Msgf("Error validating arr")
-		http.Error(w, "Invalid arr configuration", http.StatusBadRequest)
-		return
+	if cfg.UseAuth {
+		cookie := &http.Cookie{
+			Name:     "sid",
+			Value:    createSID(a.Host, a.Token),
+			Path:     "/",
+			SameSite: http.SameSiteNoneMode,
+		}
+		http.SetCookie(w, cookie)
 	}
 	_, _ = w.Write([]byte("Ok."))
 }

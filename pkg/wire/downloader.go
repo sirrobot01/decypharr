@@ -3,7 +3,6 @@ package wire
 import (
 	"crypto/md5"
 	"fmt"
-	"github.com/google/uuid"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 
@@ -350,7 +351,7 @@ func (s *Store) downloadFiles(torrent *Torrent, debridTorrent *types.Torrent, pa
 	}
 	errChan := make(chan error, len(debridTorrent.Files))
 	for _, file := range debridTorrent.GetFiles() {
-		if file.DownloadLink == nil {
+		if file.DownloadLink.Empty() {
 			s.logger.Info().Msgf("No download link found for %s", file.Name)
 			continue
 		}

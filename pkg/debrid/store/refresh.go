@@ -249,5 +249,5 @@ func (c *Cache) refreshDownloadLinks(ctx context.Context) {
 		return
 	}
 
-	c.logger.Debug().Msgf("Refreshed download %d links", c.client.Accounts().GetLinksCount())
+	c.logger.Debug().Msgf("Refreshed download links")
 }

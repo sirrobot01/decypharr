@@ -7,8 +7,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"github.com/sirrobot01/decypharr/internal/request"
-	"github.com/sirrobot01/decypharr/pkg/rclone"
 	"net/http"
 	"os"
 	"path"
@@ -19,6 +17,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/puzpuzpuz/xsync/v4"
+	"github.com/sirrobot01/decypharr/pkg/debrid/common"
+	"github.com/sirrobot01/decypharr/pkg/rclone"
 
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 
@@ -42,20 +44,6 @@ const (
 	WebDavUseID                WebDavFolderNaming = "id"
 	WebdavUseHash              WebDavFolderNaming = "infohash"
 )
-
-var streamingTransport = &http.Transport{
-	TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
-	MaxIdleConns:          200,
-	MaxIdleConnsPerHost:   100,
-	MaxConnsPerHost:       200,
-	IdleConnTimeout:       90 * time.Second,
-	TLSHandshakeTimeout:   10 * time.Second,
-	ResponseHeaderTimeout: 60 * time.Second,
-	ExpectContinueTimeout: 1 * time.Second,
-	DisableKeepAlives:     true,
-	ForceAttemptHTTP2:     false,
-	TLSNextProto:          make(map[string]func(string, *tls.Conn) http.RoundTripper),
-}
 
 type CachedTorrent struct {
 	*types.Torrent
@@ -89,17 +77,17 @@ type RepairRequest struct {
 
 type Cache struct {
 	dir    string
-	client types.Client
+	client common.Client
 	logger zerolog.Logger
 
-	torrents             *torrentCache
-	invalidDownloadLinks sync.Map
-	folderNaming         WebDavFolderNaming
+	torrents     *torrentCache
+	folderNaming WebDavFolderNaming
 
 	listingDebouncer *utils.Debouncer[bool]
 	// monitors
-	repairRequest    sync.Map
-	failedToReinsert sync.Map
+	invalidDownloadLinks *xsync.Map[string, string]
+	repairRequest        *xsync.Map[string, *reInsertRequest]
+	failedToReinsert     *xsync.Map[string, struct{}]
 
 	// repair
 	repairChan chan RepairRequest
@@ -127,7 +115,7 @@ type Cache struct {
 	httpClient    *http.Client
 }
 
-func NewDebridCache(dc config.Debrid, client types.Client, mounter *rclone.Mount) *Cache {
+func NewDebridCache(dc config.Debrid, client common.Client, mounter *rclone.Mount) *Cache {
 	cfg := config.Get()
 	cet, err := time.LoadLocation("CET")
 	if err != nil {
@@ -170,11 +158,13 @@ func NewDebridCache(dc config.Debrid, client types.Client, mounter *rclone.Mount
 
 	}
 	_log := logger.New(fmt.Sprintf("%s-webdav", client.Name()))
-	if dc.Proxy != "" {
-
+	transport := &http.Transport{
+		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		MaxIdleConns:          10,
+		MaxIdleConnsPerHost:   2,
 	}
-	transport := streamingTransport
-	request.SetProxy(transport, dc.Proxy)
 	httpClient := &http.Client{
 		Transport: transport,
 		Timeout:   0,
@@ -198,8 +188,12 @@ func NewDebridCache(dc config.Debrid, client types.Client, mounter *rclone.Mount
 		customFolders: customFolders,
 		mounter:       mounter,
 
-		ready:      make(chan struct{}),
-		httpClient: httpClient,
+		ready:                make(chan struct{}),
+		httpClient:           httpClient,
+		invalidDownloadLinks: xsync.NewMap[string, string](),
+		repairRequest:        xsync.NewMap[string, *reInsertRequest](),
+		failedToReinsert:     xsync.NewMap[string, struct{}](),
+		repairChan:           make(chan RepairRequest, 100), // Initialize the repair channel, max 100 requests buffered
 	}
 
 	c.listingDebouncer = utils.NewDebouncer[bool](100*time.Millisecond, func(refreshRclone bool) {
@@ -250,9 +244,9 @@ func (c *Cache) Reset() {
 	c.torrents.reset()
 
 	// 3. Clear any sync.Maps
-	c.invalidDownloadLinks = sync.Map{}
-	c.repairRequest = sync.Map{}
-	c.failedToReinsert = sync.Map{}
+	c.invalidDownloadLinks = xsync.NewMap[string, string]()
+	c.repairRequest = xsync.NewMap[string, *reInsertRequest]()
+	c.failedToReinsert = xsync.NewMap[string, struct{}]()
 
 	// 5. Rebuild the listing debouncer
 	c.listingDebouncer = utils.NewDebouncer[bool](
@@ -285,7 +279,6 @@ func (c *Cache) Start(ctx context.Context) error {
 
 	// initial download links
 	go c.refreshDownloadLinks(ctx)
-	c.repairChan = make(chan RepairRequest, 100) // Initialize the repair channel, max 100 requests buffered
 	go c.repairWorker(ctx)
 
 	cfg := config.Get()
@@ -777,7 +770,7 @@ func (c *Cache) Add(t *types.Torrent) error {
 
 }
 
-func (c *Cache) Client() types.Client {
+func (c *Cache) Client() common.Client {
 	return c.client
 }
 

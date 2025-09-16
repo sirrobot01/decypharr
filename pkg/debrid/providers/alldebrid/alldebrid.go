@@ -3,25 +3,28 @@ package alldebrid
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/internal/request"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"net/http"
 	gourl "net/url"
 	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/logger"
+	"github.com/sirrobot01/decypharr/internal/request"
+	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/debrid/account"
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"go.uber.org/ratelimit"
 )
 
 type AllDebrid struct {
 	name                  string
 	Host                  string `json:"host"`
 	APIKey                string
-	accounts              *types.Accounts
+	accountsManager       *account.Manager
 	autoExpiresLinksAfter time.Duration
 	DownloadUncached      bool
 	client                *request.Client
@@ -34,8 +37,7 @@ type AllDebrid struct {
 	minimumFreeSlot int
 }
 
-func New(dc config.Debrid) (*AllDebrid, error) {
-	rl := request.ParseRateLimit(dc.RateLimit)
+func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*AllDebrid, error) {
 
 	headers := map[string]string{
 		"Authorization": fmt.Sprintf("Bearer %s", dc.APIKey),
@@ -44,7 +46,7 @@ func New(dc config.Debrid) (*AllDebrid, error) {
 	client := request.New(
 		request.WithHeaders(headers),
 		request.WithLogger(_log),
-		request.WithRateLimiter(rl),
+		request.WithRateLimiter(ratelimits["main"]),
 		request.WithProxy(dc.Proxy),
 	)
 
@@ -56,7 +58,7 @@ func New(dc config.Debrid) (*AllDebrid, error) {
 		name:                  "alldebrid",
 		Host:                  "http://api.alldebrid.com/v4.1",
 		APIKey:                dc.APIKey,
-		accounts:              types.NewAccounts(dc),
+		accountsManager:       account.NewManager(dc, ratelimits["download"], _log),
 		DownloadUncached:      dc.DownloadUncached,
 		autoExpiresLinksAfter: autoExpiresLinksAfter,
 		client:                client,
@@ -294,7 +296,7 @@ func (ad *AllDebrid) DeleteTorrent(torrentId string) error {
 
 func (ad *AllDebrid) GetFileDownloadLinks(t *types.Torrent) error {
 	filesCh := make(chan types.File, len(t.Files))
-	linksCh := make(chan *types.DownloadLink, len(t.Files))
+	linksCh := make(chan types.DownloadLink, len(t.Files))
 	errCh := make(chan error, len(t.Files))
 
 	var wg sync.WaitGroup
@@ -302,13 +304,9 @@ func (ad *AllDebrid) GetFileDownloadLinks(t *types.Torrent) error {
 	for _, file := range t.Files {
 		go func(file types.File) {
 			defer wg.Done()
-			link, _, err := ad.GetDownloadLink(t, &file)
+			link, err := ad.GetDownloadLink(t, &file)
 			if err != nil {
 				errCh <- err
-				return
-			}
-			if link == nil {
-				errCh <- fmt.Errorf("download link is empty")
 				return
 			}
 			linksCh <- link
@@ -328,17 +326,14 @@ func (ad *AllDebrid) GetFileDownloadLinks(t *types.Torrent) error {
 	}
 
 	// Collect download links
-	links := make(map[string]*types.DownloadLink, len(t.Files))
+	links := make(map[string]types.DownloadLink, len(t.Files))
 
 	for link := range linksCh {
-		if link == nil {
+		if link.Empty() {
 			continue
 		}
 		links[link.Link] = link
 	}
-	// Update the files with download links
-	ad.accounts.SetDownloadLinks(nil, links)
-
 	// Check for errors
 	for err := range errCh {
 		if err != nil {
@@ -350,7 +345,7 @@ func (ad *AllDebrid) GetFileDownloadLinks(t *types.Torrent) error {
 	return nil
 }
 
-func (ad *AllDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types.DownloadLink, *types.Account, error) {
+func (ad *AllDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (types.DownloadLink, error) {
 	url := fmt.Sprintf("%s/link/unlock", ad.Host)
 	query := gourl.Values{}
 	query.Add("link", file.Link)
@@ -358,22 +353,23 @@ func (ad *AllDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
 	resp, err := ad.client.MakeRequest(req)
 	if err != nil {
-		return nil, nil, err
+		return types.DownloadLink{}, err
 	}
 	var data DownloadLink
 	if err = json.Unmarshal(resp, &data); err != nil {
-		return nil, nil, err
+		return types.DownloadLink{}, err
 	}
 
 	if data.Error != nil {
-		return nil, nil, fmt.Errorf("error getting download link: %s", data.Error.Message)
+		return types.DownloadLink{}, fmt.Errorf("error getting download link: %s", data.Error.Message)
 	}
 	link := data.Data.Link
 	if link == "" {
-		return nil, nil, fmt.Errorf("download link is empty")
+		return types.DownloadLink{}, fmt.Errorf("download link is empty")
 	}
 	now := time.Now()
-	return &types.DownloadLink{
+	dl := types.DownloadLink{
+		Token:        ad.APIKey,
 		Link:         file.Link,
 		DownloadLink: link,
 		Id:           data.Data.Id,
@@ -381,7 +377,10 @@ func (ad *AllDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (*types
 		Filename:     file.Name,
 		Generated:    now,
 		ExpiresAt:    now.Add(ad.autoExpiresLinksAfter),
-	}, nil, nil
+	}
+	// Set the download link in the account
+	ad.accountsManager.StoreDownloadLink(dl)
+	return dl, nil
 }
 
 func (ad *AllDebrid) GetTorrents() ([]*types.Torrent, error) {
@@ -435,10 +434,6 @@ func (ad *AllDebrid) CheckLink(link string) error {
 
 func (ad *AllDebrid) GetMountPath() string {
 	return ad.MountPath
-}
-
-func (ad *AllDebrid) DeleteDownloadLink(linkId string) error {
-	return nil
 }
 
 func (ad *AllDebrid) GetAvailableSlots() (int, error) {
@@ -495,8 +490,8 @@ func (ad *AllDebrid) GetProfile() (*types.Profile, error) {
 	return profile, nil
 }
 
-func (ad *AllDebrid) Accounts() *types.Accounts {
-	return ad.accounts
+func (ad *AllDebrid) AccountManager() *account.Manager {
+	return ad.accountsManager
 }
 
 func (ad *AllDebrid) SyncAccounts() error {

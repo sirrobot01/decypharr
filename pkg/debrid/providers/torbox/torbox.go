@@ -20,15 +20,17 @@ import (
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/debrid/account"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/version"
+	"go.uber.org/ratelimit"
 )
 
 type Torbox struct {
 	name                  string
 	Host                  string `json:"host"`
 	APIKey                string
-	accounts              *types.Accounts
+	accountsManager       *account.Manager
 	autoExpiresLinksAfter time.Duration
 
 	DownloadUncached bool
@@ -40,8 +42,7 @@ type Torbox struct {
 	addSamples  bool
 }
 
-func New(dc config.Debrid) (*Torbox, error) {
-	rl := request.ParseRateLimit(dc.RateLimit)
+func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Torbox, error) {
 
 	headers := map[string]string{
 		"Authorization": fmt.Sprintf("Bearer %s", dc.APIKey),
@@ -50,7 +51,7 @@ func New(dc config.Debrid) (*Torbox, error) {
 	_log := logger.New(dc.Name)
 	client := request.New(
 		request.WithHeaders(headers),
-		request.WithRateLimiter(rl),
+		request.WithRateLimiter(ratelimits["main"]),
 		request.WithLogger(_log),
 		request.WithProxy(dc.Proxy),
 	)
@@ -63,7 +64,7 @@ func New(dc config.Debrid) (*Torbox, error) {
 		name:                  "torbox",
 		Host:                  "https://api.torbox.app/v1",
 		APIKey:                dc.APIKey,
-		accounts:              types.NewAccounts(dc),
+		accountsManager:       account.NewManager(dc, ratelimits["download"], _log),
 		DownloadUncached:      dc.DownloadUncached,
 		autoExpiresLinksAfter: autoExpiresLinksAfter,
 		client:                client,
@@ -404,7 +405,7 @@ func (tb *Torbox) DeleteTorrent(torrentId string) error {
 
 func (tb *Torbox) GetFileDownloadLinks(t *types.Torrent) error {
 	filesCh := make(chan types.File, len(t.Files))
-	linkCh := make(chan *types.DownloadLink)
+	linkCh := make(chan types.DownloadLink)
 	errCh := make(chan error, len(t.Files))
 
 	var wg sync.WaitGroup
@@ -412,12 +413,12 @@ func (tb *Torbox) GetFileDownloadLinks(t *types.Torrent) error {
 	for _, file := range t.Files {
 		go func() {
 			defer wg.Done()
-			link, _, err := tb.GetDownloadLink(t, &file)
+			link, err := tb.GetDownloadLink(t, &file)
 			if err != nil {
 				errCh <- err
 				return
 			}
-			if link != nil {
+			if link.DownloadLink != "" {
 				linkCh <- link
 				file.DownloadLink = link
 			}
@@ -437,13 +438,6 @@ func (tb *Torbox) GetFileDownloadLinks(t *types.Torrent) error {
 		files[file.Name] = file
 	}
 
-	// Collect download links
-	for link := range linkCh {
-		if link != nil {
-			tb.accounts.SetDownloadLink(nil, link)
-		}
-	}
-
 	// Check for errors
 	for err := range errCh {
 		if err != nil {
@@ -455,7 +449,7 @@ func (tb *Torbox) GetFileDownloadLinks(t *types.Torrent) error {
 	return nil
 }
 
-func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (*types.DownloadLink, *types.Account, error) {
+func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (types.DownloadLink, error) {
 	url := fmt.Sprintf("%s/api/torrents/requestdl/", tb.Host)
 	query := gourl.Values{}
 	query.Add("torrent_id", t.Id)
@@ -471,7 +465,7 @@ func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (*types.Do
 			Str("torrent_id", t.Id).
 			Str("file_id", file.Id).
 			Msg("Failed to make request to Torbox API")
-		return nil, nil, err
+		return types.DownloadLink{}, err
 	}
 
 	var data DownloadLinksResponse
@@ -481,7 +475,7 @@ func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (*types.Do
 			Str("torrent_id", t.Id).
 			Str("file_id", file.Id).
 			Msg("Failed to unmarshal Torbox API response")
-		return nil, nil, err
+		return types.DownloadLink{}, err
 	}
 
 	if data.Data == nil {
@@ -492,7 +486,7 @@ func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (*types.Do
 			Interface("error", data.Error).
 			Str("detail", data.Detail).
 			Msg("Torbox API returned no data")
-		return nil, nil, fmt.Errorf("error getting download links")
+		return types.DownloadLink{}, fmt.Errorf("error getting download links")
 	}
 
 	link := *data.Data
@@ -501,11 +495,12 @@ func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (*types.Do
 			Str("torrent_id", t.Id).
 			Str("file_id", file.Id).
 			Msg("Torbox API returned empty download link")
-		return nil, nil, fmt.Errorf("error getting download links")
+		return types.DownloadLink{}, fmt.Errorf("error getting download links")
 	}
 
 	now := time.Now()
-	downloadLink := &types.DownloadLink{
+	dl := types.DownloadLink{
+		Token:        tb.APIKey,
 		Link:         file.Link,
 		DownloadLink: link,
 		Id:           file.Id,
@@ -513,7 +508,9 @@ func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (*types.Do
 		ExpiresAt:    now.Add(tb.autoExpiresLinksAfter),
 	}
 
-	return downloadLink, nil, nil
+	tb.accountsManager.StoreDownloadLink(dl)
+
+	return dl, nil
 }
 
 func (tb *Torbox) GetDownloadingStatus() []string {
@@ -620,10 +617,6 @@ func (tb *Torbox) GetMountPath() string {
 	return tb.MountPath
 }
 
-func (tb *Torbox) DeleteDownloadLink(linkId string) error {
-	return nil
-}
-
 func (tb *Torbox) GetAvailableSlots() (int, error) {
 	//TODO: Implement the logic to check available slots for Torbox
 	return 0, fmt.Errorf("not implemented")
@@ -633,8 +626,8 @@ func (tb *Torbox) GetProfile() (*types.Profile, error) {
 	return nil, nil
 }
 
-func (tb *Torbox) Accounts() *types.Accounts {
-	return tb.accounts
+func (tb *Torbox) AccountManager() *account.Manager {
+	return tb.accountsManager
 }
 
 func (tb *Torbox) SyncAccounts() error {

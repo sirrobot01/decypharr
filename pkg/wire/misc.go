@@ -25,6 +25,7 @@ func createTorrentFromMagnet(req *ImportRequest) *Torrent {
 		AutoTmm:    false,
 		Ratio:      1,
 		RatioLimit: 1,
+		TotalSize:  magnet.Size,
 		SavePath:   filepath.Join(req.DownloadFolder, arrName) + string(os.PathSeparator),
 	}
 	return torrent

@@ -308,6 +308,10 @@ func (c *Config) IsSizeAllowed(size int64) bool {
 	return true
 }
 
+func (c *Config) SecretKey() string {
+	return cmp.Or(os.Getenv("DECYPHARR_SECRET_KEY"), "\"wqj(v%lj*!-+kf@4&i95rhh_!5_px5qnuwqbr%cjrvrozz_r*(\"")
+}
+
 func (c *Config) GetAuth() *Auth {
 	if !c.UseAuth {
 		return nil
@@ -338,10 +342,7 @@ func (c *Config) NeedsSetup() error {
 }
 
 func (c *Config) NeedsAuth() bool {
-	if c.UseAuth {
-		return c.GetAuth().Username == ""
-	}
-	return false
+	return !c.UseAuth && c.GetAuth().Username == ""
 }
 
 func (c *Config) updateDebrid(d Debrid) Debrid {

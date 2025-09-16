@@ -2,12 +2,13 @@ package server
 
 import (
 	"fmt"
+	"net/http"
+	"runtime"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/sirrobot01/decypharr/internal/request"
 	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/wire"
-	"net/http"
-	"runtime"
 )
 
 func (s *Server) handleIngests(w http.ResponseWriter, r *http.Request) {
@@ -118,33 +119,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 
 			}
 			debridStat.Library = libraryStat
-
-			// Get detailed account information
-			accounts := client.Accounts().All()
-			accountDetails := make([]map[string]any, 0)
-			for _, account := range accounts {
-				// Mask token - show first 8 characters and last 4 characters
-				maskedToken := ""
-				if len(account.Token) > 12 {
-					maskedToken = account.Token[:8] + "****" + account.Token[len(account.Token)-4:]
-				} else if len(account.Token) > 8 {
-					maskedToken = account.Token[:4] + "****" + account.Token[len(account.Token)-2:]
-				} else {
-					maskedToken = "****"
-				}
-
-				accountDetail := map[string]any{
-					"order":        account.Order,
-					"disabled":     account.Disabled,
-					"token_masked": maskedToken,
-					"username":     account.Username,
-					"traffic_used": account.TrafficUsed,
-					"links_count":  account.LinksCount(),
-					"debrid":       account.Debrid,
-				}
-				accountDetails = append(accountDetails, accountDetail)
-			}
-			debridStat.Accounts = accountDetails
+			debridStat.Accounts = client.AccountManager().Stats()
 			debridStats = append(debridStats, debridStat)
 		}
 		stats["debrids"] = debridStats

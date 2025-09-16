@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -116,18 +117,18 @@ func (t *Torrent) GetFiles() []File {
 }
 
 type File struct {
-	TorrentId    string        `json:"torrent_id"`
-	Id           string        `json:"id"`
-	Name         string        `json:"name"`
-	Size         int64         `json:"size"`
-	IsRar        bool          `json:"is_rar"`
-	ByteRange    *[2]int64     `json:"byte_range,omitempty"`
-	Path         string        `json:"path"`
-	Link         string        `json:"link"`
-	AccountId    string        `json:"account_id"`
-	Generated    time.Time     `json:"generated"`
-	Deleted      bool          `json:"deleted"`
-	DownloadLink *DownloadLink `json:"-"`
+	TorrentId    string       `json:"torrent_id"`
+	Id           string       `json:"id"`
+	Name         string       `json:"name"`
+	Size         int64        `json:"size"`
+	IsRar        bool         `json:"is_rar"`
+	ByteRange    *[2]int64    `json:"byte_range,omitempty"`
+	Path         string       `json:"path"`
+	Link         string       `json:"link"`
+	AccountId    string       `json:"account_id"`
+	Generated    time.Time    `json:"generated"`
+	Deleted      bool         `json:"deleted"`
+	DownloadLink DownloadLink `json:"-"`
 }
 
 func (t *Torrent) Cleanup(remove bool) {
@@ -170,6 +171,8 @@ type Profile struct {
 }
 
 type DownloadLink struct {
+	Debrid       string    `json:"debrid"`
+	Token        string    `json:"token"`
 	Filename     string    `json:"filename"`
 	Link         string    `json:"link"`
 	DownloadLink string    `json:"download_link"`
@@ -179,14 +182,25 @@ type DownloadLink struct {
 	ExpiresAt    time.Time
 }
 
+func isValidURL(str string) bool {
+	u, err := url.Parse(str)
+	// A valid URL should parse without error, and have a non-empty scheme and host.
+	return err == nil && u.Scheme != "" && u.Host != ""
+}
+
 func (dl *DownloadLink) Valid() error {
-	if dl.DownloadLink == "" {
+	if dl.Empty() {
 		return EmptyDownloadLinkError
 	}
-	if dl.ExpiresAt.IsZero() || dl.ExpiresAt.Before(time.Now()) {
-		return DownloadLinkExpiredError
+	// Check if the link is actually a valid URL
+	if !isValidURL(dl.DownloadLink) {
+		return ErrDownloadLinkNotFound
 	}
 	return nil
+}
+
+func (dl *DownloadLink) Empty() bool {
+	return dl.DownloadLink == ""
 }
 
 func (dl *DownloadLink) String() string {

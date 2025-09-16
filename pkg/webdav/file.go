@@ -8,7 +8,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/debrid/store"
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+)
+
+type retryAction int
+
+const (
+	noRetry retryAction = iota
+	retryWithLimit
+	retryAlways
+)
+
+const (
+	MaxNetworkRetries = 3
+	MaxLinkRetries    = 10
 )
 
 type streamError struct {
@@ -29,7 +44,7 @@ type File struct {
 	name         string
 	torrentName  string
 	link         string
-	downloadLink string
+	downloadLink types.DownloadLink
 	size         int64
 	isDir        bool
 	fileId       string
@@ -55,26 +70,27 @@ func (f *File) Close() error {
 	// This is just to satisfy the os.File interface
 	f.content = nil
 	f.children = nil
-	f.downloadLink = ""
+	f.downloadLink = types.DownloadLink{}
 	f.readOffset = 0
 	return nil
 }
 
-func (f *File) getDownloadLink() (string, error) {
+func (f *File) getDownloadLink() (types.DownloadLink, error) {
 	// Check if we already have a final URL cached
 
-	if f.downloadLink != "" && isValidURL(f.downloadLink) {
+	if f.downloadLink.Valid() == nil {
 		return f.downloadLink, nil
 	}
 	downloadLink, err := f.cache.GetDownloadLink(f.torrentName, f.name, f.link)
 	if err != nil {
-		return "", err
+		return downloadLink, err
 	}
-	if downloadLink != "" && isValidURL(downloadLink) {
-		f.downloadLink = downloadLink
-		return downloadLink, nil
+	err = downloadLink.Valid()
+	if err != nil {
+		return types.DownloadLink{}, err
 	}
-	return "", os.ErrNotExist
+	f.downloadLink = downloadLink
+	return downloadLink, nil
 }
 
 func (f *File) getDownloadByteRange() (*[2]int64, error) {
@@ -119,38 +135,29 @@ func (f *File) servePreloadedContent(w http.ResponseWriter, r *http.Request) err
 }
 
 func (f *File) StreamResponse(w http.ResponseWriter, r *http.Request) error {
-	// Handle preloaded content files
 	if f.content != nil {
 		return f.servePreloadedContent(w, r)
 	}
 
-	// Try streaming with retry logic
-	return f.streamWithRetry(w, r, 0)
+	return f.streamWithRetry(w, r, 0, 0)
 }
 
-func (f *File) streamWithRetry(w http.ResponseWriter, r *http.Request, retryCount int) error {
-	const maxRetries = 3
+func (f *File) streamWithRetry(w http.ResponseWriter, r *http.Request, networkRetries, recoverableRetries int) error {
+
 	_log := f.cache.Logger()
 
-	// Get download link (with caching optimization)
 	downloadLink, err := f.getDownloadLink()
 	if err != nil {
 		return &streamError{Err: err, StatusCode: http.StatusPreconditionFailed}
 	}
 
-	if downloadLink == "" {
-		return &streamError{Err: fmt.Errorf("empty download link"), StatusCode: http.StatusNotFound}
-	}
-
-	// Create upstream request with streaming optimizations
-	upstreamReq, err := http.NewRequest("GET", downloadLink, nil)
+	upstreamReq, err := http.NewRequest("GET", downloadLink.DownloadLink, nil)
 	if err != nil {
 		return &streamError{Err: err, StatusCode: http.StatusInternalServerError}
 	}
 
 	setVideoStreamingHeaders(upstreamReq)
 
-	// Handle range requests (critical for video seeking)
 	isRangeRequest := f.handleRangeRequest(upstreamReq, r, w)
 	if isRangeRequest == -1 {
 		return &streamError{Err: fmt.Errorf("invalid range"), StatusCode: http.StatusRequestedRangeNotSatisfiable}
@@ -158,31 +165,63 @@ func (f *File) streamWithRetry(w http.ResponseWriter, r *http.Request, retryCoun
 
 	resp, err := f.cache.Download(upstreamReq)
 	if err != nil {
+		// Network error - retry with limit
+		if networkRetries < MaxNetworkRetries {
+			_log.Debug().
+				Int("network_retries", networkRetries+1).
+				Err(err).
+				Msg("Network error, retrying")
+			return f.streamWithRetry(w, r, networkRetries+1, recoverableRetries)
+		}
 		return &streamError{Err: err, StatusCode: http.StatusServiceUnavailable}
 	}
 	defer resp.Body.Close()
 
-	// Handle upstream errors with retry logic
-	shouldRetry, retryErr := f.handleUpstream(resp, retryCount, maxRetries)
-	if shouldRetry && retryCount < maxRetries {
-		// Retry with new download link
-		_log.Debug().
-			Int("retry_count", retryCount+1).
-			Str("file", f.name).
-			Msg("Retrying stream request")
-		return f.streamWithRetry(w, r, retryCount+1)
-	}
-	if retryErr != nil {
-		return retryErr
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		retryType, retryErr := f.handleUpstreamError(downloadLink, resp)
+
+		switch retryType {
+		case retryAlways:
+			if recoverableRetries >= MaxLinkRetries {
+				return &streamError{
+					Err:        fmt.Errorf("max link retries exceeded (%d)", MaxLinkRetries),
+					StatusCode: http.StatusServiceUnavailable,
+				}
+			}
+
+			_log.Debug().
+				Int("recoverable_retries", recoverableRetries+1).
+				Str("file", f.name).
+				Msg("Recoverable error, retrying")
+			return f.streamWithRetry(w, r, 0, recoverableRetries+1) // Reset network retries
+
+		case retryWithLimit:
+			if networkRetries < MaxNetworkRetries {
+				_log.Debug().
+					Int("network_retries", networkRetries+1).
+					Str("file", f.name).
+					Msg("Network error, retrying")
+				return f.streamWithRetry(w, r, networkRetries+1, recoverableRetries)
+			}
+			fallthrough
+
+		case noRetry:
+			if retryErr != nil {
+				return retryErr
+			}
+			return &streamError{
+				Err:        fmt.Errorf("non-retryable error: status %d", resp.StatusCode),
+				StatusCode: http.StatusBadGateway,
+			}
+		}
 	}
 
-	// Determine status code based on range request
+	// Success - stream the response
 	statusCode := http.StatusOK
 	if isRangeRequest == 1 {
 		statusCode = http.StatusPartialContent
 	}
 
-	// Set headers before streaming
 	if contentLength := resp.Header.Get("Content-Length"); contentLength != "" {
 		w.Header().Set("Content-Length", contentLength)
 	}
@@ -191,10 +230,71 @@ func (f *File) streamWithRetry(w http.ResponseWriter, r *http.Request, retryCoun
 		w.Header().Set("Content-Range", contentRange)
 	}
 
-	if err := f.streamBuffer(w, resp.Body, statusCode); err != nil {
-		return err
+	return f.streamBuffer(w, resp.Body, statusCode)
+}
+
+func (f *File) handleUpstreamError(downloadLink types.DownloadLink, resp *http.Response) (retryAction, error) {
+	_log := f.cache.Logger()
+
+	cleanupResp := func(resp *http.Response) {
+		if resp.Body != nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
 	}
-	return nil
+
+	switch resp.StatusCode {
+	case http.StatusServiceUnavailable:
+		body, readErr := io.ReadAll(resp.Body)
+		cleanupResp(resp)
+
+		if readErr != nil {
+			_log.Error().Err(readErr).Msg("Failed to read response body")
+			return retryWithLimit, nil
+		}
+
+		bodyStr := string(body)
+		if strings.Contains(bodyStr, "you have exceeded your traffic") {
+			_log.Debug().
+				Str("token", utils.Mask(downloadLink.Token)).
+				Str("file", f.name).
+				Msg("Bandwidth exceeded for account, invalidating link")
+
+			f.cache.MarkDownloadLinkAsInvalid(f.downloadLink, "bandwidth_exceeded")
+			f.downloadLink = types.DownloadLink{}
+			return retryAlways, nil
+		}
+
+		return noRetry, &streamError{
+			Err:        fmt.Errorf("service unavailable: %s", bodyStr),
+			StatusCode: http.StatusServiceUnavailable,
+		}
+
+	case http.StatusNotFound:
+		cleanupResp(resp)
+		_log.Debug().
+			Str("file", f.name).
+			Msg("Link not found, invalidating and regenerating")
+
+		f.cache.MarkDownloadLinkAsInvalid(f.downloadLink, "link_not_found")
+		f.downloadLink = types.DownloadLink{}
+		return retryAlways, nil
+
+	default:
+		body, _ := io.ReadAll(resp.Body)
+		cleanupResp(resp)
+
+		_log.Error().
+			Int("status_code", resp.StatusCode).
+			Str("file", f.name).
+			Str("response_body", string(body)).
+			Msg("Unexpected upstream error")
+
+		return retryWithLimit, &streamError{
+			Err:        fmt.Errorf("upstream error %d: %s", resp.StatusCode, string(body)),
+			StatusCode: http.StatusBadGateway,
+		}
+	}
 }
 
 func (f *File) streamBuffer(w http.ResponseWriter, src io.Reader, statusCode int) error {
@@ -241,99 +341,6 @@ func (f *File) streamBuffer(w http.ResponseWriter, src io.Reader, statusCode int
 				return &streamError{Err: readErr, StatusCode: 0, IsClientDisconnection: true}
 			}
 			return readErr
-		}
-	}
-}
-
-func (f *File) handleUpstream(resp *http.Response, retryCount, maxRetries int) (shouldRetry bool, err error) {
-	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusPartialContent {
-		return false, nil
-	}
-
-	_log := f.cache.Logger()
-
-	// Clean up response body properly
-	cleanupResp := func(resp *http.Response) {
-		if resp.Body != nil {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-		}
-	}
-
-	switch resp.StatusCode {
-	case http.StatusServiceUnavailable:
-		// Read the body to check for specific error messages
-		body, readErr := io.ReadAll(resp.Body)
-		cleanupResp(resp)
-
-		if readErr != nil {
-			_log.Error().Err(readErr).Msg("Failed to read response body")
-			return false, &streamError{
-				Err:        fmt.Errorf("failed to read error response: %w", readErr),
-				StatusCode: http.StatusServiceUnavailable,
-			}
-		}
-
-		bodyStr := string(body)
-		if strings.Contains(bodyStr, "you have exceeded your traffic") {
-			_log.Debug().
-				Str("file", f.name).
-				Int("retry_count", retryCount).
-				Msg("Bandwidth exceeded. Marking link as invalid")
-
-			f.cache.MarkDownloadLinkAsInvalid(f.link, f.downloadLink, "bandwidth_exceeded")
-
-			// Retry with a different API key if available and we haven't exceeded retries
-			if retryCount < maxRetries {
-				return true, nil
-			}
-
-			return false, &streamError{
-				Err:        fmt.Errorf("bandwidth exceeded after %d retries", retryCount),
-				StatusCode: http.StatusServiceUnavailable,
-			}
-		}
-
-		return false, &streamError{
-			Err:        fmt.Errorf("service unavailable: %s", bodyStr),
-			StatusCode: http.StatusServiceUnavailable,
-		}
-
-	case http.StatusNotFound:
-		cleanupResp(resp)
-
-		_log.Debug().
-			Str("file", f.name).
-			Int("retry_count", retryCount).
-			Msg("Link not found (404). Marking link as invalid and regenerating")
-
-		f.cache.MarkDownloadLinkAsInvalid(f.link, f.downloadLink, "link_not_found")
-
-		// Try to regenerate download link if we haven't exceeded retries
-		if retryCount < maxRetries {
-			// Clear cached link to force regeneration
-			f.downloadLink = ""
-			return true, nil
-		}
-
-		return false, &streamError{
-			Err:        fmt.Errorf("file not found after %d retries", retryCount),
-			StatusCode: http.StatusNotFound,
-		}
-
-	default:
-		body, _ := io.ReadAll(resp.Body)
-		cleanupResp(resp)
-
-		_log.Error().
-			Int("status_code", resp.StatusCode).
-			Str("file", f.name).
-			Str("response_body", string(body)).
-			Msg("Unexpected upstream error")
-
-		return false, &streamError{
-			Err:        fmt.Errorf("upstream error %d: %s", resp.StatusCode, string(body)),
-			StatusCode: http.StatusBadGateway,
 		}
 	}
 }

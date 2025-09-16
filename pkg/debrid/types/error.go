@@ -14,7 +14,7 @@ var NoActiveAccountsError = &Error{
 	Code:    "no_active_accounts",
 }
 
-var NoDownloadLinkError = &Error{
+var ErrDownloadLinkNotFound = &Error{
 	Message: "No download link found",
 	Code:    "no_download_link",
 }

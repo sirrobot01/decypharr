@@ -3,9 +3,10 @@ package web
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/sirrobot01/decypharr/internal/config"
 	"net/http"
 	"strings"
+
+	"github.com/sirrobot01/decypharr/internal/config"
 )
 
 func (wb *Web) setupMiddleware(next http.Handler) http.Handler {
@@ -79,7 +80,7 @@ func (wb *Web) sendJSONError(w http.ResponseWriter, message string, statusCode i
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"error":   message,
-		"status":  statusCode,
+		"error":  message,
+		"status": statusCode,
 	})
 }

@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
+
+	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"sync"
-	"time"
 )
 
 type reInsertRequest struct {
@@ -219,8 +221,7 @@ func (c *Cache) reInsertTorrent(ct *CachedTorrent) (*CachedTorrent, error) {
 	if _, ok := c.failedToReinsert.Load(oldID); ok {
 		return ct, fmt.Errorf("can't retry re-insert for %s", torrent.Id)
 	}
-	if reqI, inFlight := c.repairRequest.Load(oldID); inFlight {
-		req := reqI.(*reInsertRequest)
+	if req, inFlight := c.repairRequest.Load(oldID); inFlight {
 		c.logger.Debug().Msgf("Waiting for existing reinsert request to complete for torrent %s", oldID)
 		return req.Wait()
 	}
@@ -305,9 +306,8 @@ func (c *Cache) reInsertTorrent(ct *CachedTorrent) (*CachedTorrent, error) {
 
 func (c *Cache) resetInvalidLinks(ctx context.Context) {
 	c.logger.Debug().Msgf("Resetting accounts")
-	c.invalidDownloadLinks = sync.Map{}
-	c.client.Accounts().Reset() // Reset the active download keys
-
+	c.invalidDownloadLinks = xsync.NewMap[string, string]()
+	c.client.AccountManager().Reset() // Reset the active download keys
 	// Refresh the download links
 	c.refreshDownloadLinks(ctx)
 }

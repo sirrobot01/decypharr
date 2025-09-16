@@ -2,11 +2,12 @@ package repair
 
 import (
 	"fmt"
-	"github.com/sirrobot01/decypharr/pkg/arr"
-	"github.com/sirrobot01/decypharr/pkg/debrid/store"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"os"
 	"path/filepath"
+
+	"github.com/sirrobot01/decypharr/pkg/arr"
+	"github.com/sirrobot01/decypharr/pkg/debrid/common"
+	"github.com/sirrobot01/decypharr/pkg/debrid/store"
 )
 
 func fileIsSymlinked(file string) bool {
@@ -85,7 +86,7 @@ func collectFiles(media arr.Content) map[string][]arr.ContentFile {
 	return uniqueParents
 }
 
-func (r *Repair) checkTorrentFiles(torrentPath string, files []arr.ContentFile, clients map[string]types.Client, caches map[string]*store.Cache) []arr.ContentFile {
+func (r *Repair) checkTorrentFiles(torrentPath string, files []arr.ContentFile, clients map[string]common.Client, caches map[string]*store.Cache) []arr.ContentFile {
 	brokenFiles := make([]arr.ContentFile, 0)
 
 	emptyFiles := make([]arr.ContentFile, 0)
@@ -149,7 +150,7 @@ func (r *Repair) checkTorrentFiles(torrentPath string, files []arr.ContentFile, 
 	return brokenFiles
 }
 
-func (r *Repair) findDebridForPath(dir string, clients map[string]types.Client) string {
+func (r *Repair) findDebridForPath(dir string, clients map[string]common.Client) string {
 	// Check cache first
 	if debridName, exists := r.debridPathCache.Load(dir); exists {
 		return debridName.(string)

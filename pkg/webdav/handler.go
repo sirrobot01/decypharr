@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"golang.org/x/net/webdav"
 	"mime"
 	"net/http"
 	"os"
@@ -14,6 +12,9 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"golang.org/x/net/webdav"
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/utils"
@@ -451,15 +452,15 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 		// Handle nginx proxy (X-Accel-Redirect)
 		if file.content == nil && !file.isRar && h.cache.StreamWithRclone() {
 			link, err := file.getDownloadLink()
-			if err != nil || link == "" {
+			if err != nil || link.Empty() {
 				http.Error(w, "Could not fetch download link", http.StatusPreconditionFailed)
 				return
 			}
 
 			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", fi.Name()))
-			w.Header().Set("X-Accel-Redirect", link)
+			w.Header().Set("X-Accel-Redirect", link.DownloadLink)
 			w.Header().Set("X-Accel-Buffering", "no")
-			http.Redirect(w, r, link, http.StatusFound)
+			http.Redirect(w, r, link.DownloadLink, http.StatusFound)
 			return
 		}
 

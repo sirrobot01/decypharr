@@ -292,6 +292,7 @@ func (s *Store) partialTorrentUpdate(t *Torrent, debridTorrent *types.Torrent) *
 	t.Files = files
 	t.Debrid = debridTorrent.Debrid
 	t.Size = totalSize
+	t.TotalSize = totalSize
 	t.Completed = sizeCompleted
 	t.NumSeeds = debridTorrent.Seeders
 	t.Downloaded = sizeCompleted

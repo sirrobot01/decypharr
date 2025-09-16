@@ -2,9 +2,10 @@ package web
 
 import (
 	"encoding/json"
+	"net/http"
+
 	"github.com/sirrobot01/decypharr/internal/config"
 	"golang.org/x/crypto/bcrypt"
-	"net/http"
 )
 
 func (wb *Web) LoginHandler(w http.ResponseWriter, r *http.Request) {
