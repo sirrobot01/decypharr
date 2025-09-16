@@ -235,12 +235,13 @@ func (c *Cache) reInsertTorrent(ct *CachedTorrent) (*CachedTorrent, error) {
 
 	// Submit the magnet to the debrid service
 	newTorrent := &types.Torrent{
-		Name:     torrent.Name,
-		Magnet:   utils.ConstructMagnet(torrent.InfoHash, torrent.Name),
-		InfoHash: torrent.InfoHash,
-		Size:     torrent.Size,
-		Files:    make(map[string]types.File),
-		Arr:      torrent.Arr,
+		Name:             torrent.Name,
+		Magnet:           utils.ConstructMagnet(torrent.InfoHash, torrent.Name),
+		InfoHash:         torrent.InfoHash,
+		Size:             torrent.Size,
+		Files:            make(map[string]types.File),
+		Arr:              torrent.Arr,
+		DownloadUncached: false,
 	}
 	var err error
 	newTorrent, err = c.client.SubmitMagnet(newTorrent)

@@ -139,6 +139,9 @@ func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
 	payload := &bytes.Buffer{}
 	writer := multipart.NewWriter(payload)
 	_ = writer.WriteField("magnet", torrent.Magnet.Link)
+	if !torrent.DownloadUncached {
+		_ = writer.WriteField("add_only_if_cached", "true")
+	}
 	err := writer.Close()
 	if err != nil {
 		return nil, err
@@ -518,7 +521,25 @@ func (tb *Torbox) GetDownloadingStatus() []string {
 }
 
 func (tb *Torbox) GetTorrents() ([]*types.Torrent, error) {
-	url := fmt.Sprintf("%s/api/torrents/mylist", tb.Host)
+	offset := 0
+	allTorrents := make([]*types.Torrent, 0)
+
+	for {
+		torrents, err := tb.getTorrents(offset)
+		if err != nil {
+			break
+		}
+		if len(torrents) == 0 {
+			break
+		}
+		allTorrents = append(allTorrents, torrents...)
+		offset += len(torrents)
+	}
+	return allTorrents, nil
+}
+
+func (tb *Torbox) getTorrents(offset int) ([]*types.Torrent, error) {
+	url := fmt.Sprintf("%s/api/torrents/mylist?offset=%d", tb.Host, offset)
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
 	resp, err := tb.client.MakeRequest(req)
 	if err != nil {
