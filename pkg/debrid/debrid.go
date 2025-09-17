@@ -109,11 +109,54 @@ func (d *Storage) StartWorker(ctx context.Context) error {
 		ctx = context.Background()
 	}
 
-	// Start all debrid syncAccounts
-	// Runs every 1m
-	if err := d.syncAccounts(); err != nil {
-		return err
+	// Start syncAccounts worker
+	go d.syncAccountsWorker(ctx)
+
+	// Start bandwidth reset worker
+	go d.checkBandwidthWorker(ctx)
+
+	return nil
+}
+
+func (d *Storage) checkBandwidthWorker(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	ticker := time.NewTicker(30 * time.Minute)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				d.checkAccountBandwidth()
+			}
+		}
+	}()
+}
+
+func (d *Storage) checkAccountBandwidth() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	for _, debrid := range d.debrids {
+		if debrid == nil || debrid.client == nil {
+			continue
+		}
+		accountManager := debrid.client.AccountManager()
+		if accountManager == nil {
+			continue
+		}
+		accountManager.CheckAndResetBandwidth()
+	}
+}
+
+func (d *Storage) syncAccountsWorker(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	_ = d.syncAccounts()
 	ticker := time.NewTicker(5 * time.Minute)
 	go func() {
 		for {
@@ -125,7 +168,7 @@ func (d *Storage) StartWorker(ctx context.Context) error {
 			}
 		}
 	}()
-	return nil
+
 }
 
 func (d *Storage) syncAccounts() error {

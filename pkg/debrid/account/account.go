@@ -1,6 +1,8 @@
 package account
 
 import (
+	"fmt"
+	"net/http"
 	"sync/atomic"
 
 	"github.com/puzpuzpuz/xsync/v4"
@@ -17,6 +19,9 @@ type Account struct {
 	TrafficUsed atomic.Int64                           `json:"traffic_used"` // Traffic used in bytes
 	Username    string                                 `json:"username"`     // Username for the account
 	httpClient  *request.Client
+
+	// Account reactivation tracking
+	DisableCount atomic.Int32 `json:"disable_count"`
 }
 
 func (a *Account) Equals(other *Account) bool {
@@ -68,4 +73,47 @@ func (a *Account) StoreDownloadLinks(dls map[string]*types.DownloadLink) {
 	for _, dl := range dls {
 		a.StoreDownloadLink(*dl)
 	}
+}
+
+// MarkDisabled marks the account as disabled and increments the disable count
+func (a *Account) MarkDisabled() {
+	a.Disabled.Store(true)
+	a.DisableCount.Add(1)
+}
+
+func (a *Account) Reset() {
+	a.DisableCount.Store(0)
+	a.Disabled.Store(false)
+}
+
+func (a *Account) CheckBandwidth() error {
+	// Get a one of the download links to check if the account is still valid
+	downloadLink := ""
+	a.links.Range(func(key string, dl types.DownloadLink) bool {
+		if dl.DownloadLink != "" {
+			downloadLink = dl.DownloadLink
+			return false
+		}
+		return true
+	})
+	if downloadLink == "" {
+		return fmt.Errorf("no download link found")
+	}
+
+	// Let's check the download link status
+	req, err := http.NewRequest(http.MethodGet, downloadLink, nil)
+	if err != nil {
+		return err
+	}
+	// Use a simple client
+	client := http.DefaultClient
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		return fmt.Errorf("account check failed with status code %d", resp.StatusCode)
+	}
+	return nil
 }

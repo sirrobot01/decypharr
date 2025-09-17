@@ -14,16 +14,22 @@ import (
 	"go.uber.org/ratelimit"
 )
 
+const (
+	MaxDisableCount = 3
+)
+
 type Manager struct {
 	debrid   string
 	current  atomic.Pointer[Account]
 	accounts *xsync.Map[string, *Account]
+	logger   zerolog.Logger
 }
 
 func NewManager(debridConf config.Debrid, downloadRL ratelimit.Limiter, logger zerolog.Logger) *Manager {
 	m := &Manager{
 		debrid:   debridConf.Name,
 		accounts: xsync.NewMap[string, *Account](),
+		logger:   logger,
 	}
 
 	var firstAccount *Account
@@ -95,8 +101,16 @@ func (m *Manager) Current() *Account {
 	// Slow path - find new current account
 	activeAccounts := m.Active()
 	if len(activeAccounts) == 0 {
-		m.current.Store(nil)
-		return nil
+		// No active accounts left, try to use disabled ones
+		m.logger.Warn().Str("debrid", m.debrid).Msg("No active accounts available, all accounts are disabled")
+		allAccounts := m.All()
+		if len(allAccounts) == 0 {
+			m.logger.Error().Str("debrid", m.debrid).Msg("No accounts configured")
+			m.current.Store(nil)
+			return nil
+		}
+		m.current.Store(allAccounts[0])
+		return allAccounts[0]
 	}
 
 	newCurrent := activeAccounts[0]
@@ -104,16 +118,12 @@ func (m *Manager) Current() *Account {
 	return newCurrent
 }
 
-func (m *Manager) setCurrent(account *Account) {
-	m.current.Store(account)
-}
-
 func (m *Manager) Disable(account *Account) {
 	if account == nil {
 		return
 	}
 
-	account.Disabled.Store(true)
+	account.MarkDisabled()
 
 	// If we're disabling the current account, it will be replaced
 	// on the next Current() call - no need to proactively update
@@ -131,7 +141,7 @@ func (m *Manager) Disable(account *Account) {
 
 func (m *Manager) Reset() {
 	m.accounts.Range(func(key string, acc *Account) bool {
-		acc.Disabled.Store(false)
+		acc.Reset()
 		return true
 	})
 
@@ -141,12 +151,6 @@ func (m *Manager) Reset() {
 		m.current.Store(activeAccounts[0])
 	} else {
 		m.current.Store(nil)
-	}
-}
-
-func (m *Manager) Update(account *Account) {
-	if account != nil {
-		m.accounts.Store(account.Token, account)
 	}
 }
 
@@ -208,4 +212,28 @@ func (m *Manager) Stats() []map[string]any {
 		stats = append(stats, accountDetail)
 	}
 	return stats
+}
+
+func (m *Manager) CheckAndResetBandwidth() {
+	found := false
+	m.accounts.Range(func(key string, acc *Account) bool {
+		if acc.Disabled.Load() && acc.DisableCount.Load() < MaxDisableCount {
+			if err := acc.CheckBandwidth(); err == nil {
+				acc.Disabled.Store(false)
+				found = true
+				m.logger.Info().Str("debrid", m.debrid).Str("token", utils.Mask(acc.Token)).Msg("Re-activated disabled account")
+			} else {
+				m.logger.Debug().Err(err).Str("debrid", m.debrid).Str("token", utils.Mask(acc.Token)).Msg("Account still disabled")
+			}
+		}
+		return true
+	})
+	if found {
+		// If we re-activated any account, reset current to first active
+		activeAccounts := m.Active()
+		if len(activeAccounts) > 0 {
+			m.current.Store(activeAccounts[0])
+		}
+
+	}
 }

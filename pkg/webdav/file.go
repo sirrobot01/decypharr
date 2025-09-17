@@ -101,7 +101,6 @@ func (f *File) getDownloadByteRange() (*[2]int64, error) {
 	return byteRange, nil
 }
 
-// setVideoStreamingHeaders sets the necessary headers for video streaming
 // It returns error and a boolean indicating if the request is a range request
 func (f *File) servePreloadedContent(w http.ResponseWriter, r *http.Request) error {
 	content := f.content
@@ -155,8 +154,6 @@ func (f *File) streamWithRetry(w http.ResponseWriter, r *http.Request, networkRe
 	if err != nil {
 		return &streamError{Err: err, StatusCode: http.StatusInternalServerError}
 	}
-
-	setVideoStreamingHeaders(upstreamReq)
 
 	isRangeRequest := f.handleRangeRequest(upstreamReq, r, w)
 	if isRangeRequest == -1 {

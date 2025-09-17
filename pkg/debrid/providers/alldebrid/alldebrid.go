@@ -104,7 +104,7 @@ func (ad *AllDebrid) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error
 	}
 	magnets := data.Data.Magnets
 	if len(magnets) == 0 {
-		return nil, fmt.Errorf("error adding torrent")
+		return nil, fmt.Errorf("error adding torrent. No magnets returned")
 	}
 	magnet := magnets[0]
 	torrentId := strconv.Itoa(magnet.ID)

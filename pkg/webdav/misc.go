@@ -212,12 +212,3 @@ func parseRange(s string, size int64) ([]httpRange, error) {
 	}
 	return ranges, nil
 }
-
-func setVideoStreamingHeaders(req *http.Request) {
-	// Request optimizations for faster response
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Accept-Encoding", "identity")
-	req.Header.Set("Connection", "keep-alive")
-	req.Header.Set("User-Agent", "VideoStream/1.0")
-	req.Header.Set("Priority", "u=1")
-}
