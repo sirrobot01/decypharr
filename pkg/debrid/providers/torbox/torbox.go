@@ -588,12 +588,15 @@ func (tb *Torbox) GetTorrents() ([]*types.Torrent, error) {
 				// Skip sample files
 				continue
 			}
+			
 			if !cfg.IsAllowedFile(fileName) {
 				continue
 			}
+
 			if !cfg.IsSizeAllowed(f.Size) {
 				continue
 			}
+
 			file := types.File{
 				TorrentId: t.Id,
 				Id:        strconv.Itoa(f.Id),

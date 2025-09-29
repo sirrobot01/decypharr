@@ -42,6 +42,7 @@ func New(dc config.Debrid) (*DebridLink, error) {
 		"Authorization": fmt.Sprintf("Bearer %s", dc.APIKey),
 		"Content-Type":  "application/json",
 	}
+
 	_log := logger.New(dc.Name)
 	client := request.New(
 		request.WithHeaders(headers),
@@ -54,6 +55,7 @@ func New(dc config.Debrid) (*DebridLink, error) {
 	if autoExpiresLinksAfter == 0 || err != nil {
 		autoExpiresLinksAfter = 48 * time.Hour
 	}
+
 	return &DebridLink{
 		name:                  "debridlink",
 		Host:                  "https://debrid-link.com/api/v2",
@@ -83,10 +85,7 @@ func (dl *DebridLink) IsAvailable(hashes []string) map[string]bool {
 
 	// Divide hashes into groups of 100
 	for i := 0; i < len(hashes); i += 100 {
-		end := i + 100
-		if end > len(hashes) {
-			end = len(hashes)
-		}
+		end := min(i+100, len(hashes))
 
 		// Filter out empty strings
 		validHashes := make([]string, 0, end-i)
@@ -109,15 +108,18 @@ func (dl *DebridLink) IsAvailable(hashes []string) map[string]bool {
 			dl.logger.Error().Err(err).Msgf("Error checking availability")
 			return result
 		}
+
 		var data AvailableResponse
 		err = json.Unmarshal(resp, &data)
 		if err != nil {
 			dl.logger.Error().Err(err).Msgf("Error marshalling availability")
 			return result
 		}
+
 		if data.Value == nil {
 			return result
 		}
+
 		value := *data.Value
 		for _, h := range hashes[i:end] {
 			_, exists := value[h]
@@ -126,6 +128,7 @@ func (dl *DebridLink) IsAvailable(hashes []string) map[string]bool {
 			}
 		}
 	}
+
 	return result
 }
 
@@ -136,19 +139,23 @@ func (dl *DebridLink) GetTorrent(torrentId string) (*types.Torrent, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var res torrentInfo
 	err = json.Unmarshal(resp, &res)
 	if err != nil {
 		return nil, err
 	}
+
 	if !res.Success || res.Value == nil {
 		return nil, fmt.Errorf("error getting torrent")
 	}
+
 	data := *res.Value
 
 	if len(data) == 0 {
 		return nil, fmt.Errorf("torrent not found")
 	}
+
 	t := data[0]
 	name := utils.RemoveInvalidChars(t.Name)
 	torrent := &types.Torrent{
@@ -162,11 +169,13 @@ func (dl *DebridLink) GetTorrent(torrentId string) (*types.Torrent, error) {
 		Debrid:           dl.name,
 		Added:            time.Unix(t.Created, 0).Format(time.RFC3339),
 	}
+
 	cfg := config.Get()
 	for _, f := range t.Files {
 		if !cfg.IsSizeAllowed(f.Size) {
 			continue
 		}
+
 		file := types.File{
 			TorrentId: t.ID,
 			Id:        f.ID,
@@ -175,6 +184,7 @@ func (dl *DebridLink) GetTorrent(torrentId string) (*types.Torrent, error) {
 			Path:      f.Name,
 			Link:      f.DownloadURL,
 		}
+
 		torrent.Files[file.Name] = file
 	}
 
@@ -188,22 +198,27 @@ func (dl *DebridLink) UpdateTorrent(t *types.Torrent) error {
 	if err != nil {
 		return err
 	}
+
 	var res torrentInfo
 	err = json.Unmarshal(resp, &res)
 	if err != nil {
 		return err
 	}
+
 	if !res.Success {
 		return fmt.Errorf("error getting torrent")
 	}
+
 	if res.Value == nil {
 		return fmt.Errorf("torrent not found")
 	}
+
 	dt := *res.Value
 
 	if len(dt) == 0 {
 		return fmt.Errorf("torrent not found")
 	}
+
 	data := dt[0]
 
 	status := "downloading"
@@ -223,6 +238,7 @@ func (dl *DebridLink) UpdateTorrent(t *types.Torrent) error {
 	t.Filename = name
 	t.OriginalFilename = name
 	t.Added = time.Unix(data.Created, 0).Format(time.RFC3339)
+
 	cfg := config.Get()
 	links := make(map[string]*types.DownloadLink)
 	now := time.Now()
@@ -245,12 +261,14 @@ func (dl *DebridLink) UpdateTorrent(t *types.Torrent) error {
 			Generated:    now,
 			ExpiresAt:    now.Add(dl.autoExpiresLinksAfter),
 		}
+
 		links[file.Link] = link
 		file.DownloadLink = link
 		t.Files[f.Name] = file
 	}
 
 	dl.accounts.SetDownloadLinks(links)
+
 	return nil
 }
 
@@ -303,6 +321,7 @@ func (dl *DebridLink) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
 			Link:      f.DownloadURL,
 			Generated: now,
 		}
+
 		link := &types.DownloadLink{
 			Filename:     f.Name,
 			Link:         f.DownloadURL,
@@ -330,6 +349,7 @@ func (dl *DebridLink) CheckStatus(torrent *types.Torrent) (*types.Torrent, error
 		status := torrent.Status
 		if status == "downloaded" {
 			dl.logger.Info().Msgf("Torrent: %s downloaded", torrent.Name)
+
 			return torrent, nil
 		} else if utils.Contains(dl.GetDownloadingStatus(), status) {
 			if !torrent.DownloadUncached {
@@ -342,7 +362,6 @@ func (dl *DebridLink) CheckStatus(torrent *types.Torrent) (*types.Torrent, error
 		} else {
 			return torrent, fmt.Errorf("torrent: %s has error", torrent.Name)
 		}
-
 	}
 }
 
@@ -443,6 +462,7 @@ func (dl *DebridLink) getTorrents(page, perPage int) ([]*types.Torrent, error) {
 			if !cfg.IsSizeAllowed(f.Size) {
 				continue
 			}
+
 			file := types.File{
 				TorrentId: torrent.Id,
 				Id:        f.ID,
@@ -451,6 +471,7 @@ func (dl *DebridLink) getTorrents(page, perPage int) ([]*types.Torrent, error) {
 				Path:      f.Name,
 				Link:      f.DownloadURL,
 			}
+
 			link := &types.DownloadLink{
 				Filename:     f.Name,
 				Link:         f.DownloadURL,
@@ -458,6 +479,7 @@ func (dl *DebridLink) getTorrents(page, perPage int) ([]*types.Torrent, error) {
 				Generated:    now,
 				ExpiresAt:    now.Add(dl.autoExpiresLinksAfter),
 			}
+
 			links[file.Link] = link
 			file.DownloadLink = link
 			torrent.Files[f.Name] = file
@@ -490,24 +512,29 @@ func (dl *DebridLink) GetProfile() (*types.Profile, error) {
 	if dl.Profile != nil {
 		return dl.Profile, nil
 	}
+
 	url := fmt.Sprintf("%s/account/infos", dl.Host)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
+
 	resp, err := dl.client.MakeRequest(req)
 	if err != nil {
 		return nil, err
 	}
+
 	var res UserInfo
 	err = json.Unmarshal(resp, &res)
 	if err != nil {
 		dl.logger.Error().Err(err).Msgf("Error unmarshalling user info")
 		return nil, err
 	}
+
 	if !res.Success || res.Value == nil {
 		return nil, fmt.Errorf("error getting user info")
 	}
+
 	data := *res.Value
 	expiration := time.Unix(data.PremiumLeft, 0)
 	profile := &types.Profile{
@@ -519,14 +546,17 @@ func (dl *DebridLink) GetProfile() (*types.Profile, error) {
 		Premium:    data.PremiumLeft,
 		Expiration: expiration,
 	}
+
 	if expiration.IsZero() {
 		profile.Expiration = time.Now().AddDate(1, 0, 0) // Default to 1 year if no expiration
 	}
+
 	if data.PremiumLeft > 0 {
 		profile.Type = "premium"
 	} else {
 		profile.Type = "free"
 	}
+
 	dl.Profile = profile
 	return profile, nil
 }

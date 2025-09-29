@@ -49,12 +49,14 @@ type Account struct {
 func (a *Accounts) Active() []*Account {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
+
 	activeAccounts := make([]*Account, 0)
 	for _, acc := range a.accounts {
 		if !acc.Disabled {
 			activeAccounts = append(activeAccounts, acc)
 		}
 	}
+
 	return activeAccounts
 }
 
@@ -91,6 +93,7 @@ func (a *Accounts) Current() *Account {
 	if len(activeAccounts) > 0 {
 		a.current = activeAccounts[0]
 	}
+
 	return a.current
 }
 
@@ -189,6 +192,7 @@ func (a *Accounts) GetLinksCount() int {
 	if a.Current() == nil {
 		return 0
 	}
+
 	return a.Current().LinksCount()
 }
 
@@ -196,6 +200,7 @@ func (a *Accounts) SetDownloadLinks(links map[string]*DownloadLink) {
 	if a.Current() == nil {
 		return
 	}
+
 	a.Current().setLinks(links)
 }
 
@@ -231,27 +236,32 @@ func (a *Account) getLink(fileLink string) (*DownloadLink, bool) {
 	dl, ok := a.links[a.sliceFileLink(fileLink)]
 	return dl, ok
 }
+
 func (a *Account) setLink(fileLink string, dl *DownloadLink) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.links[a.sliceFileLink(fileLink)] = dl
 }
+
 func (a *Account) deleteLink(fileLink string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	delete(a.links, a.sliceFileLink(fileLink))
 }
+
 func (a *Account) resetDownloadLinks() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.links = make(map[string]*DownloadLink)
 }
+
 func (a *Account) LinksCount() int {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return len(a.links)
 }
+
 func (a *Account) disable() {
 	a.Disabled = true
 }
@@ -265,6 +275,7 @@ func (a *Account) setLinks(links map[string]*DownloadLink) {
 			// Expired, continue
 			continue
 		}
+		
 		a.links[a.sliceFileLink(dl.Link)] = dl
 	}
 }
@@ -274,8 +285,10 @@ func (a *Account) sliceFileLink(fileLink string) string {
 	if a.Debrid != "realdebrid" {
 		return fileLink
 	}
+
 	if len(fileLink) < 39 {
 		return fileLink
 	}
+
 	return fileLink[0:39]
 }

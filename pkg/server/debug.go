@@ -2,12 +2,13 @@ package server
 
 import (
 	"fmt"
+	"net/http"
+	"runtime"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/sirrobot01/decypharr/internal/request"
 	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/store"
-	"net/http"
-	"runtime"
 )
 
 func (s *Server) handleIngests(w http.ResponseWriter, r *http.Request) {
@@ -110,6 +111,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 				Name: debridName,
 			}
 		}
+
 		profile.Name = debridName
 		debridStat.Profile = profile
 		cache, ok := caches[debridName]
@@ -121,7 +123,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 
 		}
 		debridStat.Library = libraryStat
-		
+
 		// Get detailed account information
 		accounts := client.Accounts().All()
 		accountDetails := make([]map[string]any, 0)
@@ -135,7 +137,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 			} else {
 				maskedToken = "****"
 			}
-			
+
 			accountDetail := map[string]any{
 				"order":        account.Order,
 				"disabled":     account.Disabled,
@@ -145,11 +147,14 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 				"links_count":  account.LinksCount(),
 				"debrid":       account.Debrid,
 			}
+
 			accountDetails = append(accountDetails, accountDetail)
 		}
+
 		debridStat.Accounts = accountDetails
 		debridStats = append(debridStats, debridStat)
 	}
+
 	stats["debrids"] = debridStats
 
 	// Add rclone stats if available
