@@ -570,6 +570,7 @@ func (r *RealDebrid) DeleteTorrent(torrentId string) error {
 	if _, err := r.client.MakeRequest(req); err != nil {
 		return err
 	}
+
 	r.logger.Info().Msgf("Torrent: %s deleted from RD", torrentId)
 	return nil
 }
@@ -967,7 +968,7 @@ func (r *RealDebrid) GetProfile() (*types.Profile, error) {
 		Expiration: data.Expiration,
 		Type:       data.Type,
 	}
-	
+
 	r.Profile = profile
 	return profile, nil
 }

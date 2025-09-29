@@ -179,10 +179,11 @@ func (tb *Torbox) getTorboxStatus(status string, finished bool) string {
 	}
 
 	downloading := []string{
-		"paused", "downloading", "checkingResumeData",
-		"metaDL", "pausedUP", "queuedUP", "checkingUP", "stopped seeding", "stalled (no peers)",
-		"forcedUP", "allocating", "metaDL", "pausedDL",
-		"queuedDL", "checkingDL", "forcedDL", "checkingResumeData", "moving",
+		"paused", "downloading", "pausedDL",
+		"pausedUP", "queuedUP", "forcedUP",
+		"metaDL", "stopped seeding", "stalled (no peers)",
+		"queuedDL", "forcedDL", "moving", "allocating",
+		"checkingUP", "checkingDL", "checkingResumeData",
 	}
 
 	switch {
@@ -386,15 +387,18 @@ func (tb *Torbox) CheckStatus(torrent *types.Torrent) (*types.Torrent, error) {
 		if err != nil || torrent == nil {
 			return torrent, err
 		}
+
 		status := torrent.Status
 
 		if status == "downloaded" {
 			tb.logger.Info().Msgf("torrent: %s downloaded", torrent.Name)
+
 			return torrent, nil
 		} else if utils.Contains(tb.GetDownloadingStatus(), status) {
 			if !torrent.DownloadUncached {
 				return torrent, fmt.Errorf("torrent: %s not cached", torrent.Name)
 			}
+
 			// Break out of the loop if the torrent is downloading.
 			// This is necessary to prevent infinite loop since we moved to sync downloading and async processing
 			return torrent, nil
