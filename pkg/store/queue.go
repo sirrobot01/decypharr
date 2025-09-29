@@ -3,9 +3,10 @@ package store
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/go-co-op/gocron/v2"
 	"github.com/sirrobot01/decypharr/internal/utils"
-	"time"
 )
 
 func (s *Store) addToQueue(importReq *ImportRequest) error {
@@ -24,6 +25,7 @@ func (s *Store) addToQueue(importReq *ImportRequest) error {
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -56,7 +58,7 @@ func (s *Store) StartQueueWorkers(ctx context.Context) error {
 		} else {
 			// Schedule the job
 			if _, err := s.scheduler.NewJob(jd, gocron.NewTask(func() {
-				err := s.removeStalledTorrents(ctx)
+				err := s.removeStalledTorrents()
 				if err != nil {
 					s.logger.Error().Err(err).Msg("Failed to process remove stalled torrents")
 				}
@@ -83,6 +85,7 @@ func (s *Store) trackAvailableSlots(ctx context.Context) {
 		if err != nil {
 			continue
 		}
+
 		availableSlots[name] = slots
 	}
 
@@ -92,7 +95,6 @@ func (s *Store) trackAvailableSlots(ctx context.Context) {
 	}
 
 	for name, slots := range availableSlots {
-
 		s.logger.Debug().Msgf("Available slots for %s: %d", name, slots)
 		// If slots are available, process the next import request from the queue
 		for slots > 0 {
@@ -122,7 +124,7 @@ func (s *Store) processFromQueue(ctx context.Context) error {
 	return s.AddTorrent(ctx, importReq)
 }
 
-func (s *Store) removeStalledTorrents(ctx context.Context) error {
+func (s *Store) removeStalledTorrents() error {
 	// This function checks for stalled torrents and removes them
 	stalledTorrents := s.torrents.GetStalledTorrents(s.removeStalledAfter)
 	if len(stalledTorrents) == 0 {

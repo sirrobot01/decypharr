@@ -62,6 +62,7 @@ func (t *Torrent) GetMountFolder(rClonePath string) (string, error) {
 			return path, nil
 		}
 	}
+
 	return "", fmt.Errorf("no path found")
 }
 

@@ -3,6 +3,11 @@ package decypharr
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"runtime"
+	"runtime/debug"
+	"sync"
+
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/pkg/qbit"
@@ -11,23 +16,17 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/version"
 	"github.com/sirrobot01/decypharr/pkg/web"
 	"github.com/sirrobot01/decypharr/pkg/webdav"
-	"net/http"
-	"os"
-	"runtime"
-	"runtime/debug"
-	"strconv"
-	"sync"
 )
 
 func Start(ctx context.Context) error {
 
-	if umaskStr := os.Getenv("UMASK"); umaskStr != "" {
-		umask, err := strconv.ParseInt(umaskStr, 8, 32)
-		if err != nil {
-			return fmt.Errorf("invalid UMASK value: %s", umaskStr)
-		}
-		SetUmask(int(umask))
-	}
+	// if umaskStr := os.Getenv("UMASK"); umaskStr != "" {
+	// 	umask, err := strconv.ParseInt(umaskStr, 8, 32)
+	// 	if err != nil {
+	// 		return fmt.Errorf("invalid UMASK value: %s", umaskStr)
+	// 	}
+	// 	SetUmask(int(umask))
+	// }
 
 	restartCh := make(chan struct{}, 1)
 	web.SetRestartFunc(func() {

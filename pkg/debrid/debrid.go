@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/utils"
@@ -15,8 +18,6 @@ import (
 	debridStore "github.com/sirrobot01/decypharr/pkg/debrid/store"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/rclone"
-	"sync"
-	"time"
 )
 
 type Debrid struct {
@@ -109,6 +110,7 @@ func (d *Storage) StartWorker(ctx context.Context) error {
 	if err := d.syncAccounts(); err != nil {
 		return err
 	}
+
 	ticker := time.NewTicker(5 * time.Minute)
 	go func() {
 		for {
@@ -120,6 +122,7 @@ func (d *Storage) StartWorker(ctx context.Context) error {
 			}
 		}
 	}()
+
 	return nil
 }
 
@@ -186,6 +189,7 @@ func (d *Storage) Clients() map[string]types.Client {
 			clientsCopy[name] = debrid.client
 		}
 	}
+
 	return clientsCopy
 }
 
@@ -198,6 +202,7 @@ func (d *Storage) Caches() map[string]*debridStore.Cache {
 			cachesCopy[name] = debrid.cache
 		}
 	}
+
 	return cachesCopy
 }
 
@@ -210,6 +215,7 @@ func (d *Storage) FilterClients(filter func(types.Client) bool) map[string]types
 			filteredClients[name] = client.client
 		}
 	}
+
 	return filteredClients
 }
 
@@ -293,19 +299,23 @@ func Process(ctx context.Context, store *Storage, selectedDebrid string, magnet 
 				_ = db.DeleteTorrent(id)
 			}(torrent.Id)
 		}
+
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
+
 		if torrent == nil {
 			errs = append(errs, fmt.Errorf("torrent %s returned nil after checking status", dbt.Name))
 			continue
 		}
+
 		return torrent, nil
 	}
 	if len(errs) == 0 {
 		return nil, fmt.Errorf("failed to process torrent: no clients available")
 	}
+
 	joinedErrors := errors.Join(errs...)
 	return nil, fmt.Errorf("failed to process torrent: %w", joinedErrors)
 }

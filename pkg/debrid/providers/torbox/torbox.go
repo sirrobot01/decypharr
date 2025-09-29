@@ -38,6 +38,7 @@ type Torbox struct {
 	logger      zerolog.Logger
 	checkCached bool
 	addSamples  bool
+	Profile     *types.Profile
 }
 
 func New(dc config.Debrid) (*Torbox, error) {
@@ -88,10 +89,7 @@ func (tb *Torbox) IsAvailable(hashes []string) map[string]bool {
 
 	// Divide hashes into groups of 100
 	for i := 0; i < len(hashes); i += 100 {
-		end := i + 100
-		if end > len(hashes) {
-			end = len(hashes)
-		}
+		end := min(i+100, len(hashes))
 
 		// Filter out empty strings
 		validHashes := make([]string, 0, end-i)
@@ -114,6 +112,7 @@ func (tb *Torbox) IsAvailable(hashes []string) map[string]bool {
 			tb.logger.Error().Err(err).Msgf("Error checking availability")
 			return result
 		}
+
 		var res AvailableResponse
 		err = json.Unmarshal(resp, &res)
 		if err != nil {
@@ -142,20 +141,24 @@ func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	req, _ := http.NewRequest(http.MethodPost, url, payload)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	resp, err := tb.client.MakeRequest(req)
 	if err != nil {
 		return nil, err
 	}
+
 	var data AddMagnetResponse
 	err = json.Unmarshal(resp, &data)
 	if err != nil {
 		return nil, err
 	}
+
 	if data.Data == nil {
 		return nil, fmt.Errorf("error adding torrent")
 	}
+
 	dt := *data.Data
 	torrentId := strconv.Itoa(dt.Id)
 	torrent.Id = torrentId
@@ -169,8 +172,9 @@ func (tb *Torbox) getTorboxStatus(status string, finished bool) string {
 	if finished {
 		return "downloaded"
 	}
-	downloading := []string{"completed", "cached", "paused", "downloading", "uploading",
-		"checkingResumeData", "metaDL", "pausedUP", "queuedUP", "checkingUP",
+
+	downloading := []string{"completed", "cached", "paused", "downloading", "uploading", "uploading (no peers)",
+		"checkingResumeData", "metaDL", "pausedUP", "queuedUP", "checkingUP", "stopped seeding",
 		"forcedUP", "allocating", "downloading", "metaDL", "pausedDL",
 		"queuedDL", "checkingDL", "forcedDL", "checkingResumeData", "moving"}
 
@@ -197,10 +201,12 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	data := res.Data
 	if data == nil {
 		return nil, fmt.Errorf("error getting torrent")
 	}
+
 	t := &types.Torrent{
 		Id:               strconv.Itoa(data.Id),
 		Name:             data.Name,
@@ -271,7 +277,8 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 		Int("total_files", totalFiles).
 		Int("valid_files", validFiles).
 		Int("final_file_count", len(t.Files)).
-		Msg("Torrent file processing completed")
+		Msg("torrent file processing completed")
+
 	var cleanPath string
 	if len(t.Files) > 0 {
 		cleanPath = path.Clean(data.Files[0].Name)
@@ -297,6 +304,7 @@ func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
 	if err != nil {
 		return err
 	}
+
 	data := res.Data
 	name := data.Name
 
@@ -312,7 +320,6 @@ func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
 	t.MountPath = tb.MountPath
 	t.Debrid = tb.name
 
-	// Clear existing files map to rebuild it
 	t.Files = make(map[string]types.File)
 
 	cfg := config.Get()
@@ -385,7 +392,6 @@ func (tb *Torbox) CheckStatus(torrent *types.Torrent) (*types.Torrent, error) {
 		} else {
 			return torrent, fmt.Errorf("torrent: %s has error", torrent.Name)
 		}
-
 	}
 }
 
@@ -625,12 +631,80 @@ func (tb *Torbox) DeleteDownloadLink(linkId string) error {
 }
 
 func (tb *Torbox) GetAvailableSlots() (int, error) {
-	//TODO: Implement the logic to check available slots for Torbox
-	return 0, fmt.Errorf("not implemented")
+	var planSlots map[string]int = map[string]int{
+		"essential": 3,
+		"pro":       10,
+		"standard":  5,
+	}
+
+	var accountSlots int = 1
+	profile, err := tb.GetProfile()
+	if err != nil {
+		return 0, err
+	}
+
+	if slots, ok := planSlots[profile.Type]; ok {
+		accountSlots = slots
+	}
+
+	activeTorrents, err := tb.GetTorrents()
+	if err != nil {
+		return 0, err
+	}
+
+	activeCount := 0
+	for _, t := range activeTorrents {
+		if utils.Contains(tb.GetDownloadingStatus(), t.Status) {
+			activeCount++
+		}
+	}
+
+	available := max(accountSlots-activeCount, 0)
+
+	return available, nil
 }
 
 func (tb *Torbox) GetProfile() (*types.Profile, error) {
-	return nil, nil
+	if tb.Profile != nil {
+		return tb.Profile, nil
+	}
+
+	url := fmt.Sprintf("%s/api/user/me?settings=true", tb.Host)
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+
+	resp, err := tb.client.MakeRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	var userData ProfileResponse
+	if json.Unmarshal(resp, &userData) != nil {
+		return nil, err
+	}
+
+	expiration := time.Unix(userData.PremiumExpiresAt, 0)
+	profile := &types.Profile{
+		Name:       tb.name,
+		Id:         userData.Id,
+		Username:   userData.Email,
+		Email:      userData.Email,
+		Expiration: expiration,
+	}
+
+	switch userData.Plan {
+	case 1:
+		profile.Type = "essential"
+	case 2:
+		profile.Type = "pro"
+	case 3:
+		profile.Type = "standard"
+	default:
+		profile.Type = "free"
+	}
+
+	tb.Profile = profile
+
+	return profile, nil
 }
 
 func (tb *Torbox) Accounts() *types.Accounts {

@@ -1,9 +1,10 @@
 package types
 
 import (
-	"github.com/sirrobot01/decypharr/internal/config"
 	"sync"
 	"time"
+
+	"github.com/sirrobot01/decypharr/internal/config"
 )
 
 type Accounts struct {
@@ -18,6 +19,7 @@ func NewAccounts(debridConf config.Debrid) *Accounts {
 		if token == "" {
 			continue
 		}
+
 		account := newAccount(debridConf.Name, token, idx)
 		accounts = append(accounts, account)
 	}
@@ -26,6 +28,7 @@ func NewAccounts(debridConf config.Debrid) *Accounts {
 	if len(accounts) > 0 {
 		current = accounts[0]
 	}
+
 	return &Accounts{
 		accounts: accounts,
 		current:  current,
@@ -115,6 +118,7 @@ func (a *Accounts) Reset() {
 		acc.resetDownloadLinks()
 		acc.Disabled = false
 	}
+
 	if len(a.accounts) > 0 {
 		a.current = a.accounts[0]
 	} else {
@@ -126,16 +130,20 @@ func (a *Accounts) GetDownloadLink(fileLink string) (*DownloadLink, error) {
 	if a.Current() == nil {
 		return nil, NoActiveAccountsError
 	}
+
 	dl, ok := a.Current().getLink(fileLink)
 	if !ok {
 		return nil, NoDownloadLinkError
 	}
+
 	if dl.ExpiresAt.IsZero() || dl.ExpiresAt.Before(time.Now()) {
 		return nil, DownloadLinkExpiredError
 	}
+
 	if dl.DownloadLink == "" {
 		return nil, EmptyDownloadLinkError
 	}
+
 	return dl, nil
 }
 
@@ -144,16 +152,20 @@ func (a *Accounts) GetDownloadLinkWithAccount(fileLink string) (*DownloadLink, *
 	if currentAccount == nil {
 		return nil, nil, NoActiveAccountsError
 	}
+
 	dl, ok := currentAccount.getLink(fileLink)
 	if !ok {
 		return nil, nil, NoDownloadLinkError
 	}
+
 	if dl.ExpiresAt.IsZero() || dl.ExpiresAt.Before(time.Now()) {
 		return nil, currentAccount, DownloadLinkExpiredError
 	}
+
 	if dl.DownloadLink == "" {
 		return nil, currentAccount, EmptyDownloadLinkError
 	}
+
 	return dl, currentAccount, nil
 }
 
@@ -161,6 +173,7 @@ func (a *Accounts) SetDownloadLink(fileLink string, dl *DownloadLink) {
 	if a.Current() == nil {
 		return
 	}
+
 	a.Current().setLink(fileLink, dl)
 }
 
@@ -168,6 +181,7 @@ func (a *Accounts) DeleteDownloadLink(fileLink string) {
 	if a.Current() == nil {
 		return
 	}
+
 	a.Current().deleteLink(fileLink)
 }
 
