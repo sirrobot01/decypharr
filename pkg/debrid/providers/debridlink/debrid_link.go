@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"time"
+
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"time"
 
 	"net/http"
 	"strings"
@@ -204,10 +205,12 @@ func (dl *DebridLink) UpdateTorrent(t *types.Torrent) error {
 		return fmt.Errorf("torrent not found")
 	}
 	data := dt[0]
+
 	status := "downloading"
 	if data.Status == 100 {
 		status = "downloaded"
 	}
+
 	name := utils.RemoveInvalidChars(data.Name)
 	t.Id = data.ID
 	t.Name = name
@@ -260,14 +263,17 @@ func (dl *DebridLink) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var res SubmitTorrentInfo
 	err = json.Unmarshal(resp, &res)
 	if err != nil {
 		return nil, err
 	}
+
 	if !res.Success || res.Value == nil {
 		return nil, fmt.Errorf("error adding torrent")
 	}
+
 	data := *res.Value
 	status := "downloading"
 	name := utils.RemoveInvalidChars(data.Name)
@@ -320,6 +326,7 @@ func (dl *DebridLink) CheckStatus(torrent *types.Torrent) (*types.Torrent, error
 		if err != nil || torrent == nil {
 			return torrent, err
 		}
+
 		status := torrent.Status
 		if status == "downloaded" {
 			dl.logger.Info().Msgf("Torrent: %s downloaded", torrent.Name)
@@ -328,6 +335,7 @@ func (dl *DebridLink) CheckStatus(torrent *types.Torrent) (*types.Torrent, error
 			if !torrent.DownloadUncached {
 				return torrent, fmt.Errorf("torrent: %s not cached", torrent.Name)
 			}
+
 			// Break out of the loop if the torrent is downloading.
 			// This is necessary to prevent infinite loop since we moved to sync downloading and async processing
 			return torrent, nil
@@ -344,6 +352,7 @@ func (dl *DebridLink) DeleteTorrent(torrentId string) error {
 	if _, err := dl.client.MakeRequest(req); err != nil {
 		return err
 	}
+
 	dl.logger.Info().Msgf("Torrent: %s deleted from DebridLink", torrentId)
 	return nil
 }
@@ -384,6 +393,7 @@ func (dl *DebridLink) GetTorrents() ([]*types.Torrent, error) {
 		torrents = append(torrents, t...)
 		page++
 	}
+
 	return torrents, nil
 }
 
@@ -412,6 +422,7 @@ func (dl *DebridLink) getTorrents(page, perPage int) ([]*types.Torrent, error) {
 		if t.Status != 100 {
 			continue
 		}
+
 		torrent := &types.Torrent{
 			Id:               t.ID,
 			Name:             t.Name,
@@ -425,6 +436,7 @@ func (dl *DebridLink) getTorrents(page, perPage int) ([]*types.Torrent, error) {
 			MountPath:        dl.MountPath,
 			Added:            time.Unix(t.Created, 0).Format(time.RFC3339),
 		}
+
 		cfg := config.Get()
 		now := time.Now()
 		for _, f := range t.Files {

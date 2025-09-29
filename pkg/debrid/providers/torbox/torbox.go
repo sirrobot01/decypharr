@@ -55,6 +55,7 @@ func New(dc config.Debrid) (*Torbox, error) {
 		request.WithLogger(_log),
 		request.WithProxy(dc.Proxy),
 	)
+
 	autoExpiresLinksAfter, err := time.ParseDuration(dc.AutoExpireLinksAfter)
 	if autoExpiresLinksAfter == 0 || err != nil {
 		autoExpiresLinksAfter = 48 * time.Hour
@@ -173,20 +174,25 @@ func (tb *Torbox) getTorboxStatus(status string, finished bool) string {
 		return "downloaded"
 	}
 
-	downloading := []string{"completed", "cached", "paused", "downloading", "uploading", "uploading (no peers)",
-		"checkingResumeData", "metaDL", "pausedUP", "queuedUP", "checkingUP", "stopped seeding",
-		"forcedUP", "allocating", "downloading", "metaDL", "pausedDL",
-		"queuedDL", "checkingDL", "forcedDL", "checkingResumeData", "moving"}
-
-	var determinedStatus string
-	switch {
-	case utils.Contains(downloading, status):
-		determinedStatus = "downloading"
-	default:
-		determinedStatus = "error"
+	downloaded := []string{
+		"completed", "cached", "uploading (no peers)", "uploading",
 	}
 
-	return determinedStatus
+	downloading := []string{
+		"paused", "downloading", "checkingResumeData",
+		"metaDL", "pausedUP", "queuedUP", "checkingUP", "stopped seeding", "stalled (no peers)",
+		"forcedUP", "allocating", "metaDL", "pausedDL",
+		"queuedDL", "checkingDL", "forcedDL", "checkingResumeData", "moving",
+	}
+
+	switch {
+	case utils.Contains(downloaded, status):
+		return "downloaded"
+	case utils.Contains(downloading, status):
+		return "downloading"
+	}
+
+	return "error"
 }
 
 func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
@@ -196,6 +202,7 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var res InfoResponse
 	err = json.Unmarshal(resp, &res)
 	if err != nil {
@@ -223,6 +230,7 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 		Files:            make(map[string]types.File),
 		Added:            data.CreatedAt.Format(time.RFC3339),
 	}
+
 	cfg := config.Get()
 
 	totalFiles := 0
@@ -379,8 +387,9 @@ func (tb *Torbox) CheckStatus(torrent *types.Torrent) (*types.Torrent, error) {
 			return torrent, err
 		}
 		status := torrent.Status
+
 		if status == "downloaded" {
-			tb.logger.Info().Msgf("Torrent: %s downloaded", torrent.Name)
+			tb.logger.Info().Msgf("torrent: %s downloaded", torrent.Name)
 			return torrent, nil
 		} else if utils.Contains(tb.GetDownloadingStatus(), status) {
 			if !torrent.DownloadUncached {
@@ -399,10 +408,12 @@ func (tb *Torbox) DeleteTorrent(torrentId string) error {
 	url := fmt.Sprintf("%s/api/torrents/controltorrent/%s", tb.Host, torrentId)
 	payload := map[string]string{"torrent_id": torrentId, "action": "Delete"}
 	jsonPayload, _ := json.Marshal(payload)
+
 	req, _ := http.NewRequest(http.MethodDelete, url, bytes.NewBuffer(jsonPayload))
 	if _, err := tb.client.MakeRequest(req); err != nil {
 		return err
 	}
+
 	tb.logger.Info().Msgf("Torrent %s deleted from Torbox", torrentId)
 	return nil
 }
@@ -633,8 +644,8 @@ func (tb *Torbox) DeleteDownloadLink(linkId string) error {
 func (tb *Torbox) GetAvailableSlots() (int, error) {
 	var planSlots map[string]int = map[string]int{
 		"essential": 3,
-		"pro":       10,
 		"standard":  5,
+		"pro":       10,
 	}
 
 	var accountSlots int = 1
