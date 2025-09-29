@@ -9,6 +9,7 @@ import (
 	gourl "net/url"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -174,22 +175,24 @@ func (tb *Torbox) getTorboxStatus(status string, finished bool) string {
 		return "downloaded"
 	}
 
+	cleanStatus := regexp.MustCompile(`\s*\(.*?\)\s*`).ReplaceAllString(status, "")
+
 	downloaded := []string{
-		"completed", "cached", "uploading (no peers)", "uploading",
+		"completed", "cached", "uploading",
 	}
 
 	downloading := []string{
 		"paused", "downloading", "pausedDL",
 		"pausedUP", "queuedUP", "forcedUP",
-		"metaDL", "stopped seeding", "stalled (no peers)",
+		"metaDL", "stopped seeding", "stalled",
 		"queuedDL", "forcedDL", "moving", "allocating",
 		"checkingUP", "checkingDL", "checkingResumeData",
 	}
 
 	switch {
-	case utils.Contains(downloaded, status):
+	case utils.Contains(downloaded, cleanStatus):
 		return "downloaded"
-	case utils.Contains(downloading, status):
+	case utils.Contains(downloading, cleanStatus):
 		return "downloading"
 	}
 
@@ -588,7 +591,7 @@ func (tb *Torbox) GetTorrents() ([]*types.Torrent, error) {
 				// Skip sample files
 				continue
 			}
-			
+
 			if !cfg.IsAllowedFile(fileName) {
 				continue
 			}

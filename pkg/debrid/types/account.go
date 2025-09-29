@@ -63,6 +63,7 @@ func (a *Accounts) Active() []*Account {
 func (a *Accounts) All() []*Account {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
+
 	return a.accounts
 }
 
@@ -275,7 +276,7 @@ func (a *Account) setLinks(links map[string]*DownloadLink) {
 			// Expired, continue
 			continue
 		}
-		
+
 		a.links[a.sliceFileLink(dl.Link)] = dl
 	}
 }
