@@ -134,33 +134,40 @@ func (d *Storage) syncAccounts() error {
 		if debrid == nil || debrid.client == nil {
 			continue
 		}
+
 		_log := debrid.client.Logger()
+
 		if err := debrid.client.SyncAccounts(); err != nil {
 			_log.Error().Err(err).Msgf("Failed to sync account for %s", name)
 			continue
 		}
 	}
+
 	return nil
 }
 
 func (d *Storage) Debrids() map[string]*Debrid {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
+
 	debridsCopy := make(map[string]*Debrid)
 	for name, debrid := range d.debrids {
 		if debrid != nil {
 			debridsCopy[name] = debrid
 		}
 	}
+
 	return debridsCopy
 }
 
 func (d *Storage) Client(name string) types.Client {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
+
 	if client, exists := d.debrids[name]; exists {
 		return client.client
 	}
+
 	return nil
 }
 
@@ -183,6 +190,7 @@ func (d *Storage) Reset() {
 func (d *Storage) Clients() map[string]types.Client {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
+
 	clientsCopy := make(map[string]types.Client)
 	for name, debrid := range d.debrids {
 		if debrid != nil && debrid.client != nil {
@@ -196,6 +204,7 @@ func (d *Storage) Clients() map[string]types.Client {
 func (d *Storage) Caches() map[string]*debridStore.Cache {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
+
 	cachesCopy := make(map[string]*debridStore.Cache)
 	for name, debrid := range d.debrids {
 		if debrid != nil && debrid.cache != nil {
@@ -209,6 +218,7 @@ func (d *Storage) Caches() map[string]*debridStore.Cache {
 func (d *Storage) FilterClients(filter func(types.Client) bool) map[string]types.Client {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+
 	filteredClients := make(map[string]types.Client)
 	for name, client := range d.debrids {
 		if client != nil && filter(client.client) {
@@ -235,7 +245,6 @@ func createDebridClient(dc config.Debrid) (types.Client, error) {
 }
 
 func Process(ctx context.Context, store *Storage, selectedDebrid string, magnet *utils.Magnet, a *arr.Arr, action string, overrideDownloadUncached bool) (*types.Torrent, error) {
-
 	debridTorrent := &types.Torrent{
 		InfoHash: magnet.InfoHash,
 		Magnet:   magnet,
@@ -249,6 +258,7 @@ func Process(ctx context.Context, store *Storage, selectedDebrid string, magnet 
 		if selectedDebrid != "" && c.Name() != selectedDebrid {
 			return false
 		}
+
 		return true
 	})
 
@@ -289,6 +299,7 @@ func Process(ctx context.Context, store *Storage, selectedDebrid string, magnet 
 			continue
 		}
 		dbt.Arr = a
+
 		_logger.Info().Str("id", dbt.Id).Msgf("Torrent: %s submitted to %s", dbt.Name, db.Name())
 		store.lastUsed = db.Name()
 
@@ -312,10 +323,12 @@ func Process(ctx context.Context, store *Storage, selectedDebrid string, magnet 
 
 		return torrent, nil
 	}
+
 	if len(errs) == 0 {
 		return nil, fmt.Errorf("failed to process torrent: no clients available")
 	}
 
 	joinedErrors := errors.Join(errs...)
+
 	return nil, fmt.Errorf("failed to process torrent: %w", joinedErrors)
 }

@@ -335,6 +335,7 @@ func (r *RealDebrid) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
 	if t.Magnet.IsTorrent() {
 		return r.addTorrent(t)
 	}
+
 	return r.addMagnet(t)
 }
 
@@ -346,11 +347,13 @@ func (r *RealDebrid) addTorrent(t *types.Torrent) (*types.Torrent, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	req.Header.Add("Content-Type", "application/x-bittorrent")
 	resp, err := r.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
+
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		// Handle multiple_downloads
 
@@ -361,17 +364,22 @@ func (r *RealDebrid) addTorrent(t *types.Torrent) (*types.Torrent, error) {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("realdebrid API error: Status: %d || Body: %s", resp.StatusCode, string(bodyBytes))
 	}
+
 	defer resp.Body.Close()
 	bodyBytes, err := io.ReadAll(resp.Body)
+
 	if err != nil {
 		return nil, fmt.Errorf("reading response body: %w", err)
 	}
+
 	if err = json.Unmarshal(bodyBytes, &data); err != nil {
 		return nil, err
 	}
+
 	t.Id = data.Id
 	t.Debrid = r.name
 	t.MountPath = r.MountPath
+
 	return t, nil
 }
 
@@ -418,21 +426,25 @@ func (r *RealDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("reading response body: %w", err)
 	}
+
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusNotFound {
 			return nil, utils.TorrentNotFoundError
 		}
 		return nil, fmt.Errorf("realdebrid API error: Status: %d || Body: %s", resp.StatusCode, string(bodyBytes))
 	}
+
 	var data torrentInfo
 	err = json.Unmarshal(bodyBytes, &data)
 	if err != nil {
 		return nil, err
 	}
+
 	t := &types.Torrent{
 		Id:               data.ID,
 		Name:             data.Filename,
@@ -449,6 +461,7 @@ func (r *RealDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 		Debrid:           r.name,
 		MountPath:        r.MountPath,
 	}
+	
 	t.Files = r.getTorrentFiles(t, data) // Get selected files
 	return t, nil
 }

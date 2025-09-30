@@ -1,6 +1,9 @@
 package torbox
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type APIResponse[T any] struct {
 	Success bool   `json:"success"`
@@ -56,6 +59,37 @@ type torboxInfo struct {
 	AllowZipped      bool      `json:"allow_zipped"`
 	LongTermSeeding  bool      `json:"long_term_seeding"`
 	TrackerMessage   any       `json:"tracker_message"`
+}
+
+func (t *torboxInfo) UnmarshalJSON(d []byte) error {
+	type Alias torboxInfo
+	type Aux struct {
+		*Alias
+
+		TorrentID *int `json:"torrent_id"`
+		QueuedID  *int `json:"queued_id"`
+	}
+
+	aux := &Aux{
+		Alias: (*Alias)(t),
+	}
+
+	err := json.Unmarshal(d, &aux)
+	if err != nil {
+		return err
+	}
+
+	if t.Id == 0 {
+		if aux.TorrentID != nil {
+			t.Id = *aux.TorrentID
+		}
+
+		if aux.QueuedID != nil {
+			t.Id = *aux.QueuedID
+		}
+	}
+
+	return err
 }
 
 type File struct {
