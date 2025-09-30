@@ -7,10 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/logger"
-	"go.uber.org/ratelimit"
-	"golang.org/x/net/proxy"
 	"io"
 	"math/rand"
 	"net"
@@ -20,6 +16,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/sirrobot01/decypharr/internal/logger"
+	"go.uber.org/ratelimit"
+	"golang.org/x/net/proxy"
 )
 
 func JoinURL(base string, paths ...string) (string, error) {
@@ -266,11 +267,11 @@ func New(options ...ClientOption) *Client {
 		maxRetries:    3,
 		skipTLSVerify: true,
 		retryableStatus: map[int]struct{}{
-			http.StatusTooManyRequests:     struct{}{},
-			http.StatusInternalServerError: struct{}{},
-			http.StatusBadGateway:          struct{}{},
-			http.StatusServiceUnavailable:  struct{}{},
-			http.StatusGatewayTimeout:      struct{}{},
+			http.StatusTooManyRequests:     {},
+			http.StatusInternalServerError: {},
+			http.StatusBadGateway:          {},
+			http.StatusServiceUnavailable:  {},
+			http.StatusGatewayTimeout:      {},
 		},
 		logger:  logger.New("request"),
 		timeout: 60 * time.Second,

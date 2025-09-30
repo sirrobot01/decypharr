@@ -83,13 +83,16 @@ func (i *ImportRequest) sendCallback(torrent *Torrent, debridTorrent *debridType
 		Torrent:     torrent,
 		Debrid:      debridTorrent,
 	})
+	
 	if err != nil {
 		return
 	}
+
 	req, err := http.NewRequest("POST", i.CallBackUrl, bytes.NewReader(payload))
 	if err != nil {
 		return
 	}
+
 	req.Header.Set("Content-Type", "application/json")
 	_, _ = client.Do(req)
 

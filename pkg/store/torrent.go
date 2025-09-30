@@ -25,13 +25,14 @@ func (s *Store) AddTorrent(ctx context.Context, importReq *ImportRequest) error 
 		if ok := errors.As(err, &httpErr); ok {
 			switch httpErr.Code {
 			case "too_many_active_downloads":
-				// Handle too much active downloads error
+				// Handle too many active downloads error
 				s.logger.Warn().Msgf("Too many active downloads for %s, adding to queue", importReq.Magnet.Name)
 
 				if err := s.addToQueue(importReq); err != nil {
 					s.logger.Error().Err(err).Msgf("Failed to add %s to queue", importReq.Magnet.Name)
 					return err
 				}
+
 				torrent.State = "queued"
 			default:
 				// Unhandled error, return it, caller logs it
@@ -92,12 +93,11 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 		if debridTorrent.Status == "downloaded" || !utils.Contains(downloadingStatuses, debridTorrent.Status) {
 			break
 		}
-		select {
-		case <-backoff.C:
-			// Increase interval gradually, cap at max
-			nextInterval := min(s.refreshInterval*2, 30*time.Second)
-			backoff.Reset(nextInterval)
-		}
+
+		<-backoff.C
+		// Increase interval gradually, cap at max
+		nextInterval := min(s.refreshInterval*2, 30*time.Second)
+		backoff.Reset(nextInterval)
 	}
 	var torrentSymlinkPath string
 	var err error
@@ -115,7 +115,6 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 		}()
 		s.logger.Error().Err(err).Msgf("Error occured while processing torrent %s", debridTorrent.Name)
 		importReq.markAsFailed(err, torrent, debridTorrent)
-		return
 	}
 
 	onSuccess := func(torrentSymlinkPath string) {
@@ -124,11 +123,13 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 		s.logger.Info().Msgf("Adding %s took %s", debridTorrent.Name, time.Since(timer))
 
 		go importReq.markAsCompleted(torrent, debridTorrent) // Mark the import request as completed, send callback if needed
+
 		go func() {
 			if err := request.SendDiscordMessage("download_complete", "success", torrent.discordContext()); err != nil {
 				s.logger.Error().Msgf("Error sending discord message: %v", err)
 			}
 		}()
+
 		go func() {
 			_arr.Refresh()
 		}()
@@ -172,16 +173,19 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 			onFailed(err)
 			return
 		}
+
 		torrentSymlinkPath, err = s.processDownload(torrent, debridTorrent)
 		if err != nil {
 			onFailed(err)
 			return
 		}
+
 		if torrentSymlinkPath == "" {
 			err = fmt.Errorf("download path is empty for %s", debridTorrent.Name)
 			onFailed(err)
 			return
 		}
+
 		onSuccess(torrentSymlinkPath)
 	case "none":
 		s.logger.Debug().Msgf("Post-Download Action: None")
@@ -212,21 +216,25 @@ func (s *Store) partialTorrentUpdate(t *Torrent, debridTorrent *types.Torrent) *
 	if err != nil {
 		addedOn = time.Now()
 	}
+
 	totalSize := debridTorrent.Bytes
 	progress := (cmp.Or(debridTorrent.Progress, 0.0)) / 100.0
 	if math.IsNaN(progress) || math.IsInf(progress, 0) {
 		progress = 0
 	}
+
 	sizeCompleted := int64(float64(totalSize) * progress)
 
 	var speed int64
 	if debridTorrent.Speed != 0 {
 		speed = debridTorrent.Speed
 	}
+
 	var eta int
 	if speed != 0 {
 		eta = int((totalSize - sizeCompleted) / speed)
 	}
+
 	files := make([]*File, 0, len(debridTorrent.Files))
 	for index, file := range debridTorrent.GetFiles() {
 		files = append(files, &File{
@@ -235,6 +243,7 @@ func (s *Store) partialTorrentUpdate(t *Torrent, debridTorrent *types.Torrent) *
 			Size:  file.Size,
 		})
 	}
+
 	t.DebridID = debridTorrent.Id
 	t.Name = debridTorrent.Name
 	t.AddedOn = addedOn.Unix()
@@ -253,6 +262,7 @@ func (s *Store) partialTorrentUpdate(t *Torrent, debridTorrent *types.Torrent) *
 	t.Dlspeed = speed
 	t.Upspeed = speed
 	t.ContentPath = filepath.Join(t.SavePath, t.Name) + string(os.PathSeparator)
+
 	return t
 }
 
@@ -266,6 +276,7 @@ func (s *Store) updateTorrent(t *Torrent, debridTorrent *types.Torrent) *Torrent
 			_ = debridClient.UpdateTorrent(debridTorrent)
 		}
 	}
+
 	t = s.partialTorrentUpdate(t, debridTorrent)
 	t.ContentPath = t.TorrentPath + string(os.PathSeparator)
 
@@ -286,6 +297,7 @@ func (s *Store) updateTorrent(t *Torrent, debridTorrent *types.Torrent) *Torrent
 				s.torrents.Update(t)
 				return t
 			}
+
 			updatedT := s.updateTorrent(t, debridTorrent)
 			t = updatedT
 

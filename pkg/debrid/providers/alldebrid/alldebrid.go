@@ -3,18 +3,19 @@ package alldebrid
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/internal/request"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"net/http"
 	gourl "net/url"
 	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/logger"
+	"github.com/sirrobot01/decypharr/internal/request"
+	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 )
 
 type AllDebrid struct {
@@ -465,6 +466,7 @@ func (ad *AllDebrid) GetProfile() (*types.Profile, error) {
 		ad.logger.Error().Err(err).Msgf("Error unmarshalling user profile")
 		return nil, err
 	}
+
 	if res.Status != "success" {
 		message := "unknown error"
 		if res.Error != nil {
@@ -472,6 +474,7 @@ func (ad *AllDebrid) GetProfile() (*types.Profile, error) {
 		}
 		return nil, fmt.Errorf("error getting user profile: %s", message)
 	}
+
 	userData := res.Data.User
 	expiration := time.Unix(userData.PremiumUntil, 0)
 	profile := &types.Profile{
@@ -483,6 +486,7 @@ func (ad *AllDebrid) GetProfile() (*types.Profile, error) {
 		Premium:    userData.PremiumUntil,
 		Expiration: expiration,
 	}
+
 	if userData.IsPremium {
 		profile.Type = "premium"
 	} else if userData.IsTrial {
@@ -490,6 +494,7 @@ func (ad *AllDebrid) GetProfile() (*types.Profile, error) {
 	} else {
 		profile.Type = "free"
 	}
+	
 	ad.Profile = profile
 	return profile, nil
 }
