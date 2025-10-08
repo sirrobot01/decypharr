@@ -146,12 +146,16 @@ func (c *Cache) checkDownloadLink(link string) (types.DownloadLink, error) {
 	return types.DownloadLink{}, fmt.Errorf("download link not found for %s", link)
 }
 
+func (c *Cache) IncrementFailedLinkCounter(link string) int32 {
+	counter, _ := c.failedLinksCounter.LoadOrCompute(link, func() (atomic.Int32, bool) {
+		return atomic.Int32{}, true
+	})
+	return counter.Add(1)
+}
+
 func (c *Cache) MarkLinkAsInvalid(downloadLink types.DownloadLink, reason string) {
 	// Increment file link error counter
-	counter, _ := c.failedLinksCounter.LoadOrCompute(downloadLink.Link, func() (*atomic.Int32, bool) {
-		return &atomic.Int32{}, true
-	})
-	counter.Add(1)
+	c.IncrementFailedLinkCounter(downloadLink.Link)
 
 	c.invalidDownloadLinks.Store(downloadLink.DownloadLink, reason)
 	// Remove the download api key from active

@@ -89,7 +89,7 @@ type Cache struct {
 	invalidDownloadLinks *xsync.Map[string, string]
 	repairRequest        *xsync.Map[string, *reInsertRequest]
 	failedToReinsert     *xsync.Map[string, struct{}]
-	failedLinksCounter   *xsync.Map[string, *atomic.Int32] // link -> counter
+	failedLinksCounter   *xsync.Map[string, atomic.Int32] // link -> counter
 
 	// repair
 	repairChan chan RepairRequest
@@ -198,7 +198,7 @@ func NewDebridCache(dc config.Debrid, client common.Client, mounter *rclone.Moun
 		invalidDownloadLinks: xsync.NewMap[string, string](),
 		repairRequest:        xsync.NewMap[string, *reInsertRequest](),
 		failedToReinsert:     xsync.NewMap[string, struct{}](),
-		failedLinksCounter:   xsync.NewMap[string, *atomic.Int32](),
+		failedLinksCounter:   xsync.NewMap[string, atomic.Int32](),
 		streamClient:         httpClient,
 		repairChan:           make(chan RepairRequest, 100), // Initialize the repair channel, max 100 requests buffered
 	}
