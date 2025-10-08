@@ -75,7 +75,7 @@
 
         // Handle skip auth button
         skipAuthBtn.addEventListener('click', function() {
-            window.decypharrUtils.fetcher('/skip-auth', { method: 'GET' })
+            window.decypharrUtils.fetcher('/skip-auth', { method: 'POST' })
                 .then(response => {
                     if (response.ok) {
                         window.location.href = window.decypharrUtils.joinURL(window.urlBase, '/');

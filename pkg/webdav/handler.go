@@ -101,18 +101,13 @@ func (h *Handler) RemoveAll(ctx context.Context, name string) error {
 	if len(parts) >= 2 {
 		if utils.Contains(h.getParentItems(), parts[0]) {
 			torrentName := parts[1]
-			cached := h.cache.GetTorrentByName(torrentName)
-			if cached != nil && len(parts) >= 3 {
-				filename := filepath.Clean(path.Join(parts[2:]...))
-				if file, ok := cached.GetFile(filename); ok {
-					if err := h.cache.RemoveFile(cached.Id, file.Name); err != nil {
-						h.logger.Error().Err(err).Msgf("Failed to remove file %s from torrent %s", file.Name, torrentName)
-						return err
-					}
-					// If the file was successfully removed, we can return nil
-					return nil
-				}
+			filename := filepath.Clean(path.Join(parts[2:]...))
+			if err := h.cache.RemoveFile(torrentName, filename); err != nil {
+				h.logger.Error().Err(err).Msgf("Failed to remove file %s from torrent %s", filename, torrentName)
+				return err
 			}
+			// If the file was successfully removed, we can return nil
+			return nil
 		}
 	}
 
@@ -489,7 +484,6 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	return
 }
 
 func (h *Handler) handleHead(w http.ResponseWriter, r *http.Request) {

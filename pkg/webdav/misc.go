@@ -128,14 +128,6 @@ func writeXml(w http.ResponseWriter, status int, buf stringbuf.StringBuf) {
 	_, _ = w.Write(buf.Bytes())
 }
 
-func hasHeadersWritten(w http.ResponseWriter) bool {
-	// Most ResponseWriter implementations support this
-	if hw, ok := w.(interface{ Written() bool }); ok {
-		return hw.Written()
-	}
-	return false
-}
-
 func isClientDisconnection(err error) bool {
 	if err == nil {
 		return false

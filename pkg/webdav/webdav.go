@@ -4,10 +4,6 @@ import (
 	"context"
 	"embed"
 	"fmt"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/pkg/wire"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -16,6 +12,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/wire"
 )
 
 //go:embed templates/*
@@ -33,42 +35,8 @@ var (
 			}
 			return strings.Join(segments, "/")
 		},
-		"formatSize": func(bytes int64) string {
-			const (
-				KB = 1024
-				MB = 1024 * KB
-				GB = 1024 * MB
-				TB = 1024 * GB
-			)
-
-			var size float64
-			var unit string
-
-			switch {
-			case bytes >= TB:
-				size = float64(bytes) / TB
-				unit = "TB"
-			case bytes >= GB:
-				size = float64(bytes) / GB
-				unit = "GB"
-			case bytes >= MB:
-				size = float64(bytes) / MB
-				unit = "MB"
-			case bytes >= KB:
-				size = float64(bytes) / KB
-				unit = "KB"
-			default:
-				size = float64(bytes)
-				unit = "bytes"
-			}
-
-			// Format to 2 decimal places for larger units, no decimals for bytes
-			if unit == "bytes" {
-				return fmt.Sprintf("%.0f %s", size, unit)
-			}
-			return fmt.Sprintf("%.2f %s", size, unit)
-		},
-		"hasSuffix": strings.HasSuffix,
+		"formatSize": utils.FormatSize,
+		"hasSuffix":  strings.HasSuffix,
 	}
 	tplRoot      = template.Must(template.ParseFS(templatesFS, "templates/root.html"))
 	tplDirectory = template.Must(template.New("").Funcs(funcMap).ParseFS(templatesFS, "templates/directory.html"))
@@ -108,6 +76,7 @@ func (wd *WebDav) Routes() http.Handler {
 	wr := chi.NewRouter()
 	wr.Use(middleware.StripSlashes)
 	wr.Use(wd.commonMiddleware)
+	// wr.Use(wd.authMiddleware) Disable auth for now
 
 	wd.setupRootHandler(wr)
 	wd.mountHandlers(wr)
@@ -174,6 +143,21 @@ func (wd *WebDav) commonMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Methods", "OPTIONS, PROPFIND, GET, HEAD, POST, PUT, DELETE, MKCOL, PROPPATCH, COPY, MOVE, LOCK, UNLOCK")
 		w.Header().Set("Access-Control-Allow-Headers", "Depth, Content-Type, Authorization")
 
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (wd *WebDav) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cfg := config.Get()
+		if cfg.UseAuth && cfg.EnableWebdavAuth {
+			username, password, ok := r.BasicAuth()
+			if !ok || !config.VerifyAuth(username, password) {
+				w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+		}
 		next.ServeHTTP(w, r)
 	})
 }

@@ -36,9 +36,10 @@ const (
 )
 
 type Arr struct {
-	Name             string `json:"name"`
-	Host             string `json:"host"`
-	Token            string `json:"token"`
+	Name  string `json:"name"`
+	Host  string `json:"host"`
+	Token string `json:"token"`
+
 	Type             Type   `json:"type"`
 	Cleanup          bool   `json:"cleanup"`
 	SkipRepair       bool   `json:"skip_repair"`
@@ -110,7 +111,10 @@ func (a *Arr) Request(method, endpoint string, payload interface{}) (*http.Respo
 
 func (a *Arr) Validate() error {
 	if a.Token == "" || a.Host == "" {
-		return nil
+		return fmt.Errorf("arr not configured")
+	}
+	if request.ValidateURL(a.Host) != nil {
+		return fmt.Errorf("invalid arr host URL")
 	}
 	resp, err := a.Request("GET", "/api/v3/health", nil)
 	if err != nil {

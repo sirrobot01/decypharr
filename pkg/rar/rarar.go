@@ -191,7 +191,6 @@ func (f *HttpFile) ReadAt(p []byte, off int64) (n int, err error) {
 			bytesRead, err := io.ReadFull(resp.Body, p)
 			return bytesRead, err
 		case http.StatusOK:
-			// Some servers return the full content instead of partial
 			fullData, err := io.ReadAll(resp.Body)
 			if err != nil {
 				return 0, fmt.Errorf("%w: %v", ErrNetworkError, err)
@@ -683,19 +682,4 @@ func (r *Reader) ExtractFile(file *File) ([]byte, error) {
 	}
 
 	return r.readBytes(file.DataOffset, int(file.CompressedSize))
-}
-
-// Helper functions
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

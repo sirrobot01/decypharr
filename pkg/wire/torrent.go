@@ -91,12 +91,11 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 		if debridTorrent.Status == "downloaded" || !utils.Contains(downloadingStatuses, debridTorrent.Status) {
 			break
 		}
-		select {
-		case <-backoff.C:
-			// Increase interval gradually, cap at max
-			nextInterval := min(s.refreshInterval*2, 30*time.Second)
-			backoff.Reset(nextInterval)
-		}
+
+		<-backoff.C
+		// Reset the backoff timer
+		nextInterval := min(s.refreshInterval*2, 30*time.Second)
+		backoff.Reset(nextInterval)
 	}
 	var torrentSymlinkPath, torrentRclonePath string
 	debridTorrent.Arr = _arr
@@ -113,7 +112,6 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 		}()
 		s.logger.Error().Err(err).Msgf("Error occured while processing torrent %s", debridTorrent.Name)
 		importReq.markAsFailed(err, torrent, debridTorrent)
-		return
 	}
 
 	onSuccess := func(torrentSymlinkPath string) {

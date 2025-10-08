@@ -1,8 +1,9 @@
 package store
 
 import (
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"sort"
+
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 )
 
 // MergeFiles merges the files from multiple torrents into a single map.

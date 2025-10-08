@@ -3,50 +3,50 @@ package store
 import (
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 )
 
-type downloadLinkRequest struct {
-	result string
-	err    error
-	done   chan struct{}
-}
-
-func newDownloadLinkRequest() *downloadLinkRequest {
-	return &downloadLinkRequest{
-		done: make(chan struct{}),
-	}
-}
-
-func (r *downloadLinkRequest) Complete(result string, err error) {
-	r.result = result
-	r.err = err
-	close(r.done)
-}
-
-func (r *downloadLinkRequest) Wait() (string, error) {
-	<-r.done
-	return r.result, r.err
-}
+const (
+	MaxLinkFailures = 10
+)
 
 func (c *Cache) GetDownloadLink(torrentName, filename, fileLink string) (types.DownloadLink, error) {
-	// Check link cache
-	if dl, err := c.checkDownloadLink(fileLink); err == nil && !dl.Empty() {
-		return dl, nil
+	// Check
+	counter, ok := c.failedLinksCounter.Load(fileLink)
+	if ok && counter.Load() >= MaxLinkFailures {
+		return types.DownloadLink{}, fmt.Errorf("file link %s has failed %d times, not retrying", fileLink, counter.Load())
 	}
 
-	dl, err := c.fetchDownloadLink(torrentName, filename, fileLink)
+	// Use singleflight to deduplicate concurrent requests
+	v, err, _ := c.downloadSG.Do(fileLink, func() (interface{}, error) {
+		// Double-check cache inside singleflight (another goroutine might have filled it)
+		if dl, err := c.checkDownloadLink(fileLink); err == nil && !dl.Empty() {
+			return dl, nil
+		}
+
+		// Fetch the download link
+		dl, err := c.fetchDownloadLink(torrentName, filename, fileLink)
+		if err != nil {
+			c.downloadSG.Forget(fileLink)
+			return types.DownloadLink{}, err
+		}
+
+		if dl.Empty() {
+			c.downloadSG.Forget(fileLink)
+			err = fmt.Errorf("download link is empty for %s in torrent %s", filename, torrentName)
+			return types.DownloadLink{}, err
+		}
+
+		return dl, nil
+	})
+
 	if err != nil {
 		return types.DownloadLink{}, err
 	}
-
-	if dl.Empty() {
-		err = fmt.Errorf("download link is empty for %s in torrent %s", filename, torrentName)
-		return types.DownloadLink{}, err
-	}
-	return dl, err
+	return v.(types.DownloadLink), nil
 }
 
 func (c *Cache) fetchDownloadLink(torrentName, filename, fileLink string) (types.DownloadLink, error) {
@@ -146,7 +146,13 @@ func (c *Cache) checkDownloadLink(link string) (types.DownloadLink, error) {
 	return types.DownloadLink{}, fmt.Errorf("download link not found for %s", link)
 }
 
-func (c *Cache) MarkDownloadLinkAsInvalid(downloadLink types.DownloadLink, reason string) {
+func (c *Cache) MarkLinkAsInvalid(downloadLink types.DownloadLink, reason string) {
+	// Increment file link error counter
+	counter, _ := c.failedLinksCounter.LoadOrCompute(downloadLink.Link, func() (*atomic.Int32, bool) {
+		return &atomic.Int32{}, true
+	})
+	counter.Add(1)
+
 	c.invalidDownloadLinks.Store(downloadLink.DownloadLink, reason)
 	// Remove the download api key from active
 	if reason == "bandwidth_exceeded" {
@@ -166,8 +172,7 @@ func (c *Cache) MarkDownloadLinkAsInvalid(downloadLink types.DownloadLink, reaso
 }
 
 func (c *Cache) downloadLinkIsInvalid(downloadLink string) bool {
-	if reason, ok := c.invalidDownloadLinks.Load(downloadLink); ok {
-		c.logger.Debug().Msgf("Download link %s is invalid: %s", downloadLink, reason)
+	if _, ok := c.invalidDownloadLinks.Load(downloadLink); ok {
 		return true
 	}
 	return false

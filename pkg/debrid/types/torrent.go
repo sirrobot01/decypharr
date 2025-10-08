@@ -2,7 +2,6 @@ package types
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -182,19 +181,9 @@ type DownloadLink struct {
 	ExpiresAt    time.Time
 }
 
-func isValidURL(str string) bool {
-	u, err := url.Parse(str)
-	// A valid URL should parse without error, and have a non-empty scheme and host.
-	return err == nil && u.Scheme != "" && u.Host != ""
-}
-
 func (dl *DownloadLink) Valid() error {
 	if dl.Empty() {
 		return EmptyDownloadLinkError
-	}
-	// Check if the link is actually a valid URL
-	if !isValidURL(dl.DownloadLink) {
-		return ErrDownloadLinkNotFound
 	}
 	return nil
 }

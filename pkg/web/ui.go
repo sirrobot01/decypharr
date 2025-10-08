@@ -114,9 +114,11 @@ func (wb *Web) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 func (wb *Web) IndexHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
 	data := map[string]interface{}{
-		"URLBase": cfg.URLBase,
-		"Page":    "index",
-		"Title":   "Torrents",
+		"URLBase":    cfg.URLBase,
+		"Page":       "index",
+		"Title":      "Torrents",
+		"NeedSetup":  cfg.CheckSetup() != nil,
+		"SetupError": cfg.CheckSetup(),
 	}
 	_ = wb.templates.ExecuteTemplate(w, "layout", data)
 }
@@ -134,6 +136,8 @@ func (wb *Web) DownloadHandler(w http.ResponseWriter, r *http.Request) {
 		"Debrids":        debrids,
 		"HasMultiDebrid": len(debrids) > 1,
 		"DownloadFolder": cfg.QBitTorrent.DownloadFolder,
+		"NeedSetup":      cfg.CheckSetup() != nil,
+		"SetupError":     cfg.CheckSetup(),
 	}
 	_ = wb.templates.ExecuteTemplate(w, "layout", data)
 }
@@ -141,9 +145,11 @@ func (wb *Web) DownloadHandler(w http.ResponseWriter, r *http.Request) {
 func (wb *Web) RepairHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
 	data := map[string]interface{}{
-		"URLBase": cfg.URLBase,
-		"Page":    "repair",
-		"Title":   "Repair",
+		"URLBase":    cfg.URLBase,
+		"Page":       "repair",
+		"Title":      "Repair",
+		"NeedSetup":  cfg.CheckSetup() != nil,
+		"SetupError": cfg.CheckSetup(),
 	}
 	_ = wb.templates.ExecuteTemplate(w, "layout", data)
 }
@@ -151,9 +157,11 @@ func (wb *Web) RepairHandler(w http.ResponseWriter, r *http.Request) {
 func (wb *Web) ConfigHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
 	data := map[string]interface{}{
-		"URLBase": cfg.URLBase,
-		"Page":    "config",
-		"Title":   "Config",
+		"URLBase":    cfg.URLBase,
+		"Page":       "config",
+		"Title":      "Config",
+		"NeedSetup":  cfg.CheckSetup() != nil,
+		"SetupError": cfg.CheckSetup(),
 	}
 	_ = wb.templates.ExecuteTemplate(w, "layout", data)
 }

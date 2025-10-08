@@ -1,5 +1,15 @@
 {{ define "repair" }}
 <div class="space-y-6">
+    {{ if .NeedSetup }}
+    <div role="alert" class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle text-xl"></i>
+        <div>
+            <h3 class="font-bold">Configuration Required</h3>
+            <div class="text-sm">Your configuration is incomplete. Please complete the setup in the <a href="{{.URLBase}}settings" class="link link-hover font-semibold">Settings page</a>.</div>
+        </div>
+    </div>
+    {{ end }}
+
     <div class="card bg-base-100 shadow-xl">
         <div class="card-body">
             <h2 class="card-title text-2xl mb-6">

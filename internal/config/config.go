@@ -152,6 +152,7 @@ type Config struct {
 	DiscordWebhook     string      `json:"discord_webhook_url,omitempty"`
 	RemoveStalledAfter string      `json:"remove_stalled_after,omitzero"`
 	CallbackURL        string      `json:"callback_url,omitempty"`
+	EnableWebdavAuth   bool        `json:"enable_webdav_auth,omitempty"`
 }
 
 func (c *Config) JsonFile() string {
@@ -337,12 +338,12 @@ func (c *Config) SaveAuth(auth *Auth) error {
 	return os.WriteFile(c.AuthFile(), data, 0644)
 }
 
-func (c *Config) NeedsSetup() error {
+func (c *Config) CheckSetup() error {
 	return ValidateConfig(c)
 }
 
 func (c *Config) NeedsAuth() bool {
-	return !c.UseAuth && c.GetAuth().Username == ""
+	return c.UseAuth && (c.Auth == nil || c.Auth.Username == "" || c.Auth.Password == "")
 }
 
 func (c *Config) updateDebrid(d Debrid) Debrid {

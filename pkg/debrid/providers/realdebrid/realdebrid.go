@@ -347,18 +347,11 @@ func (r *RealDebrid) addTorrent(t *types.Torrent) (*types.Torrent, error) {
 		if resp.StatusCode == 509 {
 			return nil, utils.TooManyActiveDownloadsError
 		}
-
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("realdebrid API error: Status: %d || Body: %s", resp.StatusCode, string(bodyBytes))
 	}
 	defer func(Body io.ReadCloser) {
 		_ = Body.Close()
 	}(resp.Body)
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading response body: %w", err)
-	}
-	if err = json.Unmarshal(bodyBytes, &data); err != nil {
+	if err = json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, err
 	}
 	t.Id = data.Id
@@ -379,6 +372,7 @@ func (r *RealDebrid) addMagnet(t *types.Torrent) (*types.Torrent, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		// Handle multiple_downloads
 
@@ -386,15 +380,10 @@ func (r *RealDebrid) addMagnet(t *types.Torrent) (*types.Torrent, error) {
 			return nil, utils.TooManyActiveDownloadsError
 		}
 
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return nil, fmt.Errorf("realdebrid API error: Status: %d || Body: %s", resp.StatusCode, string(bodyBytes))
 	}
-	defer resp.Body.Close()
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading response body: %w", err)
-	}
-	if err = json.Unmarshal(bodyBytes, &data); err != nil {
+	if err = json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, err
 	}
 	t.Id = data.Id
@@ -412,19 +401,15 @@ func (r *RealDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading response body: %w", err)
-	}
 	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		if resp.StatusCode == http.StatusNotFound {
 			return nil, utils.TorrentNotFoundError
 		}
-		return nil, fmt.Errorf("realdebrid API error: Status: %d || Body: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("realdebrid API error: Status: %d || Body %s", resp.StatusCode, string(bodyBytes))
 	}
 	var data torrentInfo
-	err = json.Unmarshal(bodyBytes, &data)
-	if err != nil {
+	if err = json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, err
 	}
 	t := &types.Torrent{
@@ -455,19 +440,15 @@ func (r *RealDebrid) UpdateTorrent(t *types.Torrent) error {
 		return err
 	}
 	defer resp.Body.Close()
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("reading response body: %w", err)
-	}
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusNotFound {
 			return utils.TorrentNotFoundError
 		}
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return fmt.Errorf("realdebrid API error: Status: %d || Body: %s", resp.StatusCode, string(bodyBytes))
 	}
 	var data torrentInfo
-	err = json.Unmarshal(bodyBytes, &data)
-	if err != nil {
+	if err = json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return err
 	}
 	t.Name = data.Filename
@@ -657,13 +638,9 @@ func (r *RealDebrid) getDownloadLink(account *account.Account, file *types.File)
 	}(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		// Read the response body to get the error message
-		b, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return emptyLink, err
-		}
 		var data ErrorResponse
-		if err = json.Unmarshal(b, &data); err != nil {
-			return emptyLink, fmt.Errorf("error unmarshalling %d || %s \n %s", resp.StatusCode, err, string(b))
+		if err = json.NewDecoder(resp.Body).Decode(&data); err != nil {
+			return emptyLink, fmt.Errorf("error unmarshalling %d || %s", resp.StatusCode, err)
 		}
 		switch data.ErrorCode {
 		case 19, 24, 35:
@@ -674,12 +651,8 @@ func (r *RealDebrid) getDownloadLink(account *account.Account, file *types.File)
 			return emptyLink, fmt.Errorf("realdebrid API error: Status: %d || Code: %d", resp.StatusCode, data.ErrorCode)
 		}
 	}
-	b, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return emptyLink, err
-	}
 	var data UnrestrictResponse
-	if err = json.Unmarshal(b, &data); err != nil {
+	if err = json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return emptyLink, fmt.Errorf("realdebrid API error: Error unmarshalling response: %w", err)
 	}
 	if data.Download == "" {
@@ -758,14 +731,10 @@ func (r *RealDebrid) getTorrents(offset int, limit int) (int, []*types.Torrent, 
 	}
 
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, torrents, err
-	}
 	totalItems, _ := strconv.Atoi(resp.Header.Get("X-Total-Count"))
 	var data []TorrentsResponse
-	if err = json.Unmarshal(body, &data); err != nil {
-		return 0, torrents, err
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return 0, nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 	filenames := map[string]struct{}{}
 	for _, t := range data {

@@ -23,6 +23,7 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/rclone"
 
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"golang.org/x/sync/singleflight"
 
 	"encoding/json"
 	_ "time/tzdata"
@@ -88,6 +89,7 @@ type Cache struct {
 	invalidDownloadLinks *xsync.Map[string, string]
 	repairRequest        *xsync.Map[string, *reInsertRequest]
 	failedToReinsert     *xsync.Map[string, struct{}]
+	failedLinksCounter   *xsync.Map[string, *atomic.Int32] // link -> counter
 
 	// repair
 	repairChan chan RepairRequest
@@ -112,7 +114,8 @@ type Cache struct {
 	config        config.Debrid
 	customFolders []string
 	mounter       *rclone.Mount
-	httpClient    *http.Client
+	downloadSG    singleflight.Group
+	streamClient  *http.Client
 }
 
 func NewDebridCache(dc config.Debrid, client common.Client, mounter *rclone.Mount) *Cache {
@@ -160,10 +163,13 @@ func NewDebridCache(dc config.Debrid, client common.Client, mounter *rclone.Moun
 	_log := logger.New(fmt.Sprintf("%s-webdav", client.Name()))
 	transport := &http.Transport{
 		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
-		MaxIdleConns:          10,
-		MaxIdleConnsPerHost:   2,
+		TLSHandshakeTimeout:   30 * time.Second,
+		ResponseHeaderTimeout: 60 * time.Second,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   20,
+		IdleConnTimeout:       90 * time.Second,
+		DisableKeepAlives:     false,
+		ForceAttemptHTTP2:     false,
 	}
 	httpClient := &http.Client{
 		Transport: transport,
@@ -189,10 +195,11 @@ func NewDebridCache(dc config.Debrid, client common.Client, mounter *rclone.Moun
 		mounter:       mounter,
 
 		ready:                make(chan struct{}),
-		httpClient:           httpClient,
 		invalidDownloadLinks: xsync.NewMap[string, string](),
 		repairRequest:        xsync.NewMap[string, *reInsertRequest](),
 		failedToReinsert:     xsync.NewMap[string, struct{}](),
+		failedLinksCounter:   xsync.NewMap[string, *atomic.Int32](),
+		streamClient:         httpClient,
 		repairChan:           make(chan RepairRequest, 100), // Initialize the repair channel, max 100 requests buffered
 	}
 
@@ -923,8 +930,4 @@ func (c *Cache) Logger() zerolog.Logger {
 
 func (c *Cache) GetConfig() config.Debrid {
 	return c.config
-}
-
-func (c *Cache) Download(req *http.Request) (*http.Response, error) {
-	return c.httpClient.Do(req)
 }

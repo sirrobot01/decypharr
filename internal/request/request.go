@@ -7,10 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/logger"
-	"go.uber.org/ratelimit"
-	"golang.org/x/net/proxy"
 	"io"
 	"math/rand"
 	"net"
@@ -20,6 +16,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/sirrobot01/decypharr/internal/logger"
+	"go.uber.org/ratelimit"
+	"golang.org/x/net/proxy"
 )
 
 func JoinURL(base string, paths ...string) (string, error) {
@@ -421,4 +422,43 @@ func SetProxy(transport *http.Transport, proxyURL string) {
 		transport.Proxy = http.ProxyFromEnvironment
 	}
 	return
+}
+
+func ValidateURL(urlStr string) error {
+	if urlStr == "" {
+		return fmt.Errorf("URL cannot be empty")
+	}
+
+	// Try parsing as full URL first
+	u, err := url.Parse(urlStr)
+	if err == nil && u.Scheme != "" && u.Host != "" {
+		// It's a full URL, validate scheme
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return fmt.Errorf("URL scheme must be http or https")
+		}
+		return nil
+	}
+
+	// Check if it's a host:port format (no scheme)
+	if strings.Contains(urlStr, ":") && !strings.Contains(urlStr, "://") {
+		// Try parsing with http:// prefix
+		testURL := "http://" + urlStr
+		u, err := url.Parse(testURL)
+		if err != nil {
+			return fmt.Errorf("invalid host:port format: %w", err)
+		}
+
+		if u.Host == "" {
+			return fmt.Errorf("host is required in host:port format")
+		}
+
+		// Validate port number
+		if u.Port() == "" {
+			return fmt.Errorf("port is required in host:port format")
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("invalid URL format: %s", urlStr)
 }

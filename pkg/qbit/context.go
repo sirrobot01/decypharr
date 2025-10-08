@@ -6,14 +6,12 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/pkg/arr"
 	"github.com/sirrobot01/decypharr/pkg/wire"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type contextKey string
@@ -23,45 +21,6 @@ const (
 	hashesKey   contextKey = "hashes"
 	arrKey      contextKey = "arr"
 )
-
-func validateServiceURL(urlStr string) error {
-	if urlStr == "" {
-		return fmt.Errorf("URL cannot be empty")
-	}
-
-	// Try parsing as full URL first
-	u, err := url.Parse(urlStr)
-	if err == nil && u.Scheme != "" && u.Host != "" {
-		// It's a full URL, validate scheme
-		if u.Scheme != "http" && u.Scheme != "https" {
-			return fmt.Errorf("URL scheme must be http or https")
-		}
-		return nil
-	}
-
-	// Check if it's a host:port format (no scheme)
-	if strings.Contains(urlStr, ":") && !strings.Contains(urlStr, "://") {
-		// Try parsing with http:// prefix
-		testURL := "http://" + urlStr
-		u, err := url.Parse(testURL)
-		if err != nil {
-			return fmt.Errorf("invalid host:port format: %w", err)
-		}
-
-		if u.Host == "" {
-			return fmt.Errorf("host is required in host:port format")
-		}
-
-		// Validate port number
-		if u.Port() == "" {
-			return fmt.Errorf("port is required in host:port format")
-		}
-
-		return nil
-	}
-
-	return fmt.Errorf("invalid URL format: %s", urlStr)
-}
 
 func getCategory(ctx context.Context) string {
 	if category, ok := ctx.Value(categoryKey).(string); ok {
@@ -187,21 +146,27 @@ func (q *QBit) authenticate(category, username, password string) (*arr.Arr, erro
 	}
 	a.Host = username
 	a.Token = password
-	if cfg.UseAuth {
-		if a.Host == "" || a.Token == "" {
-			return nil, fmt.Errorf("unauthorized: Host and token are required for authentication(you've enabled authentication)")
-		}
-		// try to use either Arr validate, or user auth validation
-		if err := a.Validate(); err != nil {
-			// If this failed, try to use user auth validation
-			if !verifyAuth(username, password) {
-				return nil, fmt.Errorf("unauthorized: invalid credentials")
-			}
-		}
+	arrValidated := false // This is a flag to indicate if arr validation was successful
+	if a.Host == "" || a.Token == "" && cfg.UseAuth {
+		return nil, fmt.Errorf("unauthorized: Host and token are required for authentication(you've enabled authentication)")
 	}
 
-	a.Source = "auto"
-	arrs.AddOrUpdate(a)
+	if err := a.Validate(); err == nil {
+		arrValidated = true
+	}
+
+	if !arrValidated && cfg.UseAuth {
+		// If arr validation failed, try to use user auth validation
+		if !config.VerifyAuth(username, password) {
+			return nil, fmt.Errorf("unauthorized: invalid credentials")
+		}
+	}
+	if arrValidated {
+		// Only update the arr if arr validation was successful
+		a.Source = "auto"
+		arrs.AddOrUpdate(a)
+	}
+
 	return a, nil
 }
 
@@ -263,20 +228,4 @@ func hashesContext(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), hashesKey, hashes)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
-}
-
-func verifyAuth(username, password string) bool {
-	// If you're storing hashed password, use bcrypt to compare
-	if username == "" {
-		return false
-	}
-	auth := config.Get().GetAuth()
-	if auth == nil {
-		return false
-	}
-	if username != auth.Username {
-		return false
-	}
-	err := bcrypt.CompareHashAndPassword([]byte(auth.Password), []byte(password))
-	return err == nil
 }
