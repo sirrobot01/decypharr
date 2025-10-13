@@ -312,13 +312,9 @@ func Process(ctx context.Context, store *Storage, selectedDebrid string, magnet 
 
 	// Override first, arr second, debrid third
 
-	if overrideDownloadUncached {
-		debridTorrent.DownloadUncached = true
-	} else if a.DownloadUncached != nil {
+	if !overrideDownloadUncached && a.DownloadUncached != nil {
 		// Arr cached is set
-		debridTorrent.DownloadUncached = *a.DownloadUncached
-	} else {
-		debridTorrent.DownloadUncached = false
+		overrideDownloadUncached = *a.DownloadUncached
 	}
 
 	for _, db := range clients {
@@ -331,8 +327,9 @@ func Process(ctx context.Context, store *Storage, selectedDebrid string, magnet 
 			Str("Action", action).
 			Msg("Processing torrent")
 
-		if !overrideDownloadUncached && a.DownloadUncached == nil {
-			debridTorrent.DownloadUncached = db.GetDownloadUncached()
+		// If debrid.DownloadUnached is true, it overrides everything
+		if db.GetDownloadUncached() || overrideDownloadUncached {
+			debridTorrent.DownloadUncached = true
 		}
 
 		dbt, err := db.SubmitMagnet(debridTorrent)
