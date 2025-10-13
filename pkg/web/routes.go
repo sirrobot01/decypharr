@@ -13,8 +13,8 @@ func (wb *Web) Routes() http.Handler {
 	// Static assets - always public
 	staticFS, _ := fs.Sub(assetsEmbed, "assets/build")
 	imagesFS, _ := fs.Sub(imagesEmbed, "assets/images")
-	r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.FS(staticFS))))
-	r.Handle("/images/*", http.StripPrefix("/images/", http.FileServer(http.FS(imagesFS))))
+	r.Handle("/assets/*", http.StripPrefix(wb.urlBase+"assets/", http.FileServer(http.FS(staticFS))))
+	r.Handle("/images/*", http.StripPrefix(wb.urlBase+"images/", http.FileServer(http.FS(imagesFS))))
 
 	// Public routes - no auth needed
 	r.Get("/version", wb.handleGetVersion)

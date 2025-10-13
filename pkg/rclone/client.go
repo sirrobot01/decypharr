@@ -111,6 +111,10 @@ func (m *Manager) performMount(mountPath, provider, webdavURL string) error {
 		configOpts["BufferSize"] = cfg.Rclone.BufferSize
 	}
 
+	if cfg.Rclone.BwLimit != "" {
+		configOpts["BwLimit"] = cfg.Rclone.BwLimit
+	}
+
 	if len(configOpts) > 0 {
 		// Only add _config if there are options to set
 		mountArgs["_config"] = configOpts

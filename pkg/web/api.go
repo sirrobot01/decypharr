@@ -2,13 +2,15 @@ package web
 
 import (
 	"fmt"
-	"github.com/sirrobot01/decypharr/pkg/wire"
-	"golang.org/x/crypto/bcrypt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/sirrobot01/decypharr/pkg/wire"
+	"golang.org/x/crypto/bcrypt"
+
 	"encoding/json"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/request"
@@ -18,8 +20,8 @@ import (
 )
 
 func (wb *Web) handleGetArrs(w http.ResponseWriter, r *http.Request) {
-	_store := wire.Get()
-	request.JSONResponse(w, _store.Arr().GetAll(), http.StatusOK)
+	arrStorage := wire.Get().Arr()
+	request.JSONResponse(w, arrStorage.GetAll(), http.StatusOK)
 }
 
 func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
@@ -41,6 +43,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 	if downloadFolder == "" {
 		downloadFolder = config.Get().QBitTorrent.DownloadFolder
 	}
+	skipMultiSeason := r.FormValue("skipMultiSeason") == "true"
 
 	downloadUncached := r.FormValue("downloadUncached") == "true"
 
@@ -66,7 +69,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			importReq := wire.NewImportRequest(debridName, downloadFolder, magnet, _arr, action, downloadUncached, callbackUrl, wire.ImportTypeAPI)
+			importReq := wire.NewImportRequest(debridName, downloadFolder, magnet, _arr, action, downloadUncached, callbackUrl, wire.ImportTypeAPI, skipMultiSeason)
 			if err := _store.AddTorrent(ctx, importReq); err != nil {
 				wb.logger.Error().Err(err).Str("url", url).Msg("Failed to add torrent")
 				errs = append(errs, fmt.Sprintf("URL %s: %v", url, err))
@@ -91,7 +94,7 @@ func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			importReq := wire.NewImportRequest(debridName, downloadFolder, magnet, _arr, action, downloadUncached, callbackUrl, wire.ImportTypeAPI)
+			importReq := wire.NewImportRequest(debridName, downloadFolder, magnet, _arr, action, downloadUncached, callbackUrl, wire.ImportTypeAPI, skipMultiSeason)
 			err = _store.AddTorrent(ctx, importReq)
 			if err != nil {
 				wb.logger.Error().Err(err).Str("file", fileHeader.Filename).Msg("Failed to add torrent")
@@ -183,38 +186,9 @@ func (wb *Web) handleDeleteTorrents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (wb *Web) handleGetConfig(w http.ResponseWriter, r *http.Request) {
-	// Merge config arrs, with arr Storage
-	unique := map[string]config.Arr{}
-	cfg := config.Get()
 	arrStorage := wire.Get().Arr()
-
-	// Add existing Arrs from storage
-	for _, a := range arrStorage.GetAll() {
-		if _, ok := unique[a.Name]; !ok {
-			// Only add if not already in the unique map
-			unique[a.Name] = config.Arr{
-				Name:             a.Name,
-				Host:             a.Host,
-				Token:            a.Token,
-				Cleanup:          a.Cleanup,
-				SkipRepair:       a.SkipRepair,
-				DownloadUncached: a.DownloadUncached,
-				SelectedDebrid:   a.SelectedDebrid,
-				Source:           a.Source,
-			}
-		}
-	}
-
-	for _, a := range cfg.Arrs {
-		if a.Host == "" || a.Token == "" {
-			continue // Skip empty arrs
-		}
-		unique[a.Name] = a
-	}
-	cfg.Arrs = make([]config.Arr, 0, len(unique))
-	for _, a := range unique {
-		cfg.Arrs = append(cfg.Arrs, a)
-	}
+	cfg := config.Get()
+	cfg.Arrs = arrStorage.SyncToConfig()
 
 	// Create response with API token info
 	type ConfigResponse struct {
@@ -271,10 +245,7 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	currentConfig.Rclone = updatedConfig.Rclone
 
 	// Update Debrids
-	if len(updatedConfig.Debrids) > 0 {
-		currentConfig.Debrids = updatedConfig.Debrids
-		// Clear legacy single debrid if using array
-	}
+	currentConfig.Debrids = updatedConfig.Debrids
 
 	// Update Arrs through the service
 	storage := wire.Get()
@@ -290,28 +261,8 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	currentConfig.Arrs = newConfigArrs
 
-	// Add config arr into the config
-	for _, a := range currentConfig.Arrs {
-		if a.Host == "" || a.Token == "" {
-			continue // Skip empty arrs
-		}
-		existingArr := arrStorage.Get(a.Name)
-		if existingArr != nil {
-			// Update existing Arr
-			existingArr.Host = a.Host
-			existingArr.Token = a.Token
-			existingArr.Cleanup = a.Cleanup
-			existingArr.SkipRepair = a.SkipRepair
-			existingArr.DownloadUncached = a.DownloadUncached
-			existingArr.SelectedDebrid = a.SelectedDebrid
-			existingArr.Source = a.Source
-			arrStorage.AddOrUpdate(existingArr)
-		} else {
-			// Create new Arr if it doesn't exist
-			newArr := arr.New(a.Name, a.Host, a.Token, a.Cleanup, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid, a.Source)
-			arrStorage.AddOrUpdate(newArr)
-		}
-	}
+	// Sync arrStorage with the new arrs
+	arrStorage.SyncFromConfig(currentConfig.Arrs)
 
 	if err := currentConfig.Save(); err != nil {
 		http.Error(w, "Error saving config: "+err.Error(), http.StatusInternalServerError)

@@ -471,7 +471,7 @@
                                     <h3 class="text-lg font-semibold mb-4 flex items-center">
                                         <i class="bi bi-folder mr-2"></i>Mount Configuration
                                     </h3>
-                                    <div class="grid grid-cols-3 gap-4">
+                                    <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
                                         <div class="form-control">
                                             <label class="label" for="rclone.mount_path">
                                                 <span class="label-text font-medium">Global Mount Path</span>
@@ -533,9 +533,18 @@
                                             <label class="label" for="rclone.buffer_size">
                                                 <span class="label-text font-medium">Buffer Size</span>
                                             </label>
-                                            <input type="text" class="input input-bordered" name="rclone.buffer_size" id="rclone.buffer_size" placeholder="10M" min="0">
+                                            <input type="text" class="input input-bordered" name="rclone.buffer_size" id="rclone.buffer_size" placeholder="10M">
                                             <div class="label">
                                                 <span class="label-text-alt">Buffer Size(This caches to memory, be wary!!)</span>
+                                            </div>
+                                        </div>
+                                        <div class="form-control">
+                                            <label class="label" for="rclone.bw_limit">
+                                                <span class="label-text font-medium">Bandwidth Limit</span>
+                                            </label>
+                                            <input type="text" class="input input-bordered" name="rclone.bw_limit" id="rclone.bw_limit" placeholder="100M">
+                                            <div class="label">
+                                                <span class="label-text-alt">Bandwidth limit (e.g., 100M, 1G, leave empty for unlimited)</span>
                                             </div>
                                         </div>
                                         <div class="form-control">

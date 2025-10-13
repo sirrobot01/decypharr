@@ -2,6 +2,7 @@ package arr
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -33,6 +34,7 @@ const (
 	Radarr  Type = "radarr"
 	Lidarr  Type = "lidarr"
 	Readarr Type = "readarr"
+	Others  Type = "others"
 )
 
 type Arr struct {
@@ -113,6 +115,7 @@ func (a *Arr) Validate() error {
 	if a.Token == "" || a.Host == "" {
 		return fmt.Errorf("arr not configured")
 	}
+
 	if request.ValidateURL(a.Host) != nil {
 		return fmt.Errorf("invalid arr host URL")
 	}
@@ -151,7 +154,7 @@ func InferType(host, name string) Type {
 	case strings.Contains(host, "readarr") || strings.Contains(name, "readarr"):
 		return Readarr
 	default:
-		return ""
+		return Others
 	}
 }
 
@@ -162,7 +165,11 @@ func NewStorage() *Storage {
 			continue // Skip if host or token is not set
 		}
 		name := a.Name
-		arrs[name] = New(name, a.Host, a.Token, a.Cleanup, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid, a.Source)
+		as := New(name, a.Host, a.Token, a.Cleanup, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid, a.Source)
+		if request.ValidateURL(as.Host) != nil {
+			continue
+		}
+		arrs[a.Name] = as
 	}
 	return &Storage{
 		Arrs:   arrs,
@@ -174,6 +181,11 @@ func (s *Storage) AddOrUpdate(arr *Arr) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if arr.Host == "" || arr.Token == "" || arr.Name == "" {
+		return
+	}
+
+	// Check the host URL
+	if request.ValidateURL(arr.Host) != nil {
 		return
 	}
 	s.Arrs[arr.Name] = arr
@@ -193,6 +205,87 @@ func (s *Storage) GetAll() []*Arr {
 		arrs = append(arrs, arr)
 	}
 	return arrs
+}
+
+func (s *Storage) SyncToConfig() []config.Arr {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cfg := config.Get()
+	arrConfigs := make(map[string]config.Arr)
+	for _, a := range cfg.Arrs {
+		if a.Host == "" || a.Token == "" {
+			continue // Skip empty arrs
+		}
+		arrConfigs[a.Name] = a
+	}
+
+	for name, arr := range s.Arrs {
+		exists, ok := arrConfigs[name]
+		if ok {
+			// Update existing arr config
+			// Check if the host URL is valid
+			if request.ValidateURL(arr.Host) == nil {
+				exists.Host = arr.Host
+			}
+			exists.Token = cmp.Or(exists.Token, arr.Token)
+			exists.Cleanup = arr.Cleanup
+			exists.SkipRepair = arr.SkipRepair
+			exists.DownloadUncached = arr.DownloadUncached
+			exists.SelectedDebrid = arr.SelectedDebrid
+			arrConfigs[name] = exists
+		} else {
+			// Add new arr config
+			arrConfigs[name] = config.Arr{
+				Name:             arr.Name,
+				Host:             arr.Host,
+				Token:            arr.Token,
+				Cleanup:          arr.Cleanup,
+				SkipRepair:       arr.SkipRepair,
+				DownloadUncached: arr.DownloadUncached,
+				SelectedDebrid:   arr.SelectedDebrid,
+				Source:           arr.Source,
+			}
+		}
+	}
+	// Convert map to slice
+	arrs := make([]config.Arr, 0, len(arrConfigs))
+	for _, a := range arrConfigs {
+		arrs = append(arrs, a)
+	}
+	return arrs
+}
+
+func (s *Storage) SyncFromConfig(arrs []config.Arr) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	arrConfigs := make(map[string]*Arr)
+	for _, a := range arrs {
+		arrConfigs[a.Name] = New(a.Name, a.Host, a.Token, a.Cleanup, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid, a.Source)
+	}
+
+	// Add or update arrs from config
+	for name, arr := range s.Arrs {
+		if ac, ok := arrConfigs[name]; ok {
+			// Update existing arr
+			// is the host URL valid?
+			if request.ValidateURL(ac.Host) == nil {
+				ac.Host = arr.Host
+			}
+			ac.Token = cmp.Or(ac.Token, arr.Token)
+			ac.Cleanup = arr.Cleanup
+			ac.SkipRepair = arr.SkipRepair
+			ac.DownloadUncached = arr.DownloadUncached
+			ac.SelectedDebrid = arr.SelectedDebrid
+			ac.Source = arr.Source
+			arrConfigs[name] = ac
+		} else {
+			arrConfigs[name] = arr
+		}
+	}
+
+	// Replace the arrs map
+	s.Arrs = arrConfigs
+
 }
 
 func (s *Storage) StartWorker(ctx context.Context) error {

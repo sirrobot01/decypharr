@@ -5,16 +5,18 @@
         <i class="bi bi-exclamation-triangle text-xl"></i>
         <div>
             <h3 class="font-bold">Configuration Required</h3>
-            <div class="text-sm">Your configuration is incomplete. Please complete the setup in the <a href="{{.URLBase}}settings" class="link link-hover font-semibold">Settings page</a>.</div>
+            <div class="text-sm">Your configuration is incomplete. Please complete the setup in the <a
+                    href="{{.URLBase}}settings" class="link link-hover font-semibold">Settings page</a>.
+            </div>
         </div>
     </div>
     {{ end }}
 
     <div class="card bg-base-100 shadow-xl">
         <div class="card-body">
-            <form id="downloadForm" enctype="multipart/form-data" class="space-y-3">
-                <div class="space-y-2">
-                    <div class="form-control">
+            <form id="downloadForm" enctype="multipart/form-data" class="space-y-6">
+                <div class="flex gap-4">
+                    <div class="form-control flex-1">
                         <label class="label" for="magnetURI">
                             <span class="label-text font-semibold">
                                 <i class="bi bi-magnet mr-2 text-primary"></i>Torrent Links
@@ -27,9 +29,7 @@
                                   placeholder="Paste your magnet links or torrent URLs here, one per line..."></textarea>
                     </div>
 
-                    <div class="divider">OR</div>
-
-                    <div class="form-control">
+                    <div class="form-control flex-1">
                         <label class="label">
                             <span class="label-text font-semibold">
                                 <i class="bi bi-file-earmark-arrow-up mr-2 text-secondary"></i>Upload Torrent Files
@@ -50,86 +50,84 @@
                     </div>
                 </div>
 
-                <div class="divider"></div>
+                <div class="divider">Download Settings</div>
 
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                    <div class="space-y-2">
-                        <h3 class="text-lg font-semibold flex items-center">
-                            <i class="bi bi-gear mr-2 text-info"></i>Download Settings
-                        </h3>
-
-                        <div class="form-control">
-                            <label class="label" for="downloadAction">
-                                <span class="label-text">Post Download Action</span>
-                            </label>
-                            <select class="select select-bordered" id="downloadAction" name="downloadAction">
-                                <option value="symlink" selected>Create Symlink</option>
-                                <option value="download">Download Files</option>
-                                <option value="none">No Action</option>
-                            </select>
-                            <div class="label">
-                                <span class="label-text-alt">How to handle files after download completion</span>
-                            </div>
-                        </div>
-
-                        <div class="form-control">
-                            <label class="label" for="downloadFolder">
-                                <span class="label-text">Download Folder</span>
-                            </label>
-                            <input type="text"
-                                   class="input input-bordered"
-                                   id="downloadFolder"
-                                   name="downloadFolder"
-                                   placeholder="/downloads/torrents">
-                            <div class="label">
-                                <span class="label-text-alt">Leave empty to use default qBittorrent folder</span>
-                            </div>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 space-y-4">
+                    <div class="form-control">
+                        <label class="label" for="downloadAction">
+                            <span class="label-text">Post Download Action</span>
+                        </label>
+                        <select class="select select-bordered" id="downloadAction" name="downloadAction">
+                            <option value="symlink" selected>Create Symlink</option>
+                            <option value="download">Download Files</option>
+                            <option value="none">No Action</option>
+                        </select>
+                        <div class="label">
+                            <span class="label-text-alt">How to handle files after download completion</span>
                         </div>
                     </div>
 
-                    <div class="space-y-2">
-                        <h3 class="text-lg font-semibold flex items-center">
-                            <i class="bi bi-tags mr-2 text-warning"></i>Categorization
-                        </h3>
-
-                        <div class="form-control">
-                            <label class="label" for="arr">
-                                <span class="label-text">Arr Category</span>
-                            </label>
-                            <input type="text"
-                                   class="input input-bordered"
-                                   id="arr"
-                                   name="arr"
-                                   placeholder="sonarr, radarr, etc.">
-                            <div class="label">
-                                <span class="label-text-alt">Optional: Specify which Arr service should handle this</span>
-                            </div>
+                    <div class="form-control">
+                        <label class="label" for="downloadFolder">
+                            <span class="label-text">Download Folder</span>
+                        </label>
+                        <input type="text"
+                               class="input input-bordered"
+                               id="downloadFolder"
+                               name="downloadFolder"
+                               placeholder="/downloads/torrents">
+                        <div class="label">
+                            <span class="label-text-alt">Leave empty to use default qBittorrent folder</span>
                         </div>
-
-                        {{ if .HasMultiDebrid }}
-                        <div class="form-control">
-                            <label class="label" for="debrid">
-                                <span class="label-text">Debrid Service</span>
-                            </label>
-                            <select class="select select-bordered" id="debrid" name="debrid">
-                                {{ range $index, $debrid := .Debrids }}
-                                <option value="{{ $debrid }}" {{ if eq $index 0 }}selected{{end}}>
-                                    {{ $debrid }}
-                                </option>
-                                {{ end }}
-                            </select>
-                            <div class="label">
-                                <span class="label-text-alt">Choose which debrid service to use</span>
-                            </div>
-                        </div>
-                        {{ end }}
                     </div>
+
+                    <div class="form-control">
+                        <label class="label" for="arr">
+                            <span class="label-text">Arr Category</span>
+                        </label>
+                        <input type="text"
+                               class="input input-bordered"
+                               id="arr"
+                               name="arr"
+                               placeholder="sonarr, radarr, etc.">
+                        <div class="label">
+                            <span class="label-text-alt">Optional: Specify which Arr service should handle this</span>
+                        </div>
+                    </div>
+
+                    {{ if .HasMultiDebrid }}
+                    <div class="form-control">
+                        <label class="label" for="debrid">
+                            <span class="label-text">Debrid Service</span>
+                        </label>
+                        <select class="select select-bordered" id="debrid" name="debrid">
+                            {{ range $index, $debrid := .Debrids }}
+                            <option value="{{ $debrid }}" {{ if eq $index 0 }}selected{{end}}>
+                                {{ $debrid }}
+                            </option>
+                            {{ end }}
+                        </select>
+                        <div class="label">
+                            <span class="label-text-alt">Choose which debrid service to use</span>
+                        </div>
+                    </div>
+                    {{ end }}
                     <div class="form-control">
                         <label class="label cursor-pointer justify-start gap-3">
                             <input type="checkbox" class="checkbox" name="downloadUncached" id="downloadUncached">
                             <div>
                                 <span class="label-text font-medium">Download Uncached Content</span>
-                                <div class="label-text-alt">Allow downloading of content not cached by debrid service</div>
+                                <div class="label-text-alt">Allow downloading of content not cached by debrid service
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input type="checkbox" class="checkbox" name="skipMultiSeason" id="skipMultiSeason">
+                            <div>
+                                <span class="label-text font-medium">Skip Multi-Season Checker</span>
+                                <div class="label-text-alt">Skip the multi-season episode checker for TV shows</div>
                             </div>
                         </label>
                     </div>

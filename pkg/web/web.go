@@ -61,6 +61,7 @@ type Web struct {
 	cookie    *sessions.CookieStore
 	templates *template.Template
 	torrents  *wire.TorrentStorage
+	urlBase   string
 }
 
 func New() *Web {
@@ -87,5 +88,6 @@ func New() *Web {
 		templates: templates,
 		cookie:    cookieStore,
 		torrents:  wire.Get().Torrents(),
+		urlBase:   cfg.URLBase,
 	}
 }

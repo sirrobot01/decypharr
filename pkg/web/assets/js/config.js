@@ -150,7 +150,7 @@ class ConfigManager {
 
         const fields = [
             'enabled', 'rc_port', 'mount_path', 'cache_dir', 'transfers', 'vfs_cache_mode', 'vfs_cache_max_size', 'vfs_cache_max_age',
-            'vfs_cache_poll_interval', 'vfs_read_chunk_size', 'vfs_read_chunk_size_limit', 'buffer_size',
+            'vfs_cache_poll_interval', 'vfs_read_chunk_size', 'vfs_read_chunk_size_limit', 'buffer_size', 'bw_limit',
             'uid', 'gid', 'vfs_read_ahead', 'attr_timeout', 'dir_cache_time', 'poll_interval', 'umask',
             'no_modtime', 'no_checksum', 'log_level', 'vfs_cache_min_free_space', 'vfs_fast_fingerprint', 'vfs_read_chunk_streams',
             'async_read', 'use_mmap'
@@ -1245,6 +1245,7 @@ class ConfigManager {
             rc_port: getElementValue('rc_port', "5572"),
             mount_path: getElementValue('mount_path'),
             buffer_size: getElementValue('buffer_size'),
+            bw_limit: getElementValue('bw_limit'),
             cache_dir: getElementValue('cache_dir'),
             transfers: getElementValue('transfers', 8),
             vfs_cache_mode: getElementValue('vfs_cache_mode', 'off'),

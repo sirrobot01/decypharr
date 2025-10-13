@@ -3,13 +3,14 @@ package qbit
 import (
 	"context"
 	"fmt"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/arr"
-	"github.com/sirrobot01/decypharr/pkg/wire"
 	"io"
 	"mime/multipart"
 	"strings"
 	"time"
+
+	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/arr"
+	"github.com/sirrobot01/decypharr/pkg/wire"
 )
 
 // All torrent-related helpers goes here
@@ -20,7 +21,7 @@ func (q *QBit) addMagnet(ctx context.Context, url string, arr *arr.Arr, debrid s
 	}
 	_store := wire.Get()
 
-	importReq := wire.NewImportRequest(debrid, q.DownloadFolder, magnet, arr, action, false, "", wire.ImportTypeQBitTorrent)
+	importReq := wire.NewImportRequest(debrid, q.DownloadFolder, magnet, arr, action, false, "", wire.ImportTypeQBitTorrent, false)
 
 	err = _store.AddTorrent(ctx, importReq)
 	if err != nil {
@@ -38,7 +39,7 @@ func (q *QBit) addTorrent(ctx context.Context, fileHeader *multipart.FileHeader,
 		return fmt.Errorf("error reading file: %s \n %w", fileHeader.Filename, err)
 	}
 	_store := wire.Get()
-	importReq := wire.NewImportRequest(debrid, q.DownloadFolder, magnet, arr, action, false, "", wire.ImportTypeQBitTorrent)
+	importReq := wire.NewImportRequest(debrid, q.DownloadFolder, magnet, arr, action, false, "", wire.ImportTypeQBitTorrent, false)
 	err = _store.AddTorrent(ctx, importReq)
 	if err != nil {
 		return fmt.Errorf("failed to process torrent: %w", err)

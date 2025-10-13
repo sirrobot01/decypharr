@@ -231,14 +231,12 @@ func (c *Cache) Reset() {
 		}
 	}
 
-	if err := c.scheduler.StopJobs(); err != nil {
-		c.logger.Error().Err(err).Msg("Failed to stop scheduler jobs")
-	}
-
-	if err := c.scheduler.Shutdown(); err != nil {
-		c.logger.Error().Err(err).Msg("Failed to stop scheduler")
-	}
-
+	go func() {
+		// Shutdown the scheduler (this will stop all jobs)
+		if err := c.scheduler.Shutdown(); err != nil {
+			c.logger.Error().Err(err).Msg("Failed to stop scheduler")
+		}
+	}()
 	// Stop the listing debouncer
 	c.listingDebouncer.Stop()
 

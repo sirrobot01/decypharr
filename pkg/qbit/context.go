@@ -161,11 +161,8 @@ func (q *QBit) authenticate(category, username, password string) (*arr.Arr, erro
 			return nil, fmt.Errorf("unauthorized: invalid credentials")
 		}
 	}
-	if arrValidated {
-		// Only update the arr if arr validation was successful
-		a.Source = "auto"
-		arrs.AddOrUpdate(a)
-	}
+	a.Source = "auto"
+	arrs.AddOrUpdate(a)
 
 	return a, nil
 }

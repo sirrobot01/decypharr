@@ -5,16 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/go-co-op/gocron/v2"
-	"github.com/google/uuid"
-	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/internal/request"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/arr"
-	"github.com/sirrobot01/decypharr/pkg/debrid"
-	"golang.org/x/sync/errgroup"
 	"net"
 	"net/http"
 	"net/url"
@@ -25,6 +15,17 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-co-op/gocron/v2"
+	"github.com/google/uuid"
+	"github.com/rs/zerolog"
+	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/logger"
+	"github.com/sirrobot01/decypharr/internal/request"
+	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/arr"
+	"github.com/sirrobot01/decypharr/pkg/debrid"
+	"golang.org/x/sync/errgroup"
 )
 
 type Repair struct {
@@ -105,10 +106,6 @@ func New(arrs *arr.Storage, engine *debrid.Storage) *Repair {
 func (r *Repair) Reset() {
 	// Stop scheduler
 	if r.scheduler != nil {
-		if err := r.scheduler.StopJobs(); err != nil {
-			r.logger.Error().Err(err).Msg("Error stopping scheduler")
-		}
-
 		if err := r.scheduler.Shutdown(); err != nil {
 			r.logger.Error().Err(err).Msg("Error shutting down scheduler")
 		}

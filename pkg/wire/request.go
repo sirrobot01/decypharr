@@ -6,16 +6,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
+	"sync"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/arr"
 	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"net/http"
-	"net/url"
-	"sync"
-	"time"
 )
 
 type ImportType string
@@ -34,6 +35,7 @@ type ImportRequest struct {
 	Action           string        `json:"action"`
 	DownloadUncached bool          `json:"downloadUncached"`
 	CallBackUrl      string        `json:"callBackUrl"`
+	SkipMultiSeason  bool          `json:"skip_multi_season"`
 
 	Status      string    `json:"status"`
 	CompletedAt time.Time `json:"completedAt,omitempty"`
@@ -43,7 +45,7 @@ type ImportRequest struct {
 	Async bool       `json:"async"`
 }
 
-func NewImportRequest(debrid string, downloadFolder string, magnet *utils.Magnet, arr *arr.Arr, action string, downloadUncached bool, callBackUrl string, importType ImportType) *ImportRequest {
+func NewImportRequest(debrid string, downloadFolder string, magnet *utils.Magnet, arr *arr.Arr, action string, downloadUncached bool, callBackUrl string, importType ImportType, skipMultiSeason bool) *ImportRequest {
 	cfg := config.Get()
 	callBackUrl = cmp.Or(callBackUrl, cfg.CallbackURL)
 	return &ImportRequest{
@@ -57,6 +59,7 @@ func NewImportRequest(debrid string, downloadFolder string, magnet *utils.Magnet
 		DownloadUncached: downloadUncached,
 		CallBackUrl:      callBackUrl,
 		Type:             importType,
+		SkipMultiSeason:  skipMultiSeason,
 	}
 }
 
