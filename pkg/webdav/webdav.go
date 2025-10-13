@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/wire"
@@ -74,9 +73,8 @@ func New() *WebDav {
 
 func (wd *WebDav) Routes() http.Handler {
 	wr := chi.NewRouter()
-	wr.Use(middleware.StripSlashes)
 	wr.Use(wd.commonMiddleware)
-	// wr.Use(wd.authMiddleware) Disable auth for now
+	//wr.Use(wd.authMiddleware) Disable auth for now
 
 	wd.setupRootHandler(wr)
 	wd.mountHandlers(wr)

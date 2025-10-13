@@ -4,15 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
-	"io"
-	"net/http"
-	"os"
-	"path/filepath"
 )
 
 type Server struct {
@@ -24,6 +25,8 @@ func New(handlers map[string]http.Handler) *Server {
 	l := logger.New("http")
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
+	r.Use(middleware.StripSlashes)
+	r.Use(middleware.RedirectSlashes)
 
 	cfg := config.Get()
 

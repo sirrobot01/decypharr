@@ -147,10 +147,9 @@ func (q *QBit) authenticate(category, username, password string) (*arr.Arr, erro
 	a.Host = username
 	a.Token = password
 	arrValidated := false // This is a flag to indicate if arr validation was successful
-	if a.Host == "" || a.Token == "" && cfg.UseAuth {
+	if (a.Host == "" || a.Token == "") && cfg.UseAuth {
 		return nil, fmt.Errorf("unauthorized: Host and token are required for authentication(you've enabled authentication)")
 	}
-
 	if err := a.Validate(); err == nil {
 		arrValidated = true
 	}
