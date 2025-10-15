@@ -160,20 +160,23 @@ func InferType(host, name string) Type {
 
 func NewStorage() *Storage {
 	arrs := make(map[string]*Arr)
+	log := logger.New("arr")
+	
 	for _, a := range config.Get().Arrs {
 		if a.Host == "" || a.Token == "" || a.Name == "" {
 			continue // Skip if host or token is not set
 		}
 		name := a.Name
 		as := New(name, a.Host, a.Token, a.Cleanup, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid, a.Source)
-		if request.ValidateURL(as.Host) != nil {
-			continue
+		if err := request.ValidateURL(as.Host); err != nil {
+			log.Warn().Str("arr", name).Str("host", as.Host).Err(err).Msg("Arr host URL validation failed, but adding to storage anyway")
+			// Don't skip - add it anyway, validation will happen during requests
 		}
 		arrs[a.Name] = as
 	}
 	return &Storage{
 		Arrs:   arrs,
-		logger: logger.New("arr"),
+		logger: log,
 	}
 }
 
@@ -184,10 +187,21 @@ func (s *Storage) AddOrUpdate(arr *Arr) {
 		return
 	}
 
-	// Check the host URL
-	if request.ValidateURL(arr.Host) != nil {
-		return
+	// If this is an auto-detected Arr, only add if no config Arr exists
+	if arr.Source == "auto" {
+		if existing, ok := s.Arrs[arr.Name]; ok && existing.Source != "auto" {
+			// Don't overwrite config Arr with auto-detected one
+			return
+		}
 	}
+
+	// Only log warning for config Arrs
+	if arr.Source != "auto" {
+		if err := request.ValidateURL(arr.Host); err != nil {
+			s.logger.Warn().Str("arr", arr.Name).Str("host", arr.Host).Err(err).Msg("Arr host URL validation failed, but adding to storage anyway")
+		}
+	}
+
 	s.Arrs[arr.Name] = arr
 }
 
@@ -202,6 +216,12 @@ func (s *Storage) GetAll() []*Arr {
 	defer s.mu.Unlock()
 	arrs := make([]*Arr, 0, len(s.Arrs))
 	for _, arr := range s.Arrs {
+		if arr.Host == "" || arr.Token == "" {
+			continue // skip invalid arrs
+		}
+		if arr.Source == "auto" && request.ValidateURL(arr.Host) != nil {
+			continue // skip auto-detected arrs with invalid host
+		}
 		arrs = append(arrs, arr)
 	}
 	return arrs
@@ -223,10 +243,7 @@ func (s *Storage) SyncToConfig() []config.Arr {
 		exists, ok := arrConfigs[name]
 		if ok {
 			// Update existing arr config
-			// Check if the host URL is valid
-			if request.ValidateURL(arr.Host) == nil {
-				exists.Host = arr.Host
-			}
+			exists.Host = arr.Host // Always update host regardless of validation
 			exists.Token = cmp.Or(exists.Token, arr.Token)
 			exists.Cleanup = arr.Cleanup
 			exists.SkipRepair = arr.SkipRepair
@@ -266,11 +283,8 @@ func (s *Storage) SyncFromConfig(arrs []config.Arr) {
 	// Add or update arrs from config
 	for name, arr := range s.Arrs {
 		if ac, ok := arrConfigs[name]; ok {
-			// Update existing arr
-			// is the host URL valid?
-			if request.ValidateURL(ac.Host) == nil {
-				ac.Host = arr.Host
-			}
+			// Update existing arr from storage values
+			ac.Host = arr.Host // Use storage host value
 			ac.Token = cmp.Or(ac.Token, arr.Token)
 			ac.Cleanup = arr.Cleanup
 			ac.SkipRepair = arr.SkipRepair
