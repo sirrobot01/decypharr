@@ -172,6 +172,19 @@ func (c *Cache) MarkLinkAsInvalid(downloadLink types.DownloadLink, reason string
 			return
 		}
 		accountManager.Disable(account)
+	} else if reason == "link_not_found" {
+		// Let's try to delete the download link from the account, so we can fetch a new one next time
+		accountManager := c.client.AccountManager()
+		account, err := accountManager.GetAccount(downloadLink.Token)
+		if err != nil {
+			c.logger.Error().Err(err).Str("token", utils.Mask(downloadLink.Token)).Msg("Failed to get account to delete download link")
+			return
+		}
+		if account == nil {
+			c.logger.Error().Str("token", utils.Mask(downloadLink.Token)).Msg("Account not found to delete download link")
+			return
+		}
+		c.client.DeleteDownloadLink(account, downloadLink)
 	}
 }
 

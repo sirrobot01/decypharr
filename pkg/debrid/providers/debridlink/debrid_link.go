@@ -518,3 +518,8 @@ func (dl *DebridLink) AccountManager() *account.Manager {
 func (dl *DebridLink) SyncAccounts() error {
 	return nil
 }
+
+func (dl *DebridLink) DeleteDownloadLink(account *account.Account, downloadLink types.DownloadLink) error {
+	account.DeleteDownloadLink(downloadLink.Link)
+	return nil
+}

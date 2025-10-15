@@ -654,3 +654,8 @@ func (tb *Torbox) AccountManager() *account.Manager {
 func (tb *Torbox) SyncAccounts() error {
 	return nil
 }
+
+func (tb *Torbox) DeleteDownloadLink(account *account.Account, downloadLink types.DownloadLink) error {
+	account.DeleteDownloadLink(downloadLink.Link)
+	return nil
+}

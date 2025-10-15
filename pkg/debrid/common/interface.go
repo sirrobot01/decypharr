@@ -27,4 +27,5 @@ type Client interface {
 	GetProfile() (*types.Profile, error)
 	GetAvailableSlots() (int, error)
 	SyncAccounts() error // Updates each accounts details(like traffic, username, etc.)
+	DeleteDownloadLink(account *account.Account, downloadLink types.DownloadLink) error
 }

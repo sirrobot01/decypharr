@@ -497,3 +497,8 @@ func (ad *AllDebrid) AccountManager() *account.Manager {
 func (ad *AllDebrid) SyncAccounts() error {
 	return nil
 }
+
+func (ad *AllDebrid) DeleteDownloadLink(account *account.Account, downloadLink types.DownloadLink) error {
+	account.DeleteDownloadLink(downloadLink.Link)
+	return nil
+}

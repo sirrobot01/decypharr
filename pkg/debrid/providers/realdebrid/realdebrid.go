@@ -986,3 +986,20 @@ func (r *RealDebrid) syncAccount(account *account.Account) error {
 	//r.accountsManager.Update(account)
 	return nil
 }
+
+func (r *RealDebrid) DeleteDownloadLink(account *account.Account, downloadLink types.DownloadLink) error {
+	url := fmt.Sprintf("%s/downloads/delete/%s", r.Host, downloadLink.Id)
+	req, _ := http.NewRequest(http.MethodDelete, url, nil)
+	resp, err := account.Client().Do(req)
+	if err != nil {
+		return err
+	}
+	defer func(Body io.ReadCloser) {
+		_ = Body.Close()
+	}(resp.Body)
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("realdebrid API error: %d", resp.StatusCode)
+	}
+	account.DeleteDownloadLink(downloadLink.Link)
+	return nil
+}
