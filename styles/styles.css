@@ -1,0 +1,24 @@
+/* Light mode image - visible by default */
+.light-mode-image {
+    display: block;
+}
+
+/* Dark mode image - hidden by default */
+.dark-mode-image {
+    display: none;
+}
+
+/* When dark theme (slate) is active */
+[data-md-color-scheme="slate"] .light-mode-image {
+    display: none;
+}
+
+[data-md-color-scheme="slate"] .dark-mode-image {
+    display: block;
+}
+
+/* Optional: smooth transition */
+.light-mode-image,
+.dark-mode-image {
+    transition: opacity 0.2s ease-in-out;
+}

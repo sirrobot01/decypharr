@@ -1,0 +1,418 @@
+openapi: 3.0.3
+info:
+  title: Decypharr API
+  description: QbitTorrent with Debrid Support API
+  version: 1.0.0
+  contact:
+    name: Decypharr
+    url: https://github.com/sirrobot01/decypharr
+
+servers:
+  - url: /api
+    description: API endpoints
+
+security:
+  - cookieAuth: []
+  - bearerAuth: []
+
+paths:
+  /arrs:
+    get:
+      summary: Get all configured Arrs
+      description: Retrieve a list of all configured Arr applications (Sonarr, Radarr, etc.)
+      tags:
+        - Arrs
+      responses:
+        '200':
+          description: Successfully retrieved Arrs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Arr'
+
+  /add:
+    post:
+      summary: Add content for processing
+      description: Add torrent files or magnet links for processing through debrid services
+      tags:
+        - Content
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                arr:
+                  type: string
+                  description: Name of the Arr application
+                action:
+                  type: string
+                  description: Action to perform
+                debrid:
+                  type: string
+                  description: Debrid service to use
+                callbackUrl:
+                  type: string
+                  description: Optional callback URL
+                downloadFolder:
+                  type: string
+                  description: Download folder path
+                downloadUncached:
+                  type: boolean
+                  description: Whether to download uncached content
+                urls:
+                  type: string
+                  description: Newline-separated URLs or magnet links
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: Torrent files to upload
+      responses:
+        '200':
+          description: Content added successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ImportRequest'
+                  errors:
+                    type: array
+                    items:
+                      type: string
+        '400':
+          description: Bad request
+
+  /repair:
+    post:
+      summary: Repair media
+      description: Start a repair process for specified media items
+      tags:
+        - Repair
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RepairRequest'
+      responses:
+        '200':
+          description: Repair started or completed
+          content:
+            application/json:
+              schema:
+                type: string
+        '400':
+          description: Bad request
+        '404':
+          description: Arr not found
+        '500':
+          description: Internal server error
+
+  /repair/jobs:
+    get:
+      summary: Get repair jobs
+      description: Retrieve all repair jobs
+      tags:
+        - Repair
+      responses:
+        '200':
+          description: Successfully retrieved repair jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RepairJob'
+    delete:
+      summary: Delete repair jobs
+      description: Delete multiple repair jobs by IDs
+      tags:
+        - Repair
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items:
+                    type: string
+              required:
+                - ids
+      responses:
+        '200':
+          description: Jobs deleted successfully
+        '400':
+          description: Bad request
+
+  /repair/jobs/{id}/process:
+    post:
+      summary: Process repair job
+      description: Process a specific repair job by ID
+      tags:
+        - Repair
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Job ID
+      responses:
+        '200':
+          description: Job processed successfully
+        '400':
+          description: Bad request
+
+  /repair/jobs/{id}/stop:
+    post:
+      summary: Stop repair job
+      description: Stop a running repair job by ID
+      tags:
+        - Repair
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Job ID
+      responses:
+        '200':
+          description: Job stopped successfully
+        '400':
+          description: Bad request
+        '500':
+          description: Internal server error
+
+  /torrents:
+    get:
+      summary: Get all torrents
+      description: Retrieve all torrents sorted by added date
+      tags:
+        - Torrents
+      responses:
+        '200':
+          description: Successfully retrieved torrents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Torrent'
+    delete:
+      summary: Delete multiple torrents
+      description: Delete multiple torrents by hash list
+      tags:
+        - Torrents
+      parameters:
+        - name: hashes
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Comma-separated list of torrent hashes
+        - name: removeFromDebrid
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Whether to remove from debrid service
+      responses:
+        '200':
+          description: Torrents deleted successfully
+        '400':
+          description: Bad request
+
+  /torrents/{category}/{hash}:
+    delete:
+      summary: Delete single torrent
+      description: Delete a specific torrent by category and hash
+      tags:
+        - Torrents
+      parameters:
+        - name: category
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Torrent category
+        - name: hash
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Torrent hash
+        - name: removeFromDebrid
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Whether to remove from debrid service
+      responses:
+        '200':
+          description: Torrent deleted successfully
+        '400':
+          description: Bad request
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: auth-session
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: token
+      description: API token for authentication
+
+  schemas:
+    Arr:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Name of the Arr application
+        host:
+          type: string
+          description: Host URL of the Arr application
+        token:
+          type: string
+          description: API token for the Arr application
+        cleanup:
+          type: boolean
+          description: Whether to cleanup after processing
+        skipRepair:
+          type: boolean
+          description: Whether to skip repair operations
+        downloadUncached:
+          type: boolean
+          description: Whether to download uncached content
+        selectedDebrid:
+          type: string
+          description: Selected debrid service
+        source:
+          type: string
+          description: Source of the Arr configuration
+
+    ImportRequest:
+      type: object
+      properties:
+        debridName:
+          type: string
+          description: Name of the debrid service
+        downloadFolder:
+          type: string
+          description: Download folder path
+        magnet:
+          type: string
+          description: Magnet link
+        arr:
+          $ref: '#/components/schemas/Arr'
+        action:
+          type: string
+          description: Action to perform
+        downloadUncached:
+          type: boolean
+          description: Whether to download uncached content
+        callbackUrl:
+          type: string
+          description: Callback URL
+        importType:
+          type: string
+          description: Type of import (API, etc.)
+
+    RepairRequest:
+      type: object
+      properties:
+        arrName:
+          type: string
+          description: Name of the Arr application
+        mediaIds:
+          type: array
+          items:
+            type: string
+          description: List of media IDs to repair
+        autoProcess:
+          type: boolean
+          description: Whether to auto-process the repair
+        async:
+          type: boolean
+          description: Whether to run repair asynchronously
+      required:
+        - arrName
+
+    RepairJob:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Job ID
+        status:
+          type: string
+          description: Job status
+        arrName:
+          type: string
+          description: Associated Arr application
+        mediaIds:
+          type: array
+          items:
+            type: string
+          description: Media IDs being repaired
+        createdAt:
+          type: string
+          format: date-time
+          description: Job creation timestamp
+
+    Torrent:
+      type: object
+      properties:
+        hash:
+          type: string
+          description: Torrent hash
+        name:
+          type: string
+          description: Torrent name
+        category:
+          type: string
+          description: Torrent category
+        addedOn:
+          type: string
+          format: date-time
+          description: Date when torrent was added
+        size:
+          type: integer
+          description: Torrent size in bytes
+        progress:
+          type: number
+          format: float
+          description: Download progress (0-1)
+        status:
+          type: string
+          description: Torrent status
+
+
+tags:
+  - name: Arrs
+    description: Arr application management
+  - name: Content
+    description: Content addition and processing
+  - name: Repair
+    description: Media repair operations
+  - name: Torrents
+    description: Torrent management
+  - name: Configuration
+    description: Application configuration
+  - name: Authentication
+    description: API token management
