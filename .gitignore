@@ -3,7 +3,9 @@ config.json
 .idea/
 .DS_Store
 *.torrent
+!testdata/*.torrent
 *.magnet
+!testdata/*.magnet
 *.db
 *.log
 *.log.*
