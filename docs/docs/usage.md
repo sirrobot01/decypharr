@@ -21,6 +21,7 @@ If it's the first time you're accessing the UI, you will be prompted to set up y
 
 - Click on **Qbittorrent** in the tab
 - Set the **Download Folder** to where you want Decypharr to save downloaded files. These files will be symlinked to the mount folder you configured earlier.
+- Set **Always Remove Tracker URLs**  if you want to always remove the tracker URLs torrents and magnet links. This is useful if you want to [download private tracker torrents](features/private-tracker-downloads.md) without breaking the rules, but will make uncached torrents always stall.
 You can leave the remaining settings as default for now.
 
 ### Arrs Configuration
@@ -42,6 +43,7 @@ To connect Decypharr to your Sonarr or Radarr instance:
    - **Category**: e.g., `sonarr`, `radarr` (match what you configured in Decypharr)
    - **Use SSL**: `No`
    - **Sequential Download**: `No` or `Yes` (if you want to download torrents locally instead of symlink)
+   - **First and Last First**: `No` by default or `Yes` if you want to remove torrent tracker URLs from the torrents. This can make it possible to [download private trackers torrents without breaking the rules](features/private-tracker-downloads.md).
 3. Click **Test** to verify the connection
 4. Click **Save** to add the download client
 
