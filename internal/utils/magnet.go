@@ -7,8 +7,6 @@ import (
 	"encoding/base32"
 	"encoding/hex"
 	"fmt"
-	"github.com/anacrolix/torrent/metainfo"
-	"github.com/sirrobot01/decypharr/internal/request"
 	"io"
 	"log"
 	"net/http"
@@ -18,6 +16,9 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/anacrolix/torrent/metainfo"
+	"github.com/sirrobot01/decypharr/internal/request"
 )
 
 var (
@@ -36,7 +37,17 @@ func (m *Magnet) IsTorrent() bool {
 	return m.File != nil
 }
 
-func GetMagnetFromFile(file io.Reader, filePath string) (*Magnet, error) {
+// stripTrackersFromMagnet removes trackers from a magnet and returns a modified copy
+func stripTrackersFromMagnet(mi metainfo.Magnet, fileType string) metainfo.Magnet {
+	originalTrackerCount := len(mi.Trackers)
+	if len(mi.Trackers) > 0 {
+		mi.Trackers = nil
+		log.Printf("Removed %d tracker URLs from %s", originalTrackerCount, fileType)
+	}
+	return mi
+}
+
+func GetMagnetFromFile(file io.Reader, filePath string, rmTrackerUrls bool) (*Magnet, error) {
 	var (
 		m   *Magnet
 		err error
@@ -46,14 +57,14 @@ func GetMagnetFromFile(file io.Reader, filePath string) (*Magnet, error) {
 		if err != nil {
 			return nil, err
 		}
-		m, err = GetMagnetFromBytes(torrentData)
+		m, err = GetMagnetFromBytes(torrentData, rmTrackerUrls)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		// .magnet file
 		magnetLink := ReadMagnetFile(file)
-		m, err = GetMagnetInfo(magnetLink)
+		m, err = GetMagnetInfo(magnetLink, rmTrackerUrls)
 		if err != nil {
 			return nil, err
 		}
@@ -62,32 +73,37 @@ func GetMagnetFromFile(file io.Reader, filePath string) (*Magnet, error) {
 	return m, nil
 }
 
-func GetMagnetFromUrl(url string) (*Magnet, error) {
+func GetMagnetFromUrl(url string, rmTrackerUrls bool) (*Magnet, error) {
 	if strings.HasPrefix(url, "magnet:") {
-		return GetMagnetInfo(url)
+		return GetMagnetInfo(url, rmTrackerUrls)
 	} else if strings.HasPrefix(url, "http") {
-		return OpenMagnetHttpURL(url)
+		return OpenMagnetHttpURL(url, rmTrackerUrls)
 	}
 	return nil, fmt.Errorf("invalid url")
 }
 
-func GetMagnetFromBytes(torrentData []byte) (*Magnet, error) {
+func GetMagnetFromBytes(torrentData []byte, rmTrackerUrls bool) (*Magnet, error) {
 	// Create a scanner to read the file line by line
 	mi, err := metainfo.Load(bytes.NewReader(torrentData))
 	if err != nil {
 		return nil, err
 	}
+
 	hash := mi.HashInfoBytes()
 	infoHash := hash.HexString()
 	info, err := mi.UnmarshalInfo()
 	if err != nil {
 		return nil, err
 	}
+	magnetMeta := mi.Magnet(&hash, &info)
+	if rmTrackerUrls {
+		magnetMeta = stripTrackersFromMagnet(magnetMeta, "torrent file")
+	}
 	magnet := &Magnet{
 		InfoHash: infoHash,
 		Name:     info.Name,
 		Size:     info.Length,
-		Link:     mi.Magnet(&hash, &info).String(),
+		Link:     magnetMeta.String(),
 		File:     torrentData,
 	}
 	return magnet, nil
@@ -124,7 +140,7 @@ func ReadMagnetFile(file io.Reader) string {
 	return ""
 }
 
-func OpenMagnetHttpURL(magnetLink string) (*Magnet, error) {
+func OpenMagnetHttpURL(magnetLink string, rmTrackerUrls bool) (*Magnet, error) {
 	resp, err := http.Get(magnetLink)
 	if err != nil {
 		return nil, fmt.Errorf("error making GET request: %v", err)
@@ -139,34 +155,35 @@ func OpenMagnetHttpURL(magnetLink string) (*Magnet, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error reading response body: %v", err)
 	}
-	return GetMagnetFromBytes(torrentData)
+	return GetMagnetFromBytes(torrentData, rmTrackerUrls)
 }
 
-func GetMagnetInfo(magnetLink string) (*Magnet, error) {
+func GetMagnetInfo(magnetLink string, rmTrackerUrls bool) (*Magnet, error) {
 	if magnetLink == "" {
 		return nil, fmt.Errorf("error getting magnet from file")
 	}
 
-	magnetURI, err := url.Parse(magnetLink)
+	mi, err := metainfo.ParseMagnetUri(magnetLink)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing magnet link")
+		return nil, fmt.Errorf("error parsing magnet link: %w", err)
 	}
 
-	query := magnetURI.Query()
-	xt := query.Get("xt")
-	dn := query.Get("dn")
-
-	// Extract BTIH
-	parts := strings.Split(xt, ":")
-	btih := ""
-	if len(parts) > 2 {
-		btih = parts[2]
+	// Strip all announce URLs if requested
+	if rmTrackerUrls {
+		mi = stripTrackersFromMagnet(mi, "magnet link")
 	}
+
+	btih := mi.InfoHash.HexString()
+	dn := mi.DisplayName
+
+	// Reconstruct the magnet link using the (possibly modified) spec
+	finalLink := mi.String()
+
 	magnet := &Magnet{
 		InfoHash: btih,
 		Name:     dn,
 		Size:     0,
-		Link:     magnetLink,
+		Link:     finalLink,
 	}
 	return magnet, nil
 }

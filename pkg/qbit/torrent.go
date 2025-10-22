@@ -14,8 +14,8 @@ import (
 )
 
 // All torrent-related helpers goes here
-func (q *QBit) addMagnet(ctx context.Context, url string, arr *arr.Arr, debrid string, action string) error {
-	magnet, err := utils.GetMagnetFromUrl(url)
+func (q *QBit) addMagnet(ctx context.Context, url string, arr *arr.Arr, debrid string, action string, rmTrackerUrls bool) error {
+	magnet, err := utils.GetMagnetFromUrl(url, rmTrackerUrls)
 	if err != nil {
 		return fmt.Errorf("error parsing magnet link: %w", err)
 	}
@@ -30,11 +30,11 @@ func (q *QBit) addMagnet(ctx context.Context, url string, arr *arr.Arr, debrid s
 	return nil
 }
 
-func (q *QBit) addTorrent(ctx context.Context, fileHeader *multipart.FileHeader, arr *arr.Arr, debrid string, action string) error {
+func (q *QBit) addTorrent(ctx context.Context, fileHeader *multipart.FileHeader, arr *arr.Arr, debrid string, action string, rmTrackerUrls bool) error {
 	file, _ := fileHeader.Open()
 	defer file.Close()
 	var reader io.Reader = file
-	magnet, err := utils.GetMagnetFromFile(reader, fileHeader.Filename)
+	magnet, err := utils.GetMagnetFromFile(reader, fileHeader.Filename, rmTrackerUrls)
 	if err != nil {
 		return fmt.Errorf("error reading file: %s \n %w", fileHeader.Filename, err)
 	}
