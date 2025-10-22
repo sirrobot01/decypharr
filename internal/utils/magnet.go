@@ -8,16 +8,15 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/request"
 )
 
@@ -41,6 +40,7 @@ func (m *Magnet) IsTorrent() bool {
 func stripTrackersFromMagnet(mi metainfo.Magnet, fileType string) metainfo.Magnet {
 	originalTrackerCount := len(mi.Trackers)
 	if len(mi.Trackers) > 0 {
+		log := logger.Default()
 		mi.Trackers = nil
 		log.Printf("Removed %d tracker URLs from %s", originalTrackerCount, fileType)
 	}
@@ -109,21 +109,6 @@ func GetMagnetFromBytes(torrentData []byte, rmTrackerUrls bool) (*Magnet, error)
 	return magnet, nil
 }
 
-func OpenMagnetFile(filePath string) string {
-	file, err := os.Open(filePath)
-	if err != nil {
-		log.Println("Error opening file:", err)
-		return ""
-	}
-	defer func(file *os.File) {
-		err := file.Close()
-		if err != nil {
-			return
-		}
-	}(file) // Ensure the file is closed after the function ends
-	return ReadMagnetFile(file)
-}
-
 func ReadMagnetFile(file io.Reader) string {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -135,6 +120,7 @@ func ReadMagnetFile(file io.Reader) string {
 
 	// Check for any errors during scanning
 	if err := scanner.Err(); err != nil {
+		log := logger.Default()
 		log.Println("Error reading file:", err)
 	}
 	return ""
