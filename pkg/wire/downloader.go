@@ -610,7 +610,7 @@ func (s *Store) processMultiSeasonDownloads(torrent *Torrent, debridTorrent *typ
 
 		// Update season torrent with final path
 		seasonTorrent.TorrentPath = seasonDownloadPath
-		torrent.ContentPath = seasonDownloadPath
+		seasonTorrent.ContentPath = seasonDownloadPath
 		seasonTorrent.State = "pausedUP"
 
 		// Add the season torrent to storage
