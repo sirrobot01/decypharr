@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -52,9 +53,14 @@ func (m *Manager) mountWithRetry(mountPath, provider, webdavURL string, maxRetri
 func (m *Manager) performMount(mountPath, provider, webdavURL string) error {
 	cfg := config.Get()
 
-	// Create mount directory
-	if err := os.MkdirAll(mountPath, 0755); err != nil {
-		return fmt.Errorf("failed to create mount directory %s: %w", mountPath, err)
+	// Create mount directory(except on Windows, cos winFSP handles it)
+	if runtime.GOOS != "windows" {
+		if err := os.MkdirAll(mountPath, 0755); err != nil {
+			return fmt.Errorf("failed to create mount directory %s: %w", mountPath, err)
+		}
+	} else {
+		// In fact, delete the mount if it exists, to avoid issues
+		_ = os.Remove(mountPath) // Ignore error
 	}
 
 	// Check if already mounted
