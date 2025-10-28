@@ -21,7 +21,21 @@ import (
 
 func (wb *Web) handleGetArrs(w http.ResponseWriter, r *http.Request) {
 	arrStorage := wire.Get().Arr()
-	request.JSONResponse(w, arrStorage.GetAll(), http.StatusOK)
+
+	// Only return valid config Arrs, not auto-detected ones with invalid host/token
+	validArrs := make([]*arr.Arr, 0)
+	for _, a := range arrStorage.GetAll() {
+		if a.Host == "" || a.Token == "" {
+			continue // Skip invalid arrs
+		}
+		// Skip auto-detected arrs with invalid URLs that look like credentials
+		if a.Source == "auto" && request.ValidateURL(a.Host) != nil {
+			continue
+		}
+		validArrs = append(validArrs, a)
+	}
+
+	request.JSONResponse(w, validArrs, http.StatusOK)
 }
 
 func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
@@ -135,28 +149,50 @@ func (wb *Web) handleRepairMedia(w http.ResponseWriter, r *http.Request) {
 	if req.ArrName != "" {
 		_arr := _store.Arr().Get(req.ArrName)
 		if _arr == nil {
-			http.Error(w, "No Arrs found to repair", http.StatusNotFound)
+			http.Error(w, fmt.Sprintf("Arr '%s' not found", req.ArrName), http.StatusNotFound)
 			return
 		}
 		arrs = append(arrs, req.ArrName)
+	} else {
+		// If no specific arr provided, use all available arrs
+		for _, arr := range _store.Arr().GetAll() {
+			if !arr.SkipRepair {
+				arrs = append(arrs, arr.Name)
+			}
+		}
 	}
+
+	if len(arrs) == 0 {
+		http.Error(w, "No valid Arrs found for repair", http.StatusBadRequest)
+		return
+	}
+
+	wb.logger.Info().Strs("arrs", arrs).Strs("mediaIds", req.MediaIds).Bool("async", req.Async).Bool("autoProcess", req.AutoProcess).Msg("Starting repair job")
 
 	if req.Async {
 		go func() {
 			if err := _store.Repair().AddJob(arrs, req.MediaIds, req.AutoProcess, false); err != nil {
-				wb.logger.Error().Err(err).Msg("Failed to repair media")
+				wb.logger.Error().Err(err).Strs("arrs", arrs).Msg("Failed to repair media")
 			}
 		}()
-		request.JSONResponse(w, "Repair process started", http.StatusOK)
+		request.JSONResponse(w, map[string]interface{}{
+			"message": "Repair process started",
+			"arrs":    arrs,
+			"async":   true,
+		}, http.StatusOK)
 		return
 	}
 
-	if err := _store.Repair().AddJob([]string{req.ArrName}, req.MediaIds, req.AutoProcess, false); err != nil {
+	if err := _store.Repair().AddJob(arrs, req.MediaIds, req.AutoProcess, false); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to repair: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	request.JSONResponse(w, "Repair completed", http.StatusOK)
+	request.JSONResponse(w, map[string]interface{}{
+		"message": "Repair completed",
+		"arrs":    arrs,
+		"async":   false,
+	}, http.StatusOK)
 }
 
 func (wb *Web) handleGetVersion(w http.ResponseWriter, r *http.Request) {
@@ -195,7 +231,44 @@ func (wb *Web) handleDeleteTorrents(w http.ResponseWriter, r *http.Request) {
 func (wb *Web) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	arrStorage := wire.Get().Arr()
 	cfg := config.Get()
-	cfg.Arrs = arrStorage.SyncToConfig()
+	
+	// Merge config arrs with valid storage arrs, but don't let invalid auto-detected arrs override config
+	unique := map[string]config.Arr{}
+
+	// First, add existing Arrs from config file
+	for _, a := range cfg.Arrs {
+		if a.Host != "" && a.Token != "" {
+			unique[a.Name] = a
+		}
+	}
+
+	// Then add/update with valid Arrs from storage
+	for _, a := range arrStorage.GetAll() {
+		if a.Host == "" || a.Token == "" {
+			continue // Skip invalid arrs
+		}
+		// Skip auto-detected arrs with invalid URLs that look like credentials
+		if a.Source == "auto" && request.ValidateURL(a.Host) != nil {
+			continue
+		}
+		
+		unique[a.Name] = config.Arr{
+			Name:             a.Name,
+			Host:             a.Host,
+			Token:            a.Token,
+			Cleanup:          a.Cleanup,
+			SkipRepair:       a.SkipRepair,
+			DownloadUncached: a.DownloadUncached,
+			SelectedDebrid:   a.SelectedDebrid,
+			Source:           a.Source,
+		}
+	}
+
+	// Convert map to slice
+	cfg.Arrs = make([]config.Arr, 0, len(unique))
+	for _, a := range unique {
+		cfg.Arrs = append(cfg.Arrs, a)
+	}
 
 	// Create response with API token info
 	type ConfigResponse struct {
@@ -261,7 +334,12 @@ func (wb *Web) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	newConfigArrs := make([]config.Arr, 0)
 	for _, a := range updatedConfig.Arrs {
 		if a.Name == "" || a.Host == "" || a.Token == "" {
-			// Skip empty or auto-generated arrs
+			// Skip empty arrs
+			continue
+		}
+		// Skip auto-detected arrs with invalid data (credentials instead of API tokens)
+		if a.Source == "auto" && request.ValidateURL(a.Host) != nil {
+			wb.logger.Warn().Str("arr", a.Name).Str("host", a.Host).Str("source", a.Source).Msg("Skipping auto-detected arr with invalid host")
 			continue
 		}
 		newConfigArrs = append(newConfigArrs, a)
