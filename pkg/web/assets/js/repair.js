@@ -153,10 +153,8 @@ class RepairManager {
                 throw new Error(errorText || 'Failed to start repair');
             }
 
-            const result = await response.json();
-
             window.decypharrUtils.createToast(
-                `Repair job started successfully! Job ID: ${result.job_id?.substring(0, 8) || 'Unknown'}`,
+                'Repair job started successfully!',
                 'success'
             );
 
