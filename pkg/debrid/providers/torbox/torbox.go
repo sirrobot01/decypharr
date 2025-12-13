@@ -453,6 +453,7 @@ func (tb *Torbox) GetFileDownloadLinks(t *types.Torrent) error {
 }
 
 func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (types.DownloadLink, error) {
+	// 1. Call TorBox requestdl endpoint to validate access to this file
 	url := fmt.Sprintf("%s/api/torrents/requestdl/", tb.Host)
 	query := gourl.Values{}
 	query.Add("torrent_id", t.Id)
@@ -492,8 +493,9 @@ func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (types.Dow
 		return types.DownloadLink{}, fmt.Errorf("error getting download links")
 	}
 
-	link := *data.Data
-	if link == "" {
+	// CDN link. Not being used anymore.
+	cdnLink := *data.Data
+	if cdnLink == "" {
 		tb.logger.Error().
 			Str("torrent_id", t.Id).
 			Str("file_id", file.Id).
@@ -501,11 +503,28 @@ func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (types.Dow
 		return types.DownloadLink{}, fmt.Errorf("error getting download links")
 	}
 
+	// 2. Build the permalink as TorBox recommends:
+	//    {{api_base}}/{{api_version}}/api/torrents/requestdl?token={{api_key}}&torrent_id={{torrent_id}}&file_id={{torrent_file_id}}&redirect=true
+	permalinkQuery := gourl.Values{}
+	permalinkQuery.Add("token", tb.APIKey)
+	permalinkQuery.Add("torrent_id", t.Id)
+	permalinkQuery.Add("file_id", file.Id)
+	permalinkQuery.Add("redirect", "true")
+
+	permalink := fmt.Sprintf("%s/api/torrents/requestdl?%s", tb.Host, permalinkQuery.Encode())
+
+	// Debug log so we can see the generated permalink while testing
+	tb.logger.Debug().
+		Str("torrent_id", t.Id).
+		Str("file_id", file.Id).
+		Str("permalink", permalink).
+		Msg("Generated Torbox download permalink")
+
 	now := time.Now()
 	dl := types.DownloadLink{
 		Token:        tb.APIKey,
 		Link:         file.Link,
-		DownloadLink: link,
+		DownloadLink: permalink, // store permalink, not cdnLink
 		Id:           file.Id,
 		Generated:    now,
 		ExpiresAt:    now.Add(tb.autoExpiresLinksAfter),
