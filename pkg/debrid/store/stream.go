@@ -104,9 +104,6 @@ func (c *Cache) Stream(ctx context.Context, start, end int64, linkFunc func() (t
 		}
 
 		if streamErr.LinkError {
-			c.logger.Trace().
-				Int("retries", retry).
-				Msg("Link error, getting fresh link")
 			lastErr = streamErr
 			// Try new link
 			downloadLink, err = linkFunc()
@@ -116,7 +113,7 @@ func (c *Cache) Stream(ctx context.Context, start, end int64, linkFunc func() (t
 			continue
 		}
 
-		// Retryable HTTP error (429, 503, etc.) - retry network
+		// Retryable HTTP error (429, 503, 404 etc.) - retry network
 		lastErr = streamErr
 		c.logger.Trace().
 			Err(lastErr).
@@ -198,9 +195,6 @@ func (c *Cache) doRequest(ctx context.Context, url string, start, end int64) (*h
 }
 
 func (c *Cache) handleHTTPError(resp *http.Response, downloadLink types.DownloadLink) StreamError {
-	body, _ := io.ReadAll(resp.Body)
-	bodyStr := strings.ToLower(string(body))
-
 	switch resp.StatusCode {
 	case http.StatusNotFound:
 		c.MarkLinkAsInvalid(downloadLink, "link_not_found")
@@ -211,6 +205,8 @@ func (c *Cache) handleHTTPError(resp *http.Response, downloadLink types.Download
 		}
 
 	case http.StatusServiceUnavailable:
+		body, _ := io.ReadAll(resp.Body)
+		bodyStr := strings.ToLower(string(body))
 		if strings.Contains(bodyStr, "bandwidth") || strings.Contains(bodyStr, "traffic") {
 			c.MarkLinkAsInvalid(downloadLink, "bandwidth_exceeded")
 			return StreamError{
@@ -230,6 +226,7 @@ func (c *Cache) handleHTTPError(resp *http.Response, downloadLink types.Download
 
 	default:
 		retryable := resp.StatusCode >= 500
+		body, _ := io.ReadAll(resp.Body)
 		return StreamError{
 			Err:       fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body)),
 			Retryable: retryable,

@@ -184,7 +184,11 @@ func (c *Cache) MarkLinkAsInvalid(downloadLink types.DownloadLink, reason string
 			c.logger.Error().Str("token", utils.Mask(downloadLink.Token)).Msg("Account not found to delete download link")
 			return
 		}
-		c.client.DeleteDownloadLink(account, downloadLink)
+
+		if err := c.client.DeleteDownloadLink(account, downloadLink); err != nil {
+			c.logger.Error().Err(err).Str("token", utils.Mask(downloadLink.Token)).Msg("Failed to delete download link from account")
+			return
+		}
 	}
 }
 

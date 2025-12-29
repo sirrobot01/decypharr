@@ -49,14 +49,15 @@ type Debrid struct {
 }
 
 type QBitTorrent struct {
-	Username        string   `json:"username,omitempty"`
-	Password        string   `json:"password,omitempty"`
-	Port            string   `json:"port,omitempty"` // deprecated
-	DownloadFolder  string   `json:"download_folder,omitempty"`
-	Categories      []string `json:"categories,omitempty"`
-	RefreshInterval int      `json:"refresh_interval,omitempty"`
-	SkipPreCache    bool     `json:"skip_pre_cache,omitempty"`
-	MaxDownloads    int      `json:"max_downloads,omitempty"`
+	Username          	string   `json:"username,omitempty"`
+	Password          	string   `json:"password,omitempty"`
+	Port              	string   `json:"port,omitempty"` // deprecated
+	DownloadFolder    	string   `json:"download_folder,omitempty"`
+	Categories        	[]string `json:"categories,omitempty"`
+	RefreshInterval   	int      `json:"refresh_interval,omitempty"`
+	SkipPreCache      	bool     `json:"skip_pre_cache,omitempty"`
+	MaxDownloads      	int      `json:"max_downloads,omitempty"`
+	AlwaysRmTrackerUrls bool     `json:"always_rm_tracker_urls,omitempty"`
 }
 
 type Arr struct {

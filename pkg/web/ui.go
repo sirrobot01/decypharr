@@ -130,14 +130,15 @@ func (wb *Web) DownloadHandler(w http.ResponseWriter, r *http.Request) {
 		debrids = append(debrids, d.Name)
 	}
 	data := map[string]interface{}{
-		"URLBase":        cfg.URLBase,
-		"Page":           "download",
-		"Title":          "Download",
-		"Debrids":        debrids,
-		"HasMultiDebrid": len(debrids) > 1,
-		"DownloadFolder": cfg.QBitTorrent.DownloadFolder,
-		"NeedSetup":      cfg.CheckSetup() != nil,
-		"SetupError":     cfg.CheckSetup(),
+		"URLBase":             	cfg.URLBase,
+		"Page":                	"download",
+		"Title":               	"Download",
+		"Debrids":             	debrids,
+		"HasMultiDebrid":      	len(debrids) > 1,
+		"DownloadFolder":      	cfg.QBitTorrent.DownloadFolder,
+		"AlwaysRmTrackerUrls": 	cfg.QBitTorrent.AlwaysRmTrackerUrls,
+		"NeedSetup":           	cfg.CheckSetup() != nil,
+		"SetupError":          	cfg.CheckSetup(),
 	}
 	_ = wb.templates.ExecuteTemplate(w, "layout", data)
 }

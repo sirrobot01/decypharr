@@ -66,6 +66,7 @@ nav:
   - Features:
       - Overview: features/index.md
       - Repair Worker: features/repair-worker.md
+      - Private Tracker Downloads: features/private-tracker-downloads.md
   - Guides:
       - Overview: guides/index.md
       - Manual Downloading: guides/downloading.md
