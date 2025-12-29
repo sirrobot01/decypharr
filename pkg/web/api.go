@@ -21,21 +21,7 @@ import (
 
 func (wb *Web) handleGetArrs(w http.ResponseWriter, r *http.Request) {
 	arrStorage := wire.Get().Arr()
-
-	// Only return valid config Arrs, not auto-detected ones with invalid host/token
-	validArrs := make([]*arr.Arr, 0)
-	for _, a := range arrStorage.GetAll() {
-		if a.Host == "" || a.Token == "" {
-			continue // Skip invalid arrs
-		}
-		// Skip auto-detected arrs with invalid URLs that look like credentials
-		if a.Source == "auto" && request.ValidateURL(a.Host) != nil {
-			continue
-		}
-		validArrs = append(validArrs, a)
-	}
-
-	request.JSONResponse(w, validArrs, http.StatusOK)
+	request.JSONResponse(w, arrStorage.GetAll(), http.StatusOK)
 }
 
 func (wb *Web) handleAddContent(w http.ResponseWriter, r *http.Request) {
