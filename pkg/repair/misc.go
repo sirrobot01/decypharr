@@ -34,10 +34,28 @@ func getSymlinkTarget(file string) string {
 }
 
 func fileIsReadable(filePath string) error {
-	// First check if file exists and is accessible
-	info, err := os.Stat(filePath)
+	// First check if the symlink itself exists
+	info, err := os.Lstat(filePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("file does not exist: %w", err)
+	}
+
+	// If it's a symlink, check the target
+	if info.Mode()&os.ModeSymlink != 0 {
+		target := getSymlinkTarget(filePath)
+		if target == "" {
+			return fmt.Errorf("cannot read symlink target")
+		}
+		
+		// Check if the symlink target exists
+		targetInfo, err := os.Stat(target)
+		if err != nil {
+			return fmt.Errorf("symlink target does not exist: %w", err)
+		}
+		
+		// Use the target for further checks
+		filePath = target
+		info = targetInfo
 	}
 
 	// Check if it's a regular file
@@ -45,10 +63,10 @@ func fileIsReadable(filePath string) error {
 		return fmt.Errorf("not a regular file")
 	}
 
-	// Try to read the first 1024 bytes
+	// Try to read the first 1024 bytes to detect I/O errors
 	err = checkFileStart(filePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("cannot read file (I/O error): %w", err)
 	}
 
 	return nil
