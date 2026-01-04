@@ -602,7 +602,6 @@ func (r *Repair) checkMountUp(media []arr.Content) error {
 }
 
 func (r *Repair) getBrokenFiles(job *Job, media arr.Content) []arr.ContentFile {
-
 	if r.useWebdav {
 		return r.getWebdavBrokenFiles(job, media)
 	} else if r.IsZurg {
@@ -613,15 +612,23 @@ func (r *Repair) getBrokenFiles(job *Job, media arr.Content) []arr.ContentFile {
 }
 
 func (r *Repair) getFileBrokenFiles(job *Job, media arr.Content) []arr.ContentFile {
-	// This checks symlink target, try to get read a tiny bit of the file
-
 	brokenFiles := make([]arr.ContentFile, 0)
+
+	// First pass: check local readability for ALL files to detect I/O errors
+	remainingFiles := make([]arr.ContentFile, 0)
+	for _, file := range media.Files {
+		if err := fileIsReadable(file.Path); err != nil {
+			r.logger.Debug().Err(err).Msgf("File %s is not readable (I/O error)", file.Path)
+			brokenFiles = append(brokenFiles, file)
+			continue
+		}
+		remainingFiles = append(remainingFiles, file)
+	}
+	media.Files = remainingFiles
 
 	uniqueParents := collectFiles(media)
 
 	for parent, files := range uniqueParents {
-		// Check stat
-		// Check file stat first
 		for _, file := range files {
 			if err := fileIsReadable(file.Path); err != nil {
 				r.logger.Debug().Msgf("Broken file found at: %s", parent)
@@ -642,6 +649,19 @@ func (r *Repair) getZurgBrokenFiles(job *Job, media arr.Content) []arr.ContentFi
 	// This reduces bandwidth usage significantly
 
 	brokenFiles := make([]arr.ContentFile, 0)
+
+	// First pass: check local readability for ALL files to detect I/O errors
+	remainingFiles := make([]arr.ContentFile, 0)
+	for _, file := range media.Files {
+		if err := fileIsReadable(file.Path); err != nil {
+			r.logger.Debug().Err(err).Msgf("File %s is not readable (I/O error)", file.Path)
+			brokenFiles = append(brokenFiles, file)
+			continue
+		}
+		remainingFiles = append(remainingFiles, file)
+	}
+	media.Files = remainingFiles
+
 	uniqueParents := collectFiles(media)
 	tr := &http.Transport{
 		TLSHandshakeTimeout: 60 * time.Second,
@@ -653,7 +673,7 @@ func (r *Repair) getZurgBrokenFiles(job *Job, media arr.Content) []arr.ContentFi
 	client := request.New(request.WithTimeout(0), request.WithTransport(tr))
 	// Access zurg url + symlink folder + first file(encoded)
 	for parent, files := range uniqueParents {
-		r.logger.Debug().Msgf("Checking %s", parent)
+		r.logger.Debug().Msgf("Checking %d files in %s", len(files), parent)
 		torrentName := url.PathEscape(filepath.Base(parent))
 
 		if len(files) == 0 {
@@ -721,6 +741,19 @@ func (r *Repair) getWebdavBrokenFiles(job *Job, media arr.Content) []arr.Content
 	}
 
 	brokenFiles := make([]arr.ContentFile, 0)
+
+	// First pass: check local readability for ALL files to detect I/O errors
+	remainingFiles := make([]arr.ContentFile, 0)
+	for _, file := range media.Files {
+		if err := fileIsReadable(file.Path); err != nil {
+			r.logger.Debug().Err(err).Msgf("File %s is not readable (I/O error)", file.Path)
+			brokenFiles = append(brokenFiles, file)
+			continue
+		}
+		remainingFiles = append(remainingFiles, file)
+	}
+	media.Files = remainingFiles
+
 	uniqueParents := collectFiles(media)
 	for torrentPath, files := range uniqueParents {
 		select {

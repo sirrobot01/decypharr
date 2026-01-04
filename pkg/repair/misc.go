@@ -109,7 +109,7 @@ func (r *Repair) checkTorrentFiles(torrentPath string, files []arr.ContentFile, 
 
 	emptyFiles := make([]arr.ContentFile, 0)
 
-	r.logger.Debug().Msgf("Checking %s", torrentPath)
+	r.logger.Debug().Msgf("Checking %d files in %s", len(files), torrentPath)
 
 	// Get the debrid client
 	dir := filepath.Dir(torrentPath)
@@ -148,20 +148,21 @@ func (r *Repair) checkTorrentFiles(torrentPath string, files []arr.ContentFile, 
 	}
 
 	brokenFilePaths := cache.GetBrokenFiles(&torrent, filePaths)
+	
+	// Create a set for O(1) lookup
+	brokenSet := make(map[string]bool, len(brokenFilePaths))
+	for _, brokenPath := range brokenFilePaths {
+		brokenSet[brokenPath] = true
+	}
+
 	if len(brokenFilePaths) > 0 {
-		r.logger.Debug().Msgf("%d broken files found in %s", len(brokenFilePaths), torrentName)
+		r.logger.Debug().Msgf("%d broken files found in %s via debrid check", len(brokenFilePaths), torrentName)
+	}
 
-		// Create a set for O(1) lookup
-		brokenSet := make(map[string]bool, len(brokenFilePaths))
-		for _, brokenPath := range brokenFilePaths {
-			brokenSet[brokenPath] = true
-		}
-
-		// Filter broken files
-		for _, contentFile := range files {
-			if brokenSet[contentFile.TargetPath] {
-				brokenFiles = append(brokenFiles, contentFile)
-			}
+	// Filter broken files
+	for _, contentFile := range files {
+		if brokenSet[contentFile.TargetPath] {
+			brokenFiles = append(brokenFiles, contentFile)
 		}
 	}
 
