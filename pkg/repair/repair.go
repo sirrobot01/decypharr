@@ -43,7 +43,8 @@ type Repair struct {
 	scheduler   gocron.Scheduler
 
 	debridPathCache sync.Map // debridPath:debridName cache.Emptied after each run
-	torrentsMap     sync.Map //debridName: map[string]*store.CacheTorrent. Emptied after each run
+	torrentsMap     sync.Map // debridName: map[string]*store.CacheTorrent. Emptied after each run
+	mountStatusCache sync.Map // debridFolder:bool cache for mount status. Emptied after each run
 	ctx             context.Context
 }
 
@@ -230,6 +231,7 @@ func (r *Repair) onComplete() {
 	// Set the cache maps to nil
 	r.torrentsMap = sync.Map{} // Clear the torrent map
 	r.debridPathCache = sync.Map{}
+	r.mountStatusCache = sync.Map{} // Clear mount status cache
 }
 
 func (r *Repair) preRunChecks() error {
@@ -531,27 +533,75 @@ func (r *Repair) checkMountUp(media []arr.Content) error {
 	if len(files) == 0 {
 		return fmt.Errorf("no files found in media %s", firstMedia.Title)
 	}
-	for _, file := range files {
-		if _, err := os.Stat(file.Path); os.IsNotExist(err) {
-			// If the file does not exist, we can't check the symlink target
-			r.logger.Debug().Msgf("File %s does not exist, skipping repair", file.Path)
-			return fmt.Errorf("file %s does not exist, skipping repair", file.Path)
+	
+	// Get debrid folder paths from config
+	cfg := config.Get()
+	debridFolderMap := make(map[string]string) // folder path -> debrid name
+	for _, debrid := range cfg.Debrids {
+		if debrid.Folder != "" {
+			debridFolderMap[debrid.Folder] = debrid.Name
 		}
-		// Get the symlink target
+	}
+	
+	if len(debridFolderMap) == 0 {
+		r.logger.Warn().Msg("No debrid folders configured, skipping mount check")
+		return nil
+	}
+	
+	// Check which debrid folders are used by the files
+	requiredFolders := make(map[string]bool)
+	for _, file := range files {
 		symlinkPath := getSymlinkTarget(file.Path)
 		if symlinkPath != "" {
-			r.logger.Trace().Msgf("Found symlink target for %s: %s", file.Path, symlinkPath)
-			if _, err := os.Stat(symlinkPath); os.IsNotExist(err) {
-				r.logger.Debug().Msgf("Symlink target %s does not exist, skipping repair", symlinkPath)
-				return fmt.Errorf("symlink target %s does not exist for %s. skipping repair", symlinkPath, file.Path)
+			// Find which debrid folder this symlink belongs to
+			for debridFolder := range debridFolderMap {
+				if strings.HasPrefix(symlinkPath, debridFolder) {
+					requiredFolders[debridFolder] = true
+					break
+				}
 			}
 		}
 	}
+	
+	// Check if all required debrid folders are accessible (with caching)
+	for folder := range requiredFolders {
+		// Check cache first
+		if cachedStatus, found := r.mountStatusCache.Load(folder); found {
+			isAccessible := cachedStatus.(bool)
+			if !isAccessible {
+				debridName := debridFolderMap[folder]
+				r.logger.Debug().Msgf("Mount check (cached): debrid folder %s (%s) is not accessible", folder, debridName)
+				return fmt.Errorf("mount not available: debrid folder %s (%s) is not accessible", folder, debridName)
+			}
+			r.logger.Trace().Msgf("Mount check (cached): debrid folder %s is accessible", folder)
+			continue
+		}
+		
+		// Not in cache, check filesystem
+		isAccessible := false
+		if info, err := os.Stat(folder); err == nil && info.IsDir() {
+			isAccessible = true
+			r.logger.Debug().Msgf("Mount check passed: debrid folder %s is accessible", folder)
+		} else {
+			debridName := debridFolderMap[folder]
+			r.logger.Error().Msgf("Mount check failed: debrid folder %s (%s) is not accessible", folder, debridName)
+		}
+		
+		// Cache the result
+		r.mountStatusCache.Store(folder, isAccessible)
+		
+		// Return error if not accessible
+		if !isAccessible {
+			debridName := debridFolderMap[folder]
+			return fmt.Errorf("mount not available: debrid folder %s (%s) is not accessible", folder, debridName)
+		}
+	}
+	
+	// All required mounts are available, individual missing files will be repaired
 	return nil
 }
 
 func (r *Repair) getBrokenFiles(job *Job, media arr.Content) []arr.ContentFile {
-
 	if r.useWebdav {
 		return r.getWebdavBrokenFiles(job, media)
 	} else if r.IsZurg {
@@ -562,15 +612,23 @@ func (r *Repair) getBrokenFiles(job *Job, media arr.Content) []arr.ContentFile {
 }
 
 func (r *Repair) getFileBrokenFiles(job *Job, media arr.Content) []arr.ContentFile {
-	// This checks symlink target, try to get read a tiny bit of the file
-
 	brokenFiles := make([]arr.ContentFile, 0)
+
+	// First pass: check local readability for ALL files to detect I/O errors
+	remainingFiles := make([]arr.ContentFile, 0)
+	for _, file := range media.Files {
+		if err := fileIsReadable(file.Path); err != nil {
+			r.logger.Debug().Err(err).Msgf("File %s is not readable (I/O error)", file.Path)
+			brokenFiles = append(brokenFiles, file)
+			continue
+		}
+		remainingFiles = append(remainingFiles, file)
+	}
+	media.Files = remainingFiles
 
 	uniqueParents := collectFiles(media)
 
 	for parent, files := range uniqueParents {
-		// Check stat
-		// Check file stat first
 		for _, file := range files {
 			if err := fileIsReadable(file.Path); err != nil {
 				r.logger.Debug().Msgf("Broken file found at: %s", parent)
@@ -591,6 +649,19 @@ func (r *Repair) getZurgBrokenFiles(job *Job, media arr.Content) []arr.ContentFi
 	// This reduces bandwidth usage significantly
 
 	brokenFiles := make([]arr.ContentFile, 0)
+
+	// First pass: check local readability for ALL files to detect I/O errors
+	remainingFiles := make([]arr.ContentFile, 0)
+	for _, file := range media.Files {
+		if err := fileIsReadable(file.Path); err != nil {
+			r.logger.Debug().Err(err).Msgf("File %s is not readable (I/O error)", file.Path)
+			brokenFiles = append(brokenFiles, file)
+			continue
+		}
+		remainingFiles = append(remainingFiles, file)
+	}
+	media.Files = remainingFiles
+
 	uniqueParents := collectFiles(media)
 	tr := &http.Transport{
 		TLSHandshakeTimeout: 60 * time.Second,
@@ -602,7 +673,7 @@ func (r *Repair) getZurgBrokenFiles(job *Job, media arr.Content) []arr.ContentFi
 	client := request.New(request.WithTimeout(0), request.WithTransport(tr))
 	// Access zurg url + symlink folder + first file(encoded)
 	for parent, files := range uniqueParents {
-		r.logger.Debug().Msgf("Checking %s", parent)
+		r.logger.Debug().Msgf("Checking %d files in %s", len(files), parent)
 		torrentName := url.PathEscape(filepath.Base(parent))
 
 		if len(files) == 0 {
@@ -670,6 +741,19 @@ func (r *Repair) getWebdavBrokenFiles(job *Job, media arr.Content) []arr.Content
 	}
 
 	brokenFiles := make([]arr.ContentFile, 0)
+
+	// First pass: check local readability for ALL files to detect I/O errors
+	remainingFiles := make([]arr.ContentFile, 0)
+	for _, file := range media.Files {
+		if err := fileIsReadable(file.Path); err != nil {
+			r.logger.Debug().Err(err).Msgf("File %s is not readable (I/O error)", file.Path)
+			brokenFiles = append(brokenFiles, file)
+			continue
+		}
+		remainingFiles = append(remainingFiles, file)
+	}
+	media.Files = remainingFiles
+
 	uniqueParents := collectFiles(media)
 	for torrentPath, files := range uniqueParents {
 		select {

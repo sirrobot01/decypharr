@@ -140,18 +140,18 @@ func (q *QBit) authenticate(category, username, password string) (*arr.Arr, erro
 	// Check if arr exists
 	a := arrs.Get(category)
 	if a == nil {
-		// Arr is not configured, create a new one
+		// Arr is not configured, create a new one for this session only
 		downloadUncached := false
-		a = arr.New(category, "", "", false, false, &downloadUncached, "", "auto")
+		a = arr.New(category, "", "", false, false, &downloadUncached, "", "")
 	}
-	a.Host = username
-	a.Token = password
+	// Don't modify arr configuration from authentication
+	// Authentication is for accessing torrents, not configuring arrs
+
 	arrValidated := false // This is a flag to indicate if arr validation was successful
-	if (a.Host == "" || a.Token == "") && cfg.UseAuth {
-		return nil, fmt.Errorf("unauthorized: Host and token are required for authentication(you've enabled authentication)")
-	}
-	if err := a.Validate(); err == nil {
-		arrValidated = true
+	if a.Host != "" && a.Token != "" {
+		if err := a.Validate(); err == nil {
+			arrValidated = true
+		}
 	}
 
 	if !arrValidated && cfg.UseAuth {
@@ -160,8 +160,6 @@ func (q *QBit) authenticate(category, username, password string) (*arr.Arr, erro
 			return nil, fmt.Errorf("unauthorized: invalid credentials")
 		}
 	}
-	a.Source = "auto"
-	arrs.AddOrUpdate(a)
 
 	return a, nil
 }
