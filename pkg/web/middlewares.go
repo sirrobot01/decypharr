@@ -14,14 +14,14 @@ func (wb *Web) setupMiddleware(next http.Handler) http.Handler {
 		cfg := config.Get()
 		needsSetup := cfg.CheckSetup()
 		if needsSetup != nil && r.URL.Path != "/settings" && r.URL.Path != "/api/config" {
-			http.Redirect(w, r, fmt.Sprintf("/settings?inco=%s", needsSetup.Error()), http.StatusSeeOther)
+			wb.redirectTo(w, r, fmt.Sprintf("/settings?inco=%s", needsSetup.Error()))
 			return
 		}
 
 		// strip inco from URL
 		if inco := r.URL.Query().Get("inco"); inco != "" && needsSetup == nil && r.URL.Path == "/settings" {
 			// redirect to the same URL without the inco parameter
-			http.Redirect(w, r, "/settings", http.StatusSeeOther)
+			wb.redirectTo(w, r, "/settings")
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -42,7 +42,7 @@ func (wb *Web) authMiddleware(next http.Handler) http.Handler {
 			if isAPI {
 				wb.sendJSONError(w, "Authentication setup required", http.StatusUnauthorized)
 			} else {
-				http.Redirect(w, r, "/register", http.StatusSeeOther)
+				wb.redirectTo(w, r, "/register")
 			}
 			return
 		}
@@ -61,7 +61,7 @@ func (wb *Web) authMiddleware(next http.Handler) http.Handler {
 			if isAPI {
 				wb.sendJSONError(w, "Authentication required. Please provide a valid API token in the Authorization header (Bearer <token>) or authenticate via session cookies.", http.StatusUnauthorized)
 			} else {
-				http.Redirect(w, r, "/login", http.StatusSeeOther)
+				wb.redirectTo(w, r, "/login")
 			}
 			return
 		}
@@ -86,4 +86,10 @@ func (wb *Web) sendJSONError(w http.ResponseWriter, message string, statusCode i
 	if err != nil {
 		return
 	}
+}
+
+// redirectTo redirects to a path with the URLBase prefix
+func (wb *Web) redirectTo(w http.ResponseWriter, r *http.Request, path string) {
+	target := strings.TrimSuffix(wb.urlBase, "/") + path
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }

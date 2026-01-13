@@ -71,6 +71,7 @@ nav:
       - Overview: guides/index.md
       - Manual Downloading: guides/downloading.md
       - Internal Mounting: guides/internal-mounting.md
+      - Reverse Proxy: guides/reverse-proxy.md
 
 
 plugins:

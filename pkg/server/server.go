@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -34,7 +35,13 @@ func New(handlers map[string]http.Handler) *Server {
 		logger: l,
 	}
 
-	r.Route(cfg.URLBase, func(r chi.Router) {
+	// URLBase is normalized to have trailing slash, but StripSlashes middleware
+	// removes it from requests, so we need to match without trailing slash
+	urlBase := cfg.URLBase
+	if urlBase != "/" {
+		urlBase = strings.TrimSuffix(urlBase, "/")
+	}
+	r.Route(urlBase, func(r chi.Router) {
 		for pattern, handler := range handlers {
 			r.Mount(pattern, handler)
 		}
