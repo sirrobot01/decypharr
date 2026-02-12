@@ -145,10 +145,26 @@ func (m *Manager) detectTorrentChanges(provider string, remoteTorrentsByHash map
 
 			if placementOnDebrid {
 				if !onRemote {
+					// Skip if intentionally removed by slot strategy
+					if oldPlacement.RemovedAt != nil {
+						continue
+					}
 					entry.RemoveProvider(provider, nil)
 					if len(entry.Providers) == 0 {
 						torrentsToDelete = append(torrentsToDelete, entry.InfoHash)
 					} else {
+						torrentsToUpdate = append(torrentsToUpdate, entry)
+					}
+				} else if oldPlacement.RemovedAt != nil {
+					// Torrent reappeared on provider — re-delete if alldebrid slot strategy is remove_after_add
+					client := m.ProviderClient(provider)
+					if client != nil && client.Config().Provider == "alldebrid" && client.Config().SlotStrategy == "remove_after_add" {
+						if err := client.DeleteTorrent(currentTorrent.Id); err != nil {
+							m.logger.Warn().Err(err).Str("provider", provider).Str("name", entry.Name).Msg("Failed to re-delete torrent for slot strategy")
+						}
+					} else {
+						oldPlacement.RemovedAt = nil
+						entry.AddTorrentProvider(currentTorrent)
 						torrentsToUpdate = append(torrentsToUpdate, entry)
 					}
 				} else if oldPlacement.NeedsUpdate(currentTorrent) {
@@ -485,4 +501,3 @@ func isComplete(files map[string]types.File) bool {
 	}
 	return true
 }
-

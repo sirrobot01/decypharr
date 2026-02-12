@@ -287,9 +287,24 @@ class ConfigManager {
             });
         }
 
+        // Toggle slot_strategy visibility based on provider
+        const providerSelect = newDebrid.querySelector(`[name="debrid[${this.debridCount}].provider"]`);
+        const slotStrategyField = newDebrid.querySelector('.slot-strategy-field');
+        if (providerSelect && slotStrategyField) {
+            const toggleSlotStrategy = () => {
+                slotStrategyField.style.display = providerSelect.value === 'alldebrid' ? '' : 'none';
+            };
+            providerSelect.addEventListener('change', toggleSlotStrategy);
+            toggleSlotStrategy();
+        }
+
         // Populate data if provided
         if (Object.keys(data).length > 0) {
             this.populateDebridData(this.debridCount, data);
+            // Re-check slot strategy visibility after populating data
+            if (providerSelect && slotStrategyField) {
+                slotStrategyField.style.display = providerSelect.value === 'alldebrid' ? '' : 'none';
+            }
         }
 
         // Initialize directory management
@@ -456,10 +471,22 @@ class ConfigManager {
                                 <label class="label" for="debrid[${index}].minimum_free_slot">
                                     <span class=" font-medium">Minimum Free Slot</span>
                                 </label>
-                                <input type="number" class="input w-full" 
-                                       name="debrid[${index}].minimum_free_slot" id="debrid[${index}].minimum_free_slot" 
+                                <input type="number" class="input w-full"
+                                       name="debrid[${index}].minimum_free_slot" id="debrid[${index}].minimum_free_slot"
                                        placeholder="1" value="1">
                                 <span class="text-sm opacity-70">Minimum free slot for this debrid</span>
+                            </div>
+                            <div class="slot-strategy-field" style="display:none;">
+                                <label class="label" for="debrid[${index}].slot_strategy">
+                                    <span class=" font-medium">Slot Strategy</span>
+                                </label>
+                                <select class="select w-full"
+                                        name="debrid[${index}].slot_strategy" id="debrid[${index}].slot_strategy">
+                                    <option value="">None</option>
+                                    <option value="remove_after_add">Remove After Add</option>
+                                    <option value="remove_oldest">Remove Oldest</option>
+                                </select>
+                                <span class="text-sm opacity-70">Strategy for managing torrent slots when limit is reached</span>
                             </div>
                         </div>
                     </div>
@@ -1181,7 +1208,8 @@ class ConfigManager {
                 download_uncached: document.querySelector(`[name="debrid[${i}].download_uncached"]`).checked,
                 unpack_rar: document.querySelector(`[name="debrid[${i}].unpack_rar"]`).checked,
                 add_samples: document.querySelector(`[name="debrid[${i}].add_samples"]`).checked,
-                user_agent: document.querySelector(`[name="debrid[${i}].user_agent"]`).value
+                user_agent: document.querySelector(`[name="debrid[${i}].user_agent"]`).value,
+                slot_strategy: document.querySelector(`[name="debrid[${i}].slot_strategy"]`)?.value || ""
             };
 
             // Handle download API keys
