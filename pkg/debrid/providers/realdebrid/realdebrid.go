@@ -458,7 +458,7 @@ func (r *RealDebrid) IsAvailable(hashes []string) map[string]bool {
 }
 
 func (r *RealDebrid) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
-	if t.Magnet.IsTorrent() {
+	if r.config.ShouldUseTorrentFile() && t.Magnet.IsTorrent() {
 		return r.addTorrent(t)
 	}
 	return r.addMagnet(t)
@@ -485,7 +485,6 @@ func (r *RealDebrid) addTorrent(t *types.Torrent) (*types.Torrent, error) {
 
 	return t, nil
 }
-
 func (r *RealDebrid) addMagnet(t *types.Torrent) (*types.Torrent, error) {
 	var data AddMagnetSchema
 

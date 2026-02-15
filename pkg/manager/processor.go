@@ -346,6 +346,13 @@ func (m *Manager) SendToDebrid(ctx context.Context, importRequest *ImportRequest
 			Str("Action", string(importRequest.Action)).
 			Msg("Processing torrent")
 
+		if config.Get().AlwaysRmTrackerUrls && debridTorrent.Magnet.IsTorrent() {
+			if sanitized, err := utils.GetTorrentInfo(debridTorrent.Magnet.File, true); err == nil {
+				debridTorrent.Magnet.File = sanitized.File
+				debridTorrent.Magnet.Link = sanitized.Link
+			}
+		}
+
 		dbt, err := db.SubmitMagnet(debridTorrent)
 		if err != nil || dbt == nil || dbt.Id == "" {
 			errs = append(errs, err)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"path"
@@ -181,6 +182,45 @@ func (tb *Torbox) doDelete(endpoint string, payload interface{}) (*http.Response
 	return resp, nil
 }
 
+// doPostMultipart performs a POST request with multipart file upload
+func (tb *Torbox) doPostMultipart(endpoint string, fileData []byte, filename string, downloadUncached bool, result interface{}) (*http.Response, error) {
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	part, err := writer.CreateFormFile("file", filename)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := part.Write(fileData); err != nil {
+		return nil, err
+	}
+
+	if !downloadUncached {
+		_ = writer.WriteField("add_only_if_cached", "true")
+	}
+
+	writer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, tb.Host+endpoint, &buf)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := tb.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
+		if err := json.ConfigDefault.NewDecoder(resp.Body).Decode(result); err != nil {
+			return resp, err
+		}
+	}
+	return resp, nil
+}
+
 func (tb *Torbox) IsAvailable(hashes []string) map[string]bool {
 	result := make(map[string]bool)
 
@@ -224,21 +264,30 @@ func (tb *Torbox) IsAvailable(hashes []string) map[string]bool {
 func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
 	var data AddMagnetResponse
 
-	formData := map[string]string{
-		"magnet": torrent.Magnet.Link,
-	}
-	if !torrent.DownloadUncached {
-		formData["add_only_if_cached"] = "true"
+	if tb.config.ShouldUseTorrentFile() && torrent.Magnet.IsTorrent() {
+		resp, err := tb.doPostMultipart("/api/torrents/createtorrent", torrent.Magnet.File, "file.torrent", torrent.DownloadUncached, &data)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("torbox API error: Status: %d", resp.StatusCode)
+		}
+	} else {
+		formData := map[string]string{
+			"magnet": torrent.Magnet.Link,
+		}
+		if !torrent.DownloadUncached {
+			formData["add_only_if_cached"] = "true"
+		}
+		resp, err := tb.doPostForm("/api/torrents/createtorrent", formData, &data)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("torbox API error: Status: %d", resp.StatusCode)
+		}
 	}
 
-	resp, err := tb.doPostForm("/api/torrents/createtorrent", formData, &data)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("torbox API error: Status: %d", resp.StatusCode)
-	}
 	if data.Data == nil {
 		return nil, fmt.Errorf("error adding torrent")
 	}

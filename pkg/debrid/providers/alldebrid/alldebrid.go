@@ -1,9 +1,11 @@
 package alldebrid
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -146,6 +148,39 @@ func (ad *AllDebrid) doRequest(endpoint string, queryParams map[string]string, r
 	return resp, nil
 }
 
+// doPostFile performs a POST request with multipart file upload
+func (ad *AllDebrid) doPostFile(endpoint string, fileData []byte, filename string, result interface{}) (*http.Response, error) {
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	part, err := writer.CreateFormFile("files[]", filename)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := part.Write(fileData); err != nil {
+		return nil, err
+	}
+	writer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, ad.Host+endpoint, &buf)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := ad.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
+		if err := json.ConfigDefault.NewDecoder(resp.Body).Decode(result); err != nil {
+			return resp, err
+		}
+	}
+	return resp, nil
+}
+
 func (ad *AllDebrid) IsAvailable(hashes []string) map[string]bool {
 	result := make(map[string]bool)
 	// AllDebrid does not support checking cached infohashes
@@ -153,8 +188,33 @@ func (ad *AllDebrid) IsAvailable(hashes []string) map[string]bool {
 }
 
 func (ad *AllDebrid) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
-	var data UploadMagnetResponse
+	// Upload .torrent file if available and enabled
+	if ad.config.ShouldUseTorrentFile() && torrent.Magnet.IsTorrent() {
+		// /magnet/upload/file returns data.files[] (not data.magnets[])
+		var data struct {
+			Status string `json:"status"`
+			Data   struct {
+				Files []struct {
+					ID int `json:"id"`
+				} `json:"files"`
+			} `json:"data"`
+		}
+		resp, err := ad.doPostFile("/magnet/upload/file", torrent.Magnet.File, "file.torrent", &data)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("alldebrid API error: Status: %d", resp.StatusCode)
+		}
+		if len(data.Data.Files) == 0 {
+			return nil, fmt.Errorf("error adding torrent. No files returned")
+		}
+		torrent.Id = strconv.Itoa(data.Data.Files[0].ID)
+		torrent.Added = time.Now()
+		return torrent, nil
+	}
 
+	var data UploadMagnetResponse
 	resp, err := ad.doRequest("/magnet/upload", map[string]string{"magnets[]": torrent.Magnet.Link}, &data)
 	if err != nil {
 		return nil, err

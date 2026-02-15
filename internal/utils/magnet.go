@@ -45,6 +45,56 @@ func stripTrackersFromMagnet(mi metainfo.Magnet, fileType string) metainfo.Magne
 	return mi
 }
 
+func stripTrackersFromTorrentFile(data []byte) ([]byte, error) {
+	mi, err := metainfo.Load(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	mi.Announce = ""
+	mi.AnnounceList = nil
+	var buf bytes.Buffer
+	if err := mi.Write(&buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// GetTorrentInfo parses raw .torrent file bytes and optionally removes tracker URLs.
+func GetTorrentInfo(torrentData []byte, rmTrackerUrls bool) (*Magnet, error) {
+	mi, err := metainfo.Load(bytes.NewReader(torrentData))
+	if err != nil {
+		return nil, err
+	}
+	hash := mi.HashInfoBytes()
+	infoHash := hash.HexString()
+	info, err := mi.UnmarshalInfo()
+	if err != nil {
+		return nil, err
+	}
+
+	finalTorrentData := torrentData
+	if rmTrackerUrls {
+		finalTorrentData, err = stripTrackersFromTorrentFile(torrentData)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	finalMI, err := metainfo.Load(bytes.NewReader(finalTorrentData))
+	if err != nil {
+		return nil, err
+	}
+	magnetMeta := finalMI.Magnet(&hash, &info)
+
+	return &Magnet{
+		InfoHash: infoHash,
+		Name:     info.Name,
+		Size:     info.Length,
+		Link:     magnetMeta.String(),
+		File:     finalTorrentData,
+	}, nil
+}
+
 func GetMagnetFromFile(file io.Reader, filePath string, rmTrackerUrls bool) (*Magnet, error) {
 	var (
 		m   *Magnet
@@ -81,30 +131,7 @@ func GetMagnetFromUrl(url string, rmTrackerUrls bool) (*Magnet, error) {
 }
 
 func GetMagnetFromBytes(torrentData []byte, rmTrackerUrls bool) (*Magnet, error) {
-	// Create a scanner to read the file line by line
-	mi, err := metainfo.Load(bytes.NewReader(torrentData))
-	if err != nil {
-		return nil, err
-	}
-
-	hash := mi.HashInfoBytes()
-	infoHash := hash.HexString()
-	info, err := mi.UnmarshalInfo()
-	if err != nil {
-		return nil, err
-	}
-	magnetMeta := mi.Magnet(&hash, &info)
-	if rmTrackerUrls {
-		magnetMeta = stripTrackersFromMagnet(magnetMeta, "torrent file")
-	}
-	magnet := &Magnet{
-		InfoHash: infoHash,
-		Name:     info.Name,
-		Size:     info.Length,
-		Link:     magnetMeta.String(),
-		File:     torrentData,
-	}
-	return magnet, nil
+	return GetTorrentInfo(torrentData, rmTrackerUrls)
 }
 
 func ReadMagnetFile(file io.Reader) string {

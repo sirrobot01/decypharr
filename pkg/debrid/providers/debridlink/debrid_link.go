@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strings"
@@ -282,21 +283,24 @@ func (dl *DebridLink) UpdateTorrent(t *types.Torrent) error {
 	return nil
 }
 
-func (dl *DebridLink) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
-	payload := map[string]string{"url": t.Magnet.Link}
-	var res SubmitTorrentInfo
-
-	dt, err := json.Marshal(payload)
+// doPostMultipart performs a POST request with multipart file upload.
+func (dl *DebridLink) doPostMultipart(endpoint string, fileData []byte, filename string, result interface{}) (*http.Response, error) {
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	part, err := writer.CreateFormFile("file", filename)
 	if err != nil {
 		return nil, err
 	}
-	body := bytes.NewReader(dt)
+	if _, err := part.Write(fileData); err != nil {
+		return nil, err
+	}
+	writer.Close()
 
-	req, err := http.NewRequest(http.MethodPost, dl.Host+"/seedbox/add", body)
+	req, err := http.NewRequest(http.MethodPost, dl.Host+endpoint, &buf)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	resp, err := dl.client.Do(req)
 	if err != nil {
@@ -304,9 +308,50 @@ func (dl *DebridLink) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("debridlink API error: Status: %d", resp.StatusCode)
+	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
+		if err := json.ConfigDefault.NewDecoder(resp.Body).Decode(result); err != nil {
+			return resp, err
+		}
 	}
+	return resp, nil
+}
+
+func (dl *DebridLink) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
+	var res SubmitTorrentInfo
+
+	if dl.config.ShouldUseTorrentFile() && t.Magnet.IsTorrent() {
+		resp, err := dl.doPostMultipart("/seedbox/add", t.Magnet.File, "file.torrent", &res)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("debridlink API error: Status: %d", resp.StatusCode)
+		}
+	} else {
+		payload := map[string]string{"url": t.Magnet.Link}
+		dt, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		body := bytes.NewReader(dt)
+
+		req, err := http.NewRequest(http.MethodPost, dl.Host+"/seedbox/add", body)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := dl.client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("debridlink API error: Status: %d", resp.StatusCode)
+		}
+	}
+
 	if !res.Success || res.Value == nil {
 		return nil, fmt.Errorf("error adding torrent")
 	}

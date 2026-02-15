@@ -242,6 +242,13 @@ func (f *Fixer) MoveTorrent(entry *storage.Entry, debridName string, reinsert bo
 		DownloadUncached: false,
 	}
 
+	if config.Get().AlwaysRmTrackerUrls && newDebridTorrent.Magnet.IsTorrent() {
+		if sanitized, err := utils.GetTorrentInfo(newDebridTorrent.Magnet.File, true); err == nil {
+			newDebridTorrent.Magnet.File = sanitized.File
+			newDebridTorrent.Magnet.Link = sanitized.Link
+		}
+	}
+
 	newDebridTorrent, err = client.SubmitMagnet(newDebridTorrent)
 	if err != nil {
 		return false, fmt.Errorf("failed to submit magnet: %w", err)
