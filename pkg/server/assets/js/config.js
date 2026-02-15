@@ -517,11 +517,22 @@ class ConfigManager {
 
                     <div>
                         <label class="label cursor-pointer justify-start gap-2">
-                            <input type="checkbox" class="checkbox checkbox-primary" 
+                            <input type="checkbox" class="checkbox checkbox-primary"
                                    name="debrid[${index}].unpack_rar" id="debrid[${index}].unpack_rar">
                              <div>
                                 <span class="font-medium">Unpack RAR</span>
                                 <div class="label-text-alt">Preprocess RAR files</div>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div>
+                        <label class="label cursor-pointer justify-start gap-2">
+                            <input type="checkbox" class="checkbox checkbox-primary"
+                                   name="debrid[${index}].use_torrent_file" id="debrid[${index}].use_torrent_file" checked>
+                            <div>
+                                <span class="font-medium">Use Torrent File</span>
+                                <div class="label-text-alt">Send .torrent file to provider instead of magnet link when available</div>
                             </div>
                         </label>
                     </div>
@@ -1185,6 +1196,7 @@ class ConfigManager {
                 download_uncached: document.querySelector(`[name="debrid[${i}].download_uncached"]`).checked,
                 unpack_rar: document.querySelector(`[name="debrid[${i}].unpack_rar"]`).checked,
                 add_samples: document.querySelector(`[name="debrid[${i}].add_samples"]`).checked,
+                use_torrent_file: document.querySelector(`[name="debrid[${i}].use_torrent_file"]`).checked,
                 user_agent: document.querySelector(`[name="debrid[${i}].user_agent"]`).value
             };
 
@@ -1699,5 +1711,4 @@ class ConfigManager {
         `;
     }
 }
-
 

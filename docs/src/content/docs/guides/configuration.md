@@ -58,7 +58,8 @@ Array of Debrid services:
       "download_links_refresh_interval": "10m",
       "auto_expire_links_after": "24h",
       "proxy": "",
-      "unpack_rar": true
+      "unpack_rar": true,
+      "use_torrent_file": true
     }
   ]
 }
@@ -84,6 +85,7 @@ Array of Debrid services:
 | `torrents_refresh_interval` | string | How often to refresh torrent list | `5m` |
 | `download_links_refresh_interval` | string | How often to refresh download links | `10m` |
 | `auto_expire_links_after` | string | Auto-remove links after duration | `24h` |
+| `use_torrent_file` | bool | Send .torrent file to provider instead of magnet link when available | `true` |
 | `user_agent` | string | Custom User-Agent header | Default |
 
 ## Usenet
