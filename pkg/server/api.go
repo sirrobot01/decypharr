@@ -78,7 +78,7 @@ func (s *Server) handleAddContent(w http.ResponseWriter, r *http.Request) {
 	if urls := r.FormValue("urls"); urls != "" {
 		for _, u := range strings.Split(urls, "\n") {
 			if trimmed := strings.TrimSpace(u); trimmed != "" {
-				magnet, err := utils.GetMagnetFromUrl(trimmed, rmTrackerUrls)
+				magnet, err := utils.GetMagnetFromUrl(trimmed)
 				if err != nil {
 					tasks = append(tasks, addTask{
 						taskType: "error",
@@ -103,7 +103,7 @@ func (s *Server) handleAddContent(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			magnet, err := utils.GetMagnetFromFile(file, fileHeader.Filename, rmTrackerUrls)
+			magnet, err := utils.GetMagnetFromFile(file, fileHeader.Filename)
 			if err != nil {
 				tasks = append(tasks, addTask{
 					taskType: "error",
@@ -162,7 +162,7 @@ func (s *Server) handleAddContent(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case "torrent":
-			importReq := manager.NewTorrentRequest(debridName, downloadFolder, task.magnet, _arr, config.DownloadAction(action), downloadUncached, callbackUrl, manager.ImportTypeAPI, skipMultiSeason)
+			importReq := manager.NewTorrentRequest(debridName, downloadFolder, task.magnet, _arr, config.DownloadAction(action), downloadUncached, rmTrackerUrls, callbackUrl, manager.ImportTypeAPI, skipMultiSeason)
 			if err := s.manager.AddNewTorrent(ctx, importReq); err != nil {
 				s.logger.Error().Err(err).Str("source", task.source).Msg("Failed to add torrent")
 				importReq.Error = err.Error()

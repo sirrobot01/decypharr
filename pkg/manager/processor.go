@@ -155,7 +155,7 @@ func (m *Manager) processQueuedTorrent(entry *storage.Entry) {
 		return
 	}
 
-	magnet, err := utils.GetMagnetInfo(entry.Magnet, m.config.AlwaysRmTrackerUrls)
+	magnet, err := utils.GetMagnetInfo(entry.Magnet, false)
 	if err != nil {
 		magnet = utils.ConstructMagnet(entry.InfoHash, entry.Name)
 	}
@@ -346,10 +346,17 @@ func (m *Manager) SendToDebrid(ctx context.Context, importRequest *ImportRequest
 			Str("Action", string(importRequest.Action)).
 			Msg("Processing torrent")
 
-		if config.Get().AlwaysRmTrackerUrls && debridTorrent.Magnet.IsTorrent() {
-			if sanitized, err := utils.GetTorrentInfo(debridTorrent.Magnet.File, true); err == nil {
-				debridTorrent.Magnet.File = sanitized.File
-				debridTorrent.Magnet.Link = sanitized.Link
+		if importRequest.RmTrackerUrls || config.Get().AlwaysRmTrackerUrls {
+			if debridTorrent.Magnet.Link != "" {
+				if sanitized, err := utils.GetMagnetInfo(debridTorrent.Magnet.Link, true); err == nil {
+					debridTorrent.Magnet.Link = sanitized.Link
+				}
+			}
+			if debridTorrent.Magnet.IsTorrent() {
+				if sanitized, err := utils.GetTorrentInfo(debridTorrent.Magnet.File, true); err == nil {
+					debridTorrent.Magnet.File = sanitized.File
+					debridTorrent.Magnet.Link = sanitized.Link
+				}
 			}
 		}
 

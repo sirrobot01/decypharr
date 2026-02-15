@@ -16,12 +16,12 @@ import (
 
 // All torrent-related helpers goes here
 func (q *QBit) addMagnet(ctx context.Context, url string, arr *arr.Arr, debrid string, action config.DownloadAction, callbackURL string, rmTrackerUrls, skipMultiSeason bool) error {
-	magnet, err := utils.GetMagnetFromUrl(url, rmTrackerUrls)
+	magnet, err := utils.GetMagnetFromUrl(url)
 	if err != nil {
 		return fmt.Errorf("error parsing magnet link: %w", err)
 	}
 
-	importReq := manager.NewTorrentRequest(debrid, q.downloadFolder, magnet, arr, action, arr.DownloadUncached, callbackURL, manager.ImportTypeQBit, skipMultiSeason)
+	importReq := manager.NewTorrentRequest(debrid, q.downloadFolder, magnet, arr, action, arr.DownloadUncached, rmTrackerUrls, callbackURL, manager.ImportTypeQBit, skipMultiSeason)
 
 	err = q.manager.AddNewTorrent(ctx, importReq)
 	if err != nil {
@@ -34,11 +34,11 @@ func (q *QBit) addTorrent(ctx context.Context, fileHeader *multipart.FileHeader,
 	file, _ := fileHeader.Open()
 	defer file.Close()
 	var reader io.Reader = file
-	magnet, err := utils.GetMagnetFromFile(reader, fileHeader.Filename, rmTrackerUrls)
+	magnet, err := utils.GetMagnetFromFile(reader, fileHeader.Filename)
 	if err != nil {
 		return fmt.Errorf("error reading file: %s \n %w", fileHeader.Filename, err)
 	}
-	importReq := manager.NewTorrentRequest(debrid, q.downloadFolder, magnet, arr, action, arr.DownloadUncached, callbackURL, manager.ImportTypeQBit, skipMultiSeason)
+	importReq := manager.NewTorrentRequest(debrid, q.downloadFolder, magnet, arr, action, arr.DownloadUncached, rmTrackerUrls, callbackURL, manager.ImportTypeQBit, skipMultiSeason)
 	err = q.manager.AddNewTorrent(ctx, importReq)
 	if err != nil {
 		return fmt.Errorf("failed to process torrent: %w", err)
