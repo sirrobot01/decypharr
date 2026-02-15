@@ -64,6 +64,13 @@ func (m *Manager) AddNewTorrent(ctx context.Context, importReq *ImportRequest) e
 	}
 	torrent.ContentPath = torrent.SymlinkPath()
 
+	// Save .torrent file to disk if available (for re-insertion by the Fixer)
+	if importReq.Magnet.IsTorrent() {
+		if err := storage.SaveTorrentFile(importReq.Magnet.InfoHash, importReq.Magnet.File); err != nil {
+			m.logger.Warn().Err(err).Str("name", torrent.Name).Msg("Failed to save .torrent file")
+		}
+	}
+
 	// Add to queue
 	if err := m.queue.Add(torrent); err != nil {
 		return fmt.Errorf("failed to add torrent to queue: %w", err)

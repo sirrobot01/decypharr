@@ -199,6 +199,9 @@ func (s *Storage) Delete(infohash string) error {
 	if err == nil && entry != nil {
 		s.removeFromEntryItem(entry)
 	}
+	if err := DeleteTorrentFile(infohash); err != nil {
+		return err
+	}
 	return s.entries.Delete(infohash)
 }
 
