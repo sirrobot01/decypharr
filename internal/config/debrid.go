@@ -24,6 +24,7 @@ type Debrid struct {
 	Workers                      int      `json:"workers,omitempty"`
 	AutoExpireLinksAfter         string   `json:"auto_expire_links_after,omitempty"`
 	UserAgent                    string   `json:"user_agent,omitempty"`
+	UseTorrentFile               *bool    `json:"use_torrent_file,omitempty"`
 
 	// Folder
 	Folder        string `json:"folder,omitempty"`          // Deprecated. Use Mount MountPath instead.
@@ -67,8 +68,15 @@ func (c *Config) updateDebrid(d Debrid) Debrid {
 	if d.AutoExpireLinksAfter == "" {
 		d.AutoExpireLinksAfter = DefaultAutoExpireLinksAfter
 	}
-
+	if d.UseTorrentFile == nil {
+		t := true
+		d.UseTorrentFile = &t
+	}
 	return d
+}
+
+func (d Debrid) ShouldUseTorrentFile() bool {
+	return d.UseTorrentFile == nil || *d.UseTorrentFile
 }
 
 func validateDebrids(debrids []Debrid) error {
