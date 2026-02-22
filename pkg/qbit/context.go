@@ -119,11 +119,10 @@ func getUsernameAndPassword(r *http.Request) (string, string, error) {
 	if err == nil && username != "" {
 		return username, password, err
 	}
-	// Try to get from cookie
-	sid, err := r.Cookie("sid")
+	// Try to get from cookie (prefer SID, but keep sid for backward compatibility)
+	sid, err := r.Cookie("SID")
 	if err != nil {
-		// try SID
-		sid, err = r.Cookie("SID")
+		sid, err = r.Cookie("sid")
 	}
 	if err == nil {
 		username, password, err = extractFromSID(sid.Value)

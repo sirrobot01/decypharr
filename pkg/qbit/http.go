@@ -22,7 +22,7 @@ func (q *QBit) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if cfg.UseAuth {
 		cookie := &http.Cookie{
-			Name:     "sid",
+			Name:     "SID",
 			Value:    createSID(a.Host, a.Token),
 			Path:     "/",
 			SameSite: http.SameSiteNoneMode,
