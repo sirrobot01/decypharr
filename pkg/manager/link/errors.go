@@ -133,6 +133,8 @@ func ErrorCodeToLinkError(code string) *Error {
 		return NewPermanentError(ErrLinkNotFound, code)
 	case "bandwidth_exceeded":
 		return NewAccountError(ErrBandwidthExceeded, code)
+	case "bytes_limit_reached":
+		return NewAccountError(ErrBandwidthExceeded, code)
 	case "link_expired":
 		return NewRefetchableError(ErrLinkExpired, code)
 	case "file_not_available":
