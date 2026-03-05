@@ -147,6 +147,8 @@ func ErrorCodeToLinkError(code string) *Error {
 		return NewPermanentError(Err404, code)
 	case "429":
 		return NewRetryableError(Err429, code)
+	case "too_many_attempts":
+    	return NewRetryableError(Err429, code)
 	case "503":
 		return NewRetryableError(Err503, code)
 	default:
