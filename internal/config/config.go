@@ -352,10 +352,14 @@ func (c *Config) updateDebrid(d Debrid) Debrid {
 	workers := runtime.NumCPU() * 50
 	perDebrid := workers / len(c.Debrids)
 
+	d.APIKey = strings.TrimSpace(d.APIKey)
+
 	var downloadKeys []string
 
 	if len(d.DownloadAPIKeys) > 0 {
-		downloadKeys = d.DownloadAPIKeys
+		for _, key := range d.DownloadAPIKeys {
+			downloadKeys = append(downloadKeys, strings.TrimSpace(key))
+		}
 	} else {
 		// If no download API keys are specified, use the main API key
 		downloadKeys = []string{d.APIKey}
