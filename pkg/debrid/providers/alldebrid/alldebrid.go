@@ -182,81 +182,110 @@ func (ad *AllDebrid) flattenFiles(torrentId string, files []MagnetFile, parentPa
 func (ad *AllDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 	url := fmt.Sprintf("%s/magnet/status?id=%s", ad.Host, torrentId)
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	resp, err := ad.client.MakeRequest(req)
-	if err != nil {
-		return nil, err
+	
+	var lastErr error
+	for _, acc := range ad.accountsManager.All() {
+		resp, err := acc.Client().MakeRequest(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var res TorrentInfoResponse
+		err = json.Unmarshal(resp, &res)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if res.Data == nil {
+			lastErr = fmt.Errorf("magnet not found on account")
+			continue
+		}
+		
+		data := res.Data.Magnets
+		status := getAlldebridStatus(data.StatusCode)
+		name := data.Filename
+		t := &types.Torrent{
+			Id:               strconv.Itoa(data.Id),
+			Name:             name,
+			Status:           status,
+			Filename:         name,
+			OriginalFilename: name,
+			Files:            make(map[string]types.File),
+			InfoHash:         data.Hash,
+			Debrid:           ad.name,
+			MountPath:        ad.MountPath,
+			Added:            time.Unix(data.CompletionDate, 0).Format(time.RFC3339),
+		}
+		t.Bytes = data.Size
+		t.Seeders = data.Seeders
+		if status == "downloaded" {
+			t.Progress = 100
+			index := -1
+			files := ad.flattenFiles(t.Id, data.Files, "", &index)
+			t.Files = files
+		} else {
+			t.Progress = float64(data.Downloaded) / float64(data.Size) * 100
+			t.Speed = data.DownloadSpeed
+		}
+		return t, nil
 	}
-	var res TorrentInfoResponse
-	err = json.Unmarshal(resp, &res)
-	if err != nil {
-		ad.logger.Error().Err(err).Msgf("Error unmarshalling torrent info")
-		return nil, err
+	if lastErr != nil {
+		ad.logger.Error().Err(lastErr).Msgf("Error grabbing torrent info across all accounts")
 	}
-	data := res.Data.Magnets
-	status := getAlldebridStatus(data.StatusCode)
-	name := data.Filename
-	t := &types.Torrent{
-		Id:               strconv.Itoa(data.Id),
-		Name:             name,
-		Status:           status,
-		Filename:         name,
-		OriginalFilename: name,
-		Files:            make(map[string]types.File),
-		InfoHash:         data.Hash,
-		Debrid:           ad.name,
-		MountPath:        ad.MountPath,
-		Added:            time.Unix(data.CompletionDate, 0).Format(time.RFC3339),
-	}
-	t.Bytes = data.Size
-	t.Seeders = data.Seeders
-	if status == "downloaded" {
-		t.Progress = 100
-		index := -1
-		files := ad.flattenFiles(t.Id, data.Files, "", &index)
-		t.Files = files
-	} else {
-		t.Progress = float64(data.Downloaded) / float64(data.Size) * 100
-		t.Speed = data.DownloadSpeed
-	}
-	return t, nil
+	return nil, lastErr
 }
 
 func (ad *AllDebrid) UpdateTorrent(t *types.Torrent) error {
 	url := fmt.Sprintf("%s/magnet/status?id=%s", ad.Host, t.Id)
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	resp, err := ad.client.MakeRequest(req)
-	if err != nil {
-		return err
+	
+	var lastErr error
+	for _, acc := range ad.accountsManager.All() {
+		resp, err := acc.Client().MakeRequest(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var res TorrentInfoResponse
+		err = json.Unmarshal(resp, &res)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if res.Data == nil {
+			lastErr = fmt.Errorf("magnet not found on account")
+			continue
+		}
+		
+		data := res.Data.Magnets
+		status := getAlldebridStatus(data.StatusCode)
+		name := data.Filename
+		t.Name = name
+		t.Status = status
+		t.Filename = name
+		t.OriginalFilename = name
+		t.Folder = name
+		t.MountPath = ad.MountPath
+		t.Debrid = ad.name
+		t.Bytes = data.Size
+		t.Seeders = data.Seeders
+		t.Added = time.Unix(data.CompletionDate, 0).Format(time.RFC3339)
+		if status == "downloaded" {
+			t.Progress = 100
+			index := -1
+			files := ad.flattenFiles(t.Id, data.Files, "", &index)
+			t.Files = files
+		} else {
+			t.Progress = float64(data.Downloaded) / float64(data.Size) * 100
+			t.Speed = data.DownloadSpeed
+		}
+		return nil
 	}
-	var res TorrentInfoResponse
-	err = json.Unmarshal(resp, &res)
-	if err != nil {
-		ad.logger.Error().Err(err).Msgf("Error unmarshalling torrent info")
-		return err
+	
+	if lastErr != nil {
+		ad.logger.Error().Err(lastErr).Msgf("Error unmarshalling torrent info across all accounts")
 	}
-	data := res.Data.Magnets
-	status := getAlldebridStatus(data.StatusCode)
-	name := data.Filename
-	t.Name = name
-	t.Status = status
-	t.Filename = name
-	t.OriginalFilename = name
-	t.Folder = name
-	t.MountPath = ad.MountPath
-	t.Debrid = ad.name
-	t.Bytes = data.Size
-	t.Seeders = data.Seeders
-	t.Added = time.Unix(data.CompletionDate, 0).Format(time.RFC3339)
-	if status == "downloaded" {
-		t.Progress = 100
-		index := -1
-		files := ad.flattenFiles(t.Id, data.Files, "", &index)
-		t.Files = files
-	} else {
-		t.Progress = float64(data.Downloaded) / float64(data.Size) * 100
-		t.Speed = data.DownloadSpeed
-	}
-	return nil
+	return lastErr
 }
 
 func (ad *AllDebrid) CheckStatus(torrent *types.Torrent) (*types.Torrent, error) {
@@ -351,69 +380,98 @@ func (ad *AllDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (types.
 	query.Add("link", file.Link)
 	url += "?" + query.Encode()
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	resp, err := ad.client.MakeRequest(req)
-	if err != nil {
-		return types.DownloadLink{}, err
-	}
-	var data DownloadLink
-	if err = json.Unmarshal(resp, &data); err != nil {
-		return types.DownloadLink{}, err
-	}
+	
+	var lastErr error
+	accounts := ad.accountsManager.Active()
+	for _, acc := range accounts {
+		resp, err := acc.Client().MakeRequest(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var data DownloadLink
+		if err = json.Unmarshal(resp, &data); err != nil {
+			lastErr = err
+			continue
+		}
 
-	if data.Error != nil {
-		return types.DownloadLink{}, fmt.Errorf("error getting download link: %s", data.Error.Message)
+		if data.Error != nil {
+			lastErr = fmt.Errorf("error getting download link: %s", data.Error.Message)
+			continue
+		}
+		link := data.Data.Link
+		if link == "" {
+			lastErr = fmt.Errorf("download link is empty")
+			continue
+		}
+		now := time.Now()
+		dl := types.DownloadLink{
+			Token:        acc.Token,
+			Link:         file.Link,
+			DownloadLink: link,
+			Id:           data.Data.Id,
+			Size:         file.Size,
+			Filename:     file.Name,
+			Generated:    now,
+			ExpiresAt:    now.Add(ad.autoExpiresLinksAfter),
+		}
+		// Set the download link in the specific account
+		acc.StoreDownloadLink(dl)
+		return dl, nil
 	}
-	link := data.Data.Link
-	if link == "" {
-		return types.DownloadLink{}, fmt.Errorf("download link is empty")
+	
+	if lastErr != nil {
+		return types.DownloadLink{}, lastErr
 	}
-	now := time.Now()
-	dl := types.DownloadLink{
-		Token:        ad.APIKey,
-		Link:         file.Link,
-		DownloadLink: link,
-		Id:           data.Data.Id,
-		Size:         file.Size,
-		Filename:     file.Name,
-		Generated:    now,
-		ExpiresAt:    now.Add(ad.autoExpiresLinksAfter),
-	}
-	// Set the download link in the account
-	ad.accountsManager.StoreDownloadLink(dl)
-	return dl, nil
+	return types.DownloadLink{}, fmt.Errorf("no active accounts available to unlock download link")
 }
 
 func (ad *AllDebrid) GetTorrents() ([]*types.Torrent, error) {
 	url := fmt.Sprintf("%s/magnet/status?status=ready", ad.Host)
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	resp, err := ad.client.MakeRequest(req)
-	torrents := make([]*types.Torrent, 0)
-	if err != nil {
-		return torrents, err
+	
+	allTorrents := make([]*types.Torrent, 0)
+	var lastErr error
+	
+	for _, acc := range ad.accountsManager.All() {
+		resp, err := acc.Client().MakeRequest(req)
+		if err != nil {
+			ad.logger.Error().Err(err).Msgf("Error fetching torrents for account: %s", utils.Mask(acc.Token))
+			lastErr = err
+			continue
+		}
+		var res TorrentsListResponse
+		err = json.Unmarshal(resp, &res)
+		if err != nil {
+			ad.logger.Error().Err(err).Msgf("Error unmarshalling torrent info for account: %s", utils.Mask(acc.Token))
+			lastErr = err
+			continue
+		}
+		if res.Data == nil {
+			continue
+		}
+		for _, magnet := range res.Data.Magnets {
+			allTorrents = append(allTorrents, &types.Torrent{
+				Id:               strconv.Itoa(magnet.Id),
+				Name:             magnet.Filename,
+				Bytes:            magnet.Size,
+				Status:           getAlldebridStatus(magnet.StatusCode),
+				Filename:         magnet.Filename,
+				OriginalFilename: magnet.Filename,
+				Files:            make(map[string]types.File),
+				InfoHash:         magnet.Hash,
+				Debrid:           ad.name,
+				MountPath:        ad.MountPath,
+				Added:            time.Unix(magnet.CompletionDate, 0).Format(time.RFC3339),
+			})
+		}
 	}
-	var res TorrentsListResponse
-	err = json.Unmarshal(resp, &res)
-	if err != nil {
-		ad.logger.Error().Err(err).Msgf("Error unmarshalling torrent info")
-		return torrents, err
-	}
-	for _, magnet := range res.Data.Magnets {
-		torrents = append(torrents, &types.Torrent{
-			Id:               strconv.Itoa(magnet.Id),
-			Name:             magnet.Filename,
-			Bytes:            magnet.Size,
-			Status:           getAlldebridStatus(magnet.StatusCode),
-			Filename:         magnet.Filename,
-			OriginalFilename: magnet.Filename,
-			Files:            make(map[string]types.File),
-			InfoHash:         magnet.Hash,
-			Debrid:           ad.name,
-			MountPath:        ad.MountPath,
-			Added:            time.Unix(magnet.CompletionDate, 0).Format(time.RFC3339),
-		})
+	
+	if len(allTorrents) == 0 && lastErr != nil {
+		return allTorrents, lastErr
 	}
 
-	return torrents, nil
+	return allTorrents, nil
 }
 
 func (ad *AllDebrid) RefreshDownloadLinks() error {
