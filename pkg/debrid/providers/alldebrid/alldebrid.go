@@ -196,7 +196,7 @@ func (ad *AllDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 			lastErr = err
 			continue
 		}
-		if res.Data == nil {
+		if res.Status != "success" {
 			lastErr = fmt.Errorf("magnet not found on account")
 			continue
 		}
@@ -252,7 +252,7 @@ func (ad *AllDebrid) UpdateTorrent(t *types.Torrent) error {
 			lastErr = err
 			continue
 		}
-		if res.Data == nil {
+		if res.Status != "success" {
 			lastErr = fmt.Errorf("magnet not found on account")
 			continue
 		}
@@ -447,7 +447,7 @@ func (ad *AllDebrid) GetTorrents() ([]*types.Torrent, error) {
 			lastErr = err
 			continue
 		}
-		if res.Data == nil {
+		if res.Status != "success" {
 			continue
 		}
 		for _, magnet := range res.Data.Magnets {

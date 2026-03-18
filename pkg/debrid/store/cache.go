@@ -234,7 +234,22 @@ func (c *Cache) Reset() {
 	go func() {
 		// Shutdown the scheduler (this will stop all jobs)
 		if err := c.scheduler.Shutdown(); err != nil {
-			c.logger.Error().Err(err).Msg("Failed to stop scheduler")
+			if strings.Contains(err.Error(), "timed out waiting for jobs to finish") {
+				c.logger.Debug().Msg("Scheduler shutdown timed out waiting for jobs (safe to ignore)")
+			} else {
+				c.logger.Error().Err(err).Msg("Failed to stop scheduler")
+			}
+		}
+		
+		// Also shutdown cetScheduler if it's different
+		if c.cetScheduler != nil && c.cetScheduler != c.scheduler {
+			if err := c.cetScheduler.Shutdown(); err != nil {
+				if strings.Contains(err.Error(), "timed out waiting for jobs to finish") {
+					c.logger.Debug().Msg("CET Scheduler shutdown timed out waiting for jobs (safe to ignore)")
+				} else {
+					c.logger.Error().Err(err).Msg("Failed to stop CET scheduler")
+				}
+			}
 		}
 	}()
 	// Stop the listing debouncer
