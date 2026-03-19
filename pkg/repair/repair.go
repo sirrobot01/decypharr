@@ -356,11 +356,11 @@ func (r *Repair) repair(job *Job) error {
 					}
 					if _, exists := hashCounts[t.InfoHash]; exists {
 						// Duplicate discovered! Delete the trailing stream copy securely.
-						if err := dbClient.DeleteTorrent(t.ID); err == nil {
+						if err := dbClient.DeleteTorrent(t.Id); err == nil {
 							deletedCount++
 						}
 					} else {
-						hashCounts[t.InfoHash] = t.ID
+						hashCounts[t.InfoHash] = t.Id
 					}
 				}
 				if deletedCount > 0 {
