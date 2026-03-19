@@ -154,10 +154,34 @@ func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
 		req, _ := http.NewRequest(http.MethodPost, url, payload)
 		req.Header.Set("Content-Type", writer.FormDataContentType())
 		resp, err := acc.Client().MakeRequest(req)
+		
 		if err != nil {
+			if strings.Contains(err.Error(), "already queued") {
+				// The torrent is already in the queue. Fetch all torrents to find its ID and resume it.
+				torrents, fetchErr := tb.GetTorrents()
+				if fetchErr == nil {
+					for _, t := range torrents {
+						if strings.EqualFold(t.InfoHash, torrent.InfoHash) {
+							resumeUrl := fmt.Sprintf("%s/api/torrents/controltorrent", tb.Host)
+							resumePayload := map[string]interface{}{"torrent_id": t.Id, "operation": "resume", "action": "resume"}
+							jsonPayload, _ := json.Marshal(resumePayload)
+							reqResume, _ := http.NewRequest(http.MethodPost, resumeUrl, bytes.NewBuffer(jsonPayload))
+							reqResume.Header.Set("Content-Type", "application/json")
+							_, _ = acc.Client().MakeRequest(reqResume)
+							
+							torrent.Id = t.Id
+							torrent.Added = time.Now().Format(time.RFC3339)
+							torrent.MountPath = tb.MountPath
+							torrent.Debrid = tb.name
+							return torrent, nil
+						}
+					}
+				}
+			}
 			lastErr = err
 			continue
 		}
+		
 		var data AddMagnetResponse
 		err = json.Unmarshal(resp, &data)
 		if err != nil {
@@ -170,6 +194,15 @@ func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
 		}
 		dt := *data.Data
 		torrentId := strconv.Itoa(dt.Id)
+
+		// Force resume it, as Torbox often leaves them 'queued'
+		resumeUrl := fmt.Sprintf("%s/api/torrents/controltorrent", tb.Host)
+		resumePayload := map[string]interface{}{"torrent_id": dt.Id, "operation": "resume", "action": "resume"}
+		jsonPayload, _ := json.Marshal(resumePayload)
+		reqResume, _ := http.NewRequest(http.MethodPost, resumeUrl, bytes.NewBuffer(jsonPayload))
+		reqResume.Header.Set("Content-Type", "application/json")
+		_, _ = acc.Client().MakeRequest(reqResume)
+
 		torrent.Id = torrentId
 		torrent.MountPath = tb.MountPath
 		torrent.Debrid = tb.name
