@@ -512,12 +512,18 @@ func (tb *Torbox) DeleteTorrent(torrentId string) error {
 	url := fmt.Sprintf("%s/api/torrents/controltorrent/%s", tb.Host, torrentId)
 	payload := map[string]string{"torrent_id": torrentId, "action": "Delete"}
 	jsonPayload, _ := json.Marshal(payload)
-	req, _ := http.NewRequest(http.MethodDelete, url, bytes.NewBuffer(jsonPayload))
-	if _, err := tb.client.MakeRequest(req); err != nil {
-		return err
+	
+	var lastErr error
+	for _, acc := range tb.accountsManager.All() {
+		req, _ := http.NewRequest(http.MethodDelete, url, bytes.NewBuffer(jsonPayload))
+		if _, err := acc.Client().MakeRequest(req); err != nil {
+			lastErr = err
+			continue
+		}
+		tb.logger.Info().Msgf("Torrent %s deleted from Torbox on account: %s", torrentId, utils.Mask(acc.Token))
+		return nil
 	}
-	tb.logger.Info().Msgf("Torrent %s deleted from Torbox", torrentId)
-	return nil
+	return fmt.Errorf("could not delete torrent %s across all accounts: %v", torrentId, lastErr)
 }
 
 func (tb *Torbox) GetFileDownloadLinks(t *types.Torrent) error {

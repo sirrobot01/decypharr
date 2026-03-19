@@ -541,12 +541,18 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent) (*types.Torrent, error) {
 
 func (r *RealDebrid) DeleteTorrent(torrentId string) error {
 	url := fmt.Sprintf("%s/torrents/delete/%s", r.Host, torrentId)
-	req, _ := http.NewRequest(http.MethodDelete, url, nil)
-	if _, err := r.client.MakeRequest(req); err != nil {
-		return err
+	
+	var lastErr error
+	for _, acc := range r.accountsManager.All() {
+		req, _ := http.NewRequest(http.MethodDelete, url, nil)
+		if _, err := acc.Client().MakeRequest(req); err != nil {
+			lastErr = err
+			continue
+		}
+		r.logger.Info().Msgf("Torrent: %s deleted from RD on account: %s", torrentId, utils.Mask(acc.Token))
+		return nil
 	}
-	r.logger.Info().Msgf("Torrent: %s deleted from RD", torrentId)
-	return nil
+	return fmt.Errorf("could not delete torrent %s across all accounts: %v", torrentId, lastErr)
 }
 
 func (r *RealDebrid) GetFileDownloadLinks(t *types.Torrent) error {

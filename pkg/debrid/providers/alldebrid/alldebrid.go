@@ -327,12 +327,35 @@ func (ad *AllDebrid) CheckStatus(torrent *types.Torrent) (*types.Torrent, error)
 
 func (ad *AllDebrid) DeleteTorrent(torrentId string) error {
 	url := fmt.Sprintf("%s/magnet/delete?id=%s", ad.Host, torrentId)
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	if _, err := ad.client.MakeRequest(req); err != nil {
-		return err
+	
+	var lastErr error
+	for _, acc := range ad.accountsManager.All() {
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		resp, err := acc.Client().MakeRequest(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var data struct {
+			Status string         `json:"status"`
+			Error  *errorResponse `json:"error"`
+		}
+		if err := json.Unmarshal(resp, &data); err != nil {
+			lastErr = err
+			continue
+		}
+		if data.Status == "success" {
+			ad.logger.Info().Msgf("Torrent %s deleted from AD on account: %s", torrentId, utils.Mask(acc.Token))
+			return nil
+		} else {
+			if data.Error != nil {
+				lastErr = fmt.Errorf("failed: %s", data.Error.Message)
+			} else {
+				lastErr = fmt.Errorf("failed: unknown error")
+			}
+		}
 	}
-	ad.logger.Info().Msgf("Torrent %s deleted from AD", torrentId)
-	return nil
+	return fmt.Errorf("could not delete torrent %s across all accounts: %v", torrentId, lastErr)
 }
 
 func (ad *AllDebrid) GetFileDownloadLinks(t *types.Torrent) error {
