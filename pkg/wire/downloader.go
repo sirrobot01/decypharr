@@ -431,10 +431,18 @@ func (s *Store) processSymlink(debridTorrent *types.Torrent, torrentRclonePath, 
 			entryName := info.Name()
 			if file, exists := remainingFiles[entryName]; exists {
 				fileSymlinkPath := filepath.Join(torrentSymlinkPath, filepath.Base(file.Name))
-				if err := os.Symlink(dirPath, fileSymlinkPath); err == nil || os.IsExist(err) {
+				if err := os.Symlink(dirPath, fileSymlinkPath); err != nil {
+					if os.IsExist(err) {
+						os.Remove(fileSymlinkPath) // Overwrite dead/old symlinks
+						err = os.Symlink(dirPath, fileSymlinkPath)
+					}
+				}
+				if err == nil {
 					filePaths = append(filePaths, fileSymlinkPath)
 					delete(remainingFiles, entryName)
 					s.logger.Info().Msgf("File is ready: %s", file.Name)
+				} else {
+					s.logger.Error().Err(err).Msgf("Failed to create symlink for %s", file.Name)
 				}
 			}
 			return
@@ -453,10 +461,18 @@ func (s *Store) processSymlink(debridTorrent *types.Torrent, torrentRclonePath, 
 			if file, exists := remainingFiles[entryName]; exists {
 				fileSymlinkPath := filepath.Join(torrentSymlinkPath, filepath.Base(file.Name))
 
-				if err := os.Symlink(fullPath, fileSymlinkPath); err == nil || os.IsExist(err) {
+				if err := os.Symlink(fullPath, fileSymlinkPath); err != nil {
+					if os.IsExist(err) {
+						os.Remove(fileSymlinkPath)
+						err = os.Symlink(fullPath, fileSymlinkPath)
+					}
+				}
+				if err == nil {
 					filePaths = append(filePaths, fileSymlinkPath)
 					delete(remainingFiles, entryName)
 					s.logger.Info().Msgf("File is ready: %s", file.Name)
+				} else {
+					s.logger.Error().Err(err).Msgf("Failed to create symlink for %s", file.Name)
 				}
 			} else if entry.IsDir() {
 				// If not found and it's a directory, check inside
