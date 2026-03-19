@@ -199,6 +199,24 @@ func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
 		} else {
 			torrentIdInt = dt.Id
 		}
+		
+		if torrentIdInt == 0 {
+			torrents, fetchErr := tb.GetTorrents()
+			if fetchErr == nil {
+				for _, tList := range torrents {
+					if strings.EqualFold(tList.InfoHash, torrent.InfoHash) {
+						if parsedId, err := strconv.Atoi(tList.Id); err == nil {
+							torrentIdInt = parsedId
+						}
+						break
+					}
+				}
+			}
+			if torrentIdInt == 0 {
+				lastErr = fmt.Errorf("torbox submitted magnet but returned ID 0 and hash lookup failed")
+				continue
+			}
+		}
 		torrentId := strconv.Itoa(torrentIdInt)
 
 		// Force resume it, as Torbox often leaves them 'queued'
@@ -413,6 +431,7 @@ func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
 		}
 		name := data.Name
 	
+		t.Id = strconv.Itoa(data.Id)
 		t.Name = name
 		t.Bytes = data.Size
 		t.Folder = name
