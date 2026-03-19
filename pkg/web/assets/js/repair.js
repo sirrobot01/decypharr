@@ -47,6 +47,9 @@ class RepairManager {
             modalJobAutoProcess: document.getElementById('modalJobAutoProcess'),
             modalJobError: document.getElementById('modalJobError'),
             errorContainer: document.getElementById('errorContainer'),
+            deduplicatedItemsCard: document.getElementById('deduplicatedItemsCard'),
+            totalDedupeCount: document.getElementById('totalDedupeCount'),
+            deduplicatedItemsTableBody: document.getElementById('deduplicatedItemsTableBody'),
 
             // Broken items
             brokenItemsTableBody: document.getElementById('brokenItemsTableBody'),
