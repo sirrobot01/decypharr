@@ -104,6 +104,45 @@ func New(arrs *arr.Storage, engine *debrid.Storage) *Repair {
 	return r
 }
 
+func (r *Repair) RunDeduplication(ctx context.Context) (int, error) {
+	r.initRun(ctx)
+	totalDeleted := 0
+	
+	for _, dbClient := range r.deb.Clients() {
+		if dbClient == nil {
+			continue
+		}
+		torrents, err := dbClient.GetTorrents()
+		if err == nil && len(torrents) > 0 {
+			hashCounts := make(map[string]string)
+			deletedCount := 0
+			
+			for _, t := range torrents {
+				if t == nil || t.InfoHash == "" {
+					continue
+				}
+				if _, exists := hashCounts[t.InfoHash]; exists {
+					if err := dbClient.DeleteTorrent(t.Id); err == nil {
+						deletedCount++
+					}
+				} else {
+					hashCounts[t.InfoHash] = t.Id
+				}
+			}
+			if deletedCount > 0 {
+				r.logger.Info().Msgf("[DEDUPE] Successfully deducted %d duplicate torrents from %s", deletedCount, dbClient.Name())
+			} else {
+				r.logger.Info().Msgf("[DEDUPE] Scanned %d active hashes on %s - Clean, no duplicates found", len(torrents), dbClient.Name())
+			}
+			totalDeleted += deletedCount
+		} else if err != nil {
+			r.logger.Warn().Err(err).Msgf("[DEDUPE] Failed to fetch torrents from %s for deduplication", dbClient.Name())
+		}
+	}
+	r.onComplete()
+	return totalDeleted, nil
+}
+
 func (r *Repair) getWorkers() int {
 	workers := config.Get().Repair.Workers
 	if workers > 0 {
@@ -348,38 +387,7 @@ func (r *Repair) repair(job *Job) error {
 	// Phase 1: Deduplicate Debrid Accounts if explicitly engaged
 	if job.DedupeOnRepair {
 		r.logger.Info().Msg("Starting Debrid deduplication sequence")
-		for _, dbClient := range r.deb.Clients() {
-			if dbClient == nil {
-				continue
-			}
-			torrents, err := dbClient.GetTorrents()
-			if err == nil && len(torrents) > 0 {
-				hashCounts := make(map[string]string)
-				deletedCount := 0
-				
-				// Natively iterate the downstream hashes to capture collision instances
-				for _, t := range torrents {
-					if t == nil || t.InfoHash == "" {
-						continue
-					}
-					if _, exists := hashCounts[t.InfoHash]; exists {
-						// Duplicate discovered! Delete the trailing stream copy securely.
-						if err := dbClient.DeleteTorrent(t.Id); err == nil {
-							deletedCount++
-						}
-					} else {
-						hashCounts[t.InfoHash] = t.Id
-					}
-				}
-				if deletedCount > 0 {
-					r.logger.Info().Msgf("[DEDUPE] Successfully deducted %d duplicate torrents from %s", deletedCount, dbClient.Name())
-				} else {
-					r.logger.Info().Msgf("[DEDUPE] Scanned %d active hashes on %s - Clean, no duplicates found", len(torrents), dbClient.Name())
-				}
-			} else if err != nil {
-				r.logger.Warn().Err(err).Msgf("[DEDUPE] Failed to fetch torrents from %s for deduplication", dbClient.Name())
-			}
-		}
+		_, _ = r.RunDeduplication(job.ctx)
 	}
 
 	// Use a mutex to protect concurrent access to brokenItems

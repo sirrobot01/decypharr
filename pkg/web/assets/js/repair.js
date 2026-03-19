@@ -25,6 +25,7 @@ class RepairManager {
             isAsync: document.getElementById('isAsync'),
             autoProcess: document.getElementById('autoProcess'),
             submitBtn: document.getElementById('submitRepair'),
+            runInstantDedupeBtn: document.getElementById('runInstantDedupeBtn'),
 
             // Jobs table
             jobsTable: document.getElementById('jobsTable'),
@@ -79,6 +80,9 @@ class RepairManager {
     bindEvents() {
         // Form submission
         this.refs.repairForm.addEventListener('submit', (e) => this.handleFormSubmit(e));
+        if (this.refs.runInstantDedupeBtn) {
+            this.refs.runInstantDedupeBtn.addEventListener('click', () => this.handleRunInstantDedupe());
+        }
 
         // Jobs table events
         this.refs.refreshJobs.addEventListener('click', () => this.loadJobs());
@@ -172,6 +176,34 @@ class RepairManager {
             window.decypharrUtils.createToast(`Error starting repair: ${error.message}`, 'error');
         } finally {
             window.decypharrUtils.setButtonLoading(this.refs.submitBtn, false);
+        }
+    }
+
+    async handleRunInstantDedupe() {
+        try {
+            window.decypharrUtils.setButtonLoading(this.refs.runInstantDedupeBtn, true);
+
+            const response = await window.decypharrUtils.fetcher('/api/repair/dedupe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || 'Failed to run deduplication');
+            }
+
+            const result = await response.json();
+            window.decypharrUtils.createToast(
+                result.message || `Successfully swept duplicates!`,
+                'success'
+            );
+
+        } catch (error) {
+            console.error('Error running deduplication:', error);
+            window.decypharrUtils.createToast(`Error running dedupe: ${error.message}`, 'error');
+        } finally {
+            window.decypharrUtils.setButtonLoading(this.refs.runInstantDedupeBtn, false);
         }
     }
 

@@ -151,6 +151,20 @@ func (wb *Web) handleRepairMedia(w http.ResponseWriter, r *http.Request) {
 	request.JSONResponse(w, map[string]string{"status": "Job successfully started"}, http.StatusOK)
 }
 
+func (wb *Web) handleRunDedupe(w http.ResponseWriter, r *http.Request) {
+	_store := wire.Get()
+	deletedCount, err := _store.Repair().RunDeduplication(r.Context())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to run deduplication: %v", err), http.StatusInternalServerError)
+		return
+	}
+	request.JSONResponse(w, map[string]interface{}{
+		"status":  "success",
+		"deleted": deletedCount,
+		"message": fmt.Sprintf("Successfully swept %d duplicates across Debrid caches", deletedCount),
+	}, http.StatusOK)
+}
+
 func (wb *Web) handleGetVersion(w http.ResponseWriter, r *http.Request) {
 	v := version.GetInfo()
 	request.JSONResponse(w, v, http.StatusOK)
