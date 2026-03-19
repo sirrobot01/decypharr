@@ -216,17 +216,17 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 			lastErr = err
 			continue
 		}
-		var res InfoResponse
+		var res TorrentsListResponse
 		err = json.Unmarshal(resp, &res)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		data := res.Data
-		if data == nil {
+		if res.Data == nil || len(*res.Data) == 0 {
 			lastErr = fmt.Errorf("error getting torrent")
 			continue
 		}
+		data := (*res.Data)[0]
 		t := &types.Torrent{
 			Id:               strconv.Itoa(data.Id),
 			Name:             data.Name,
@@ -327,17 +327,17 @@ func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
 			lastErr = err
 			continue
 		}
-		var res InfoResponse
+		var res TorrentsListResponse
 		err = json.Unmarshal(resp, &res)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		data := res.Data
-		if data == nil {
+		if res.Data == nil || len(*res.Data) == 0 {
 			lastErr = fmt.Errorf("error updating torrent")
 			continue
 		}
+		data := (*res.Data)[0]
 		name := data.Name
 	
 		t.Name = name
