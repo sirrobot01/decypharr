@@ -142,6 +142,10 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 
 	onSuccess := func(torrentSymlinkPath string) {
 		torrent.TorrentPath = torrentSymlinkPath
+		// Force progress stats so Sonarr/Radarr sees it as completely downloaded
+		debridTorrent.Progress = 100
+		debridTorrent.Status = "downloaded"
+		debridTorrent.SizeDownloaded = debridTorrent.Bytes
 		s.updateTorrent(torrent, debridTorrent)
 		s.logger.Info().Msgf("Adding %s took %s", debridTorrent.Name, time.Since(timer))
 
@@ -351,26 +355,8 @@ func (s *Store) updateTorrent(t *Torrent, debridTorrent *types.Torrent) *Torrent
 
 	if t.IsReady() {
 		t.State = "pausedUP"
-		s.torrents.Update(t)
-		return t
 	}
 
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			if t.IsReady() {
-				t.State = "pausedUP"
-				s.torrents.Update(t)
-				return t
-			}
-			updatedT := s.updateTorrent(t, debridTorrent)
-			t = updatedT
-
-		case <-time.After(10 * time.Minute): // Add a timeout
-			return t
-		}
-	}
+	s.torrents.Update(t)
+	return t
 }

@@ -558,6 +558,9 @@ func (s *Store) processMultiSeasonSymlinks(torrent *Torrent, debridTorrent *type
 		seasonTorrent.TorrentPath = torrentSymlinkPath
 		seasonTorrent.ContentPath = torrentSymlinkPath
 		seasonTorrent.State = "pausedUP"
+		seasonTorrent.Progress = 1.0
+		seasonTorrent.AmountLeft = 0
+		seasonTorrent.Completed = seasonTorrent.TotalSize
 		// Add the season torrent to storage
 		s.torrents.AddOrUpdate(seasonTorrent)
 
@@ -613,6 +616,9 @@ func (s *Store) processMultiSeasonDownloads(torrent *Torrent, debridTorrent *typ
 		seasonTorrent.TorrentPath = seasonDownloadPath
 		seasonTorrent.ContentPath = seasonDownloadPath
 		seasonTorrent.State = "pausedUP"
+		seasonTorrent.Progress = 1.0
+		seasonTorrent.AmountLeft = 0
+		seasonTorrent.Completed = seasonTorrent.TotalSize
 
 		// Add the season torrent to storage
 		s.torrents.AddOrUpdate(seasonTorrent)
