@@ -193,11 +193,17 @@ func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
 			continue
 		}
 		dt := *data.Data
-		torrentId := strconv.Itoa(dt.Id)
+		var torrentIdInt int
+		if dt.TorrentId != 0 {
+			torrentIdInt = dt.TorrentId
+		} else {
+			torrentIdInt = dt.Id
+		}
+		torrentId := strconv.Itoa(torrentIdInt)
 
 		// Force resume it, as Torbox often leaves them 'queued'
 		resumeUrl := fmt.Sprintf("%s/api/torrents/controltorrent", tb.Host)
-		resumePayload := map[string]interface{}{"torrent_id": dt.Id, "operation": "resume", "action": "resume"}
+		resumePayload := map[string]interface{}{"torrent_id": torrentIdInt, "operation": "resume", "action": "resume"}
 		jsonPayload, _ := json.Marshal(resumePayload)
 		reqResume, _ := http.NewRequest(http.MethodPost, resumeUrl, bytes.NewBuffer(jsonPayload))
 		reqResume.Header.Set("Content-Type", "application/json")
