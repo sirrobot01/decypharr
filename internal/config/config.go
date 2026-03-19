@@ -1,5 +1,6 @@
 package config
 
+import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
