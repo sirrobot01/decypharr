@@ -9,7 +9,7 @@ type File struct {
 	Index        int     `json:"index,omitempty"`
 	Name         string  `json:"name,omitempty"`
 	Size         int64   `json:"size,omitempty"`
-	Progress     int     `json:"progress,omitempty"`
+	Progress     float64 `json:"progress,omitempty"`
 	Priority     int     `json:"priority,omitempty"`
 	IsSeed       bool    `json:"is_seed,omitempty"`
 	PieceRange   []int   `json:"piece_range,omitempty"`

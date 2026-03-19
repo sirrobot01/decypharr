@@ -314,9 +314,10 @@ func (s *Store) partialTorrentUpdate(t *Torrent, debridTorrent *types.Torrent) *
 	files := make([]*File, 0, len(debridTorrent.Files))
 	for index, file := range debridTorrent.GetFiles() {
 		files = append(files, &File{
-			Index: index,
-			Name:  file.Path,
-			Size:  file.Size,
+			Index:    index,
+			Name:     file.Path,
+			Size:     file.Size,
+			Progress: progress,
 		})
 	}
 	t.DebridID = debridTorrent.Id
