@@ -31,13 +31,13 @@ func (s *Store) AddTorrent(ctx context.Context, importReq *ImportRequest) error 
 				debridTorrent, err = debridClient.GetTorrent(existing.DebridID)
 			}
 		}
-		
+
 		if err != nil || debridTorrent == nil {
 			s.logger.Warn().Msgf("[DEDUPE/SYMLINK] Upstream Debrid record lost for %s, falling back to fresh API push", torrent.Hash)
 			debridTorrent, err = debridTypes.Process(ctx, s.debrid, importReq.SelectedDebrid, importReq.Magnet, importReq.Arr, importReq.Action, importReq.DownloadUncached)
 		} else {
 			// Rescue the hidden struct since Radarr requested it again
-			existing.Hidden = false 
+			existing.Hidden = false
 			s.logger.Info().Msgf("[DEDUPE/SYMLINK] Torrent %s successfully bypassed Debrid upload - Re-emitting payload to WebDAV cache securely!", torrent.Hash)
 		}
 	} else {
@@ -358,7 +358,7 @@ func (s *Store) updateTorrent(t *Torrent, debridTorrent *types.Torrent) *Torrent
 		t.State = "pausedUP"
 	}
 
-	s.logger.Info().Msgf("[STATE DEBUG] Torrent %s -> State: %s, Progress: %f, AmountLeft: %d, TotalSize: %d, Path: %s, IsReady: %v", t.Name, t.State, t.Progress, t.AmountLeft, t.TotalSize, t.TorrentPath, t.IsReady())
+	// s.logger.Info().Msgf("[STATE DEBUG] Torrent %s -> State: %s, Progress: %f, AmountLeft: %d, TotalSize: %d, Path: %s, IsReady: %v", t.Name, t.State, t.Progress, t.AmountLeft, t.TotalSize, t.TorrentPath, t.IsReady())
 
 	s.torrents.Update(t)
 	return t
