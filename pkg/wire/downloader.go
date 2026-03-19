@@ -422,6 +422,24 @@ func (s *Store) processSymlink(debridTorrent *types.Torrent, torrentRclonePath, 
 
 	var checkDirectory func(string) // Recursive function
 	checkDirectory = func(dirPath string) {
+		info, err := os.Stat(dirPath)
+		if err != nil {
+			return
+		}
+
+		if !info.IsDir() {
+			entryName := info.Name()
+			if file, exists := remainingFiles[entryName]; exists {
+				fileSymlinkPath := filepath.Join(torrentSymlinkPath, filepath.Base(file.Name))
+				if err := os.Symlink(dirPath, fileSymlinkPath); err == nil || os.IsExist(err) {
+					filePaths = append(filePaths, fileSymlinkPath)
+					delete(remainingFiles, entryName)
+					s.logger.Info().Msgf("File is ready: %s", file.Name)
+				}
+			}
+			return
+		}
+
 		entries, err := os.ReadDir(dirPath)
 		if err != nil {
 			return
