@@ -216,17 +216,34 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 			lastErr = err
 			continue
 		}
-		var res TorrentsListResponse
-		err = json.Unmarshal(resp, &res)
+		var rawResp struct {
+			Success bool            `json:"success"`
+			Error   any             `json:"error"`
+			Detail  string          `json:"detail"`
+			Data    json.RawMessage `json:"data"`
+		}
+		err = json.Unmarshal(resp, &rawResp)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		if res.Data == nil || len(*res.Data) == 0 {
-			lastErr = fmt.Errorf("error getting torrent")
+		
+		if !rawResp.Success || rawResp.Data == nil || string(rawResp.Data) == "null" {
+			lastErr = fmt.Errorf("error getting torrent. detail: %s", rawResp.Detail)
 			continue
 		}
-		data := (*res.Data)[0]
+
+		var data torboxInfo
+		if err := json.Unmarshal(rawResp.Data, &data); err != nil {
+			// fallback: try array
+			var dataArray []torboxInfo
+			if errArray := json.Unmarshal(rawResp.Data, &dataArray); errArray == nil && len(dataArray) > 0 {
+				data = dataArray[0]
+			} else {
+				lastErr = fmt.Errorf("could not unmarshal torbox data: err=%v, errArray=%v", err, errArray)
+				continue
+			}
+		}
 		t := &types.Torrent{
 			Id:               strconv.Itoa(data.Id),
 			Name:             data.Name,
@@ -327,17 +344,34 @@ func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
 			lastErr = err
 			continue
 		}
-		var res TorrentsListResponse
-		err = json.Unmarshal(resp, &res)
+		var rawResp struct {
+			Success bool            `json:"success"`
+			Error   any             `json:"error"`
+			Detail  string          `json:"detail"`
+			Data    json.RawMessage `json:"data"`
+		}
+		err = json.Unmarshal(resp, &rawResp)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		if res.Data == nil || len(*res.Data) == 0 {
-			lastErr = fmt.Errorf("error updating torrent")
+		
+		if !rawResp.Success || rawResp.Data == nil || string(rawResp.Data) == "null" {
+			lastErr = fmt.Errorf("error updating torrent. detail: %s", rawResp.Detail)
 			continue
 		}
-		data := (*res.Data)[0]
+
+		var data torboxInfo
+		if err := json.Unmarshal(rawResp.Data, &data); err != nil {
+			// fallback: try array
+			var dataArray []torboxInfo
+			if errArray := json.Unmarshal(rawResp.Data, &dataArray); errArray == nil && len(dataArray) > 0 {
+				data = dataArray[0]
+			} else {
+				lastErr = fmt.Errorf("could not unmarshal torbox data: err=%v, errArray=%v", err, errArray)
+				continue
+			}
+		}
 		name := data.Name
 	
 		t.Name = name
