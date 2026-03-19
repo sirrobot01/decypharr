@@ -104,6 +104,14 @@ func New(arrs *arr.Storage, engine *debrid.Storage) *Repair {
 	return r
 }
 
+func (r *Repair) getWorkers() int {
+	workers := config.Get().Repair.Workers
+	if workers > 0 {
+		return workers
+	}
+	return runtime.NumCPU() * 20
+}
+
 func (r *Repair) Reset() {
 	// Stop scheduler
 	if r.scheduler != nil {
@@ -364,10 +372,12 @@ func (r *Repair) repair(job *Job) error {
 					}
 				}
 				if deletedCount > 0 {
-					r.logger.Info().Msgf("Successfully deducted %d duplicate torrents from %s", deletedCount, dbClient.Name())
+					r.logger.Info().Msgf("[DEDUPE] Successfully deducted %d duplicate torrents from %s", deletedCount, dbClient.Name())
+				} else {
+					r.logger.Info().Msgf("[DEDUPE] Scanned %d active hashes on %s - Clean, no duplicates found", len(torrents), dbClient.Name())
 				}
 			} else if err != nil {
-				r.logger.Warn().Err(err).Msgf("Failed to fetch torrents from %s for deduplication", dbClient.Name())
+				r.logger.Warn().Err(err).Msgf("[DEDUPE] Failed to fetch torrents from %s for deduplication", dbClient.Name())
 			}
 		}
 	}
@@ -497,9 +507,10 @@ func (r *Repair) repairArr(job *Job, _arr string, tmdbId string) ([]arr.ContentF
 	// Mutex for brokenItems
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	workerChan := make(chan arr.Content, min(len(media), r.workers))
+	workersCount := r.getWorkers()
+	workerChan := make(chan arr.Content, min(len(media), workersCount))
 
-	for i := 0; i < r.workers; i++ {
+	for i := 0; i < workersCount; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -778,7 +789,7 @@ func (r *Repair) ProcessJob(id string) error {
 	}
 
 	g, ctx := errgroup.WithContext(job.ctx)
-	g.SetLimit(r.workers)
+	g.SetLimit(r.getWorkers())
 
 	for arrName, items := range brokenItems {
 		items := items

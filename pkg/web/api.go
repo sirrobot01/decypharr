@@ -141,22 +141,14 @@ func (wb *Web) handleRepairMedia(w http.ResponseWriter, r *http.Request) {
 		arrs = append(arrs, req.ArrName)
 	}
 
-	if req.Async {
-		go func() {
-			if err := _store.Repair().AddJob(arrs, req.MediaIds, req.AutoProcess, false, req.DedupeOnRepair); err != nil {
-				wb.logger.Error().Err(err).Msg("Failed to repair media")
-			}
-		}()
-		request.JSONResponse(w, "Repair process started", http.StatusOK)
+	// AddJob encapsulates its own go wrapper natively, avoid secondary goroutines racing the HTTP response handler
+	if err := _store.Repair().AddJob(arrs, req.MediaIds, req.AutoProcess, false, req.DedupeOnRepair); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to submit repair task: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	if err := _store.Repair().AddJob([]string{req.ArrName}, req.MediaIds, req.AutoProcess, false, req.DedupeOnRepair); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to repair: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	request.JSONResponse(w, "Repair completed", http.StatusOK)
+	// Just send standard OK, the frontend will refresh /api/repair/jobs manually
+	request.JSONResponse(w, map[string]string{"status": "Job successfully started"}, http.StatusOK)
 }
 
 func (wb *Web) handleGetVersion(w http.ResponseWriter, r *http.Request) {

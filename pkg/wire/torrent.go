@@ -33,11 +33,12 @@ func (s *Store) AddTorrent(ctx context.Context, importReq *ImportRequest) error 
 		}
 		
 		if err != nil || debridTorrent == nil {
-			s.logger.Warn().Msgf("Upstream Debrid record lost for %s, falling back to fresh API push", torrent.Hash)
+			s.logger.Warn().Msgf("[DEDUPE/SYMLINK] Upstream Debrid record lost for %s, falling back to fresh API push", torrent.Hash)
 			debridTorrent, err = debridTypes.Process(ctx, s.debrid, importReq.SelectedDebrid, importReq.Magnet, importReq.Arr, importReq.Action, importReq.DownloadUncached)
 		} else {
 			// Rescue the hidden struct since Radarr requested it again
 			existing.Hidden = false 
+			s.logger.Info().Msgf("[DEDUPE/SYMLINK] Torrent %s successfully bypassed Debrid upload - Re-emitting payload to WebDAV cache securely!", torrent.Hash)
 		}
 	} else {
 		// Normal upload sequence
