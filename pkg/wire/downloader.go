@@ -408,10 +408,11 @@ func (s *Store) processSymlink(debridTorrent *types.Torrent, torrentRclonePath, 
 		return "", fmt.Errorf("failed to create directory: %s: %v", torrentSymlinkPath, err)
 	}
 
-	// Track pending files
+	// Track pending files by their base name so os.ReadDir recursive scans match correctly
 	remainingFiles := make(map[string]types.File)
 	for _, file := range files {
-		remainingFiles[file.Name] = file
+		baseName := filepath.Base(file.Name)
+		remainingFiles[baseName] = file
 	}
 
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -432,7 +433,7 @@ func (s *Store) processSymlink(debridTorrent *types.Torrent, torrentRclonePath, 
 
 			// Check if this matches a remaining file
 			if file, exists := remainingFiles[entryName]; exists {
-				fileSymlinkPath := filepath.Join(torrentSymlinkPath, file.Name)
+				fileSymlinkPath := filepath.Join(torrentSymlinkPath, filepath.Base(file.Name))
 
 				if err := os.Symlink(fullPath, fileSymlinkPath); err == nil || os.IsExist(err) {
 					filePaths = append(filePaths, fileSymlinkPath)
