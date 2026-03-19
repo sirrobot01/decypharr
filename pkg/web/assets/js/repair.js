@@ -487,6 +487,23 @@ class RepairManager {
         this.refs.processJobBtn.classList.toggle('hidden', job.status !== 'pending');
         this.refs.stopJobBtn.classList.toggle('hidden', !['started', 'processing'].includes(job.status));
 
+        // Process Deduplicated items
+        if (job.deduplicated && job.deduplicated.length > 0) {
+            this.refs.deduplicatedItemsCard.classList.remove('hidden');
+            this.refs.totalDedupeCount.textContent = job.deduplicated.length;
+            this.refs.deduplicatedItemsTableBody.innerHTML = job.deduplicated.map(item => `
+                <tr class="hover">
+                    <td class="font-medium px-2 py-1">${window.decypharrUtils.escapeHtml(item.provider)}</td>
+                    <td class="text-xs break-all px-2 py-1">${window.decypharrUtils.escapeHtml(item.name || 'Unknown')}</td>
+                    <td class="font-mono text-xs px-2 py-1" title="${window.decypharrUtils.escapeHtml(item.id || item.hash)}">${window.decypharrUtils.escapeHtml(item.hash || 'Unknown')}</td>
+                </tr>
+            `).join('');
+        } else {
+            this.refs.deduplicatedItemsCard.classList.add('hidden');
+            this.refs.deduplicatedItemsTableBody.innerHTML = '';
+            this.refs.totalDedupeCount.textContent = '0';
+        }
+
         // Process broken items
         if (job.broken_items) {
             this.state.allBrokenItems = this.processItemsData(job.broken_items);

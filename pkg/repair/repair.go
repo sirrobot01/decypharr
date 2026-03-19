@@ -58,6 +58,13 @@ const (
 	JobCancelled  JobStatus = "cancelled"
 )
 
+type DeduplicatedItem struct {
+	Hash     string `json:"hash"`
+	Provider string `json:"provider"`
+	Name     string `json:"name"`
+	ID       string `json:"id"`
+}
+
 type Job struct {
 	ID          string                       `json:"id"`
 	Arrs        []string                     `json:"arrs"`
@@ -67,9 +74,10 @@ type Job struct {
 	Status      JobStatus                    `json:"status"`
 	CompletedAt time.Time                    `json:"finished_at"`
 	FailedAt    time.Time                    `json:"failed_at"`
-	AutoProcess bool                         `json:"auto_process"`
-	Recurrent   bool                         `json:"recurrent"`
-	DedupeOnRepair bool                      `json:"dedupe_on_repair"`
+	AutoProcess    bool                         `json:"auto_process"`
+	Recurrent      bool                         `json:"recurrent"`
+	DedupeOnRepair bool                         `json:"dedupe_on_repair"`
+	Deduplicated   []DeduplicatedItem           `json:"deduplicated,omitempty"`
 
 	Error string `json:"error"`
 
@@ -104,9 +112,9 @@ func New(arrs *arr.Storage, engine *debrid.Storage) *Repair {
 	return r
 }
 
-func (r *Repair) RunDeduplication(ctx context.Context) (int, error) {
+func (r *Repair) RunDeduplication(ctx context.Context) ([]DeduplicatedItem, error) {
 	r.initRun(ctx)
-	totalDeleted := 0
+	var totalDeleted []DeduplicatedItem
 	
 	for _, dbClient := range r.deb.Clients() {
 		if dbClient == nil {
@@ -123,6 +131,12 @@ func (r *Repair) RunDeduplication(ctx context.Context) (int, error) {
 				}
 				if _, exists := hashCounts[t.InfoHash]; exists {
 					if err := dbClient.DeleteTorrent(t.Id); err == nil {
+						totalDeleted = append(totalDeleted, DeduplicatedItem{
+							Hash:     t.InfoHash,
+							Provider: dbClient.Name(),
+							Name:     t.Name,
+							ID:       t.Id,
+						})
 						deletedCount++
 					}
 				} else {
@@ -134,7 +148,6 @@ func (r *Repair) RunDeduplication(ctx context.Context) (int, error) {
 			} else {
 				r.logger.Info().Msgf("[DEDUPE] Scanned %d active hashes on %s - Clean, no duplicates found", len(torrents), dbClient.Name())
 			}
-			totalDeleted += deletedCount
 		} else if err != nil {
 			r.logger.Warn().Err(err).Msgf("[DEDUPE] Failed to fetch torrents from %s for deduplication", dbClient.Name())
 		}
@@ -387,7 +400,8 @@ func (r *Repair) repair(job *Job) error {
 	// Phase 1: Deduplicate Debrid Accounts if explicitly engaged
 	if job.DedupeOnRepair {
 		r.logger.Info().Msg("Starting Debrid deduplication sequence")
-		_, _ = r.RunDeduplication(job.ctx)
+		deduped, _ := r.RunDeduplication(job.ctx)
+		job.Deduplicated = deduped
 	}
 
 	// Use a mutex to protect concurrent access to brokenItems

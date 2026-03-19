@@ -301,6 +301,31 @@
                         </div>
                     </div>
 
+                    <div class="card bg-base-200 mt-6 hidden" id="deduplicatedItemsCard">
+                        <div class="card-body">
+                            <div class="flex justify-between items-center mb-4">
+                                <h4 class="card-title text-lg">
+                                    Deduplicated Streams
+                                    <div class="badge badge-success" id="totalDedupeCount">0</div>
+                                </h4>
+                            </div>
+
+                            <div class="overflow-x-auto max-h-96 border border-base-300 rounded-lg">
+                                <table class="table table-sm table-hover">
+                                    <thead class="sticky top-0 bg-base-300">
+                                    <tr>
+                                        <th class="font-semibold w-32">Provider</th>
+                                        <th class="font-semibold break-all text-wrap">Stream Name</th>
+                                        <th class="font-semibold w-40">InfoHash</th>
+                                    </tr>
+                                    </thead>
+                                    <tbody id="deduplicatedItemsTableBody">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
                     <div id="noBrokenItemsMessage" class="text-center py-8 hidden">
                         <div class="text-4xl text-base-content/30 mb-2">
                             <i class="bi bi-check-circle"></i>
