@@ -1,5 +1,6 @@
 package qbit
 
+import (
 	"bytes"
 	"context"
 	"io"
