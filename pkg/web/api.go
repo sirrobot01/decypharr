@@ -153,16 +153,16 @@ func (wb *Web) handleRepairMedia(w http.ResponseWriter, r *http.Request) {
 
 func (wb *Web) handleRunDedupe(w http.ResponseWriter, r *http.Request) {
 	_store := wire.Get()
-	deletedItems, err := _store.Repair().RunDeduplication(r.Context())
+	jobID, err := _store.Repair().AddDedupeJob()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to run deduplication: %v", err), http.StatusInternalServerError)
 		return
 	}
+	// The frontend JS will automatically catch the job_id and refresh the jobs table manually
 	request.JSONResponse(w, map[string]interface{}{
-		"status":  "success",
-		"deleted": len(deletedItems),
-		"items":   deletedItems,
-		"message": fmt.Sprintf("Successfully swept %d duplicates across Debrid caches", len(deletedItems)),
+		"status":  "Job successfully started",
+		"job_id":  jobID,
+		"message": "Deduplication sweep queued successfully in the background",
 	}, http.StatusOK)
 }
 

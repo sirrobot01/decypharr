@@ -195,9 +195,12 @@ class RepairManager {
 
             const result = await response.json();
             window.decypharrUtils.createToast(
-                result.message || `Successfully swept duplicates!`,
+                `Deduplication job started! Job ID: ${result.job_id?.substring(0, 8) || 'Unknown'}`,
                 'success'
             );
+
+            // Refresh jobs list
+            await this.loadJobs();
 
         } catch (error) {
             console.error('Error running deduplication:', error);

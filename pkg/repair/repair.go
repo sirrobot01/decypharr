@@ -356,6 +356,43 @@ func (r *Repair) AddJob(arrsNames []string, mediaIDs []string, autoProcess, recu
 	return nil
 }
 
+func (r *Repair) AddDedupeJob() (string, error) {
+	job := &Job{
+		ID:             uuid.New().String(),
+		Arrs:           []string{"Dedupe Only"},
+		MediaIDs:       []string{},
+		StartedAt:      time.Now(),
+		Status:         JobStarted,
+		DedupeOnRepair: true,
+	}
+
+	job.ctx, job.cancelFunc = context.WithCancel(r.ctx)
+	r.Jobs[job.ID] = job
+	go r.saveToFile()
+
+	go func() {
+		job.Status = JobProcessing
+		r.logger.Info().Msg("Starting pure deduplication job")
+		
+		deduped, err := r.RunDeduplication(job.ctx)
+		if err != nil {
+			r.logger.Error().Err(err).Msg("Error running deduplication job")
+			job.FailedAt = time.Now()
+			job.Error = err.Error()
+			job.Status = JobFailed
+		} else {
+			job.CompletedAt = time.Now()
+			job.Status = JobCompleted
+			job.Deduplicated = deduped
+		}
+		
+		// RunDeduplication internally invokes initRun and onComplete so just save map
+		r.saveToFile()
+	}()
+
+	return job.ID, nil
+}
+
 func (r *Repair) StopJob(id string) error {
 	job := r.GetJob(id)
 	if job == nil {
