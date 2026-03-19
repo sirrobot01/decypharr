@@ -1,13 +1,17 @@
 package qbit
 
-import (
+	"bytes"
+	"context"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
 
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/request"
+	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/arr"
+	"github.com/sirrobot01/decypharr/pkg/wire"
 )
 
 func (q *QBit) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -125,10 +129,11 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 			urlList = append(urlList, strings.TrimSpace(u))
 		}
 		for _, url := range urlList {
-			if err := q.addMagnet(ctx, url, _arr, debridName, action, rmTrackerUrls); err != nil {
-				q.logger.Debug().Msgf("Error adding magnet: %s", err.Error())
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
+			urlCopy := url
+			q.jobQueue <- func() {
+				if err := q.addMagnet(context.Background(), urlCopy, _arr, debridName, action, rmTrackerUrls); err != nil {
+					q.logger.Debug().Msgf("Error adding magnet: %s", err.Error())
+				}
 			}
 			atleastOne = true
 		}
@@ -138,10 +143,26 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 	if r.MultipartForm != nil && r.MultipartForm.File != nil {
 		if files := r.MultipartForm.File["torrents"]; len(files) > 0 {
 			for _, fileHeader := range files {
-				if err := q.addTorrent(ctx, fileHeader, _arr, debridName, action, rmTrackerUrls); err != nil {
-					q.logger.Debug().Err(err).Msgf("Error adding torrent")
-					http.Error(w, err.Error(), http.StatusBadRequest)
-					return
+				file, err := fileHeader.Open()
+				if err != nil {
+					continue
+				}
+				var buf bytes.Buffer
+				io.Copy(&buf, file)
+				file.Close()
+
+				fileData := buf.Bytes()
+				fileName := fileHeader.Filename
+				
+				q.jobQueue <- func() {
+					magnet, err := utils.GetMagnetFromFile(bytes.NewReader(fileData), fileName, rmTrackerUrls)
+					if err != nil {
+						q.logger.Debug().Err(err).Msgf("Error adding torrent file")
+						return
+					}
+					_store := wire.Get()
+					importReq := wire.NewImportRequest(debridName, q.DownloadFolder, magnet, _arr, action, false, "", wire.ImportTypeQBitTorrent, false)
+					_ = _store.AddTorrent(context.Background(), importReq)
 				}
 				atleastOne = true
 			}

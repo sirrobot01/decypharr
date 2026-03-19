@@ -114,7 +114,7 @@ class ConfigManager {
     populateQBittorrentSettings(qbitConfig) {
         if (!qbitConfig) return;
 
-        const fields = ['download_folder', 'refresh_interval', 'max_downloads', 'skip_pre_cache', 'always_rm_tracker_urls'];
+        const fields = ['download_folder', 'refresh_interval', 'max_downloads', 'skip_pre_cache', 'always_rm_tracker_urls', 'workers'];
 
         fields.forEach(field => {
             const element = document.querySelector(`[name="qbit.${field}"]`);
@@ -1183,6 +1183,7 @@ class ConfigManager {
             download_folder: document.querySelector('[name="qbit.download_folder"]').value,
             refresh_interval: parseInt(document.querySelector('[name="qbit.refresh_interval"]').value) || 30,
             max_downloads: parseInt(document.querySelector('[name="qbit.max_downloads"]').value) || 0,
+            workers: parseInt(document.querySelector('[name="qbit.workers"]').value) || 10,
             skip_pre_cache: document.querySelector('[name="qbit.skip_pre_cache"]').checked,
             always_rm_tracker_urls: document.querySelector('[name="qbit.always_rm_tracker_urls"]').checked
         };

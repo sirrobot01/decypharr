@@ -1,7 +1,5 @@
 package config
 
-import (
-	"cmp"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -58,6 +56,7 @@ type QBitTorrent struct {
 	SkipPreCache      	bool     `json:"skip_pre_cache,omitempty"`
 	MaxDownloads      	int      `json:"max_downloads,omitempty"`
 	AlwaysRmTrackerUrls bool     `json:"always_rm_tracker_urls,omitempty"`
+	Workers             int      `json:"workers,omitempty"`
 }
 
 type Arr struct {
@@ -414,7 +413,9 @@ func (c *Config) setDefaults() {
 		c.AllowedExt = getDefaultExtensions()
 	}
 
-	c.Port = cmp.Or(c.Port, c.QBitTorrent.Port)
+	if c.Port == "" {
+		c.Port = c.QBitTorrent.Port
+	}
 
 	if c.URLBase == "" {
 		c.URLBase = "/"
@@ -425,6 +426,10 @@ func (c *Config) setDefaults() {
 	}
 	if !strings.HasSuffix(c.URLBase, "/") {
 		c.URLBase += "/"
+	}
+
+	if c.QBitTorrent.Workers <= 0 {
+		c.QBitTorrent.Workers = 10
 	}
 
 	// Set repair defaults
@@ -455,10 +460,16 @@ func (c *Config) setDefaults() {
 			c.Rclone.Transfers = 4 // Default number of transfers
 		}
 		if c.Rclone.VfsCacheMode != "off" {
-			c.Rclone.VfsCachePollInterval = cmp.Or(c.Rclone.VfsCachePollInterval, "1m") // Clean cache every minute
+			if c.Rclone.VfsCachePollInterval == "" {
+				c.Rclone.VfsCachePollInterval = "1m" // Clean cache every minute
+			}
 		}
-		c.Rclone.DirCacheTime = cmp.Or(c.Rclone.DirCacheTime, "5m")
-		c.Rclone.LogLevel = cmp.Or(c.Rclone.LogLevel, "INFO")
+		if c.Rclone.DirCacheTime == "" {
+			c.Rclone.DirCacheTime = "5m"
+		}
+		if c.Rclone.LogLevel == "" {
+			c.Rclone.LogLevel = "INFO"
+		}
 	}
 	// Load the auth file
 	c.Auth = c.GetAuth()
@@ -508,6 +519,7 @@ func (c *Config) createConfig(path string) error {
 		DownloadFolder:  filepath.Join(path, "downloads"),
 		Categories:      []string{"sonarr", "radarr"},
 		RefreshInterval: 15,
+		Workers:         10,
 	}
 	return nil
 }
