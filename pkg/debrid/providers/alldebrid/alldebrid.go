@@ -242,7 +242,7 @@ func (ad *AllDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 		return t, nil
 	}
 	if lastErr != nil {
-		ad.logger.Error().Err(lastErr).Msgf("Error grabbing torrent info across all accounts")
+		ad.logger.Trace().Err(lastErr).Msgf("Error grabbing torrent info across all accounts")
 	}
 	return nil, lastErr
 }
@@ -295,7 +295,7 @@ func (ad *AllDebrid) UpdateTorrent(t *types.Torrent) error {
 	}
 	
 	if lastErr != nil {
-		ad.logger.Error().Err(lastErr).Msgf("Error unmarshalling torrent info across all accounts")
+		ad.logger.Trace().Err(lastErr).Msgf("Error unmarshalling torrent info across all accounts")
 	}
 	return lastErr
 }
