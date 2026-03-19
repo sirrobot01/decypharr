@@ -30,7 +30,7 @@ func (q *QBit) handleLogin(w http.ResponseWriter, r *http.Request) {
 			Name:     "sid",
 			Value:    createSID(a.Host, a.Token),
 			Path:     "/",
-			SameSite: http.SameSiteNoneMode,
+			MaxAge:   31536000,
 		}
 		http.SetCookie(w, cookie)
 	}
