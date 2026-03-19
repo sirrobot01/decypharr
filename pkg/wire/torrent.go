@@ -357,6 +357,8 @@ func (s *Store) updateTorrent(t *Torrent, debridTorrent *types.Torrent) *Torrent
 		t.State = "pausedUP"
 	}
 
+	s.logger.Info().Msgf("[STATE DEBUG] Torrent %s -> State: %s, Progress: %f, AmountLeft: %d, TotalSize: %d, Path: %s, IsReady: %v", t.Name, t.State, t.Progress, t.AmountLeft, t.TotalSize, t.TorrentPath, t.IsReady())
+
 	s.torrents.Update(t)
 	return t
 }
