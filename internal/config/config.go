@@ -73,14 +73,15 @@ type Arr struct {
 }
 
 type Repair struct {
-	Enabled     bool           `json:"enabled,omitempty"`
-	Interval    string         `json:"interval,omitempty"`
-	ZurgURL     string         `json:"zurg_url,omitempty"`
-	AutoProcess bool           `json:"auto_process,omitempty"`
-	UseWebDav   bool           `json:"use_webdav,omitempty"`
-	Workers     int            `json:"workers,omitempty"`
-	ReInsert    bool           `json:"reinsert,omitempty"`
-	Strategy    RepairStrategy `json:"strategy,omitempty"`
+	Enabled        bool           `json:"enabled,omitempty"`
+	Interval       string         `json:"interval,omitempty"`
+	ZurgURL        string         `json:"zurg_url,omitempty"`
+	AutoProcess    bool           `json:"auto_process,omitempty"`
+	UseWebDav      bool           `json:"use_webdav,omitempty"`
+	Workers        int            `json:"workers,omitempty"`
+	ReInsert       bool           `json:"reinsert,omitempty"`
+	Strategy       RepairStrategy `json:"strategy,omitempty"`
+	DedupeOnRepair bool           `json:"dedupe_on_repair,omitempty"`
 }
 
 type Auth struct {

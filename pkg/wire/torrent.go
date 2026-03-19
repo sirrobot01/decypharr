@@ -17,7 +17,33 @@ import (
 
 func (s *Store) AddTorrent(ctx context.Context, importReq *ImportRequest) error {
 	torrent := createTorrentFromMagnet(importReq)
-	debridTorrent, err := debridTypes.Process(ctx, s.debrid, importReq.SelectedDebrid, importReq.Magnet, importReq.Arr, importReq.Action, importReq.DownloadUncached)
+
+	existing := s.torrents.Get(torrent.Hash, "")
+	var debridTorrent *types.Torrent
+	var err error
+
+	if existing != nil && existing.DebridID != "" {
+		s.logger.Info().Msgf("Torrent %s already exists in cache, verifying Debrid state to bypass upload", torrent.Hash)
+		deb := s.debrid.Debrid(existing.Debrid)
+		if deb != nil {
+			debridClient := deb.Client()
+			if debridClient != nil {
+				debridTorrent, err = debridClient.GetTorrent(existing.DebridID)
+			}
+		}
+		
+		if err != nil || debridTorrent == nil {
+			s.logger.Warn().Msgf("Upstream Debrid record lost for %s, falling back to fresh API push", torrent.Hash)
+			debridTorrent, err = debridTypes.Process(ctx, s.debrid, importReq.SelectedDebrid, importReq.Magnet, importReq.Arr, importReq.Action, importReq.DownloadUncached)
+		} else {
+			// Rescue the hidden struct since Radarr requested it again
+			existing.Hidden = false 
+		}
+	} else {
+		// Normal upload sequence
+		debridTorrent, err = debridTypes.Process(ctx, s.debrid, importReq.SelectedDebrid, importReq.Magnet, importReq.Arr, importReq.Action, importReq.DownloadUncached)
+	}
+
 	if err != nil {
 		var httpErr *utils.HTTPError
 		if ok := errors.As(err, &httpErr); ok {

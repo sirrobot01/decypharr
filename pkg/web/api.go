@@ -143,7 +143,7 @@ func (wb *Web) handleRepairMedia(w http.ResponseWriter, r *http.Request) {
 
 	if req.Async {
 		go func() {
-			if err := _store.Repair().AddJob(arrs, req.MediaIds, req.AutoProcess, false); err != nil {
+			if err := _store.Repair().AddJob(arrs, req.MediaIds, req.AutoProcess, false, req.DedupeOnRepair); err != nil {
 				wb.logger.Error().Err(err).Msg("Failed to repair media")
 			}
 		}()
@@ -151,7 +151,7 @@ func (wb *Web) handleRepairMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := _store.Repair().AddJob([]string{req.ArrName}, req.MediaIds, req.AutoProcess, false); err != nil {
+	if err := _store.Repair().AddJob([]string{req.ArrName}, req.MediaIds, req.AutoProcess, false, req.DedupeOnRepair); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to repair: %v", err), http.StatusInternalServerError)
 		return
 	}

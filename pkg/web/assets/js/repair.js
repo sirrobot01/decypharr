@@ -144,7 +144,8 @@ class RepairManager {
                     arr: arr,
                     mediaIds: mediaIds.length > 0 ? mediaIds : null,
                     async: this.refs.isAsync.checked,
-                    autoProcess: this.refs.autoProcess.checked
+                    autoProcess: this.refs.autoProcess.checked,
+                    dedupeOnRepair: document.getElementById('dedupeOnRepair').checked
                 })
             });
 

@@ -69,6 +69,7 @@ type Job struct {
 	FailedAt    time.Time                    `json:"failed_at"`
 	AutoProcess bool                         `json:"auto_process"`
 	Recurrent   bool                         `json:"recurrent"`
+	DedupeOnRepair bool                      `json:"dedupe_on_repair"`
 
 	Error string `json:"error"`
 
@@ -124,7 +125,7 @@ func (r *Repair) Start(ctx context.Context) error {
 	} else {
 		_, err2 := r.scheduler.NewJob(jd, gocron.NewTask(func() {
 			r.logger.Info().Msgf("Repair job started at %s", time.Now().Format("15:04:05"))
-			if err := r.AddJob([]string{}, []string{}, r.autoProcess, true); err != nil {
+			if err := r.AddJob([]string{}, []string{}, r.autoProcess, true, config.Get().Repair.DedupeOnRepair); err != nil {
 				r.logger.Error().Err(err).Msg("Error running repair job")
 			}
 		}))
@@ -258,7 +259,7 @@ func (r *Repair) preRunChecks() error {
 	return nil
 }
 
-func (r *Repair) AddJob(arrsNames []string, mediaIDs []string, autoProcess, recurrent bool) error {
+func (r *Repair) AddJob(arrsNames []string, mediaIDs []string, autoProcess, recurrent, dedupeOnRepair bool) error {
 	key := jobKey(arrsNames, mediaIDs)
 	job, ok := r.Jobs[key]
 	if job != nil && job.Status == JobStarted {
@@ -269,6 +270,7 @@ func (r *Repair) AddJob(arrsNames []string, mediaIDs []string, autoProcess, recu
 	}
 	job.AutoProcess = autoProcess
 	job.Recurrent = recurrent
+	job.DedupeOnRepair = dedupeOnRepair
 	r.reset(job)
 
 	job.ctx, job.cancelFunc = context.WithCancel(r.ctx)
@@ -334,6 +336,41 @@ func (r *Repair) repair(job *Job) error {
 
 	// Initialize the run
 	r.initRun(job.ctx)
+
+	// Phase 1: Deduplicate Debrid Accounts if explicitly engaged
+	if job.DedupeOnRepair {
+		r.logger.Info().Msg("Starting Debrid deduplication sequence")
+		for _, dbClient := range r.deb.Clients() {
+			if dbClient == nil {
+				continue
+			}
+			torrents, err := dbClient.GetTorrents()
+			if err == nil && len(torrents) > 0 {
+				hashCounts := make(map[string]string)
+				deletedCount := 0
+				
+				// Natively iterate the downstream hashes to capture collision instances
+				for _, t := range torrents {
+					if t == nil || t.InfoHash == "" {
+						continue
+					}
+					if _, exists := hashCounts[t.InfoHash]; exists {
+						// Duplicate discovered! Delete the trailing stream copy securely.
+						if err := dbClient.DeleteTorrent(t.ID); err == nil {
+							deletedCount++
+						}
+					} else {
+						hashCounts[t.InfoHash] = t.ID
+					}
+				}
+				if deletedCount > 0 {
+					r.logger.Info().Msgf("Successfully deducted %d duplicate torrents from %s", deletedCount, dbClient.Name())
+				}
+			} else if err != nil {
+				r.logger.Warn().Err(err).Msgf("Failed to fetch torrents from %s for deduplication", dbClient.Name())
+			}
+		}
+	}
 
 	// Use a mutex to protect concurrent access to brokenItems
 	var mu sync.Mutex

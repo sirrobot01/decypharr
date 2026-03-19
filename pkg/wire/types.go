@@ -65,6 +65,7 @@ type Torrent struct {
 	Tracker           string  `json:"tracker,omitempty"`
 	UpLimit           int64   `json:"up_limit,omitempty"`
 	Uploaded          int64   `json:"uploaded,omitempty"`
+	Hidden            bool    `json:"-"` // Prevents hidden torrents from showing up in TorrentsInfo
 	UploadedSession   int64   `json:"uploaded_session,omitempty"`
 	Upspeed           int64   `json:"upspeed,omitempty"`
 	Source            string  `json:"source,omitempty"`
@@ -113,13 +114,13 @@ func (t *Torrent) Copy() *Torrent {
 		SeqDl:             t.SeqDl,
 		Size:              t.Size,
 		State:             t.State,
-		SuperSeeding:      t.SuperSeeding,
 		Tags:              t.Tags,
 		TimeActive:        t.TimeActive,
 		TotalSize:         t.TotalSize,
 		Tracker:           t.Tracker,
 		UpLimit:           t.UpLimit,
 		Uploaded:          t.Uploaded,
+		Hidden:            t.Hidden,
 		UploadedSession:   t.UploadedSession,
 		Upspeed:           t.Upspeed,
 		Source:            t.Source,
