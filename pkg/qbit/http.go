@@ -272,6 +272,10 @@ func (q *QBit) handleTorrentProperties(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	hash := r.URL.Query().Get("hash")
 	torrent := q.storage.Get(hash, getCategory(ctx))
+	if torrent == nil {
+		http.Error(w, "Torrent not found", http.StatusNotFound)
+		return
+	}
 
 	properties := q.GetTorrentProperties(torrent)
 	request.JSONResponse(w, properties, http.StatusOK)
