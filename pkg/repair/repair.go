@@ -115,7 +115,8 @@ func New(arrs *arr.Storage, engine *debrid.Storage) *Repair {
 func (r *Repair) RunDeduplication(ctx context.Context) ([]DeduplicatedItem, error) {
 	r.initRun(ctx)
 	var totalDeleted []DeduplicatedItem
-	
+	var mu sync.Mutex
+
 	for _, dbClient := range r.deb.Clients() {
 		if dbClient == nil {
 			continue
@@ -123,28 +124,56 @@ func (r *Repair) RunDeduplication(ctx context.Context) ([]DeduplicatedItem, erro
 		torrents, err := dbClient.GetTorrents()
 		if err == nil && len(torrents) > 0 {
 			hashCounts := make(map[string]string)
-			deletedCount := 0
+			
+			type delItem struct {
+				ID       string
+				InfoHash string
+				Name     string
+			}
+			var deleteList []delItem
 			
 			for _, t := range torrents {
 				if t == nil || t.InfoHash == "" {
 					continue
 				}
 				if _, exists := hashCounts[t.InfoHash]; exists {
-					if err := dbClient.DeleteTorrent(t.Id); err == nil {
-						totalDeleted = append(totalDeleted, DeduplicatedItem{
-							Hash:     t.InfoHash,
-							Provider: dbClient.Name(),
-							Name:     t.Name,
-							ID:       t.Id,
-						})
-						deletedCount++
-					}
+					deleteList = append(deleteList, delItem{
+						ID:       t.Id,
+						InfoHash: t.InfoHash,
+						Name:     t.Name,
+					})
 				} else {
 					hashCounts[t.InfoHash] = t.Id
 				}
 			}
-			if deletedCount > 0 {
-				r.logger.Info().Msgf("[DEDUPE] Successfully deducted %d duplicate torrents from %s", deletedCount, dbClient.Name())
+
+			if len(deleteList) > 0 {
+				var deletedCount int
+				g, _ := errgroup.WithContext(ctx)
+				g.SetLimit(r.getWorkers())
+
+				for _, item := range deleteList {
+					item := item // capture loop variable
+					g.Go(func() error {
+						if err := dbClient.DeleteTorrent(item.ID); err == nil {
+							mu.Lock()
+							totalDeleted = append(totalDeleted, DeduplicatedItem{
+								Hash:     item.InfoHash,
+								Provider: dbClient.Name(),
+								Name:     item.Name,
+								ID:       item.ID,
+							})
+							deletedCount++
+							mu.Unlock()
+						}
+						return nil
+					})
+				}
+				_ = g.Wait()
+
+				if deletedCount > 0 {
+					r.logger.Info().Msgf("[DEDUPE] Successfully deducted %d duplicate torrents from %s", deletedCount, dbClient.Name())
+				}
 			} else {
 				r.logger.Info().Msgf("[DEDUPE] Scanned %d active hashes on %s - Clean, no duplicates found", len(torrents), dbClient.Name())
 			}
