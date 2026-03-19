@@ -69,10 +69,10 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 				Err(err).
 				Msg("Error checking torrent status")
 			if dbT != nil && dbT.Id != "" {
-				// Delete the torrent if it was not downloaded
-				go func() {
-					_ = client.DeleteTorrent(dbT.Id)
-				}()
+				// Disabled auto-deletion on error to allow users to debug Debrid interfaces
+				// go func() {
+				// 	_ = client.DeleteTorrent(dbT.Id)
+				// }()
 			}
 			s.logger.Error().Msgf("Error checking status: %v", err)
 			s.markTorrentAsFailed(torrent)
@@ -104,11 +104,11 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 
 	onFailed := func(err error) {
 		s.markTorrentAsFailed(torrent)
-		go func() {
-			if deleteErr := client.DeleteTorrent(debridTorrent.Id); deleteErr != nil {
-				s.logger.Warn().Err(deleteErr).Msgf("Failed to delete torrent %s", debridTorrent.Id)
-			}
-		}()
+		// go func() {
+		// 	if deleteErr := client.DeleteTorrent(debridTorrent.Id); deleteErr != nil {
+		// 		s.logger.Warn().Err(deleteErr).Msgf("Failed to delete torrent %s", debridTorrent.Id)
+		// 	}
+		// }()
 		s.logger.Error().Err(err).Msgf("Error occured while processing torrent %s", debridTorrent.Name)
 		importReq.markAsFailed(err, torrent, debridTorrent)
 	}
