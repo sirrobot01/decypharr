@@ -136,38 +136,53 @@ func (tb *Torbox) IsAvailable(hashes []string) map[string]bool {
 
 func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
 	url := fmt.Sprintf("%s/api/torrents/createtorrent", tb.Host)
-	payload := &bytes.Buffer{}
-	writer := multipart.NewWriter(payload)
-	_ = writer.WriteField("magnet", torrent.Magnet.Link)
-	if !torrent.DownloadUncached {
-		_ = writer.WriteField("add_only_if_cached", "true")
+	
+	var lastErr error
+	for _, acc := range tb.accountsManager.All() {
+		payload := &bytes.Buffer{}
+		writer := multipart.NewWriter(payload)
+		_ = writer.WriteField("magnet", torrent.Magnet.Link)
+		if !torrent.DownloadUncached {
+			_ = writer.WriteField("add_only_if_cached", "true")
+		}
+		err := writer.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		
+		req, _ := http.NewRequest(http.MethodPost, url, payload)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		resp, err := acc.Client().MakeRequest(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var data AddMagnetResponse
+		err = json.Unmarshal(resp, &data)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if data.Data == nil {
+			lastErr = fmt.Errorf("error adding torrent. No data returned")
+			continue
+		}
+		dt := *data.Data
+		torrentId := strconv.Itoa(dt.Id)
+		torrent.Id = torrentId
+		torrent.MountPath = tb.MountPath
+		torrent.Debrid = tb.name
+		torrent.Added = time.Now().Format(time.RFC3339)
+	
+		return torrent, nil
 	}
-	err := writer.Close()
-	if err != nil {
-		return nil, err
+	
+	if lastErr != nil {
+		tb.logger.Error().Err(lastErr).Msgf("Error adding torrent across all Torbox accounts")
 	}
-	req, _ := http.NewRequest(http.MethodPost, url, payload)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	resp, err := tb.client.MakeRequest(req)
-	if err != nil {
-		return nil, err
-	}
-	var data AddMagnetResponse
-	err = json.Unmarshal(resp, &data)
-	if err != nil {
-		return nil, err
-	}
-	if data.Data == nil {
-		return nil, fmt.Errorf("error adding torrent")
-	}
-	dt := *data.Data
-	torrentId := strconv.Itoa(dt.Id)
-	torrent.Id = torrentId
-	torrent.MountPath = tb.MountPath
-	torrent.Debrid = tb.name
-	torrent.Added = time.Now().Format(time.RFC3339)
 
-	return torrent, nil
+	return nil, lastErr
 }
 
 func (tb *Torbox) getTorboxStatus(status string, finished bool) string {
@@ -192,181 +207,207 @@ func (tb *Torbox) getTorboxStatus(status string, finished bool) string {
 
 func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 	url := fmt.Sprintf("%s/api/torrents/mylist/?id=%s", tb.Host, torrentId)
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	resp, err := tb.client.MakeRequest(req)
-	if err != nil {
-		return nil, err
-	}
-	var res InfoResponse
-	err = json.Unmarshal(resp, &res)
-	if err != nil {
-		return nil, err
-	}
-	data := res.Data
-	if data == nil {
-		return nil, fmt.Errorf("error getting torrent")
-	}
-	t := &types.Torrent{
-		Id:               strconv.Itoa(data.Id),
-		Name:             data.Name,
-		Bytes:            data.Size,
-		Folder:           data.Name,
-		Progress:         data.Progress * 100,
-		Status:           tb.getTorboxStatus(data.DownloadState, data.DownloadFinished),
-		Speed:            data.DownloadSpeed,
-		Seeders:          data.Seeds,
-		Filename:         data.Name,
-		OriginalFilename: data.Name,
-		MountPath:        tb.MountPath,
-		Debrid:           tb.name,
-		Files:            make(map[string]types.File),
-		Added:            data.CreatedAt.Format(time.RFC3339),
-	}
-	cfg := config.Get()
-
-	totalFiles := 0
-	skippedSamples := 0
-	skippedFileType := 0
-	skippedSize := 0
-	validFiles := 0
-	filesWithLinks := 0
-
-	for _, f := range data.Files {
-		totalFiles++
-		fileName := filepath.Base(f.Name)
-
-		if !tb.addSamples && utils.IsSampleFile(f.AbsolutePath) {
-			skippedSamples++
+	
+	var lastErr error
+	for _, acc := range tb.accountsManager.All() {
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		resp, err := acc.Client().MakeRequest(req)
+		if err != nil {
+			lastErr = err
 			continue
 		}
-		if !cfg.IsAllowedFile(fileName) {
-			skippedFileType++
+		var res InfoResponse
+		err = json.Unmarshal(resp, &res)
+		if err != nil {
+			lastErr = err
 			continue
 		}
-
-		if !cfg.IsSizeAllowed(f.Size) {
-			skippedSize++
+		data := res.Data
+		if data == nil {
+			lastErr = fmt.Errorf("error getting torrent")
 			continue
 		}
-
-		validFiles++
-		file := types.File{
-			TorrentId: t.Id,
-			Id:        strconv.Itoa(f.Id),
-			Name:      fileName,
-			Size:      f.Size,
-			Path:      f.Name,
+		t := &types.Torrent{
+			Id:               strconv.Itoa(data.Id),
+			Name:             data.Name,
+			Bytes:            data.Size,
+			Folder:           data.Name,
+			Progress:         data.Progress * 100,
+			Status:           tb.getTorboxStatus(data.DownloadState, data.DownloadFinished),
+			Speed:            data.DownloadSpeed,
+			Seeders:          data.Seeds,
+			Filename:         data.Name,
+			OriginalFilename: data.Name,
+			MountPath:        tb.MountPath,
+			Debrid:           tb.name,
+			Files:            make(map[string]types.File),
+			Added:            data.CreatedAt.Format(time.RFC3339),
 		}
-
-		// For downloaded torrents, set a placeholder link to indicate file is available
-		if data.DownloadFinished {
-			file.Link = fmt.Sprintf("torbox://%s/%d", t.Id, f.Id)
-			filesWithLinks++
+		cfg := config.Get()
+	
+		totalFiles := 0
+		skippedSamples := 0
+		skippedFileType := 0
+		skippedSize := 0
+		validFiles := 0
+		filesWithLinks := 0
+	
+		for _, f := range data.Files {
+			totalFiles++
+			fileName := filepath.Base(f.Name)
+	
+			if !tb.addSamples && utils.IsSampleFile(f.AbsolutePath) {
+				skippedSamples++
+				continue
+			}
+			if !cfg.IsAllowedFile(fileName) {
+				skippedFileType++
+				continue
+			}
+	
+			if !cfg.IsSizeAllowed(f.Size) {
+				skippedSize++
+				continue
+			}
+	
+			validFiles++
+			file := types.File{
+				TorrentId: t.Id,
+				Id:        strconv.Itoa(f.Id),
+				Name:      fileName,
+				Size:      f.Size,
+				Path:      f.Name,
+			}
+	
+			// For downloaded torrents, set a placeholder link to indicate file is available
+			if data.DownloadFinished {
+				file.Link = fmt.Sprintf("torbox://%s/%d", t.Id, f.Id)
+				filesWithLinks++
+			}
+	
+			t.Files[fileName] = file
 		}
-
-		t.Files[fileName] = file
+	
+		// Log summary only if there are issues or for debugging
+		tb.logger.Debug().
+			Str("torrent_id", t.Id).
+			Str("torrent_name", t.Name).
+			Bool("download_finished", data.DownloadFinished).
+			Str("status", t.Status).
+			Int("total_files", totalFiles).
+			Int("valid_files", validFiles).
+			Int("final_file_count", len(t.Files)).
+			Msg("Torrent file processing completed")
+		var cleanPath string
+		if len(t.Files) > 0 {
+			cleanPath = path.Clean(data.Files[0].Name)
+		} else {
+			cleanPath = path.Clean(data.Name)
+		}
+	
+		t.OriginalFilename = strings.Split(cleanPath, "/")[0]
+		t.Debrid = tb.name
+	
+		return t, nil
 	}
-
-	// Log summary only if there are issues or for debugging
-	tb.logger.Debug().
-		Str("torrent_id", t.Id).
-		Str("torrent_name", t.Name).
-		Bool("download_finished", data.DownloadFinished).
-		Str("status", t.Status).
-		Int("total_files", totalFiles).
-		Int("valid_files", validFiles).
-		Int("final_file_count", len(t.Files)).
-		Msg("Torrent file processing completed")
-	var cleanPath string
-	if len(t.Files) > 0 {
-		cleanPath = path.Clean(data.Files[0].Name)
-	} else {
-		cleanPath = path.Clean(data.Name)
+	if lastErr != nil {
+		tb.logger.Error().Err(lastErr).Msgf("Error grabbing torrent info across all Torbox accounts")
 	}
-
-	t.OriginalFilename = strings.Split(cleanPath, "/")[0]
-	t.Debrid = tb.name
-
-	return t, nil
+	return nil, lastErr
 }
 
 func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
 	url := fmt.Sprintf("%s/api/torrents/mylist/?id=%s", tb.Host, t.Id)
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	resp, err := tb.client.MakeRequest(req)
-	if err != nil {
-		return err
-	}
-	var res InfoResponse
-	err = json.Unmarshal(resp, &res)
-	if err != nil {
-		return err
-	}
-	data := res.Data
-	name := data.Name
-
-	t.Name = name
-	t.Bytes = data.Size
-	t.Folder = name
-	t.Progress = data.Progress * 100
-	t.Status = tb.getTorboxStatus(data.DownloadState, data.DownloadFinished)
-	t.Speed = data.DownloadSpeed
-	t.Seeders = data.Seeds
-	t.Filename = name
-	t.OriginalFilename = name
-	t.MountPath = tb.MountPath
-	t.Debrid = tb.name
-
-	// Clear existing files map to rebuild it
-	t.Files = make(map[string]types.File)
-
-	cfg := config.Get()
-	validFiles := 0
-	filesWithLinks := 0
-
-	for _, f := range data.Files {
-		fileName := filepath.Base(f.Name)
-
-		if !tb.addSamples && utils.IsSampleFile(f.AbsolutePath) {
+	
+	var lastErr error
+	for _, acc := range tb.accountsManager.All() {
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		resp, err := acc.Client().MakeRequest(req)
+		if err != nil {
+			lastErr = err
 			continue
 		}
-
-		if !cfg.IsAllowedFile(fileName) {
+		var res InfoResponse
+		err = json.Unmarshal(resp, &res)
+		if err != nil {
+			lastErr = err
 			continue
 		}
-
-		if !cfg.IsSizeAllowed(f.Size) {
+		data := res.Data
+		if data == nil {
+			lastErr = fmt.Errorf("error updating torrent")
 			continue
 		}
-
-		validFiles++
-		file := types.File{
-			TorrentId: t.Id,
-			Id:        strconv.Itoa(f.Id),
-			Name:      fileName,
-			Size:      f.Size,
-			Path:      fileName,
+		name := data.Name
+	
+		t.Name = name
+		t.Bytes = data.Size
+		t.Folder = name
+		t.Progress = data.Progress * 100
+		t.Status = tb.getTorboxStatus(data.DownloadState, data.DownloadFinished)
+		t.Speed = data.DownloadSpeed
+		t.Seeders = data.Seeds
+		t.Filename = name
+		t.OriginalFilename = name
+		t.MountPath = tb.MountPath
+		t.Debrid = tb.name
+	
+		// Clear existing files map to rebuild it
+		t.Files = make(map[string]types.File)
+	
+		cfg := config.Get()
+		validFiles := 0
+		filesWithLinks := 0
+	
+		for _, f := range data.Files {
+			fileName := filepath.Base(f.Name)
+	
+			if !tb.addSamples && utils.IsSampleFile(f.AbsolutePath) {
+				continue
+			}
+	
+			if !cfg.IsAllowedFile(fileName) {
+				continue
+			}
+	
+			if !cfg.IsSizeAllowed(f.Size) {
+				continue
+			}
+	
+			validFiles++
+			file := types.File{
+				TorrentId: t.Id,
+				Id:        strconv.Itoa(f.Id),
+				Name:      fileName,
+				Size:      f.Size,
+				Path:      fileName,
+			}
+	
+			// For downloaded torrents, set a placeholder link to indicate file is available
+			if data.DownloadFinished {
+				file.Link = fmt.Sprintf("torbox://%s/%s", t.Id, strconv.Itoa(f.Id))
+				filesWithLinks++
+			}
+	
+			t.Files[fileName] = file
 		}
-
-		// For downloaded torrents, set a placeholder link to indicate file is available
-		if data.DownloadFinished {
-			file.Link = fmt.Sprintf("torbox://%s/%s", t.Id, strconv.Itoa(f.Id))
-			filesWithLinks++
+	
+		var cleanPath string
+		if len(t.Files) > 0 {
+			cleanPath = path.Clean(data.Files[0].Name)
+		} else {
+			cleanPath = path.Clean(data.Name)
 		}
-
-		t.Files[fileName] = file
+	
+		t.OriginalFilename = strings.Split(cleanPath, "/")[0]
+		t.Debrid = tb.name
+		return nil
 	}
-
-	var cleanPath string
-	if len(t.Files) > 0 {
-		cleanPath = path.Clean(data.Files[0].Name)
-	} else {
-		cleanPath = path.Clean(data.Name)
+	
+	if lastErr != nil {
+		tb.logger.Error().Err(lastErr).Msgf("Error unmarshalling torrent info across all Torbox accounts")
 	}
-
-	t.OriginalFilename = strings.Split(cleanPath, "/")[0]
-	t.Debrid = tb.name
-	return nil
+	return lastErr
 }
 
 func (tb *Torbox) CheckStatus(torrent *types.Torrent) (*types.Torrent, error) {
@@ -454,66 +495,68 @@ func (tb *Torbox) GetFileDownloadLinks(t *types.Torrent) error {
 
 func (tb *Torbox) GetDownloadLink(t *types.Torrent, file *types.File) (types.DownloadLink, error) {
 	url := fmt.Sprintf("%s/api/torrents/requestdl/", tb.Host)
-	query := gourl.Values{}
-	query.Add("torrent_id", t.Id)
-	query.Add("token", tb.APIKey)
-	query.Add("file_id", file.Id)
-	url += "?" + query.Encode()
 
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	resp, err := tb.client.MakeRequest(req)
-	if err != nil {
-		tb.logger.Error().
-			Err(err).
-			Str("torrent_id", t.Id).
-			Str("file_id", file.Id).
-			Msg("Failed to make request to Torbox API")
-		return types.DownloadLink{}, err
+	var lastErr error
+	accounts := tb.accountsManager.Active()
+	for _, acc := range accounts {
+		query := gourl.Values{}
+		query.Add("torrent_id", t.Id)
+		query.Add("token", acc.Token)
+		query.Add("file_id", file.Id)
+		fullUrl := url + "?" + query.Encode()
+	
+		req, _ := http.NewRequest(http.MethodGet, fullUrl, nil)
+		resp, err := acc.Client().MakeRequest(req)
+		if err != nil {
+			tb.logger.Error().
+				Err(err).
+				Str("torrent_id", t.Id).
+				Str("file_id", file.Id).
+				Msg("Failed to make request to Torbox API")
+			lastErr = err
+			continue
+		}
+	
+		var data DownloadLinksResponse
+		if err = json.Unmarshal(resp, &data); err != nil {
+			tb.logger.Error().
+				Err(err).
+				Str("torrent_id", t.Id).
+				Str("file_id", file.Id).
+				Msg("Failed to unmarshal Torbox API response")
+			lastErr = err
+			continue
+		}
+	
+		if data.Data == nil {
+			lastErr = fmt.Errorf("error getting download links")
+			continue
+		}
+	
+		link := *data.Data
+		if link == "" {
+			lastErr = fmt.Errorf("error getting download links")
+			continue
+		}
+	
+		now := time.Now()
+		dl := types.DownloadLink{
+			Token:        acc.Token,
+			Link:         file.Link,
+			DownloadLink: link,
+			Id:           file.Id,
+			Generated:    now,
+			ExpiresAt:    now.Add(tb.autoExpiresLinksAfter),
+		}
+	
+		acc.StoreDownloadLink(dl)
+	
+		return dl, nil
 	}
-
-	var data DownloadLinksResponse
-	if err = json.Unmarshal(resp, &data); err != nil {
-		tb.logger.Error().
-			Err(err).
-			Str("torrent_id", t.Id).
-			Str("file_id", file.Id).
-			Msg("Failed to unmarshal Torbox API response")
-		return types.DownloadLink{}, err
+	if lastErr != nil {
+		return types.DownloadLink{}, lastErr
 	}
-
-	if data.Data == nil {
-		tb.logger.Error().
-			Str("torrent_id", t.Id).
-			Str("file_id", file.Id).
-			Bool("success", data.Success).
-			Interface("error", data.Error).
-			Str("detail", data.Detail).
-			Msg("Torbox API returned no data")
-		return types.DownloadLink{}, fmt.Errorf("error getting download links")
-	}
-
-	link := *data.Data
-	if link == "" {
-		tb.logger.Error().
-			Str("torrent_id", t.Id).
-			Str("file_id", file.Id).
-			Msg("Torbox API returned empty download link")
-		return types.DownloadLink{}, fmt.Errorf("error getting download links")
-	}
-
-	now := time.Now()
-	dl := types.DownloadLink{
-		Token:        tb.APIKey,
-		Link:         file.Link,
-		DownloadLink: link,
-		Id:           file.Id,
-		Generated:    now,
-		ExpiresAt:    now.Add(tb.autoExpiresLinksAfter),
-	}
-
-	tb.accountsManager.StoreDownloadLink(dl)
-
-	return dl, nil
+	return types.DownloadLink{}, fmt.Errorf("no active accounts available to unlock torbox link")
 }
 
 func (tb *Torbox) GetDownloadingStatus() []string {
@@ -521,105 +564,103 @@ func (tb *Torbox) GetDownloadingStatus() []string {
 }
 
 func (tb *Torbox) GetTorrents() ([]*types.Torrent, error) {
-	offset := 0
 	allTorrents := make([]*types.Torrent, 0)
+	var lastErr error
 
-	for {
-		torrents, err := tb.getTorrents(offset)
-		if err != nil {
-			break
+	for _, acc := range tb.accountsManager.All() {
+		offset := 0
+		for {
+			url := fmt.Sprintf("%s/api/torrents/mylist?offset=%d", tb.Host, offset)
+			req, _ := http.NewRequest(http.MethodGet, url, nil)
+			resp, err := acc.Client().MakeRequest(req)
+			if err != nil {
+				lastErr = err
+				break
+			}
+		
+			var res TorrentsListResponse
+			err = json.Unmarshal(resp, &res)
+			if err != nil {
+				lastErr = err
+				break
+			}
+		
+			if !res.Success || res.Data == nil {
+				lastErr = fmt.Errorf("torbox API error: %v", res.Error)
+				break
+			}
+		
+			cfg := config.Get()
+		
+			for _, data := range *res.Data {
+				t := &types.Torrent{
+					Id:               strconv.Itoa(data.Id),
+					Name:             data.Name,
+					Bytes:            data.Size,
+					Folder:           data.Name,
+					Progress:         data.Progress * 100,
+					Status:           tb.getTorboxStatus(data.DownloadState, data.DownloadFinished),
+					Speed:            data.DownloadSpeed,
+					Seeders:          data.Seeds,
+					Filename:         data.Name,
+					OriginalFilename: data.Name,
+					MountPath:        tb.MountPath,
+					Debrid:           tb.name,
+					Files:            make(map[string]types.File),
+					Added:            data.CreatedAt.Format(time.RFC3339),
+					InfoHash:         data.Hash,
+				}
+		
+				for _, f := range data.Files {
+					fileName := filepath.Base(f.Name)
+					if !tb.addSamples && utils.IsSampleFile(f.AbsolutePath) {
+						continue
+					}
+					if !cfg.IsAllowedFile(fileName) {
+						continue
+					}
+					if !cfg.IsSizeAllowed(f.Size) {
+						continue
+					}
+					file := types.File{
+						TorrentId: t.Id,
+						Id:        strconv.Itoa(f.Id),
+						Name:      fileName,
+						Size:      f.Size,
+						Path:      f.Name,
+					}
+		
+					if data.DownloadFinished {
+						file.Link = fmt.Sprintf("torbox://%s/%d", t.Id, f.Id)
+					}
+		
+					t.Files[fileName] = file
+				}
+		
+				var cleanPath string
+				if len(t.Files) > 0 {
+					cleanPath = path.Clean(data.Files[0].Name)
+				} else {
+					cleanPath = path.Clean(data.Name)
+				}
+				t.OriginalFilename = strings.Split(cleanPath, "/")[0]
+		
+				allTorrents = append(allTorrents, t)
+			}
+			
+			total := len(*res.Data)
+			if total == 0 {
+				break
+			}
+			offset += total
 		}
-		if len(torrents) == 0 {
-			break
-		}
-		allTorrents = append(allTorrents, torrents...)
-		offset += len(torrents)
 	}
+	
+	if len(allTorrents) == 0 && lastErr != nil {
+		return nil, lastErr
+	}
+
 	return allTorrents, nil
-}
-
-func (tb *Torbox) getTorrents(offset int) ([]*types.Torrent, error) {
-	url := fmt.Sprintf("%s/api/torrents/mylist?offset=%d", tb.Host, offset)
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	resp, err := tb.client.MakeRequest(req)
-	if err != nil {
-		return nil, err
-	}
-
-	var res TorrentsListResponse
-	err = json.Unmarshal(resp, &res)
-	if err != nil {
-		return nil, err
-	}
-
-	if !res.Success || res.Data == nil {
-		return nil, fmt.Errorf("torbox API error: %v", res.Error)
-	}
-
-	torrents := make([]*types.Torrent, 0, len(*res.Data))
-	cfg := config.Get()
-
-	for _, data := range *res.Data {
-		t := &types.Torrent{
-			Id:               strconv.Itoa(data.Id),
-			Name:             data.Name,
-			Bytes:            data.Size,
-			Folder:           data.Name,
-			Progress:         data.Progress * 100,
-			Status:           tb.getTorboxStatus(data.DownloadState, data.DownloadFinished),
-			Speed:            data.DownloadSpeed,
-			Seeders:          data.Seeds,
-			Filename:         data.Name,
-			OriginalFilename: data.Name,
-			MountPath:        tb.MountPath,
-			Debrid:           tb.name,
-			Files:            make(map[string]types.File),
-			Added:            data.CreatedAt.Format(time.RFC3339),
-			InfoHash:         data.Hash,
-		}
-
-		// Process files
-		for _, f := range data.Files {
-			fileName := filepath.Base(f.Name)
-			if !tb.addSamples && utils.IsSampleFile(f.AbsolutePath) {
-				// Skip sample files
-				continue
-			}
-			if !cfg.IsAllowedFile(fileName) {
-				continue
-			}
-			if !cfg.IsSizeAllowed(f.Size) {
-				continue
-			}
-			file := types.File{
-				TorrentId: t.Id,
-				Id:        strconv.Itoa(f.Id),
-				Name:      fileName,
-				Size:      f.Size,
-				Path:      f.Name,
-			}
-
-			// For downloaded torrents, set a placeholder link to indicate file is available
-			if data.DownloadFinished {
-				file.Link = fmt.Sprintf("torbox://%s/%d", t.Id, f.Id)
-			}
-
-			t.Files[fileName] = file
-		}
-
-		// Set original filename based on first file or torrent name
-		var cleanPath string
-		if len(t.Files) > 0 {
-			cleanPath = path.Clean(data.Files[0].Name)
-		} else {
-			cleanPath = path.Clean(data.Name)
-		}
-		t.OriginalFilename = strings.Split(cleanPath, "/")[0]
-
-		torrents = append(torrents, t)
-	}
-
-	return torrents, nil
 }
 
 func (tb *Torbox) GetDownloadUncached() bool {

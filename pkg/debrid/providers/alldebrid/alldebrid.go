@@ -92,26 +92,38 @@ func (ad *AllDebrid) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error
 	query := gourl.Values{}
 	query.Add("magnets[]", torrent.Magnet.Link)
 	url += "?" + query.Encode()
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	resp, err := ad.client.MakeRequest(req)
-	if err != nil {
-		return nil, err
+	
+	var lastErr error
+	for _, acc := range ad.accountsManager.All() {
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		resp, err := acc.Client().MakeRequest(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var data UploadMagnetResponse
+		err = json.Unmarshal(resp, &data)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		magnets := data.Data.Magnets
+		if len(magnets) == 0 {
+			lastErr = fmt.Errorf("error adding torrent. No magnets returned")
+			continue
+		}
+		magnet := magnets[0]
+		torrentId := strconv.Itoa(magnet.ID)
+		torrent.Id = torrentId
+		torrent.Added = time.Now().Format(time.RFC3339)
+	
+		return torrent, nil
 	}
-	var data UploadMagnetResponse
-	err = json.Unmarshal(resp, &data)
-	if err != nil {
-		return nil, err
+	
+	if lastErr != nil {
+		ad.logger.Error().Err(lastErr).Msgf("Error adding torrent across all accounts")
 	}
-	magnets := data.Data.Magnets
-	if len(magnets) == 0 {
-		return nil, fmt.Errorf("error adding torrent. No magnets returned")
-	}
-	magnet := magnets[0]
-	torrentId := strconv.Itoa(magnet.ID)
-	torrent.Id = torrentId
-	torrent.Added = time.Now().Format(time.RFC3339)
-
-	return torrent, nil
+	return nil, lastErr
 }
 
 func getAlldebridStatus(statusCode int) string {
