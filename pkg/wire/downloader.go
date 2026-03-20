@@ -408,10 +408,11 @@ func (s *Store) processSymlink(debridTorrent *types.Torrent, torrentRclonePath, 
 		return "", fmt.Errorf("failed to create directory: %s: %v", torrentSymlinkPath, err)
 	}
 
-	// Track pending files
+	// Track pending files by their base name so os.ReadDir recursive scans match correctly
 	remainingFiles := make(map[string]types.File)
 	for _, file := range files {
-		remainingFiles[file.Name] = file
+		baseName := filepath.Base(file.Name)
+		remainingFiles[baseName] = file
 	}
 
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -421,6 +422,33 @@ func (s *Store) processSymlink(debridTorrent *types.Torrent, torrentRclonePath, 
 
 	var checkDirectory func(string) // Recursive function
 	checkDirectory = func(dirPath string) {
+		info, err := os.Stat(dirPath)
+		if err != nil {
+			return
+		}
+
+		if !info.IsDir() {
+			entryName := info.Name()
+			if file, exists := remainingFiles[entryName]; exists {
+				fileSymlinkPath := filepath.Join(torrentSymlinkPath, filepath.Base(file.Name))
+				errSym := os.Symlink(dirPath, fileSymlinkPath)
+				if errSym != nil {
+					if os.IsExist(errSym) {
+						os.Remove(fileSymlinkPath) // Overwrite dead/old symlinks
+						errSym = os.Symlink(dirPath, fileSymlinkPath)
+					}
+				}
+				if errSym == nil {
+					filePaths = append(filePaths, fileSymlinkPath)
+					delete(remainingFiles, entryName)
+					s.logger.Info().Msgf("File is ready: %s", file.Name)
+				} else {
+					s.logger.Error().Err(errSym).Msgf("Failed to create symlink for %s", file.Name)
+				}
+			}
+			return
+		}
+
 		entries, err := os.ReadDir(dirPath)
 		if err != nil {
 			return
@@ -432,12 +460,21 @@ func (s *Store) processSymlink(debridTorrent *types.Torrent, torrentRclonePath, 
 
 			// Check if this matches a remaining file
 			if file, exists := remainingFiles[entryName]; exists {
-				fileSymlinkPath := filepath.Join(torrentSymlinkPath, file.Name)
+				fileSymlinkPath := filepath.Join(torrentSymlinkPath, filepath.Base(file.Name))
 
-				if err := os.Symlink(fullPath, fileSymlinkPath); err == nil || os.IsExist(err) {
+				errSym := os.Symlink(fullPath, fileSymlinkPath)
+				if errSym != nil {
+					if os.IsExist(errSym) {
+						os.Remove(fileSymlinkPath)
+						errSym = os.Symlink(fullPath, fileSymlinkPath)
+					}
+				}
+				if errSym == nil {
 					filePaths = append(filePaths, fileSymlinkPath)
 					delete(remainingFiles, entryName)
 					s.logger.Info().Msgf("File is ready: %s", file.Name)
+				} else {
+					s.logger.Error().Err(errSym).Msgf("Failed to create symlink for %s", file.Name)
 				}
 			} else if entry.IsDir() {
 				// If not found and it's a directory, check inside
@@ -557,6 +594,9 @@ func (s *Store) processMultiSeasonSymlinks(torrent *Torrent, debridTorrent *type
 		seasonTorrent.TorrentPath = torrentSymlinkPath
 		seasonTorrent.ContentPath = torrentSymlinkPath
 		seasonTorrent.State = "pausedUP"
+		seasonTorrent.Progress = 1.0
+		seasonTorrent.AmountLeft = 0
+		seasonTorrent.Completed = seasonTorrent.TotalSize
 		// Add the season torrent to storage
 		s.torrents.AddOrUpdate(seasonTorrent)
 
@@ -612,6 +652,9 @@ func (s *Store) processMultiSeasonDownloads(torrent *Torrent, debridTorrent *typ
 		seasonTorrent.TorrentPath = seasonDownloadPath
 		seasonTorrent.ContentPath = seasonDownloadPath
 		seasonTorrent.State = "pausedUP"
+		seasonTorrent.Progress = 1.0
+		seasonTorrent.AmountLeft = 0
+		seasonTorrent.Completed = seasonTorrent.TotalSize
 
 		// Add the season torrent to storage
 		s.torrents.AddOrUpdate(seasonTorrent)

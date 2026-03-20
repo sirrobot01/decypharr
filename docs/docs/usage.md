@@ -38,7 +38,7 @@ To connect Decypharr to your Sonarr or Radarr instance:
 2. Configure the following settings:
    - **Host**: `localhost` (or the IP of your Decypharr server)
    - **Port**: `8282` (or your configured qBittorrent port)
-   - **Username**: `http://sonarr:8989` (your Arr host with http/https)
+   - **Username**: `username` (Your Radarr/Sonnar Username)
    - **Password**: `sonarr_token` (your Arr API token, you can get this from Sonarr/Radarr settings)
    - **Category**: e.g., `sonarr`, `radarr` (match what you configured in Decypharr)
    - **Use SSL**: `No`

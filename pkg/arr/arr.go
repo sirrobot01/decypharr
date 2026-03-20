@@ -268,7 +268,7 @@ func (s *Storage) SyncFromConfig(arrs []config.Arr) {
 		if ac, ok := arrConfigs[name]; ok {
 			// Update existing arr
 			// is the host URL valid?
-			if request.ValidateURL(ac.Host) == nil {
+			if request.ValidateURL(ac.Host) != nil {
 				ac.Host = arr.Host
 			}
 			ac.Token = cmp.Or(ac.Token, arr.Token)

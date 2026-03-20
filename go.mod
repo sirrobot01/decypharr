@@ -2,8 +2,6 @@ module github.com/sirrobot01/decypharr
 
 go 1.24.0
 
-toolchain go1.24.3
-
 require (
 	github.com/anacrolix/torrent v1.55.0
 	github.com/cavaliergopher/grab/v3 v3.0.1

@@ -90,6 +90,9 @@ func (ts *TorrentStorage) GetAll(category string, filter string, hashes []string
 	defer ts.mu.RUnlock()
 	torrents := make([]*Torrent, 0)
 	for _, torrent := range ts.torrents {
+		if torrent.Hidden {
+			continue
+		}
 		if category != "" && torrent.Category != category {
 			continue
 		}
@@ -183,8 +186,11 @@ func (ts *TorrentStorage) Delete(hash, category string, removeFromDebrid bool) {
 				if dbClient != nil {
 					_ = dbClient.DeleteTorrent(torrent.DebridID)
 				}
+				delete(ts.torrents, key)
+			} else {
+				// Hide the torrent from proxy interfaces but preserve it for deduplication checks
+				torrent.Hidden = true
 			}
-			delete(ts.torrents, key)
 
 			// Delete the torrent folder
 			if torrent.ContentPath != "" {
@@ -223,8 +229,10 @@ func (ts *TorrentStorage) DeleteMultiple(hashes []string, removeFromDebrid bool)
 				}
 				if removeFromDebrid && torrent.DebridID != "" && torrent.Debrid != "" {
 					toDelete[torrent.DebridID] = torrent.Debrid
+					delete(ts.torrents, key)
+				} else {
+					torrent.Hidden = true
 				}
-				delete(ts.torrents, key)
 				if torrent.ContentPath != "" {
 					err := os.RemoveAll(torrent.ContentPath)
 					if err != nil {

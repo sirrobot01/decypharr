@@ -42,6 +42,7 @@ func (wb *Web) Routes() http.Handler {
 
 			// Repair operations
 			r.Post("/repair", wb.handleRepairMedia)
+			r.Post("/repair/dedupe", wb.handleRunDedupe)
 			r.Get("/repair/jobs", wb.handleGetRepairJobs)
 			r.Post("/repair/jobs/{id}/process", wb.handleProcessRepairJob)
 			r.Post("/repair/jobs/{id}/stop", wb.handleStopRepairJob)

@@ -17,7 +17,34 @@ import (
 
 func (s *Store) AddTorrent(ctx context.Context, importReq *ImportRequest) error {
 	torrent := createTorrentFromMagnet(importReq)
-	debridTorrent, err := debridTypes.Process(ctx, s.debrid, importReq.SelectedDebrid, importReq.Magnet, importReq.Arr, importReq.Action, importReq.DownloadUncached)
+
+	existing := s.torrents.Get(torrent.Hash, "")
+	var debridTorrent *types.Torrent
+	var err error
+
+	if existing != nil && existing.DebridID != "" {
+		s.logger.Info().Msgf("Torrent %s already exists in cache, verifying Debrid state to bypass upload", torrent.Hash)
+		deb := s.debrid.Debrid(existing.Debrid)
+		if deb != nil {
+			debridClient := deb.Client()
+			if debridClient != nil {
+				debridTorrent, err = debridClient.GetTorrent(existing.DebridID)
+			}
+		}
+
+		if err != nil || debridTorrent == nil {
+			s.logger.Warn().Msgf("[DEDUPE/SYMLINK] Upstream Debrid record lost for %s, falling back to fresh API push", torrent.Hash)
+			debridTorrent, err = debridTypes.Process(ctx, s.debrid, importReq.SelectedDebrid, importReq.Magnet, importReq.Arr, importReq.Action, importReq.DownloadUncached)
+		} else {
+			// Rescue the hidden struct since Radarr requested it again
+			existing.Hidden = false
+			s.logger.Info().Msgf("[DEDUPE/SYMLINK] Torrent %s successfully bypassed Debrid upload - Re-emitting payload to WebDAV cache securely!", torrent.Hash)
+		}
+	} else {
+		// Normal upload sequence
+		debridTorrent, err = debridTypes.Process(ctx, s.debrid, importReq.SelectedDebrid, importReq.Magnet, importReq.Arr, importReq.Action, importReq.DownloadUncached)
+	}
+
 	if err != nil {
 		var httpErr *utils.HTTPError
 		if ok := errors.As(err, &httpErr); ok {
@@ -69,10 +96,10 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 				Err(err).
 				Msg("Error checking torrent status")
 			if dbT != nil && dbT.Id != "" {
-				// Delete the torrent if it was not downloaded
-				go func() {
-					_ = client.DeleteTorrent(dbT.Id)
-				}()
+				// Disabled auto-deletion on error to allow users to debug Debrid interfaces
+				// go func() {
+				// 	_ = client.DeleteTorrent(dbT.Id)
+				// }()
 			}
 			s.logger.Error().Msgf("Error checking status: %v", err)
 			s.markTorrentAsFailed(torrent)
@@ -104,17 +131,21 @@ func (s *Store) processFiles(torrent *Torrent, debridTorrent *types.Torrent, imp
 
 	onFailed := func(err error) {
 		s.markTorrentAsFailed(torrent)
-		go func() {
-			if deleteErr := client.DeleteTorrent(debridTorrent.Id); deleteErr != nil {
-				s.logger.Warn().Err(deleteErr).Msgf("Failed to delete torrent %s", debridTorrent.Id)
-			}
-		}()
+		// go func() {
+		// 	if deleteErr := client.DeleteTorrent(debridTorrent.Id); deleteErr != nil {
+		// 		s.logger.Warn().Err(deleteErr).Msgf("Failed to delete torrent %s", debridTorrent.Id)
+		// 	}
+		// }()
 		s.logger.Error().Err(err).Msgf("Error occured while processing torrent %s", debridTorrent.Name)
 		importReq.markAsFailed(err, torrent, debridTorrent)
 	}
 
 	onSuccess := func(torrentSymlinkPath string) {
 		torrent.TorrentPath = torrentSymlinkPath
+		// Force progress stats so Sonarr/Radarr sees it as completely downloaded
+		debridTorrent.Progress = 100
+		debridTorrent.Status = "downloaded"
+		debridTorrent.SizeDownloaded = debridTorrent.Bytes
 		s.updateTorrent(torrent, debridTorrent)
 		s.logger.Info().Msgf("Adding %s took %s", debridTorrent.Name, time.Since(timer))
 
@@ -283,9 +314,10 @@ func (s *Store) partialTorrentUpdate(t *Torrent, debridTorrent *types.Torrent) *
 	files := make([]*File, 0, len(debridTorrent.Files))
 	for index, file := range debridTorrent.GetFiles() {
 		files = append(files, &File{
-			Index: index,
-			Name:  file.Path,
-			Size:  file.Size,
+			Index:    index,
+			Name:     file.Path,
+			Size:     file.Size,
+			Progress: progress,
 		})
 	}
 	t.DebridID = debridTorrent.Id
@@ -324,26 +356,10 @@ func (s *Store) updateTorrent(t *Torrent, debridTorrent *types.Torrent) *Torrent
 
 	if t.IsReady() {
 		t.State = "pausedUP"
-		s.torrents.Update(t)
-		return t
 	}
 
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
+	// s.logger.Info().Msgf("[STATE DEBUG] Torrent %s -> State: %s, Progress: %f, AmountLeft: %d, TotalSize: %d, Path: %s, IsReady: %v", t.Name, t.State, t.Progress, t.AmountLeft, t.TotalSize, t.TorrentPath, t.IsReady())
 
-	for {
-		select {
-		case <-ticker.C:
-			if t.IsReady() {
-				t.State = "pausedUP"
-				s.torrents.Update(t)
-				return t
-			}
-			updatedT := s.updateTorrent(t, debridTorrent)
-			t = updatedT
-
-		case <-time.After(10 * time.Minute): // Add a timeout
-			return t
-		}
-	}
+	s.torrents.Update(t)
+	return t
 }
