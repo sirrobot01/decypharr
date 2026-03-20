@@ -25,6 +25,7 @@ class RepairManager {
             isAsync: document.getElementById('isAsync'),
             autoProcess: document.getElementById('autoProcess'),
             submitBtn: document.getElementById('submitRepair'),
+            runInstantDedupeBtn: document.getElementById('runInstantDedupeBtn'),
 
             // Jobs table
             jobsTable: document.getElementById('jobsTable'),
@@ -46,6 +47,9 @@ class RepairManager {
             modalJobAutoProcess: document.getElementById('modalJobAutoProcess'),
             modalJobError: document.getElementById('modalJobError'),
             errorContainer: document.getElementById('errorContainer'),
+            deduplicatedItemsCard: document.getElementById('deduplicatedItemsCard'),
+            totalDedupeCount: document.getElementById('totalDedupeCount'),
+            deduplicatedItemsTableBody: document.getElementById('deduplicatedItemsTableBody'),
 
             // Broken items
             brokenItemsTableBody: document.getElementById('brokenItemsTableBody'),
@@ -79,6 +83,9 @@ class RepairManager {
     bindEvents() {
         // Form submission
         this.refs.repairForm.addEventListener('submit', (e) => this.handleFormSubmit(e));
+        if (this.refs.runInstantDedupeBtn) {
+            this.refs.runInstantDedupeBtn.addEventListener('click', () => this.handleRunInstantDedupe());
+        }
 
         // Jobs table events
         this.refs.refreshJobs.addEventListener('click', () => this.loadJobs());
@@ -144,7 +151,8 @@ class RepairManager {
                     arr: arr,
                     mediaIds: mediaIds.length > 0 ? mediaIds : null,
                     async: this.refs.isAsync.checked,
-                    autoProcess: this.refs.autoProcess.checked
+                    autoProcess: this.refs.autoProcess.checked,
+                    dedupeOnRepair: document.getElementById('dedupeOnRepair').checked
                 })
             });
 
@@ -171,6 +179,37 @@ class RepairManager {
             window.decypharrUtils.createToast(`Error starting repair: ${error.message}`, 'error');
         } finally {
             window.decypharrUtils.setButtonLoading(this.refs.submitBtn, false);
+        }
+    }
+
+    async handleRunInstantDedupe() {
+        try {
+            window.decypharrUtils.setButtonLoading(this.refs.runInstantDedupeBtn, true);
+
+            const response = await window.decypharrUtils.fetcher('/api/repair/dedupe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || 'Failed to run deduplication');
+            }
+
+            const result = await response.json();
+            window.decypharrUtils.createToast(
+                `Deduplication job started! Job ID: ${result.job_id?.substring(0, 8) || 'Unknown'}`,
+                'success'
+            );
+
+            // Refresh jobs list
+            await this.loadJobs();
+
+        } catch (error) {
+            console.error('Error running deduplication:', error);
+            window.decypharrUtils.createToast(`Error running dedupe: ${error.message}`, 'error');
+        } finally {
+            window.decypharrUtils.setButtonLoading(this.refs.runInstantDedupeBtn, false);
         }
     }
 
@@ -453,6 +492,23 @@ class RepairManager {
         // Action buttons
         this.refs.processJobBtn.classList.toggle('hidden', job.status !== 'pending');
         this.refs.stopJobBtn.classList.toggle('hidden', !['started', 'processing'].includes(job.status));
+
+        // Process Deduplicated items
+        if (job.deduplicated && job.deduplicated.length > 0) {
+            this.refs.deduplicatedItemsCard.classList.remove('hidden');
+            this.refs.totalDedupeCount.textContent = job.deduplicated.length;
+            this.refs.deduplicatedItemsTableBody.innerHTML = job.deduplicated.map(item => `
+                <tr class="hover">
+                    <td class="font-medium px-2 py-1">${window.decypharrUtils.escapeHtml(item.provider)}</td>
+                    <td class="text-xs break-all px-2 py-1">${window.decypharrUtils.escapeHtml(item.name || 'Unknown')}</td>
+                    <td class="font-mono text-xs px-2 py-1" title="${window.decypharrUtils.escapeHtml(item.id || item.hash)}">${window.decypharrUtils.escapeHtml(item.hash || 'Unknown')}</td>
+                </tr>
+            `).join('');
+        } else {
+            this.refs.deduplicatedItemsCard.classList.add('hidden');
+            this.refs.deduplicatedItemsTableBody.innerHTML = '';
+            this.refs.totalDedupeCount.textContent = '0';
+        }
 
         // Process broken items
         if (job.broken_items) {

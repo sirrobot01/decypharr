@@ -139,29 +139,36 @@ func (q *QBit) authenticate(category, username, password string) (*arr.Arr, erro
 	arrs := wire.Get().Arr()
 	// Check if arr exists
 	a := arrs.Get(category)
-	if a == nil {
-		// Arr is not configured, create a new one
-		downloadUncached := false
-		a = arr.New(category, "", "", false, false, &downloadUncached, "", "auto")
-	}
-	a.Host = username
-	a.Token = password
-	arrValidated := false // This is a flag to indicate if arr validation was successful
-	if (a.Host == "" || a.Token == "") && cfg.UseAuth {
-		return nil, fmt.Errorf("unauthorized: Host and token are required for authentication(you've enabled authentication)")
-	}
-	if err := a.Validate(); err == nil {
-		arrValidated = true
+	
+	isArrHost := false
+	if username != "" && password != "" {
+		// Test if username/password are actually Arr Host/Token
+		tempArr := arr.New(category, username, password, false, false, nil, "", "auto")
+		if tempArr.Validate() == nil {
+			isArrHost = true
+		}
 	}
 
-	if !arrValidated && cfg.UseAuth {
+	if !isArrHost && cfg.UseAuth {
 		// If arr validation failed, try to use user auth validation
 		if !config.VerifyAuth(username, password) {
 			return nil, fmt.Errorf("unauthorized: invalid credentials")
 		}
 	}
-	a.Source = "auto"
-	arrs.AddOrUpdate(a)
+
+	if a == nil {
+		// Arr is not configured, create a new one
+		downloadUncached := false
+		a = arr.New(category, "", "", false, false, &downloadUncached, "", "auto")
+	}
+
+	if isArrHost {
+		// Update the existing arr with the new valid host/token, or use the newly created one
+		a.Host = username
+		a.Token = password
+		a.Source = "auto"
+		arrs.AddOrUpdate(a)
+	}
 
 	return a, nil
 }

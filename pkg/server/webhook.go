@@ -46,7 +46,7 @@ func (s *Server) handleTautulli(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Repair service is not enabled", http.StatusInternalServerError)
 		return
 	}
-	if err := repair.AddJob([]string{}, []string{mediaId}, payload.AutoProcess, false); err != nil {
+	if err := repair.AddJob([]string{}, []string{mediaId}, payload.AutoProcess, false, false); err != nil {
 		http.Error(w, "Failed to add job: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

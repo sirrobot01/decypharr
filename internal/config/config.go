@@ -58,6 +58,7 @@ type QBitTorrent struct {
 	SkipPreCache      	bool     `json:"skip_pre_cache,omitempty"`
 	MaxDownloads      	int      `json:"max_downloads,omitempty"`
 	AlwaysRmTrackerUrls bool     `json:"always_rm_tracker_urls,omitempty"`
+	Workers             int      `json:"workers,omitempty"`
 }
 
 type Arr struct {
@@ -72,14 +73,15 @@ type Arr struct {
 }
 
 type Repair struct {
-	Enabled     bool           `json:"enabled,omitempty"`
-	Interval    string         `json:"interval,omitempty"`
-	ZurgURL     string         `json:"zurg_url,omitempty"`
-	AutoProcess bool           `json:"auto_process,omitempty"`
-	UseWebDav   bool           `json:"use_webdav,omitempty"`
-	Workers     int            `json:"workers,omitempty"`
-	ReInsert    bool           `json:"reinsert,omitempty"`
-	Strategy    RepairStrategy `json:"strategy,omitempty"`
+	Enabled        bool           `json:"enabled,omitempty"`
+	Interval       string         `json:"interval,omitempty"`
+	ZurgURL        string         `json:"zurg_url,omitempty"`
+	AutoProcess    bool           `json:"auto_process,omitempty"`
+	UseWebDav      bool           `json:"use_webdav,omitempty"`
+	Workers        int            `json:"workers,omitempty"`
+	ReInsert       bool           `json:"reinsert,omitempty"`
+	Strategy       RepairStrategy `json:"strategy,omitempty"`
+	DedupeOnRepair bool           `json:"dedupe_on_repair,omitempty"`
 }
 
 type Auth struct {
@@ -352,10 +354,14 @@ func (c *Config) updateDebrid(d Debrid) Debrid {
 	workers := runtime.NumCPU() * 50
 	perDebrid := workers / len(c.Debrids)
 
+	d.APIKey = strings.TrimSpace(d.APIKey)
+
 	var downloadKeys []string
 
 	if len(d.DownloadAPIKeys) > 0 {
-		downloadKeys = d.DownloadAPIKeys
+		for _, key := range d.DownloadAPIKeys {
+			downloadKeys = append(downloadKeys, strings.TrimSpace(key))
+		}
 	} else {
 		// If no download API keys are specified, use the main API key
 		downloadKeys = []string{d.APIKey}
@@ -410,7 +416,9 @@ func (c *Config) setDefaults() {
 		c.AllowedExt = getDefaultExtensions()
 	}
 
-	c.Port = cmp.Or(c.Port, c.QBitTorrent.Port)
+	if c.Port == "" {
+		c.Port = c.QBitTorrent.Port
+	}
 
 	if c.URLBase == "" {
 		c.URLBase = "/"
@@ -421,6 +429,10 @@ func (c *Config) setDefaults() {
 	}
 	if !strings.HasSuffix(c.URLBase, "/") {
 		c.URLBase += "/"
+	}
+
+	if c.QBitTorrent.Workers <= 0 {
+		c.QBitTorrent.Workers = 10
 	}
 
 	// Set repair defaults
@@ -451,10 +463,16 @@ func (c *Config) setDefaults() {
 			c.Rclone.Transfers = 4 // Default number of transfers
 		}
 		if c.Rclone.VfsCacheMode != "off" {
-			c.Rclone.VfsCachePollInterval = cmp.Or(c.Rclone.VfsCachePollInterval, "1m") // Clean cache every minute
+			if c.Rclone.VfsCachePollInterval == "" {
+				c.Rclone.VfsCachePollInterval = "1m" // Clean cache every minute
+			}
 		}
-		c.Rclone.DirCacheTime = cmp.Or(c.Rclone.DirCacheTime, "5m")
-		c.Rclone.LogLevel = cmp.Or(c.Rclone.LogLevel, "INFO")
+		if c.Rclone.DirCacheTime == "" {
+			c.Rclone.DirCacheTime = "5m"
+		}
+		if c.Rclone.LogLevel == "" {
+			c.Rclone.LogLevel = "INFO"
+		}
 	}
 	// Load the auth file
 	c.Auth = c.GetAuth()
@@ -504,6 +522,7 @@ func (c *Config) createConfig(path string) error {
 		DownloadFolder:  filepath.Join(path, "downloads"),
 		Categories:      []string{"sonarr", "radarr"},
 		RefreshInterval: 15,
+		Workers:         10,
 	}
 	return nil
 }

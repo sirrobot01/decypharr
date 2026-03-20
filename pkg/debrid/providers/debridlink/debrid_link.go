@@ -337,12 +337,18 @@ func (dl *DebridLink) CheckStatus(torrent *types.Torrent) (*types.Torrent, error
 
 func (dl *DebridLink) DeleteTorrent(torrentId string) error {
 	url := fmt.Sprintf("%s/seedbox/%s/remove", dl.Host, torrentId)
-	req, _ := http.NewRequest(http.MethodDelete, url, nil)
-	if _, err := dl.client.MakeRequest(req); err != nil {
-		return err
+	
+	var lastErr error
+	for _, acc := range dl.accountsManager.All() {
+		req, _ := http.NewRequest(http.MethodDelete, url, nil)
+		if _, err := acc.Client().MakeRequest(req); err != nil {
+			lastErr = err
+			continue
+		}
+		dl.logger.Info().Msgf("Torrent: %s deleted from DebridLink on account: %s", torrentId, utils.Mask(acc.Token))
+		return nil
 	}
-	dl.logger.Info().Msgf("Torrent: %s deleted from DebridLink", torrentId)
-	return nil
+	return fmt.Errorf("could not delete torrent %s across all accounts: %v", torrentId, lastErr)
 }
 
 func (dl *DebridLink) GetFileDownloadLinks(t *types.Torrent) error {

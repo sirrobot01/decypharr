@@ -43,8 +43,9 @@ type ContentResponse struct {
 type RepairRequest struct {
 	ArrName     string   `json:"arr"`
 	MediaIds    []string `json:"mediaIds"`
-	Async       bool     `json:"async"`
-	AutoProcess bool     `json:"autoProcess"`
+	Async          bool     `json:"async"`
+	AutoProcess    bool     `json:"autoProcess"`
+	DedupeOnRepair bool     `json:"dedupeOnRepair"`
 }
 
 //go:embed templates/*

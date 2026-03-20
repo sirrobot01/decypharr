@@ -16,8 +16,9 @@ type AvailableResponse APIResponse[map[string]struct {
 }]
 
 type AddMagnetResponse APIResponse[struct {
-	Id   int    `json:"torrent_id"`
-	Hash string `json:"hash"`
+	TorrentId int    `json:"torrent_id"`
+	Id        int    `json:"id"`
+	Hash      string `json:"hash"`
 }]
 
 type torboxInfo struct {

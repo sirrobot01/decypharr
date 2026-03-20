@@ -58,6 +58,13 @@ const (
 	JobCancelled  JobStatus = "cancelled"
 )
 
+type DeduplicatedItem struct {
+	Hash     string `json:"hash"`
+	Provider string `json:"provider"`
+	Name     string `json:"name"`
+	ID       string `json:"id"`
+}
+
 type Job struct {
 	ID          string                       `json:"id"`
 	Arrs        []string                     `json:"arrs"`
@@ -67,8 +74,10 @@ type Job struct {
 	Status      JobStatus                    `json:"status"`
 	CompletedAt time.Time                    `json:"finished_at"`
 	FailedAt    time.Time                    `json:"failed_at"`
-	AutoProcess bool                         `json:"auto_process"`
-	Recurrent   bool                         `json:"recurrent"`
+	AutoProcess    bool                         `json:"auto_process"`
+	Recurrent      bool                         `json:"recurrent"`
+	DedupeOnRepair bool                         `json:"dedupe_on_repair"`
+	Deduplicated   []DeduplicatedItem           `json:"deduplicated,omitempty"`
 
 	Error string `json:"error"`
 
@@ -103,6 +112,87 @@ func New(arrs *arr.Storage, engine *debrid.Storage) *Repair {
 	return r
 }
 
+func (r *Repair) RunDeduplication(ctx context.Context) ([]DeduplicatedItem, error) {
+	r.initRun(ctx)
+	var totalDeleted []DeduplicatedItem
+	var mu sync.Mutex
+
+	for _, dbClient := range r.deb.Clients() {
+		if dbClient == nil {
+			continue
+		}
+		torrents, err := dbClient.GetTorrents()
+		if err == nil && len(torrents) > 0 {
+			hashCounts := make(map[string]string)
+			
+			type delItem struct {
+				ID       string
+				InfoHash string
+				Name     string
+			}
+			var deleteList []delItem
+			
+			for _, t := range torrents {
+				if t == nil || t.InfoHash == "" {
+					continue
+				}
+				if _, exists := hashCounts[t.InfoHash]; exists {
+					deleteList = append(deleteList, delItem{
+						ID:       t.Id,
+						InfoHash: t.InfoHash,
+						Name:     t.Name,
+					})
+				} else {
+					hashCounts[t.InfoHash] = t.Id
+				}
+			}
+
+			if len(deleteList) > 0 {
+				var deletedCount int
+				g, _ := errgroup.WithContext(ctx)
+				g.SetLimit(r.getWorkers())
+
+				for _, item := range deleteList {
+					item := item // capture loop variable
+					g.Go(func() error {
+						if err := dbClient.DeleteTorrent(item.ID); err == nil {
+							mu.Lock()
+							totalDeleted = append(totalDeleted, DeduplicatedItem{
+								Hash:     item.InfoHash,
+								Provider: dbClient.Name(),
+								Name:     item.Name,
+								ID:       item.ID,
+							})
+							deletedCount++
+							mu.Unlock()
+						}
+						return nil
+					})
+				}
+				_ = g.Wait()
+
+				if deletedCount > 0 {
+					r.logger.Info().Msgf("[DEDUPE] Successfully deducted %d duplicate torrents from %s", deletedCount, dbClient.Name())
+				}
+			} else {
+				r.logger.Info().Msgf("[DEDUPE] Scanned %d active hashes on %s - Clean, no duplicates found", len(torrents), dbClient.Name())
+			}
+		} else if err != nil {
+			r.logger.Warn().Err(err).Msgf("[DEDUPE] Failed to fetch torrents from %s for deduplication", dbClient.Name())
+		}
+	}
+	r.onComplete()
+	return totalDeleted, nil
+}
+
+func (r *Repair) getWorkers() int {
+	workers := config.Get().Repair.Workers
+	if workers > 0 {
+		return workers
+	}
+	return runtime.NumCPU() * 20
+}
+
 func (r *Repair) Reset() {
 	// Stop scheduler
 	if r.scheduler != nil {
@@ -124,7 +214,7 @@ func (r *Repair) Start(ctx context.Context) error {
 	} else {
 		_, err2 := r.scheduler.NewJob(jd, gocron.NewTask(func() {
 			r.logger.Info().Msgf("Repair job started at %s", time.Now().Format("15:04:05"))
-			if err := r.AddJob([]string{}, []string{}, r.autoProcess, true); err != nil {
+			if err := r.AddJob([]string{}, []string{}, r.autoProcess, true, config.Get().Repair.DedupeOnRepair); err != nil {
 				r.logger.Error().Err(err).Msg("Error running repair job")
 			}
 		}))
@@ -258,7 +348,7 @@ func (r *Repair) preRunChecks() error {
 	return nil
 }
 
-func (r *Repair) AddJob(arrsNames []string, mediaIDs []string, autoProcess, recurrent bool) error {
+func (r *Repair) AddJob(arrsNames []string, mediaIDs []string, autoProcess, recurrent, dedupeOnRepair bool) error {
 	key := jobKey(arrsNames, mediaIDs)
 	job, ok := r.Jobs[key]
 	if job != nil && job.Status == JobStarted {
@@ -269,6 +359,7 @@ func (r *Repair) AddJob(arrsNames []string, mediaIDs []string, autoProcess, recu
 	}
 	job.AutoProcess = autoProcess
 	job.Recurrent = recurrent
+	job.DedupeOnRepair = dedupeOnRepair
 	r.reset(job)
 
 	job.ctx, job.cancelFunc = context.WithCancel(r.ctx)
@@ -292,6 +383,43 @@ func (r *Repair) AddJob(arrsNames []string, mediaIDs []string, autoProcess, recu
 		r.onComplete() // Clear caches and maps after job completion
 	}()
 	return nil
+}
+
+func (r *Repair) AddDedupeJob() (string, error) {
+	job := &Job{
+		ID:             uuid.New().String(),
+		Arrs:           []string{"Dedupe Only"},
+		MediaIDs:       []string{},
+		StartedAt:      time.Now(),
+		Status:         JobStarted,
+		DedupeOnRepair: true,
+	}
+
+	job.ctx, job.cancelFunc = context.WithCancel(r.ctx)
+	r.Jobs[job.ID] = job
+	go r.saveToFile()
+
+	go func() {
+		job.Status = JobProcessing
+		r.logger.Info().Msg("Starting pure deduplication job")
+		
+		deduped, err := r.RunDeduplication(job.ctx)
+		if err != nil {
+			r.logger.Error().Err(err).Msg("Error running deduplication job")
+			job.FailedAt = time.Now()
+			job.Error = err.Error()
+			job.Status = JobFailed
+		} else {
+			job.CompletedAt = time.Now()
+			job.Status = JobCompleted
+			job.Deduplicated = deduped
+		}
+		
+		// RunDeduplication internally invokes initRun and onComplete so just save map
+		r.saveToFile()
+	}()
+
+	return job.ID, nil
 }
 
 func (r *Repair) StopJob(id string) error {
@@ -334,6 +462,13 @@ func (r *Repair) repair(job *Job) error {
 
 	// Initialize the run
 	r.initRun(job.ctx)
+
+	// Phase 1: Deduplicate Debrid Accounts if explicitly engaged
+	if job.DedupeOnRepair {
+		r.logger.Info().Msg("Starting Debrid deduplication sequence")
+		deduped, _ := r.RunDeduplication(job.ctx)
+		job.Deduplicated = deduped
+	}
 
 	// Use a mutex to protect concurrent access to brokenItems
 	var mu sync.Mutex
@@ -460,9 +595,10 @@ func (r *Repair) repairArr(job *Job, _arr string, tmdbId string) ([]arr.ContentF
 	// Mutex for brokenItems
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	workerChan := make(chan arr.Content, min(len(media), r.workers))
+	workersCount := r.getWorkers()
+	workerChan := make(chan arr.Content, min(len(media), workersCount))
 
-	for i := 0; i < r.workers; i++ {
+	for i := 0; i < workersCount; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -741,7 +877,7 @@ func (r *Repair) ProcessJob(id string) error {
 	}
 
 	g, ctx := errgroup.WithContext(job.ctx)
-	g.SetLimit(r.workers)
+	g.SetLimit(r.getWorkers())
 
 	for arrName, items := range brokenItems {
 		items := items

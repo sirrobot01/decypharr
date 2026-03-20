@@ -16,20 +16,37 @@ type QBit struct {
 	storage             *wire.TorrentStorage
 	logger              zerolog.Logger
 	Tags                []string
+	jobQueue            chan func()
 }
 
 func New() *QBit {
 	_cfg := config.Get()
 	cfg := _cfg.QBitTorrent
-	return &QBit{
+	q := &QBit{
 		Username:            cfg.Username,
 		Password:            cfg.Password,
 		DownloadFolder:      cfg.DownloadFolder,
 		Categories:          cfg.Categories,
 		AlwaysRmTrackerUrls: cfg.AlwaysRmTrackerUrls,
 		storage:             wire.Get().Torrents(),
-		logger:         	 logger.New("qbit"),
+		logger:              logger.New("qbit"),
+		jobQueue:            make(chan func(), 1000), // Bounded buffer
 	}
+
+	workers := cfg.Workers
+	if workers <= 0 {
+		workers = 10
+	}
+
+	for i := 0; i < workers; i++ {
+		go func() {
+			for job := range q.jobQueue {
+				job() // Execute the queued job
+			}
+		}()
+	}
+
+	return q
 }
 
 func (q *QBit) Reset() {
