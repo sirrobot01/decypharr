@@ -455,7 +455,7 @@ func (tb *Torbox) fetchDownloadLink(account *account.Account, id string, file *t
 	query.Set("file_id", file.Id)
 	query.Set("redirect", "true")
 
-	downloadURL := fmt.Sprintf("%s/api/torrents/requestdl/%s", tb.Host, query.Encode())
+	downloadURL := fmt.Sprintf("%s/api/torrents/requestdl?%s", tb.Host, query.Encode())
 
 	now := time.Now()
 
