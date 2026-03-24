@@ -264,7 +264,9 @@ func (ad *AllDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 		files := ad.flattenFiles(t.Id, data.Files, "", &index)
 		t.Files = files
 	} else {
-		t.Progress = float64(data.Downloaded) / float64(data.Size) * 100
+		if data.Size > 0 {
+			t.Progress = float64(data.Downloaded) / float64(data.Size) * 100
+		}
 		t.Speed = data.DownloadSpeed
 	}
 	return t, nil
@@ -302,7 +304,9 @@ func (ad *AllDebrid) UpdateTorrent(t *types.Torrent) error {
 		files := ad.flattenFiles(t.Id, data.Files, "", &index)
 		t.Files = files
 	} else {
-		t.Progress = float64(data.Downloaded) / float64(data.Size) * 100
+		if data.Size > 0 {
+			t.Progress = float64(data.Downloaded) / float64(data.Size) * 100
+		}
 		t.Speed = data.DownloadSpeed
 	}
 	return nil
