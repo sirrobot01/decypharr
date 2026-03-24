@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"math"
 	"path"
 	"path/filepath"
 	"time"
@@ -112,6 +113,20 @@ func (e *Entry) Validate() error {
 		return fmt.Errorf("no files in active providerEntry")
 	}
 	return nil
+}
+
+// Sanitize replaces any non-finite float64 values with 0 so the entry can be
+// safely JSON-encoded. This guards against NaN/Inf produced by division-by-zero
+// when a debrid provider reports size=0 for an in-progress torrent.
+func (e *Entry) Sanitize() {
+	if math.IsNaN(e.Progress) || math.IsInf(e.Progress, 0) {
+		e.Progress = 0
+	}
+	for _, p := range e.Providers {
+		if math.IsNaN(p.Progress) || math.IsInf(p.Progress, 0) {
+			p.Progress = 0
+		}
+	}
 }
 
 // CanBeFixed checks if the entry can be repaired

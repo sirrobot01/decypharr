@@ -318,6 +318,9 @@ func (s *Server) handleGetTorrents(w http.ResponseWriter, r *http.Request) {
 
 	// GetReader all torrents
 	allTorrents := s.manager.Queue().ListFilter("", config.ProtocolAll, "", nil, "added_on", false)
+	for _, t := range allTorrents {
+		t.Sanitize()
+	}
 
 	// Apply filters
 	filteredTorrents := make([]*storage.Entry, 0)
