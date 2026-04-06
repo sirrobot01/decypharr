@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sirrobot01/decypharr/internal/utils"
@@ -467,10 +468,21 @@ func (m *Manager) getCustomFolderChildren(folder string) []FileInfo {
 		if meta.Bad {
 			return nil
 		}
+		getFileNames := func() []string {
+			item, err := m.storage.GetEntryItem(meta.Name)
+			if err != nil || item == nil {
+				return nil
+			}
+			names := make([]string, 0, len(item.Files))
+			for fn := range item.Files {
+				names = append(names, strings.ToLower(fn))
+			}
+			return names
+		}
 		if m.customFolders.matchesFilter(folder, &FileInfo{
 			name: meta.Name,
 			size: meta.Size,
-		}, meta.AddedOn) {
+		}, meta.AddedOn, getFileNames) {
 			if _, ok := seen[meta.Name]; ok {
 				return nil
 			}
