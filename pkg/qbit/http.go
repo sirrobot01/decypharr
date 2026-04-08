@@ -98,9 +98,13 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	action := "download"
-	if strings.ToLower(r.FormValue("sequentialDownload")) == "false" {
-		action = "symlink"
+	// Default action is symlink; set default_download_action in config to override
+	cfg := config.Get()
+	action := "symlink"
+	if strings.ToLower(r.FormValue("sequentialDownload")) == "true" {
+		action = "download"
+	} else if cfg.DefaultAction == "download" {
+		action = "download"
 	}
 	rmTrackerUrls := strings.ToLower(r.FormValue("firstLastPiecePrio")) == "true"
 

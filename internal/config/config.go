@@ -153,6 +153,7 @@ type Config struct {
 	Auth               *Auth       `json:"-"`
 	DiscordWebhook     string      `json:"discord_webhook_url,omitempty"`
 	RemoveStalledAfter string      `json:"remove_stalled_after,omitzero"`
+	DefaultAction      string      `json:"default_download_action,omitempty"` // "download" or "symlink" (default: "symlink")
 	CallbackURL        string      `json:"callback_url,omitempty"`
 	EnableWebdavAuth   bool        `json:"enable_webdav_auth,omitempty"`
 }
