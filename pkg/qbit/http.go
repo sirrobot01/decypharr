@@ -98,9 +98,9 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	action := "symlink"
-	if strings.ToLower(r.FormValue("sequentialDownload")) == "true" {
-		action = "download"
+	action := "download"
+	if strings.ToLower(r.FormValue("sequentialDownload")) == "false" {
+		action = "symlink"
 	}
 	rmTrackerUrls := strings.ToLower(r.FormValue("firstLastPiecePrio")) == "true"
 

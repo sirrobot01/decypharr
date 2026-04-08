@@ -32,7 +32,8 @@ type Torrent struct {
 	MountPath        string          `json:"mount_path"`
 	DeletedFiles     []string        `json:"deleted_files"`
 
-	Debrid string `json:"debrid"`
+	Debrid      string `json:"debrid"`
+	AccountToken string `json:"account_token"` // Which account submitted this torrent
 
 	Arr *arr.Arr `json:"arr"`
 
@@ -70,6 +71,7 @@ func (t *Torrent) Copy() *Torrent {
 		Links:            append([]string{}, t.Links...),
 		MountPath:        t.MountPath,
 		Debrid:           t.Debrid,
+		AccountToken:     t.AccountToken,
 		Arr:              t.Arr,
 	}
 }

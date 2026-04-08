@@ -19,10 +19,11 @@ const (
 )
 
 type Manager struct {
-	debrid   string
-	current  atomic.Pointer[Account]
-	accounts *xsync.Map[string, *Account]
-	logger   zerolog.Logger
+	debrid    string
+	current   atomic.Pointer[Account]
+	accounts  *xsync.Map[string, *Account]
+	roundRobin atomic.Uint64
+	logger    zerolog.Logger
 }
 
 func NewManager(debridConf config.Debrid, downloadRL ratelimit.Limiter, logger zerolog.Logger) *Manager {
@@ -40,13 +41,21 @@ func NewManager(debridConf config.Debrid, downloadRL ratelimit.Limiter, logger z
 		headers := map[string]string{
 			"Authorization": fmt.Sprintf("Bearer %s", token),
 		}
+
+		// Create a per-account rate limiter so each account gets its own
+		// quota. If downloadRL is nil, no rate limiting is applied.
+		var accountRL ratelimit.Limiter
+		if downloadRL != nil {
+			accountRL = cloneRateLimiter(debridConf.DownloadRateLimit, debridConf.RateLimit)
+		}
+
 		account := &Account{
 			Debrid: debridConf.Name,
 			Token:  token,
 			Index:  idx,
 			links:  xsync.NewMap[string, types.DownloadLink](),
 			httpClient: request.New(
-				request.WithRateLimiter(downloadRL),
+				request.WithRateLimiter(accountRL),
 				request.WithLogger(logger),
 				request.WithHeaders(headers),
 				request.WithMaxRetries(3),
@@ -61,6 +70,17 @@ func NewManager(debridConf config.Debrid, downloadRL ratelimit.Limiter, logger z
 	}
 	m.current.Store(firstAccount)
 	return m
+}
+
+// cloneRateLimiter creates a new rate limiter with the same rate as the
+// configured download rate limit. Each account gets its own instance so
+// that having N accounts means N times the effective throughput.
+func cloneRateLimiter(downloadRateLimit, fallbackRateLimit string) ratelimit.Limiter {
+	rlStr := downloadRateLimit
+	if rlStr == "" {
+		rlStr = fallbackRateLimit
+	}
+	return request.ParseRateLimit(rlStr)
 }
 
 func (m *Manager) Active() []*Account {
@@ -116,6 +136,21 @@ func (m *Manager) Current() *Account {
 	newCurrent := activeAccounts[0]
 	m.current.Store(newCurrent)
 	return newCurrent
+}
+
+// Next returns the next active account in round-robin order.
+// This distributes download link generation evenly across all accounts
+// instead of always starting from the first one.
+func (m *Manager) Next() *Account {
+	activeAccounts := m.Active()
+	if len(activeAccounts) == 0 {
+		return m.Current()
+	}
+	if len(activeAccounts) == 1 {
+		return activeAccounts[0]
+	}
+	idx := m.roundRobin.Add(1)
+	return activeAccounts[idx%uint64(len(activeAccounts))]
 }
 
 func (m *Manager) Disable(account *Account) {
@@ -212,6 +247,27 @@ func (m *Manager) Stats() []map[string]any {
 		stats = append(stats, accountDetail)
 	}
 	return stats
+}
+
+// ClientForToken returns the HTTP client for the account with the given token.
+// Used to route torrent operations (CheckStatus, UpdateTorrent, etc.) to the
+// correct account that originally submitted the torrent.
+func (m *Manager) ClientForToken(token string) *request.Client {
+	acc, ok := m.accounts.Load(token)
+	if !ok {
+		return nil
+	}
+	return acc.Client()
+}
+
+// NextAccountForSubmit returns the next account to use for submitting a new
+// torrent (round-robin). Returns the account and its client.
+func (m *Manager) NextAccountForSubmit() (*Account, *request.Client) {
+	acc := m.Next()
+	if acc == nil {
+		return nil, nil
+	}
+	return acc, acc.Client()
 }
 
 func (m *Manager) CheckAndResetBandwidth() {

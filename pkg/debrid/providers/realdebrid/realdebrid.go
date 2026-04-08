@@ -110,6 +110,18 @@ func (r *RealDebrid) Logger() zerolog.Logger {
 	return r.logger
 }
 
+// clientForTorrent returns the HTTP client for the account that owns the given
+// torrent. Falls back to the primary client if no account token is set (backward
+// compatibility for torrents created before multi-account support).
+func (r *RealDebrid) clientForTorrent(t *types.Torrent) *request.Client {
+	if t.AccountToken != "" {
+		if c := r.accountsManager.ClientForToken(t.AccountToken); c != nil {
+			return c
+		}
+	}
+	return r.client
+}
+
 func (r *RealDebrid) getSelectedFiles(t *types.Torrent, data torrentInfo) (map[string]types.File, error) {
 	files := make(map[string]types.File)
 	selectedFiles := make([]types.File, 0)
@@ -277,7 +289,13 @@ func (r *RealDebrid) IsAvailable(hashes []string) map[string]bool {
 	// Check if the infohashes are available in the local cache
 	result := make(map[string]bool)
 
-	// Divide hashes into groups of 100
+	// Build list of clients to distribute availability checks across
+	clients := []*request.Client{r.client}
+	for _, acc := range r.accountsManager.Active() {
+		clients = append(clients, acc.Client())
+	}
+
+	// Divide hashes into groups of 200 and distribute across clients
 	for i := 0; i < len(hashes); i += 200 {
 		end := i + 200
 		if end > len(hashes) {
@@ -297,10 +315,14 @@ func (r *RealDebrid) IsAvailable(hashes []string) map[string]bool {
 			continue
 		}
 
+		// Round-robin which client handles this batch
+		clientIdx := (i / 200) % len(clients)
+		client := clients[clientIdx]
+
 		hashStr := strings.Join(validHashes, "/")
 		url := fmt.Sprintf("%s/torrents/instantAvailability/%s", r.Host, hashStr)
 		req, _ := http.NewRequest(http.MethodGet, url, nil)
-		resp, err := r.client.MakeRequest(req)
+		resp, err := client.MakeRequest(req)
 		if err != nil {
 			r.logger.Error().Err(err).Msgf("Error checking availability")
 			return result
@@ -322,13 +344,23 @@ func (r *RealDebrid) IsAvailable(hashes []string) map[string]bool {
 }
 
 func (r *RealDebrid) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
-	if t.Magnet.IsTorrent() {
-		return r.addTorrent(t)
+	// Round-robin across accounts to distribute torrent submissions
+	acc, accClient := r.accountsManager.NextAccountForSubmit()
+	if accClient == nil {
+		// No download accounts configured, fall back to primary client
+		accClient = r.client
 	}
-	return r.addMagnet(t)
+	if acc != nil {
+		t.AccountToken = acc.Token
+	}
+
+	if t.Magnet.IsTorrent() {
+		return r.addTorrent(t, accClient)
+	}
+	return r.addMagnet(t, accClient)
 }
 
-func (r *RealDebrid) addTorrent(t *types.Torrent) (*types.Torrent, error) {
+func (r *RealDebrid) addTorrent(t *types.Torrent, client *request.Client) (*types.Torrent, error) {
 	url := fmt.Sprintf("%s/torrents/addTorrent", r.Host)
 	var data AddMagnetSchema
 	req, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(t.Magnet.File))
@@ -337,7 +369,7 @@ func (r *RealDebrid) addTorrent(t *types.Torrent) (*types.Torrent, error) {
 		return nil, err
 	}
 	req.Header.Add("Content-Type", "application/x-bittorrent")
-	resp, err := r.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -361,14 +393,14 @@ func (r *RealDebrid) addTorrent(t *types.Torrent) (*types.Torrent, error) {
 	return t, nil
 }
 
-func (r *RealDebrid) addMagnet(t *types.Torrent) (*types.Torrent, error) {
+func (r *RealDebrid) addMagnet(t *types.Torrent, client *request.Client) (*types.Torrent, error) {
 	url := fmt.Sprintf("%s/torrents/addMagnet", r.Host)
 	payload := gourl.Values{
 		"magnet": {t.Magnet.Link},
 	}
 	var data AddMagnetSchema
 	req, _ := http.NewRequest(http.MethodPost, url, strings.NewReader(payload.Encode()))
-	resp, err := r.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -396,7 +428,7 @@ func (r *RealDebrid) addMagnet(t *types.Torrent) (*types.Torrent, error) {
 func (r *RealDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 	url := fmt.Sprintf("%s/torrents/info/%s", r.Host, torrentId)
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	resp, err := r.client.Do(req)
+	resp, err := r.client.Do(req) // GetTorrent has no account context, use primary
 	if err != nil {
 		return nil, err
 	}
@@ -435,7 +467,8 @@ func (r *RealDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 func (r *RealDebrid) UpdateTorrent(t *types.Torrent) error {
 	url := fmt.Sprintf("%s/torrents/info/%s", r.Host, t.Id)
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	resp, err := r.client.Do(req)
+	client := r.clientForTorrent(t)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -469,10 +502,11 @@ func (r *RealDebrid) UpdateTorrent(t *types.Torrent) error {
 }
 
 func (r *RealDebrid) CheckStatus(t *types.Torrent) (*types.Torrent, error) {
+	client := r.clientForTorrent(t)
 	url := fmt.Sprintf("%s/torrents/info/%s", r.Host, t.Id)
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
 	for {
-		resp, err := r.client.MakeRequest(req)
+		resp, err := client.MakeRequest(req)
 		if err != nil {
 			r.logger.Info().Msgf("ERROR Checking file: %v", err)
 			return t, err
@@ -508,8 +542,8 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent) (*types.Torrent, error) {
 				"files": {strings.Join(filesId, ",")},
 			}
 			payload := strings.NewReader(p.Encode())
-			req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/torrents/selectFiles/%s", r.Host, t.Id), payload)
-			res, err := r.client.Do(req)
+			selectReq, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/torrents/selectFiles/%s", r.Host, t.Id), payload)
+			res, err := client.Do(selectReq)
 			if err != nil {
 				return t, err
 			}
@@ -542,11 +576,23 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent) (*types.Torrent, error) {
 func (r *RealDebrid) DeleteTorrent(torrentId string) error {
 	url := fmt.Sprintf("%s/torrents/delete/%s", r.Host, torrentId)
 	req, _ := http.NewRequest(http.MethodDelete, url, nil)
-	if _, err := r.client.MakeRequest(req); err != nil {
-		return err
+
+	// Try the primary client first (backward compatible)
+	if _, err := r.client.MakeRequest(req); err == nil {
+		r.logger.Info().Msgf("Torrent: %s deleted from RD", torrentId)
+		return nil
 	}
-	r.logger.Info().Msgf("Torrent: %s deleted from RD", torrentId)
-	return nil
+
+	// If primary fails, try each download account (torrent may belong to one of them)
+	for _, acc := range r.accountsManager.All() {
+		req, _ = http.NewRequest(http.MethodDelete, url, nil)
+		if _, err := acc.Client().MakeRequest(req); err == nil {
+			r.logger.Info().Msgf("Torrent: %s deleted from RD (account %d)", torrentId, acc.Index)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("failed to delete torrent %s from any account", torrentId)
 }
 
 func (r *RealDebrid) GetFileDownloadLinks(t *types.Torrent) error {
@@ -676,7 +722,22 @@ func (r *RealDebrid) getDownloadLink(account *account.Account, file *types.File)
 
 func (r *RealDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (types.DownloadLink, error) {
 	accounts := r.accountsManager.Active()
-	for _, _account := range accounts {
+	if len(accounts) == 0 {
+		return types.DownloadLink{}, fmt.Errorf("realdebrid API error: no active accounts")
+	}
+
+	// Start from a round-robin position instead of always account 0
+	startAccount := r.accountsManager.Next()
+	startIdx := 0
+	for i, acc := range accounts {
+		if acc.Token == startAccount.Token {
+			startIdx = i
+			break
+		}
+	}
+
+	for i := 0; i < len(accounts); i++ {
+		_account := accounts[(startIdx+i)%len(accounts)]
 		downloadLink, err := r.getDownloadLink(_account, file)
 		if err == nil {
 			return downloadLink, nil
@@ -708,14 +769,14 @@ func (r *RealDebrid) GetDownloadLink(t *types.Torrent, file *types.File) (types.
 	return types.DownloadLink{}, fmt.Errorf("realdebrid API error: used all active accounts")
 }
 
-func (r *RealDebrid) getTorrents(offset int, limit int) (int, []*types.Torrent, error) {
+func (r *RealDebrid) getTorrentsForAccount(client *request.Client, accountToken string, offset int, limit int) (int, []*types.Torrent, error) {
 	url := fmt.Sprintf("%s/torrents?limit=%d", r.Host, limit)
 	torrents := make([]*types.Torrent, 0)
 	if offset > 0 {
 		url = fmt.Sprintf("%s&offset=%d", url, offset)
 	}
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	resp, err := r.client.Do(req)
+	resp, err := client.Do(req)
 
 	if err != nil {
 		return 0, torrents, err
@@ -736,7 +797,6 @@ func (r *RealDebrid) getTorrents(offset int, limit int) (int, []*types.Torrent, 
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return 0, nil, fmt.Errorf("failed to decode response: %w", err)
 	}
-	filenames := map[string]struct{}{}
 	for _, t := range data {
 		if t.Status != "downloaded" {
 			continue
@@ -753,10 +813,10 @@ func (r *RealDebrid) getTorrents(offset int, limit int) (int, []*types.Torrent, 
 			Files:            make(map[string]types.File),
 			InfoHash:         t.Hash,
 			Debrid:           r.name,
+			AccountToken:     accountToken,
 			MountPath:        r.MountPath,
 			Added:            t.Added.Format(time.RFC3339),
 		})
-		filenames[t.Filename] = struct{}{}
 	}
 	return totalItems, torrents, nil
 }
@@ -768,30 +828,51 @@ func (r *RealDebrid) GetTorrents() ([]*types.Torrent, error) {
 	}
 	hardLimit := r.limit
 
-	// Get first batch and total count
 	allTorrents := make([]*types.Torrent, 0)
+	seen := make(map[string]struct{}) // deduplicate by torrent ID
+
+	// Fetch from all accounts (primary + download accounts)
+	type accountClient struct {
+		client *request.Client
+		token  string
+	}
+	clients := []accountClient{{client: r.client, token: ""}}
+	for _, acc := range r.accountsManager.All() {
+		clients = append(clients, accountClient{client: acc.Client(), token: acc.Token})
+	}
+
 	var fetchError error
-	offset := 0
-	for {
-		// Fetch next batch of torrents
-		_, torrents, err := r.getTorrents(offset, limit)
-		if err != nil {
-			fetchError = err
-			break
+	for _, ac := range clients {
+		offset := 0
+		for {
+			_, torrents, err := r.getTorrentsForAccount(ac.client, ac.token, offset, limit)
+			if err != nil {
+				r.logger.Warn().Err(err).Msg("Error fetching torrents from account")
+				if fetchError == nil {
+					fetchError = err
+				}
+				break
+			}
+			if len(torrents) == 0 {
+				break
+			}
+			for _, t := range torrents {
+				if _, exists := seen[t.Id]; !exists {
+					seen[t.Id] = struct{}{}
+					allTorrents = append(allTorrents, t)
+				}
+			}
+			offset += len(torrents)
+			if hardLimit != 0 && len(allTorrents) >= hardLimit {
+				break
+			}
 		}
-		totalTorrents := len(torrents)
-		if totalTorrents == 0 {
-			break
-		}
-		allTorrents = append(allTorrents, torrents...)
-		offset += totalTorrents
 		if hardLimit != 0 && len(allTorrents) >= hardLimit {
-			// If hard limit is set, stop fetching more torrents
 			break
 		}
 	}
 
-	if fetchError != nil {
+	if fetchError != nil && len(allTorrents) == 0 {
 		return nil, fetchError
 	}
 
@@ -905,16 +986,31 @@ func (r *RealDebrid) GetProfile() (*types.Profile, error) {
 }
 
 func (r *RealDebrid) GetAvailableSlots() (int, error) {
-	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/torrents/activeCount", r.Host), nil)
-	resp, err := r.client.MakeRequest(req)
-	if err != nil {
-		return 0, nil
+	totalAvailable := 0
+
+	// Aggregate available slots across all accounts
+	clients := []*request.Client{r.client}
+	for _, acc := range r.accountsManager.Active() {
+		clients = append(clients, acc.Client())
 	}
-	var data AvailableSlotsResponse
-	if json.Unmarshal(resp, &data) != nil {
-		return 0, fmt.Errorf("error unmarshalling available slots response: %w", err)
+
+	for _, client := range clients {
+		req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/torrents/activeCount", r.Host), nil)
+		resp, err := client.MakeRequest(req)
+		if err != nil {
+			continue
+		}
+		var data AvailableSlotsResponse
+		if json.Unmarshal(resp, &data) != nil {
+			continue
+		}
+		slots := data.TotalSlots - data.ActiveSlots - r.minimumFreeSlot
+		if slots > 0 {
+			totalAvailable += slots
+		}
 	}
-	return data.TotalSlots - data.ActiveSlots - r.minimumFreeSlot, nil // Ensure we maintain minimum active pots
+
+	return totalAvailable, nil
 }
 
 func (r *RealDebrid) AccountManager() *account.Manager {
