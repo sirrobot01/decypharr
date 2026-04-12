@@ -270,7 +270,18 @@ func (d *Downloader) processTorrentDownload(entry *storage.Entry) error {
 		tasks = append(tasks, downloadTask{file: file, link: downloadLink.DownloadLink})
 	}
 
-	p := pool.New().WithErrors().WithFirstError().WithMaxGoroutines(d.maxDownloads)
+	// If no valid download links were obtained, return error instead of panic
+	if len(tasks) == 0 {
+		return fmt.Errorf("no valid download links available for %s", entry.Name)
+	}
+
+	// Ensure maxDownloads is at least 1 to avoid pool panic
+	maxGoroutines := d.maxDownloads
+	if maxGoroutines <= 0 {
+		maxGoroutines = 1
+	}
+
+	p := pool.New().WithErrors().WithFirstError().WithMaxGoroutines(maxGoroutines)
 	for _, task := range tasks {
 		p.Go(func() error {
 			if err := d.localDownloader(
@@ -323,7 +334,13 @@ func (d *Downloader) processUsenetDownload(entry *storage.Entry) error {
 	// Track per-file progress so we can compute the global total across all files
 	fileProgress := make(map[string]int64)
 
-	p := pool.New().WithErrors().WithFirstError().WithMaxGoroutines(d.maxDownloads)
+	// Ensure maxDownloads is at least 1 to avoid pool panic
+	maxGoroutines := d.maxDownloads
+	if maxGoroutines <= 0 {
+		maxGoroutines = 1
+	}
+
+	p := pool.New().WithErrors().WithFirstError().WithMaxGoroutines(maxGoroutines)
 	for _, file := range files {
 		p.Go(func() error {
 			destPath := filepath.Join(downloadedFolder, file.Name)
