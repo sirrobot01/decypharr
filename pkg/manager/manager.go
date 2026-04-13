@@ -97,7 +97,7 @@ func New() *Manager {
 	// Initialize debrid registry
 	ctx := context.Background()
 
-	// Optimized transport for high-performance streaming
+	// Optimized transport for high-performance streaming with HTTP/2 multiplexing
 	// DNS resolver with caching
 	dialer := &net.Dialer{
 		Timeout:   5 * time.Second,  // Fast connection timeout
@@ -110,15 +110,18 @@ func New() *Manager {
 			MinVersion:         tls.VersionTLS12,
 			ClientSessionCache: tls.NewLRUClientSessionCache(200),
 		},
-		TLSHandshakeTimeout: 20 * time.Second,
-		MaxIdleConns:        400,
-		MaxIdleConnsPerHost: 200,
-		MaxConnsPerHost:     400,
-		IdleConnTimeout:     30 * time.Second,
-		DisableCompression:  true,
-		DialContext:         dialer.DialContext,
-		Proxy:               http.ProxyFromEnvironment,
-		ForceAttemptHTTP2:   false,
+		TLSHandshakeTimeout:   20 * time.Second,
+		MaxIdleConns:          1000,
+		MaxIdleConnsPerHost:   500,
+		MaxConnsPerHost:       500,
+		IdleConnTimeout:       120 * time.Second,
+		DisableCompression:    false, // Enable compression for better multiplexing
+		DialContext:           dialer.DialContext,
+		Proxy:                 http.ProxyFromEnvironment,
+		ForceAttemptHTTP2:     true, // Enable HTTP/2 for multiplexing
+		MaxResponseHeaderBytes: 1 << 20, // 1MB header buffer for CDN responses
+		WriteBufferSize:        32 << 10, // 32KB write buffer
+		ReadBufferSize:         32 << 10, // 32KB read buffer
 	}
 
 	streamClient := &http.Client{
