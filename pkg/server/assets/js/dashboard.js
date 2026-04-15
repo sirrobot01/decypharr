@@ -298,7 +298,7 @@ class TorrentDashboard {
                         ${this.renderProgressBar(torrent.progress)}
                     </td>
                     <td>
-                        <span class="text-sm">${this.formatSpeed(torrent.speed ?? torrent.dlspeed)}</span>
+                        <span class="text-sm">${this.formatSpeed(torrent.dlspeed)}</span>
                     </td>
                     <td>
                         ${torrent.category ? `<span class="badge badge-sm badge-outline">${this.escapeHtml(torrent.category)}</span>` : '-'}
