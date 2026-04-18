@@ -9,6 +9,9 @@ UMASK=${UMASK:-022}
 # Set umask
 umask "$UMASK"
 
+# Test to see if docker is getting new values for env vars
+echo "Test"
+
 # Function to create directories and files
 setup_directories() {
     # Ensure directories exist
