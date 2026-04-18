@@ -130,8 +130,6 @@ func (d *Downloader) markAsCompleted(entry *storage.Entry) {
 
 	// Trigger arr refresh
 	go func() {
-		// Small delay to allow any post-processing to complete before refreshing arr
-		time.Sleep(2 * time.Second)
 		a := d.manager.arr.GetOrCreate(entry.Category)
 		a.Refresh()
 	}()
