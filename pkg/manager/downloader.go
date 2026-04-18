@@ -115,6 +115,9 @@ func (d *Downloader) process(entry *storage.Entry, mountPath string) error {
 }
 
 func (d *Downloader) markAsCompleted(entry *storage.Entry) {
+	// 20s delay to allow any post-processing to complete before marking as completed
+	d.logger.Info().Msgf("Triggering arr refresh in 20s after download completion")
+	time.Sleep(20 * time.Second)
 	// Mark as completed
 	entry.MarkAsCompleted(entry.DownloadPath())
 	_ = d.manager.queue.Update(entry)
@@ -130,9 +133,6 @@ func (d *Downloader) markAsCompleted(entry *storage.Entry) {
 
 	// Trigger arr refresh
 	go func() {
-		// 20s delay to allow any post-processing to complete before refreshing arr
-		time.Sleep(20 * time.Second)
-		d.logger.Info().Msgf("Triggering arr refresh in 20s after download completion")
 		a := d.manager.arr.GetOrCreate(entry.Category)
 		a.Refresh()
 	}()
