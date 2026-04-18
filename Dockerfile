@@ -7,7 +7,7 @@ FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 ARG TARGETOS
 ARG TARGETARCH
 ARG TARGETPLATFORM
-ARG VERSION=0.0.0
+ARG VERSION=2.2.1
 ARG CHANNEL=dev
 
 # Copy xx scripts for cross-compilation
