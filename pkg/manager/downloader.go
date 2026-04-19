@@ -115,11 +115,6 @@ func (d *Downloader) process(entry *storage.Entry, mountPath string) error {
 }
 
 func (d *Downloader) markAsCompleted(entry *storage.Entry) {
-
-	// 20s delay to allow any post-processing to complete before marking as completed
-	d.logger.Info().Msgf("Marking Complete in 20s after download completion")
-	time.Sleep(20 * time.Second)
-
 	// Mark as completed
 	entry.MarkAsCompleted(entry.DownloadPath())
 	_ = d.manager.queue.Update(entry)
@@ -233,9 +228,56 @@ func (d *Downloader) processSymlink(entry *storage.Entry, mountPath string) erro
 		}
 	}
 
+	d.waitForArrFilesystem(entry, mountPath, 2*time.Minute, 2*time.Second)
+
 	d.markAsCompleted(entry)
 
 	return nil
+}
+
+func (d *Downloader) waitForArrFilesystem(entry *storage.Entry, mountPath string, timeout time.Duration, interval time.Duration) {
+	a := d.manager.arr.GetOrCreate(entry.Category)
+	if a == nil || a.Host == "" || a.Token == "" {
+		return
+	}
+
+	files := entry.GetActiveFiles()
+	expected := make([]string, 0, len(files))
+	for _, file := range files {
+		expected = append(expected, file.Name)
+	}
+
+	deadline := time.Now().Add(timeout)
+	for attempt := 1; ; attempt++ {
+		visible, err := a.CanSeePath(mountPath, expected)
+		if err == nil && visible {
+			d.logger.Info().
+				Str("arr", a.Name).
+				Int("attempt", attempt).
+				Str("path", mountPath).
+				Msg("arr filesystem can see download path")
+			return
+		}
+
+		if err != nil {
+			d.logger.Debug().
+				Err(err).
+				Str("arr", a.Name).
+				Int("attempt", attempt).
+				Msg("arr filesystem check not ready")
+		}
+
+		if time.Now().After(deadline) {
+			d.logger.Warn().
+				Str("arr", a.Name).
+				Str("path", mountPath).
+				Dur("timeout", timeout).
+				Msg("timed out waiting for arr filesystem visibility")
+			return
+		}
+
+		time.Sleep(interval)
+	}
 }
 
 // processDownload downloads all files for an entry with progress tracking

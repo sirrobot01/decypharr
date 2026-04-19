@@ -7,6 +7,8 @@ import (
 	json "github.com/bytedance/sonic"
 	"io"
 	"net/http"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -317,6 +319,85 @@ func (a *Arr) Refresh() {
 	}
 
 	_, _ = a.Request(http.MethodPost, "api/v3/command", payload, nil)
+}
+
+type filesystemFile struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+type filesystemListing struct {
+	Path  string           `json:"path"`
+	Files []filesystemFile `json:"files"`
+}
+
+// CanSeePath checks whether arr can see the provided path via its filesystem endpoint.
+func (a *Arr) CanSeePath(path string, expectedFiles []string) (bool, error) {
+	params := url.Values{}
+	params.Set("path", path)
+	params.Set("includeFiles", "true")
+	params.Set("allowFoldersWithoutTrailingSlashes", "true")
+	endpoint := "api/v3/filesystem?" + params.Encode()
+
+	resp, err := a.Request(http.MethodGet, endpoint, nil, nil)
+	if err != nil {
+		return false, err
+	}
+	if resp.Body == nil {
+		return false, fmt.Errorf("filesystem check failed: empty response body")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return false, fmt.Errorf("filesystem check failed: %s", resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, fmt.Errorf("filesystem check failed to read response: %w", err)
+	}
+
+	var listings []filesystemListing
+	if err := json.Unmarshal(body, &listings); err != nil {
+		var single filesystemListing
+		if errSingle := json.Unmarshal(body, &single); errSingle != nil {
+			return false, fmt.Errorf("filesystem check failed to parse response: %w", err)
+		}
+		listings = []filesystemListing{single}
+	}
+
+	if len(listings) == 0 {
+		return false, nil
+	}
+
+	listing := listings[0]
+
+	if len(expectedFiles) == 0 {
+		return len(listing.Files) > 0 || strings.TrimRight(listing.Path, "/") == strings.TrimRight(path, "/"), nil
+	}
+
+	seen := make(map[string]struct{}, len(listing.Files))
+	for _, f := range listing.Files {
+		name := strings.ToLower(strings.TrimSpace(f.Name))
+		if name == "" {
+			name = strings.ToLower(strings.TrimSpace(filepath.Base(f.Path)))
+		}
+		if name != "" {
+			seen[name] = struct{}{}
+		}
+	}
+
+	for _, expected := range expectedFiles {
+		name := strings.ToLower(strings.TrimSpace(filepath.Base(expected)))
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; !ok {
+			return false, nil
+		}
+	}
+
+	return true, nil
 }
 
 func inferType(host, name string) Type {
