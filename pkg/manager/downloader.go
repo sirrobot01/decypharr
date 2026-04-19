@@ -118,7 +118,7 @@ func (d *Downloader) markAsCompleted(entry *storage.Entry) {
 
 	// 20s delay to allow any post-processing to complete before marking as completed
 	d.logger.Info().Msgf("Marking Complete in 20s after download completion")
-	time.Sleep(20 * time.Second)
+	// time.Sleep(20 * time.Second)
 
 	// Mark as completed
 	entry.MarkAsCompleted(entry.DownloadPath())
@@ -220,18 +220,18 @@ func (d *Downloader) processSymlink(entry *storage.Entry, mountPath string) erro
 	_ = d.manager.queue.Update(entry)
 
 	// Run ffprobe on files to warm cache and trigger imports
-	if !d.manager.config.SkipPreCache && len(filePaths) > 0 {
-		probeFiles := filePaths
-		if len(probeFiles) > MaxNZBPreCacheFiles {
-			probeFiles = probeFiles[:MaxNZBPreCacheFiles]
-		}
-		d.logger.Debug().Int("files", len(probeFiles)).Msgf("Running ffprobe on %s", entry.Name)
-		if err := d.manager.RunFFprobe(probeFiles); err != nil {
-			d.logger.Error().Msgf("Failed to run ffprobe: %s", err)
-		} else {
-			d.logger.Debug().Str("entry", entry.Name).Msgf("Ran ffprobe on %d/%d files", len(probeFiles), len(filePaths))
-		}
-	}
+	// if !d.manager.config.SkipPreCache && len(filePaths) > 0 {
+	// 	probeFiles := filePaths
+	// 	if len(probeFiles) > MaxNZBPreCacheFiles {
+	// 		probeFiles = probeFiles[:MaxNZBPreCacheFiles]
+	// 	}
+	// 	d.logger.Debug().Int("files", len(probeFiles)).Msgf("Running ffprobe on %s", entry.Name)
+	// 	if err := d.manager.RunFFprobe(probeFiles); err != nil {
+	// 		d.logger.Error().Msgf("Failed to run ffprobe: %s", err)
+	// 	} else {
+	// 		d.logger.Debug().Str("entry", entry.Name).Msgf("Ran ffprobe on %d/%d files", len(probeFiles), len(filePaths))
+	// 	}
+	// }
 
 	d.markAsCompleted(entry)
 
