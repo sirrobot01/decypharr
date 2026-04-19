@@ -244,6 +244,8 @@ func (d *Downloader) waitForArrFilesystem(entry *storage.Entry, mountPath string
 		return
 	}
 
+	const stableSuccessesRequired = 2
+
 	files := entry.GetActiveFiles()
 	expected := make([]string, 0, len(files))
 	for _, file := range files {
@@ -251,15 +253,36 @@ func (d *Downloader) waitForArrFilesystem(entry *storage.Entry, mountPath string
 	}
 
 	deadline := time.Now().Add(timeout)
+	stableSuccesses := 0
 	for attempt := 1; ; attempt++ {
-		visible, err := a.CanSeePath(mountPath, expected)
+		visible, apiFiles, err := a.CanSeePath(mountPath, expected)
+		if err == nil {
+			for _, apiFile := range apiFiles {
+				name := strings.TrimSpace(apiFile.Name)
+				if name == "" {
+					name = filepath.Base(apiFile.Path)
+				}
+				d.logger.Debug().
+					Str("arr", a.Name).
+					Int("attempt", attempt).
+					Str("file", name).
+					Str("file_path", apiFile.Path).
+					Msg("arr filesystem file")
+			}
+		}
 		if err == nil && visible {
-			d.logger.Info().
-				Str("arr", a.Name).
-				Int("attempt", attempt).
-				Str("path", mountPath).
-				Msg("arr filesystem can see download path")
-			return
+			stableSuccesses++
+			if stableSuccesses >= stableSuccessesRequired {
+				d.logger.Info().
+					Str("arr", a.Name).
+					Int("attempt", attempt).
+					Int("expected_files", len(expected)).
+					Str("path", mountPath).
+					Msg("arr filesystem can see all expected files")
+				return
+			}
+		} else {
+			stableSuccesses = 0
 		}
 
 		if err != nil {

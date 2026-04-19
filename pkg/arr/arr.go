@@ -332,7 +332,7 @@ type filesystemListing struct {
 }
 
 // CanSeePath checks whether arr can see the provided path via its filesystem endpoint.
-func (a *Arr) CanSeePath(path string, expectedFiles []string) (bool, error) {
+func (a *Arr) CanSeePath(path string, expectedFiles []string) (bool, []filesystemFile, error) {
 	params := url.Values{}
 	params.Set("path", path)
 	params.Set("includeFiles", "true")
@@ -341,63 +341,79 @@ func (a *Arr) CanSeePath(path string, expectedFiles []string) (bool, error) {
 
 	resp, err := a.Request(http.MethodGet, endpoint, nil, nil)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if resp.Body == nil {
-		return false, fmt.Errorf("filesystem check failed: empty response body")
+		return false, nil, fmt.Errorf("filesystem check failed: empty response body")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return false, fmt.Errorf("filesystem check failed: %s", resp.Status)
+		return false, nil, fmt.Errorf("filesystem check failed: %s", resp.Status)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return false, fmt.Errorf("filesystem check failed to read response: %w", err)
+		return false, nil, fmt.Errorf("filesystem check failed to read response: %w", err)
 	}
 
 	var listings []filesystemListing
 	if err := json.Unmarshal(body, &listings); err != nil {
 		var single filesystemListing
 		if errSingle := json.Unmarshal(body, &single); errSingle != nil {
-			return false, fmt.Errorf("filesystem check failed to parse response: %w", err)
+			return false, nil, fmt.Errorf("filesystem check failed to parse response: %w", err)
 		}
 		listings = []filesystemListing{single}
 	}
 
 	if len(listings) == 0 {
-		return false, nil
+		return false, nil, nil
 	}
 
-	listing := listings[0]
+	allFiles := make([]filesystemFile, 0)
+	for _, listing := range listings {
+		allFiles = append(allFiles, listing.Files...)
+	}
 
 	if len(expectedFiles) == 0 {
-		return len(listing.Files) > 0 || strings.TrimRight(listing.Path, "/") == strings.TrimRight(path, "/"), nil
+		for _, listing := range listings {
+			if len(listing.Files) > 0 || strings.TrimRight(listing.Path, "/") == strings.TrimRight(path, "/") {
+				return true, allFiles, nil
+			}
+		}
+		return false, allFiles, nil
 	}
 
-	seen := make(map[string]struct{}, len(listing.Files))
-	for _, f := range listing.Files {
-		name := strings.ToLower(strings.TrimSpace(f.Name))
-		if name == "" {
-			name = strings.ToLower(strings.TrimSpace(filepath.Base(f.Path)))
-		}
-		if name != "" {
-			seen[name] = struct{}{}
+	seenCounts := make(map[string]int)
+	for _, listing := range listings {
+		for _, f := range listing.Files {
+			name := strings.ToLower(strings.TrimSpace(f.Name))
+			if name == "" {
+				name = strings.ToLower(strings.TrimSpace(filepath.Base(f.Path)))
+			}
+			if name != "" {
+				seenCounts[name]++
+			}
 		}
 	}
+
+	expectedCounts := make(map[string]int)
 
 	for _, expected := range expectedFiles {
 		name := strings.ToLower(strings.TrimSpace(filepath.Base(expected)))
 		if name == "" {
 			continue
 		}
-		if _, ok := seen[name]; !ok {
-			return false, nil
+		expectedCounts[name]++
+	}
+
+	for name, expectedCount := range expectedCounts {
+		if seenCounts[name] < expectedCount {
+			return false, allFiles, nil
 		}
 	}
 
-	return true, nil
+	return true, allFiles, nil
 }
 
 func inferType(host, name string) Type {
