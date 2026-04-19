@@ -228,11 +228,14 @@ func (d *Downloader) processSymlink(entry *storage.Entry, mountPath string) erro
 		}
 	}
 
-	d.waitForArrFilesystem(entry, mountPath, 2*time.Minute, 2*time.Second)
-
-	d.markAsCompleted(entry)
+	go d.completeSymlinkAsync(entry, mountPath)
 
 	return nil
+}
+
+func (d *Downloader) completeSymlinkAsync(entry *storage.Entry, mountPath string) {
+	d.waitForArrFilesystem(entry, mountPath, 2*time.Minute, 2*time.Second)
+	d.markAsCompleted(entry)
 }
 
 func (d *Downloader) waitForArrFilesystem(entry *storage.Entry, mountPath string, timeout time.Duration, interval time.Duration) {
