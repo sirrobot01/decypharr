@@ -64,6 +64,10 @@ type Arr struct {
 	Source           Source `json:"source,omitempty"`          // The source of the arr, e.g. "auto", "manual". Auto means it was automatically detected from the arr
 }
 
+type DownloadClientSchema struct {
+	RemoveFailedDownloads bool `json:"removeFailedDownloads"`
+}
+
 func New(name, host, token string, cleanup, skipRepair bool, downloadUncached *bool, selectedDebrid, source string) *Arr {
 	return &Arr{
 		Name:             name,
@@ -146,6 +150,22 @@ func (a *Arr) Validate() error {
 		return fmt.Errorf("failed to validate arr %s: %s", a.Name, resp.Status)
 	}
 	return nil
+}
+
+func (a *Arr) GetRemoveFailedDownloads() bool {
+	var data []DownloadClientSchema
+	resp, err := a.Request(http.MethodGet, "api/v3/downloadclient", nil, &data)
+	if err != nil || resp.StatusCode != http.StatusOK || len(data) == 0 {
+		return false
+	}
+
+	for _, client := range data {
+		if client.RemoveFailedDownloads {
+			return true
+		}
+	}
+
+	return false
 }
 
 type Storage struct {
