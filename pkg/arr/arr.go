@@ -64,8 +64,8 @@ type Arr struct {
 	Source           Source `json:"source,omitempty"`          // The source of the arr, e.g. "auto", "manual". Auto means it was automatically detected from the arr
 }
 
-type DownloadClientSchema struct {
-	RemoveFailedDownloads bool `json:"removeFailedDownloads"`
+type DownloadClientConfigSchema struct {
+	AutoRedownloadFailed bool `json:"autoRedownloadFailed"`
 }
 
 func New(name, host, token string, cleanup, skipRepair bool, downloadUncached *bool, selectedDebrid, source string) *Arr {
@@ -152,20 +152,13 @@ func (a *Arr) Validate() error {
 	return nil
 }
 
-func (a *Arr) GetRemoveFailedDownloads() bool {
-	var data []DownloadClientSchema
-	resp, err := a.Request(http.MethodGet, "api/v3/downloadclient", nil, &data)
-	if err != nil || resp.StatusCode != http.StatusOK || len(data) == 0 {
+func (a *Arr) GetAutoRedownloadFailed() bool {
+	var data DownloadClientConfigSchema
+	resp, err := a.Request(http.MethodGet, "api/v3/config/downloadclient", nil, &data)
+	if err != nil || resp.StatusCode != http.StatusOK {
 		return false
 	}
-
-	for _, client := range data {
-		if client.RemoveFailedDownloads {
-			return true
-		}
-	}
-
-	return false
+	return data.AutoRedownloadFailed
 }
 
 type Storage struct {
