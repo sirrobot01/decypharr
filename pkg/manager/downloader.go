@@ -228,7 +228,8 @@ func (d *Downloader) processSymlink(entry *storage.Entry, mountPath string) erro
 		}
 	}
 
-	go d.completeSymlinkAsync(entry, mountPath)
+	d.markAsCompleted(entry)
+	// go d.completeSymlinkAsync(entry, mountPath)
 
 	return nil
 }

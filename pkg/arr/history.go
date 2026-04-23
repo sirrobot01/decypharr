@@ -108,13 +108,18 @@ func (a *Arr) GetQueue() []QueueSchema {
 }
 
 func queueFilter(q QueueSchema, autoRedownloadFailed bool) QueueAction {
+	// Temporary testing override.
+	autoRedownloadFailed = true
+
 	// Check for failed downloads(for both usenet and torrent)
 	if q.Status == "failed" && autoRedownloadFailed {
+		fmt.Printf("[queueFilter] failed item: %+v\n", q)
 		return QueueActionBlocklist
 	}
 
 	// Check for completed downloads with warning status and import pending state
 	if q.Status == "completed" && q.TrackedDownloadStatus == "warning" && autoRedownloadFailed {
+		fmt.Printf("[queueFilter] completed warning item: %+v\n", q)
 		// Check status messages for specific errors
 		messages := q.StatusMessages
 		if len(messages) > 0 {
