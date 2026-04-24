@@ -108,27 +108,18 @@ func (a *Arr) GetQueue() []QueueSchema {
 }
 
 func queueFilter(q QueueSchema, autoRedownloadFailed bool) QueueAction {
-	// Temporary testing override.
-	// autoRedownloadFailed = true
-
 	// Check for failed downloads(for both usenet and torrent)
-	// if q.Status == "failed" && autoRedownloadFailed {
-	if q.Status == "failed" {
+	if q.Status == "failed" && autoRedownloadFailed {
 		return QueueActionBlocklist
 	}
 
 	// Check for completed downloads with warning status and import pending state
-	// if q.Status == "completed" && q.TrackedDownloadStatus == "warning" && autoRedownloadFailed {
-	if q.Status == "completed" && q.TrackedDownloadStatus == "warning" {
-		fmt.Printf("[queueFilter] completed warning item: %+v\n", q)
+	if q.Status == "completed" && q.TrackedDownloadStatus == "warning" && autoRedownloadFailed {
 		// Check status messages for specific errors
 		messages := q.StatusMessages
 		if len(messages) > 0 {
-			// "Unexpected error processing file" is often transient (race/mount visibility). However "one or more episodes expected.." will catch this and blocklist it.
-			// This will quickly iterate and see if there is a processing error first and leave it for manual adjustment. Most of the time sonarr will be able to import these files on the next pass.
-			// If we use fregapples CanSeePath fuction in arr.go to check if the file is visible to sonarr, we can avoid a lot of these false positives and only blocklist the ones that are truly not visible to sonarr.
-			// Meaning, only a small fraction of the "unexpected error processing file" will be truly unexpected and not just a race condition or mount visibility issue. But this check will allow the user to decide if
-			// it is truly unexpected and blocklist it, or if it is just a transient issue and let sonarr handle it on the next pass.
+			// "Unexpected error processing file" is transient — typically a race condition or mount
+			// visibility issue. Leave these alone so arr can retry on the next pass.
 			for _, m := range messages {
 				title := strings.ToLower(m.Title)
 				joinedMessages := strings.ToLower(strings.Join(m.Messages, " "))
