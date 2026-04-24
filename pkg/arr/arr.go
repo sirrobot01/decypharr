@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"cmp"
 	"fmt"
-	json "github.com/bytedance/sonic"
 	"io"
 	"net/http"
 	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
+
+	json "github.com/bytedance/sonic"
 
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/rs/zerolog"
@@ -150,15 +151,6 @@ func (a *Arr) Validate() error {
 		return fmt.Errorf("failed to validate arr %s: %s", a.Name, resp.Status)
 	}
 	return nil
-}
-
-func (a *Arr) GetAutoRedownloadFailed() bool {
-	var data DownloadClientConfigSchema
-	resp, err := a.Request(http.MethodGet, "api/v3/config/downloadclient", nil, &data)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		return false
-	}
-	return data.AutoRedownloadFailed
 }
 
 type Storage struct {

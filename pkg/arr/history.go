@@ -107,14 +107,14 @@ func (a *Arr) GetQueue() []QueueSchema {
 	return results
 }
 
-func queueFilter(q QueueSchema, autoRedownloadFailed bool) QueueAction {
+func queueFilter(q QueueSchema) QueueAction {
 	// Check for failed downloads(for both usenet and torrent)
-	if q.Status == "failed" && autoRedownloadFailed {
+	if q.Status == "failed" {
 		return QueueActionBlocklist
 	}
 
 	// Check for completed downloads with warning status and import pending state
-	if q.Status == "completed" && q.TrackedDownloadStatus == "warning" && autoRedownloadFailed {
+	if q.Status == "completed" && q.TrackedDownloadStatus == "warning" {
 		// Check status messages for specific errors
 		messages := q.StatusMessages
 		if len(messages) > 0 {
@@ -152,11 +152,10 @@ func (a *Arr) CleanupQueue() error {
 		return fmt.Errorf("arr not configured")
 	}
 	queue := a.GetQueue()
-	autoRedownloadFailed := a.GetAutoRedownloadFailed()
 	blacklists := make(map[int]bool)
 	manualImports := make(map[string]bool)
 	for _, q := range queue {
-		switch queueFilter(q, autoRedownloadFailed) {
+		switch queueFilter(q) {
 		case QueueActionBlocklist:
 			blacklists[q.Id] = true
 		case QueueActionImport:
