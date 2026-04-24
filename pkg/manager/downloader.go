@@ -228,24 +228,22 @@ func (d *Downloader) processSymlink(entry *storage.Entry, mountPath string) erro
 		}
 	}
 
-	d.markAsCompleted(entry)
-	// go d.completeSymlinkAsync(entry, mountPath)
+	// d.markAsCompleted(entry)
+	go d.completeSymlinkAsync(entry, mountPath)
 
 	return nil
 }
 
 func (d *Downloader) completeSymlinkAsync(entry *storage.Entry, mountPath string) {
-	d.waitForArrFilesystem(entry, mountPath, 2*time.Minute, 2*time.Second)
+	d.waitForArrFilesystem(entry, mountPath, 2*time.Minute, 3*time.Second, 3)
 	d.markAsCompleted(entry)
 }
 
-func (d *Downloader) waitForArrFilesystem(entry *storage.Entry, mountPath string, timeout time.Duration, interval time.Duration) {
+func (d *Downloader) waitForArrFilesystem(entry *storage.Entry, mountPath string, timeout time.Duration, interval time.Duration, stableSuccessesRequired int) {
 	a := d.manager.arr.GetOrCreate(entry.Category)
 	if a == nil || a.Host == "" || a.Token == "" {
 		return
 	}
-
-	const stableSuccessesRequired = 2
 
 	files := entry.GetActiveFiles()
 	expected := make([]string, 0, len(files))
