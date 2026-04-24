@@ -7,7 +7,7 @@ FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 ARG TARGETOS
 ARG TARGETARCH
 ARG TARGETPLATFORM
-ARG VERSION=2.2.2
+ARG VERSION=2.2.3
 ARG CHANNEL=dev
 
 # Copy xx scripts for cross-compilation
@@ -59,7 +59,7 @@ RUN apk add --no-cache curl unzip && \
 # Stage 2: Final image
 FROM alpine:latest
 
-ARG VERSION=2.2.2
+ARG VERSION=2.2.3
 ARG CHANNEL=test
 
 LABEL version="${VERSION}-${CHANNEL}"
