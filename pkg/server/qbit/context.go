@@ -57,6 +57,15 @@ func decodeAuthHeader(header string) (string, string, error) {
 	bearer := string(bytes)
 
 	colonIndex := strings.LastIndex(bearer, ":")
+	if colonIndex < 0 {
+		// strings.LastIndex returns -1 when the substring is absent; without
+		// this guard `bearer[:colonIndex]` would panic with
+		// "slice bounds out of range [:-1]". Triggers on any Authorization
+		// header whose decoded base64 payload contains no ':' separator
+		// (e.g. an empty payload, or garbage bytes that decode but lack a
+		// 'user:pass' shape).
+		return "", "", fmt.Errorf("malformed credentials: missing colon separator")
+	}
 	username := bearer[:colonIndex]
 	password := bearer[colonIndex+1:]
 
