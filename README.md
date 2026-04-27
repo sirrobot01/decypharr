@@ -45,6 +45,8 @@ services:
       - apparmor:unconfined
 ```
 
+> Prefer not to self-host? A managed Decypharr instance is available via [ElfHosted](https://store.elfhosted.com/product/decypharr/?utm_source=github&utm_medium=readme&utm_campaign=decypharr-readme), preconfigured alongside Sonarr/Radarr to route requests to your debrid provider (7-day trial).
+
 ## Documentation
 
 For complete documentation, please visit our [Documentation](https://docs.decypharr.com).
