@@ -47,10 +47,11 @@ func stripTrackersFromMagnet(mi metainfo.Magnet, fileType string) metainfo.Magne
 
 func GetMagnetFromFile(file io.Reader, filePath string, rmTrackerUrls bool) (*Magnet, error) {
 	var (
-		m   *Magnet
-		err error
+		m         *Magnet
+		err       error
+		isTorrent = filepath.Ext(filePath) == ".torrent"
 	)
-	if filepath.Ext(filePath) == ".torrent" {
+	if isTorrent {
 		torrentData, err := io.ReadAll(file)
 		if err != nil {
 			return nil, err
@@ -67,7 +68,14 @@ func GetMagnetFromFile(file io.Reader, filePath string, rmTrackerUrls bool) (*Ma
 			return nil, err
 		}
 	}
-	m.Name = strings.TrimSuffix(filePath, filepath.Ext(filePath))
+	uploadedName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+	if isTorrent {
+		m.Name = uploadedName
+		m.Link = SetMagnetDisplayName(m.Link, m.Name)
+	} else if m.Name == "" {
+		m.Name = uploadedName
+		m.Link = SetMagnetDisplayName(m.Link, m.Name)
+	}
 	return m, nil
 }
 
@@ -170,6 +178,42 @@ func GetMagnetInfo(magnetLink string, rmTrackerUrls bool) (*Magnet, error) {
 		Link:     finalLink,
 	}
 	return magnet, nil
+}
+
+func MagnetDisplayName(magnetLink string) string {
+	mi, err := metainfo.ParseMagnetUri(magnetLink)
+	if err != nil {
+		return ""
+	}
+	return mi.DisplayName
+}
+
+func SetMagnetDisplayName(magnetLink, name string) string {
+	name = strings.TrimSpace(name)
+	if magnetLink == "" || name == "" {
+		return magnetLink
+	}
+	parsed, err := url.Parse(magnetLink)
+	if err != nil || parsed.Scheme != "magnet" {
+		return magnetLink
+	}
+	encodedName := url.QueryEscape(name)
+	parts := strings.Split(magnetLink, "?")
+	if len(parts) != 2 {
+		return magnetLink
+	}
+	queryParts := strings.Split(parts[1], "&")
+	for i, part := range queryParts {
+		if strings.HasPrefix(part, "dn=") {
+			queryParts[i] = "dn=" + encodedName
+			return parts[0] + "?" + strings.Join(queryParts, "&")
+		}
+	}
+	separator := "&"
+	if parts[1] == "" {
+		separator = ""
+	}
+	return magnetLink + separator + "dn=" + encodedName
 }
 
 func ExtractInfoHash(magnetDesc string) string {

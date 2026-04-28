@@ -506,6 +506,9 @@ func (e *Entry) IsValid() bool {
 
 // DownloadPath returns the expected download/symlink path for this entry
 func (e *Entry) DownloadPath() string {
+	if config.Get().FolderNaming == config.WebDavUseArrSubmittedName {
+		return filepath.Join(e.SavePath, e.GetFolder())
+	}
 	return filepath.Join(e.SavePath, utils.RemoveExtension(e.Name))
 }
 
@@ -676,10 +679,27 @@ func GetTorrentFolder(folderNaming config.WebDavFolderNaming, entry *Entry) stri
 		folder = path.Clean(utils.RemoveExtension(entry.Name))
 	case config.WebDavUseOriginalNameNoExt:
 		folder = path.Clean(utils.RemoveExtension(entry.OriginalFilename))
+	case config.WebDavUseArrSubmittedName:
+		folder = utils.SafeFolderName(entry.ArrSubmittedName(), entry.InfoHash)
 	case config.WebdavUseHash:
 		folder = entry.InfoHash
 	default:
 		folder = path.Clean(entry.Name)
 	}
 	return folder
+}
+
+func (e *Entry) ArrSubmittedName() string {
+	if e == nil {
+		return ""
+	}
+	if e.Magnet != "" {
+		if name := utils.MagnetDisplayName(e.Magnet); name != "" {
+			return name
+		}
+	}
+	if e.Protocol == config.ProtocolNZB && e.OriginalFilename != "" {
+		return e.OriginalFilename
+	}
+	return e.Name
 }

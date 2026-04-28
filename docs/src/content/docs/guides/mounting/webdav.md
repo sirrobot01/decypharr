@@ -72,21 +72,24 @@ WebDAV auth is controlled by:
 
 ## Folder Naming
 
-Control how torrent folders are named:
+Control how download folders are named:
 
 ```json
 {
-  "webdav_folder_naming": "filename"
+  "folder_naming": "filename"
 }
 ```
 
-| Value             | Example                 |
-|-------------------|-------------------------|
-| `filename`        | `Movie.2024.1080p.mkv`  |
-| `original`        | `Original Torrent Name` |
-| `filename_no_ext` | `Movie.2024.1080p`      |
-| `original_no_ext` | `Original Torrent Name` |
-| `infohash`        | `abc123def456...`       |
+| UI option | Config value | Example folder |
+|-----------|--------------|----------------|
+| File name | `filename` | `Movie.2024.1080p.mkv` |
+| Original name | `original` | `Original Torrent Name` |
+| File name (No Extension) | `filename_no_ext` | `Movie.2024.1080p` |
+| Original name (No Extension) | `original_no_ext` | `Original Torrent Name` |
+| ARR submitted name | `arr_submitted_name` | `Example Show Season 01 S01 1080p WEB-DL x265` |
+| Infohash | `infohash` | `abc123def456...` |
+
+**ARR submitted name** uses the release name sent by Sonarr, Radarr, or another client, such as the `dn` value in a magnet link or the uploaded torrent/NZB filename. Decypharr sanitizes this value before creating the folder.
 
 ## Streaming
 

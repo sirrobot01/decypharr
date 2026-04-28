@@ -403,9 +403,16 @@ type TorrentFile struct {
 
 // ToQBitTorrent converts to QBitTorrent format for API compatibility
 func convertToQBitTorrentTorrent(t *storage.Entry) Torrent {
+	name := t.Name
+	contentPath := t.ContentPath
+	if config.Get().FolderNaming == config.WebDavUseArrSubmittedName {
+		name = t.GetFolder()
+		contentPath = t.DownloadPath()
+	}
+
 	qbitTorrent := Torrent{
 		Hash:         t.InfoHash,
-		Name:         t.Name,
+		Name:         name,
 		Size:         t.Size,
 		Progress:     t.Progress,
 		Dlspeed:      t.Speed,
@@ -414,7 +421,7 @@ func convertToQBitTorrentTorrent(t *storage.Entry) Torrent {
 		State:        t.State,
 		Category:     t.Category,
 		SavePath:     t.SavePath,
-		ContentPath:  t.ContentPath,
+		ContentPath:  contentPath,
 		AddedOn:      t.CreatedAt.Unix(),
 		CompletionOn: 0,
 		Debrid:       t.ActiveProvider,
