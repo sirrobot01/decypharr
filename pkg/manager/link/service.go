@@ -158,8 +158,8 @@ func (s *Service) handleBadLink(ctx context.Context, err error, entry *storage.E
 			// Entry is still bad
 			return emptyDownloadLink, fmt.Errorf("entry %s(%s) still bad after repair, un-repairable", entry.GetFolder(), dl.Link)
 		}
-		// Run the GetLink again
-		return s.GetLink(ctx, entry, dl.Filename)
+		// Bypass singleflight re-entry to avoid deadlock
+		return s.fetchAndValidate(ctx, entry, dl.Filename)
 	}
 	// Just return the error
 	return dl, err
@@ -232,8 +232,8 @@ func (s *Service) fetchLink(ctx context.Context, entry *storage.Entry, filename 
 			// Entry is still bad
 			return emptyDownloadLink, fmt.Errorf("entry %s(%s) still bad after repair, un-repairable", entry.GetFolder(), downloadLink.Link)
 		}
-		// Run the GetLink again
-		return s.GetLink(ctx, entry, filename)
+		// Bypass singleflight re-entry to avoid deadlock
+		return s.fetchAndValidate(ctx, entry, filename)
 	}
 
 	return downloadLink, nil
