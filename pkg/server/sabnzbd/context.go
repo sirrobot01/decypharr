@@ -107,9 +107,17 @@ func (s *SABnzbd) authenticate(category, username, password string) (*arr.Arr, e
 	cfg := config.Get()
 	a := s.manager.Arr().Get(category)
 	if a == nil {
-		// Arr is not configured, create a new one
-		downloadUncached := false
-		a = arr.New(category, "", "", false, false, &downloadUncached, "", "auto")
+		// Arr is not yet in runtime storage — look for a matching config entry
+		// so we inherit its download_uncached setting. If no config match,
+		// leave nil so SendToDebrid falls back to the debrid provider's setting.
+		var downloadUncached *bool
+		for _, cfgArr := range config.Get().Arrs {
+			if cfgArr.Name == category {
+				downloadUncached = cfgArr.DownloadUncached
+				break
+			}
+		}
+		a = arr.New(category, "", "", false, false, downloadUncached, "", "auto")
 	}
 	a.Host = username
 	a.Token = password
