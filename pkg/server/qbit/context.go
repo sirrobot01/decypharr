@@ -57,6 +57,9 @@ func decodeAuthHeader(header string) (string, string, error) {
 	bearer := string(bytes)
 
 	colonIndex := strings.LastIndex(bearer, ":")
+	if colonIndex < 0 {
+		return "", "", fmt.Errorf("invalid basic auth payload: missing ':' separator")
+	}
 	username := bearer[:colonIndex]
 	password := bearer[colonIndex+1:]
 
