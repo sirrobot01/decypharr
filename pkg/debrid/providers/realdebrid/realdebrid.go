@@ -599,6 +599,8 @@ func (r *RealDebrid) UpdateTorrent(t *types.Torrent) error {
 
 func (r *RealDebrid) CheckStatus(t *types.Torrent) (*types.Torrent, error) {
 	for {
+		time.Sleep(2 * time.Second)
+
 		var data torrentInfo
 
 		resp, err := r.doGet(fmt.Sprintf("/torrents/info/%s", t.Id), &data)
@@ -665,6 +667,13 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent) (*types.Torrent, error) {
 				return t, fmt.Errorf("torrent: %s not cached", t.Name)
 			}
 			return t, nil
+		} else {
+			r.logger.Warn().
+				Str("torrent_id", t.Id).
+				Str("debrid_status", debridStatus).
+				Str("mapped_status", string(t.Status)).
+				Msg("Unexpected debrid status, treating as error")
+			return t, fmt.Errorf("torrent: %s has error status: %s", t.Name, debridStatus)
 		}
 	}
 }
