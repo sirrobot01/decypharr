@@ -66,6 +66,9 @@ tar -xzf decypharr_linux_amd64.tar.gz
 ./decypharr --config /path/to/
 ```
 
+## Managed (ElfHosted)
+
+Prefer not to self-host? A managed Decypharr instance is available via [ElfHosted](https://store.elfhosted.com/product/decypharr/?utm_source=github&utm_medium=docs&utm_campaign=decypharr-docs), preconfigured alongside Sonarr/Radarr and connected to your debrid provider. Includes a 7-day trial.
 
 ## Next Steps
 
