@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -423,6 +424,66 @@ func sortQueuedTorrents(torrents []*storage.Entry, sortBy, sortOrder string) {
 	}
 
 	sort.Slice(torrents, less)
+}
+
+func (s *Server) handleRefreshTorrents(w http.ResponseWriter, r *http.Request) {
+	results := s.manager.RefreshProviderTorrents(r.Context())
+	status := http.StatusOK
+	for _, result := range results {
+		if result != "ok" {
+			status = http.StatusInternalServerError
+			break
+		}
+	}
+
+	utils.JSONResponse(w, map[string]interface{}{
+		"status":  "success",
+		"results": results,
+	}, status)
+}
+
+func (s *Server) handleUpdateTorrentLabel(w http.ResponseWriter, r *http.Request) {
+	hash := chi.URLParam(r, "hash")
+	if hash == "" {
+		http.Error(w, "No hash provided", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Label    string `json:"label"`
+		Category string `json:"category"`
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	label := req.Label
+	if label == "" {
+		label = req.Category
+	}
+
+	entry, err := s.manager.UpdateEntryLabel(hash, label)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, manager.ErrInvalidLabel) {
+			status = http.StatusBadRequest
+		}
+		s.logger.Error().Err(err).Str("hash", hash).Str("label", label).Msg("Failed to update torrent label")
+		http.Error(w, err.Error(), status)
+		return
+	}
+
+	entry.Sanitize()
+	utils.JSONResponse(w, map[string]interface{}{
+		"status":  "success",
+		"torrent": entry,
+	}, http.StatusOK)
 }
 
 func (s *Server) handleDeleteTorrent(w http.ResponseWriter, r *http.Request) {

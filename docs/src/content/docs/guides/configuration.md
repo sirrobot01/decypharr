@@ -50,6 +50,7 @@ Array of Debrid services:
       "name": "RD Primary",
       "api_key": "YOUR_API_KEY",
       "download_uncached": false,
+      "keep_in_sync": false,
       "rate_limit": "200/minute",
       "workers": 50,
       "minimum_free_slot": 0,
@@ -73,6 +74,7 @@ Array of Debrid services:
 | `api_key` | string | API key from provider dashboard | **Required** |
 | `download_api_keys` | array | Additional keys for download rotation | `[api_key]` |
 | `download_uncached` | bool | Download torrents not in provider cache | `false` |
+| `keep_in_sync` | bool | Import provider torrents as category `other` with STRM post-processing | `false` |
 | `rate_limit` | string | API rate limit (`200/minute`, `10/second`) | `200/minute` |
 | `repair_rate_limit` | string | Separate limit for repair operations | Same as `rate_limit` |
 | `download_rate_limit` | string | Separate limit for downloads | Same as `rate_limit` |

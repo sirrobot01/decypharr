@@ -12,6 +12,7 @@ type Debrid struct {
 	APIKey                       string   `json:"api_key,omitempty"`
 	DownloadAPIKeys              []string `json:"download_api_keys,omitempty"`
 	DownloadUncached             bool     `json:"download_uncached,omitempty"`
+	KeepInSync                   bool     `json:"keep_in_sync,omitempty"`
 	RateLimit                    string   `json:"rate_limit,omitempty"` // 200/minute or 10/second
 	RepairRateLimit              string   `json:"repair_rate_limit,omitempty"`
 	DownloadRateLimit            string   `json:"download_rate_limit,omitempty"`
@@ -109,6 +110,9 @@ func (c *Config) applyDebridEnvVars() {
 			}
 			if proxy := getEnv(prefix + "PROXY"); proxy != "" {
 				c.Debrids[i].Proxy = proxy
+			}
+			if keepInSync := getEnv(prefix + "KEEP_IN_SYNC"); keepInSync != "" {
+				c.Debrids[i].KeepInSync = parseBool(keepInSync)
 			}
 		}
 	}

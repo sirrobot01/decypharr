@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,6 +36,33 @@ func (m *Manager) syncTorrents(ctx context.Context) {
 		Msg("Initial sync of torrents from debrid clients completed")
 }
 
+func (m *Manager) RefreshProviderTorrents(ctx context.Context) map[string]string {
+	results := make(map[string]string)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	m.clients.Range(func(name string, client debrid.Client) bool {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := m.refreshTorrents(ctx, name, client); err != nil {
+				m.logger.Error().Err(err).Str("debrid", name).Msg("Manual torrent sync failed")
+				mu.Lock()
+				results[name] = err.Error()
+				mu.Unlock()
+				return
+			}
+			mu.Lock()
+			results[name] = "ok"
+			mu.Unlock()
+		}()
+		return true
+	})
+
+	wg.Wait()
+	m.RefreshEntries(true)
+	return results
+}
 
 // Refresh configuration constants
 const (
@@ -91,7 +119,8 @@ func (m *Manager) doRefreshTorrents(ctx context.Context, provider string, debrid
 	}
 
 	// Detect changes by streaming through cached entries
-	newTorrents, torrentsToUpdate, torrentsToDelete, err := m.detectTorrentChanges(provider, remoteTorrentsByHash)
+	keepInSync := debridClient.Config().KeepInSync
+	newTorrents, torrentsToUpdate, torrentsToDelete, err := m.detectTorrentChanges(provider, remoteTorrentsByHash, keepInSync)
 	if err != nil {
 		return err
 	}
@@ -113,7 +142,7 @@ func (m *Manager) doRefreshTorrents(ctx context.Context, provider string, debrid
 
 	// Process new torrents
 	if len(newTorrents) > 0 {
-		if err := m.processNewTorrents(provider, newTorrents); err != nil {
+		if err := m.processNewTorrents(provider, newTorrents, keepInSync); err != nil {
 			m.logger.Error().Err(err).Str("debrid", provider).Msg("Failed to process new torrents")
 		}
 	}
@@ -125,7 +154,7 @@ func (m *Manager) doRefreshTorrents(ctx context.Context, provider string, debrid
 }
 
 // detectTorrentChanges streams through cached entries and detects what changed
-func (m *Manager) detectTorrentChanges(provider string, remoteTorrentsByHash map[string]*types.Torrent) (
+func (m *Manager) detectTorrentChanges(provider string, remoteTorrentsByHash map[string]*types.Torrent, keepInSync bool) (
 	newTorrents []*types.Torrent,
 	torrentsToUpdate []*storage.Entry,
 	torrentsToDelete []string,
@@ -151,7 +180,7 @@ func (m *Manager) detectTorrentChanges(provider string, remoteTorrentsByHash map
 					} else {
 						torrentsToUpdate = append(torrentsToUpdate, entry)
 					}
-				} else if oldPlacement.NeedsUpdate(currentTorrent) {
+				} else if oldPlacement.NeedsUpdate(currentTorrent) || (keepInSync && needsKeepInSyncImport(entry)) {
 					// currentTorrent has changes for this provider - update placement info
 					// But the issue is that currentTorrent may not have all the metadata we need to update the placement (e.g. downloadedAt, files etc)
 					// So we need to fetch the full torrent info from debrid to ensure we have all the metadata to update the placement correctly
@@ -178,6 +207,10 @@ func (m *Manager) detectTorrentChanges(provider string, remoteTorrentsByHash map
 	}
 
 	return newTorrents, torrentsToUpdate, torrentsToDelete, nil
+}
+
+func needsKeepInSyncImport(entry *storage.Entry) bool {
+	return entry.Category == ""
 }
 
 // handleTorrentDeletions processes torrent deletions concurrently
@@ -210,7 +243,7 @@ func (m *Manager) handleTorrentDeletions(torrentsToDelete []string) {
 }
 
 // processNewTorrents processes new torrents with worker pool and batch writing
-func (m *Manager) processNewTorrents(provider string, newTorrents []*types.Torrent) error {
+func (m *Manager) processNewTorrents(provider string, newTorrents []*types.Torrent, keepInSync bool) error {
 	workChan := make(chan *types.Torrent, min(refreshWorkChanBuffer, len(newTorrents)))
 	batchChan := make(chan *storage.Entry, refreshBatchChanBuffer)
 	errChan := make(chan error, 1) // Buffer for first error
@@ -235,10 +268,14 @@ func (m *Manager) processNewTorrents(provider string, newTorrents []*types.Torre
 		go func() {
 			defer processWg.Done()
 			for t := range workChan {
-				if mt, err := m.processSyncTorrent(t); err != nil {
+				if mt, err := m.processSyncTorrent(t, keepInSync); err != nil {
 					m.logger.Error().Err(err).Str("debrid", provider).Msgf("Failed to process torrent %s", t.Id)
 				} else if mt != nil {
-					batchChan <- mt
+					if shouldProcessKeepInSyncAction(mt, keepInSync) {
+						m.processAction(mt)
+					} else {
+						batchChan <- mt
+					}
 				}
 				count := processed.Add(1)
 				if count%50 == 0 {
@@ -312,7 +349,7 @@ func (m *Manager) runBatchWriter(batchChan <-chan *storage.Entry, errChan chan<-
 }
 
 // processSyncTorrent processes a single torrent and returns it for batched writing
-func (m *Manager) processSyncTorrent(t *types.Torrent) (*storage.Entry, error) {
+func (m *Manager) processSyncTorrent(t *types.Torrent, keepInSync bool) (*storage.Entry, error) {
 	// GetReader the debrid client
 	client := m.ProviderClient(t.Debrid)
 	if client == nil {
@@ -377,6 +414,7 @@ func (m *Manager) processSyncTorrent(t *types.Torrent) (*storage.Entry, error) {
 			UpdatedAt:        time.Now(),
 		}
 	}
+	m.applyKeepInSyncDefaults(mt, keepInSync)
 
 	// Populate global Files metadata (only if empty)
 	if len(mt.Files) == 0 {
@@ -391,7 +429,6 @@ func (m *Manager) processSyncTorrent(t *types.Torrent) (*storage.Entry, error) {
 			}
 		}
 	}
-
 	// AddOrUpdate or update placement
 	placement := mt.AddTorrentProvider(t)
 	placement.Progress = t.Progress
@@ -406,6 +443,12 @@ func (m *Manager) processSyncTorrent(t *types.Torrent) (*storage.Entry, error) {
 			_ = mt.ActivatePlacement(t.Debrid)
 		}
 	}
+	if mt.ActiveProvider == t.Debrid {
+		mt.Status = t.Status
+		mt.Progress = t.Progress
+		mt.Speed = t.Speed
+		mt.Seeders = t.Seeders
+	}
 
 	// confirm everything is complete
 	if err := mt.Validate(); err != nil {
@@ -413,6 +456,30 @@ func (m *Manager) processSyncTorrent(t *types.Torrent) (*storage.Entry, error) {
 	}
 
 	return mt, nil
+}
+
+func (m *Manager) applyKeepInSyncDefaults(entry *storage.Entry, keepInSync bool) {
+	if !keepInSync {
+		return
+	}
+	if entry.Category == "" {
+		entry.Category = "other"
+		entry.Action = config.DownloadActionStrm
+	}
+	if entry.SavePath == "" {
+		entry.SavePath = filepath.Join(m.config.DownloadFolder, entry.Category)
+	}
+	if entry.ContentPath == "" {
+		entry.ContentPath = entry.DownloadPath()
+	}
+}
+
+func shouldProcessKeepInSyncAction(entry *storage.Entry, keepInSync bool) bool {
+	return keepInSync &&
+		entry.Category == "other" &&
+		entry.Action == config.DownloadActionStrm &&
+		entry.Status == types.TorrentStatusDownloaded &&
+		entry.CompletedAt == nil
 }
 
 // refreshTorrent refreshes a single torrent from its active debrid
@@ -442,7 +509,7 @@ func (m *Manager) refreshTorrent(infohash string) (*storage.Entry, error) {
 		return nil, err
 	}
 
-	entry, err := m.processSyncTorrent(debridTorrent)
+	entry, err := m.processSyncTorrent(debridTorrent, false)
 	if err != nil {
 		return nil, err
 	}
@@ -485,4 +552,3 @@ func isComplete(files map[string]types.File) bool {
 	}
 	return true
 }
-
