@@ -85,6 +85,7 @@ Array of Debrid services:
 | `download_links_refresh_interval` | string | How often to refresh download links | `10m` |
 | `auto_expire_links_after` | string | Auto-remove links after duration | `24h` |
 | `user_agent` | string | Custom User-Agent header | Default |
+| `slot_strategy` | string | Slot management strategy for AllDebrid: `remove_after_add` or `remove_oldest` | `""` (disabled) |
 
 ## Usenet
 

@@ -153,6 +153,12 @@ func (ad *AllDebrid) IsAvailable(hashes []string) map[string]bool {
 }
 
 func (ad *AllDebrid) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
+	if ad.config.SlotStrategy == "remove_oldest" {
+		if err := ad.enforceSlotLimit(); err != nil {
+			ad.logger.Warn().Err(err).Msg("Failed to enforce slot limit, continuing with upload")
+		}
+	}
+
 	var data UploadMagnetResponse
 
 	resp, err := ad.doRequest("/magnet/upload", map[string]string{"magnets[]": torrent.Magnet.Link}, &data)
@@ -449,8 +455,54 @@ func (ad *AllDebrid) CheckFile(ctx context.Context, infohash, link string) error
 }
 
 func (ad *AllDebrid) GetAvailableSlots() (int, error) {
-	// AllDebrid does not provide available slots info
-	return config.DefaultAvailableSlots, nil
+	if ad.config.Limit == 0 {
+		return config.DefaultAvailableSlots, nil
+	}
+	count, err := ad.countMagnets()
+	if err != nil {
+		return 0, err
+	}
+	available := ad.config.Limit - count - ad.config.MinimumFreeSlot
+	if available < 0 {
+		available = 0
+	}
+	return available, nil
+}
+
+func (ad *AllDebrid) countMagnets() (int, error) {
+	var res TorrentsListResponse
+	resp, err := ad.doRequest("/magnet/status", nil, &res)
+	if err != nil {
+		return 0, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, fmt.Errorf("alldebrid API error: Status: %d", resp.StatusCode)
+	}
+	return len(res.Data.Magnets), nil
+}
+
+func (ad *AllDebrid) enforceSlotLimit() error {
+	var res TorrentsListResponse
+	resp, err := ad.doRequest("/magnet/status", nil, &res)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("alldebrid API error: Status: %d", resp.StatusCode)
+	}
+	magnets := res.Data.Magnets
+	if len(magnets) < ad.config.Limit {
+		return nil
+	}
+	// Find the oldest magnet by UploadDate
+	oldest := magnets[0]
+	for _, m := range magnets[1:] {
+		if m.UploadDate < oldest.UploadDate {
+			oldest = m
+		}
+	}
+	ad.logger.Info().Str("magnet", oldest.Filename).Int("id", oldest.Id).Msg("Removing oldest magnet to free slot")
+	return ad.DeleteTorrent(strconv.Itoa(oldest.Id))
 }
 
 func (ad *AllDebrid) GetProfile() (*types.Profile, error) {

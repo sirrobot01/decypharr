@@ -257,6 +257,31 @@ func (m *Manager) processAction(entry *storage.Entry) {
 			Msg("Error running post-download action")
 		return
 	}
+	m.applySlotStrategy(entry)
+}
+
+func (m *Manager) applySlotStrategy(entry *storage.Entry) {
+	for providerName, pe := range entry.Providers {
+		client := m.ProviderClient(providerName)
+		if client == nil {
+			continue
+		}
+		cfg := client.Config()
+		if cfg.Provider != "alldebrid" || cfg.SlotStrategy != "remove_after_add" {
+			continue
+		}
+		if pe.RemovedAt != nil {
+			continue
+		}
+		if err := client.DeleteTorrent(pe.ID); err != nil {
+			m.logger.Warn().Err(err).Str("provider", providerName).Str("name", entry.Name).Msg("Failed to free slot (remove_after_add)")
+			continue
+		}
+		now := time.Now()
+		pe.RemovedAt = &now
+		m.logger.Info().Str("provider", providerName).Str("name", entry.Name).Msg("Slot freed (remove_after_add)")
+	}
+	_ = m.AddOrUpdate(entry, nil)
 }
 
 // processTorrent handles the complete torrent lifecycle

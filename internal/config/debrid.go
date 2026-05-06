@@ -24,6 +24,7 @@ type Debrid struct {
 	Workers                      int      `json:"workers,omitempty"`
 	AutoExpireLinksAfter         string   `json:"auto_expire_links_after,omitempty"`
 	UserAgent                    string   `json:"user_agent,omitempty"`
+	SlotStrategy                 string   `json:"slot_strategy,omitempty"`
 
 	// Folder
 	Folder        string `json:"folder,omitempty"`          // Deprecated. Use Mount MountPath instead.
@@ -80,6 +81,14 @@ func validateDebrids(debrids []Debrid) error {
 		// Basic field validation
 		if debrid.APIKey == "" {
 			return errors.New("debrid api key is required")
+		}
+		if debrid.SlotStrategy != "" {
+			if debrid.Provider != "alldebrid" {
+				return fmt.Errorf("slot_strategy is only supported for alldebrid provider")
+			}
+			if debrid.SlotStrategy != "remove_after_add" && debrid.SlotStrategy != "remove_oldest" {
+				return fmt.Errorf("invalid slot_strategy: %s (must be 'remove_after_add' or 'remove_oldest')", debrid.SlotStrategy)
+			}
 		}
 	}
 
