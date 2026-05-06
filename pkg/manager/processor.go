@@ -257,6 +257,15 @@ func (m *Manager) processAction(entry *storage.Entry) {
 			Msg("Error running post-download action")
 		return
 	}
+	if err := m.AddOrUpdate(entry, func(t *storage.Entry) {
+		m.RefreshEntries(true)
+	}); err != nil {
+		m.logger.Error().
+			Err(err).
+			Str("name", entry.Name).
+			Msg("Error saving completed entry")
+		return
+	}
 }
 
 // processTorrent handles the complete torrent lifecycle

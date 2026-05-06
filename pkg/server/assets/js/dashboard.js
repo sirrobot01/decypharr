@@ -45,7 +45,7 @@ class TorrentDashboard {
 
     bindEvents() {
         // Refresh button
-        this.refs.refreshBtn.addEventListener('click', () => this.loadTorrents());
+        this.refs.refreshBtn.addEventListener('click', () => this.syncAndLoadTorrents());
 
         // Batch delete
         this.refs.batchDeleteBtn.addEventListener('click', () => this.deleteSelectedTorrents());
@@ -179,8 +179,14 @@ class TorrentDashboard {
                     window.decypharrUtils.createToast('Failed to copy torrent name', 'error');
                 }
             },
+            'edit-label': async () => {
+                await this.editLabel(torrent.hash, torrent.category);
+            },
             'delete': async () => {
                 await this.deleteTorrent(torrent.hash, torrent.category, false);
+            },
+            'debrid-delete': async () => {
+                await this.deleteTorrent(torrent.hash, torrent.category, true);
             },
             'delete-debrid': async () => {
                 await this.deleteTorrent(torrent.hash, torrent.category, true);
@@ -234,6 +240,27 @@ class TorrentDashboard {
             window.decypharrUtils.createToast(`Error loading items: ${error.message}`, 'error');
         } finally {
             this.refs.refreshBtn.disabled = false;
+        }
+    }
+
+    async syncAndLoadTorrents() {
+        try {
+            this.refs.refreshBtn.disabled = true;
+            this.refs.paginationInfo.textContent = 'Syncing providers...';
+
+            const response = await window.decypharrUtils.fetcher(`${window.urlBase}api/torrents/refresh`, {
+                method: 'POST'
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || 'Failed to sync providers');
+            }
+            window.decypharrUtils.createToast('Provider sync completed', 'success');
+        } catch (error) {
+            console.error('Error syncing providers:', error);
+            window.decypharrUtils.createToast(`Error syncing providers: ${error.message}`, 'error');
+        } finally {
+            await this.loadTorrents();
         }
     }
 
@@ -316,6 +343,11 @@ class TorrentDashboard {
                         ${this.renderStateBadge(torrent.state)}
                     </td>
                     <td>
+                        <button class="btn btn-ghost btn-xs text-info"
+                                title="Edit Label"
+                                onclick="window.dashboard.editLabel('${torrent.info_hash}', '${this.escapeAttr(torrent.category || '')}');">
+                            <i class="bi bi-pencil-square"></i>
+                        </button>
                         <button class="btn btn-ghost btn-xs text-error"
                                 title="Delete Torrent"
                                 onclick="window.dashboard.deleteTorrent('${torrent.info_hash}', '${this.escapeAttr(torrent.category || '')}', false);">
@@ -448,6 +480,41 @@ class TorrentDashboard {
         const allSelected = this.state.torrents.length > 0 &&
             this.state.torrents.every(t => this.state.selectedEntries.has(t.info_hash));
         this.refs.selectAll.checked = allSelected;
+    }
+
+    async editLabel(hash, currentLabel = '') {
+        const label = prompt('New label', currentLabel || '');
+        if (label === null) return;
+
+        const trimmedLabel = label.trim();
+        if (!trimmedLabel) {
+            window.decypharrUtils.createToast('Label cannot be empty', 'warning');
+            return;
+        }
+
+        if (trimmedLabel.includes('/') || trimmedLabel.includes('\\') || trimmedLabel === '.' || trimmedLabel === '..') {
+            window.decypharrUtils.createToast('Label cannot contain path separators', 'warning');
+            return;
+        }
+
+        try {
+            const response = await window.decypharrUtils.fetcher(`${window.urlBase}api/torrents/${encodeURIComponent(hash)}/label`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ label: trimmedLabel })
+            });
+
+            if (!response.ok) {
+                const message = await response.text();
+                throw new Error(message || 'Failed to update label');
+            }
+
+            window.decypharrUtils.createToast('Label updated successfully');
+            this.loadTorrents();
+        } catch (error) {
+            console.error('Error updating label:', error);
+            window.decypharrUtils.createToast(`Failed to update label: ${error.message}`, 'error');
+        }
     }
 
     async deleteTorrent(hash, category, removeFromDebrid = false) {

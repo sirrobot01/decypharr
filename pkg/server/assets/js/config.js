@@ -500,11 +500,22 @@ class ConfigManager {
                 <div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
                     <div>
                         <label class="label cursor-pointer justify-start gap-2">
-                            <input type="checkbox" class="checkbox checkbox-primary" 
+                            <input type="checkbox" class="checkbox checkbox-primary"
                                    name="debrid[${index}].download_uncached" id="debrid[${index}].download_uncached">
                             <div>
                                 <span class="font-medium">Download Uncached</span>
                                 <div class="label-text-alt">Download uncached files</div>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div>
+                        <label class="label cursor-pointer justify-start gap-2">
+                            <input type="checkbox" class="checkbox checkbox-primary"
+                                   name="debrid[${index}].keep_in_sync" id="debrid[${index}].keep_in_sync">
+                            <div>
+                                <span class="font-medium">Keep In Sync</span>
+                                <div class="label-text-alt">Import provider torrents as STRM</div>
                             </div>
                         </label>
                     </div>
@@ -1179,6 +1190,7 @@ class ConfigManager {
                 minimum_free_slot: parseInt(document.querySelector(`[name="debrid[${i}].minimum_free_slot"]`).value) || 0,
                 proxy: document.querySelector(`[name="debrid[${i}].proxy"]`).value,
                 download_uncached: document.querySelector(`[name="debrid[${i}].download_uncached"]`).checked,
+                keep_in_sync: document.querySelector(`[name="debrid[${i}].keep_in_sync"]`).checked,
                 unpack_rar: document.querySelector(`[name="debrid[${i}].unpack_rar"]`).checked,
                 add_samples: document.querySelector(`[name="debrid[${i}].add_samples"]`).checked,
                 user_agent: document.querySelector(`[name="debrid[${i}].user_agent"]`).value
@@ -1685,5 +1697,3 @@ class ConfigManager {
         `;
     }
 }
-
-
