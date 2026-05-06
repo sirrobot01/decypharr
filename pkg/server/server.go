@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -131,7 +132,12 @@ func New(mgr *manager.Manager) *Server {
 	routes["/webdav"] = wd.Routes()
 	routes["/sabnzbd"] = sb.Routes()
 
-	r.Route(cfg.URLBase, func(r chi.Router) {
+	// Trim trailing slash so chi registers the URLBase root path itself
+	routePath := cfg.URLBase
+	if routePath != "/" {
+		routePath = strings.TrimSuffix(routePath, "/")
+	}
+	r.Route(routePath, func(r chi.Router) {
 		// Mount web routes
 		r.Mount("/", s.WebRoutes())
 
