@@ -53,6 +53,9 @@ const (
 	// Without a cap, binary doubling eventually produces chunk sizes in the GB range,
 	// causing oversized HTTP range requests that are wasteful on seeks.
 	maxChunkSizeMultiplier = 16
+	// minSuccessfulChunksBeforeGrowth keeps short-lived scans at the base chunk size
+	// until the stream proves it is sustained sequential reading.
+	minSuccessfulChunksBeforeGrowth = 2
 )
 
 // Downloaders coordinates multiple concurrent downloads to a cache item
@@ -65,6 +68,13 @@ type Downloaders struct {
 	chunkSize     int64
 	readAheadSize int64
 	retries       int
+
+	// Adaptive state shared across contiguous downloaders so sustained playback
+	// does not have to re-ramp when a nearby downloader is recreated.
+	adaptiveEnd              int64
+	adaptiveChunkSize        int64
+	adaptiveSuccessfulChunks int
+	nextDownloaderID         int64 // protected by dls.mu; used only for trace correlation
 
 	mu         sync.Mutex
 	dls        []*downloader
@@ -129,6 +139,7 @@ type waiter struct {
 
 // downloader represents a single download goroutine
 type downloader struct {
+	id     int64
 	dls    *Downloaders
 	quit   chan struct{}
 	kick   chan struct{}
@@ -145,6 +156,7 @@ type downloader struct {
 
 	baseChunkSize    int64
 	currentChunkSize int64
+	successfulChunks int
 	// priority downloaders keep a small fixed chunk size (no adaptive growth)
 	// so each Stream call is short and yields its connection quickly.
 	priority bool
@@ -429,6 +441,21 @@ func (dls *Downloaders) ensureDownloaderLocked(r ranges.Range, priority bool) er
 	// Look for existing downloader in range
 	dls.removeClosed()
 	if dl := dls.findDownloaderForPosLocked(r.Pos); dl != nil {
+		start, offset, maxOffset := dl.getRange()
+
+		if dls.item.cache != nil {
+			dls.item.cache.logger.Trace().
+				Str("event", "dfs_downloader_reuse").
+				Str("key", dls.item.key).
+				Int64("downloader_id", dl.id).
+				Int64("requested_pos", r.Pos).
+				Int64("target_end", targetEnd).
+				Int64("start", start).
+				Int64("offset", offset).
+				Int64("max_offset_before", maxOffset).
+				Msg("dfs downloader reused")
+		}
+
 		// Extend existing downloader
 		dl.setMaxOffset(targetEnd)
 		return nil
@@ -441,6 +468,8 @@ func (dls *Downloaders) ensureDownloaderLocked(r ranges.Range, priority bool) er
 // extendAndFindMissingRangeLocked expands a request by read-ahead and returns
 // only the missing tail that must be downloaded.
 func (dls *Downloaders) extendAndFindMissingRangeLocked(r ranges.Range) ranges.Range {
+	requested := r
+
 	bufferWindow := dls.readAheadSize
 	if bufferWindow <= 0 {
 		bufferWindow = dls.chunkSize * 4
@@ -450,7 +479,25 @@ func (dls *Downloaders) extendAndFindMissingRangeLocked(r ranges.Range) ranges.R
 	if r.Pos+r.Size > dls.item.info.Size {
 		r.Size = dls.item.info.Size - r.Pos
 	}
-	return dls.item.FindMissing(r)
+
+	missing := dls.item.FindMissing(r)
+
+	// Trace only when this request causes actual upstream work. This lets us
+	// measure read amplification without logging every cache hit.
+	if !missing.IsEmpty() && dls.item.cache != nil {
+		dls.item.cache.logger.Trace().
+			Str("event", "dfs_read_ahead").
+			Str("key", dls.item.key).
+			Int64("requested_offset", requested.Pos).
+			Int64("requested_size", requested.Size).
+			Int64("expanded_offset", r.Pos).
+			Int64("expanded_size", r.Size).
+			Int64("missing_offset", missing.Pos).
+			Int64("missing_size", missing.Size).
+			Msg("dfs read-ahead expansion")
+	}
+
+	return missing
 }
 
 func (dls *Downloaders) downloaderMatchWindowLocked() int64 {
@@ -464,8 +511,14 @@ func (dls *Downloaders) downloaderMatchWindowLocked() int64 {
 func (dls *Downloaders) findDownloaderForPosLocked(pos int64) *downloader {
 	window := dls.downloaderMatchWindowLocked()
 	for _, dl := range dls.dls {
-		start, offset := dl.getRange()
-		if pos >= start && pos < offset+window {
+		start, offset, maxOffset := dl.getRange()
+
+		matchEnd := offset + window
+		if maxOffset > matchEnd {
+			matchEnd = maxOffset
+		}
+
+		if pos >= start && pos < matchEnd {
 			return dl
 		}
 	}
@@ -479,8 +532,45 @@ func (dls *Downloaders) kickExistingDownloaderLocked(pos int64) {
 	if dl == nil {
 		return
 	}
-	_, offset := dl.getRange()
+	_, offset, _ := dl.getRange()
 	dl.setMaxOffset(offset) // kick without extending
+}
+
+// updateAdaptiveState advances shared adaptive state only across exact contiguous progress.
+// Non-contiguous reads are probes, seeks, or separate streams and must not inherit growth.
+func (dls *Downloaders) updateAdaptiveState(start, end, currentChunk int64, successfulChunks int) {
+	dls.mu.Lock()
+	defer dls.mu.Unlock()
+
+	if dls.adaptiveEnd != 0 && start != dls.adaptiveEnd {
+		return
+	}
+
+	dls.adaptiveEnd = end
+	dls.adaptiveChunkSize = currentChunk
+	dls.adaptiveSuccessfulChunks = successfulChunks
+}
+
+// adaptiveStateForNewDownloader returns the starting adaptive state for a new
+// downloader. Caller must hold dls.mu.
+func (dls *Downloaders) adaptiveStateForNewDownloader(pos, size, baseChunk int64) (int64, int) {
+	currentChunk := baseChunk
+	successfulChunks := 0
+
+	// Reuse adaptive state only when this downloader is an exact contiguous
+	// continuation of the last sustained sequential downloader.
+	if dls.adaptiveChunkSize > 0 && pos == dls.adaptiveEnd {
+		currentChunk = dls.adaptiveChunkSize
+		successfulChunks = dls.adaptiveSuccessfulChunks
+	} else if size >= baseChunk {
+		// A non-contiguous full-size request looks like a new sequential stream or seek.
+		// Reset shared adaptive state so the new stream must prove itself again.
+		dls.adaptiveEnd = 0
+		dls.adaptiveChunkSize = 0
+		dls.adaptiveSuccessfulChunks = 0
+	}
+
+	return currentChunk, successfulChunks
 }
 
 // newDownloaderLocked creates and starts a new downloader
@@ -495,12 +585,22 @@ func (dls *Downloaders) newDownloaderLocked(r ranges.Range, targetEnd int64, pri
 		baseChunk = probeChunkSize
 	}
 
+	currentChunk := baseChunk
+	successfulChunks := 0
+	if !priority {
+		currentChunk, successfulChunks = dls.adaptiveStateForNewDownloader(r.Pos, r.Size, baseChunk)
+	}
+
 	// Each downloader gets its own context derived from the Downloaders context.
 	// stop() cancels dlCtx, which interrupts any in-flight manager.Stream call
 	// without having to cancel the shared dls.ctx.
 	dlCtx, dlCancel := context.WithCancel(dls.ctx)
 
+	dls.nextDownloaderID++
+	downloaderID := dls.nextDownloaderID
+
 	dl := &downloader{
+		id:               downloaderID,
 		dls:              dls,
 		quit:             make(chan struct{}),
 		kick:             make(chan struct{}, 1),
@@ -510,11 +610,25 @@ func (dls *Downloaders) newDownloaderLocked(r ranges.Range, targetEnd int64, pri
 		offset:           r.Pos,
 		maxOffset:        targetEnd,
 		baseChunkSize:    baseChunk,
-		currentChunkSize: baseChunk,
+		currentChunkSize: currentChunk,
+		successfulChunks: successfulChunks,
 		priority:         priority,
 	}
 
 	dls.dls = append(dls.dls, dl)
+	if dls.item.cache != nil {
+		dls.item.cache.logger.Trace().
+			Str("event", "dfs_downloader_new").
+			Str("key", dls.item.key).
+			Int64("downloader_id", dl.id).
+			Int64("start", dl.start).
+			Int64("offset", dl.offset).
+			Int64("max_offset", dl.maxOffset).
+			Int64("base_chunk_size", dl.baseChunkSize).
+			Int64("current_chunk_size", dl.currentChunkSize).
+			Int("successful_chunks", dl.successfulChunks).
+			Msg("dfs downloader created")
+	}
 
 	// Track active download count
 	dls.item.cache.activeDownloads.Add(1)
@@ -526,6 +640,26 @@ func (dls *Downloaders) newDownloaderLocked(r ranges.Range, targetEnd int64, pri
 		defer dlCancel() // always release the per-downloader context
 		n, err := dl.run()
 		dl.close(err)
+
+		if dls.item.cache != nil {
+			start, offset, maxOffset := dl.getRange()
+
+			event := dls.item.cache.logger.Trace().
+				Str("event", "dfs_downloader_closed").
+				Str("key", dls.item.key).
+				Int64("downloader_id", dl.id).
+				Int64("start", start).
+				Int64("offset", offset).
+				Int64("max_offset", maxOffset).
+				Int64("total_bytes", n).
+				Bool("success", err == nil)
+
+			if err != nil {
+				event = event.Err(err)
+			}
+
+			event.Msg("dfs downloader closed")
+		}
 		// Only count real errors. If dl.ctx was canceled (intentional stop/close),
 		// the error is not a network/server failure and must not trip the circuit breaker.
 		if dl.ctx.Err() == nil {
@@ -1040,7 +1174,10 @@ func (dl *downloader) downloadChunkWithRetry(start, end int64) (int64, error) {
 		written, err := dl.streamChunk(start, end)
 
 		if err == nil {
-			dl.adjustChunkSize(chunkLen, written, true)
+			currentChunk, successfulChunks := dl.adjustChunkSize(chunkLen, written, true)
+			if !dl.priority {
+				dl.dls.updateAdaptiveState(start, end, currentChunk, successfulChunks)
+			}
 			return written, nil
 		}
 
@@ -1088,11 +1225,11 @@ func (dl *downloader) downloadChunkWithRetry(start, end int64) (int64, error) {
 	return 0, errors.New("exhausted retries")
 }
 
-// getRange returns the current download range
-func (dl *downloader) getRange() (start, offset int64) {
+// getRange returns the downloader start, current written offset, and assigned end.
+func (dl *downloader) getRange() (start, offset, maxOffset int64) {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
-	return dl.start, dl.offset
+	return dl.start, dl.offset, dl.maxOffset
 }
 
 func (dl *downloader) streamChunk(start, end int64) (int64, error) {
@@ -1151,6 +1288,25 @@ func (dl *downloader) streamChunk(start, end int64) (int64, error) {
 		lastProgressNanos.Store(time.Now().UnixNano())
 	}
 
+	streamStart := time.Now()
+	cache := dl.dls.item.cache
+
+	downloaderStart, downloaderOffset, downloaderMaxOffset := dl.getRange()
+	if cache != nil {
+		cache.logger.Trace().
+			Str("event", "dfs_upstream_fetch_start").
+			Str("key", dl.dls.item.key).
+			Int64("downloader_id", dl.id).
+			Int64("downloader_start", downloaderStart).
+			Int64("downloader_offset", downloaderOffset).
+			Int64("downloader_max_offset", downloaderMaxOffset).
+			Int64("requested_start", start).
+			Int64("requested_end", end).
+			Int64("missing_offset", missingRange.Pos).
+			Int64("missing_size", missingRange.Size).
+			Msg("dfs upstream fetch start")
+	}
+
 	err := dl.dls.manager.Stream(
 		attemptCtx,
 		dl.dls.item.entry,
@@ -1161,6 +1317,31 @@ func (dl *downloader) streamChunk(start, end int64) (int64, error) {
 		nil,
 		"DFS",
 	)
+
+	if cache != nil {
+		doneStart, doneOffset, doneMaxOffset := dl.getRange()
+
+		event := cache.logger.Trace().
+			Str("event", "dfs_upstream_fetch_done").
+			Str("key", dl.dls.item.key).
+			Int64("downloader_id", dl.id).
+			Int64("downloader_start", doneStart).
+			Int64("downloader_offset", doneOffset).
+			Int64("downloader_max_offset", doneMaxOffset).
+			Int64("requested_start", start).
+			Int64("requested_end", end).
+			Int64("missing_offset", missingRange.Pos).
+			Int64("missing_size", missingRange.Size).
+			Int64("written", writer.written).
+			Dur("duration", time.Since(streamStart)).
+			Bool("success", err == nil)
+
+		if err != nil {
+			event = event.Err(err)
+		}
+
+		event.Msg("dfs upstream fetch complete")
+	}
 
 	if err != nil {
 		if dl.ctx.Err() != nil {
@@ -1212,27 +1393,35 @@ func (dl *downloader) setMaxOffset(max int64) {
 	}
 }
 
-func (dl *downloader) adjustChunkSize(chunkLen, written int64, success bool) {
+func (dl *downloader) adjustChunkSize(chunkLen, written int64, success bool) (int64, int) {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
 
-	// Only reset on actual failure, not on partial writes due to pre-cached data
-	// If success is false, it means the stream itself failed
-	if !success {
-		dl.currentChunkSize = dl.baseChunkSize
-		return
-	}
-
-	// If no data needed to be written (all cached), don't change chunk size
-	if chunkLen <= 0 {
-		return
-	}
-
-	// Priority downloaders stay small on purpose — never ramp them up, or a
-	// probe stream would start hogging a connection like a bulk download.
 	if dl.priority {
 		dl.currentChunkSize = dl.baseChunkSize
-		return
+		return dl.currentChunkSize, dl.successfulChunks
+	}
+
+	// Only reset on actual failure, not on partial writes due to pre-cached data.
+	// If success is false, it means the stream itself failed or was interrupted.
+	if !success {
+		dl.currentChunkSize = dl.baseChunkSize
+		dl.successfulChunks = 0
+		return dl.currentChunkSize, dl.successfulChunks
+	}
+
+	// If no data needed to be written (all cached), don't change chunk size.
+	if written <= 0 {
+		return dl.currentChunkSize, dl.successfulChunks
+	}
+
+	dl.successfulChunks++
+
+	// Keep short-lived scans at the base chunk size until the stream has
+	// completed enough successful chunks to look like sustained reading.
+	if dl.successfulChunks < minSuccessfulChunksBeforeGrowth {
+		dl.currentChunkSize = dl.baseChunkSize
+		return dl.currentChunkSize, dl.successfulChunks
 	}
 
 	// Double chunk size on successful download to quickly ramp up on good connections,
@@ -1245,6 +1434,7 @@ func (dl *downloader) adjustChunkSize(chunkLen, written int64, success bool) {
 		next = dl.baseChunkSize
 	}
 	dl.currentChunkSize = next
+	return dl.currentChunkSize, dl.successfulChunks
 }
 
 // stop signals the downloader to stop and cancels its context so any
