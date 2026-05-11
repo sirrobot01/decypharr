@@ -2,12 +2,13 @@ package server
 
 import (
 	"fmt"
-	json "github.com/bytedance/sonic"
 	"net/http"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+
+	json "github.com/bytedance/sonic"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sirrobot01/decypharr/internal/config"

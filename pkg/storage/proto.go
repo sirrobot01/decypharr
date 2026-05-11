@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/pkg/arr"
 	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
 )
 
@@ -296,9 +295,10 @@ func ProtoToEntryItem(pb *EntryItemProto) *EntryItem {
 }
 
 // ============================================================================
-// Job (Repair) Conversions
+// Job (Repair) Conversions — removed in repair v2.
 // ============================================================================
 
+/*
 func JobToProto(j *Job) *JobProto {
 	pb := &JobProto{
 		Id:          j.ID,
@@ -388,6 +388,7 @@ func ProtoToJob(pb *JobProto) *Job {
 
 	return j
 }
+*/
 
 // ============================================================================
 // SwitcherJob Conversions

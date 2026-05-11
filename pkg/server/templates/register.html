@@ -32,7 +32,7 @@
 </div>
 
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
+    document.addEventListener('DOMContentLoaded', function () {
         const authForm = document.getElementById('authForm');
         const skipAuthBtn = document.getElementById('skipAuthBtn');
 
@@ -74,8 +74,8 @@
         });
 
         // Handle skip auth button
-        skipAuthBtn.addEventListener('click', function() {
-            window.decypharrUtils.fetcher('/skip-auth', { method: 'POST' })
+        skipAuthBtn.addEventListener('click', function () {
+            window.decypharrUtils.fetcher('/skip-auth', {method: 'POST'})
                 .then(response => {
                     if (response.ok) {
                         window.location.href = window.decypharrUtils.joinURL(window.urlBase, '/');

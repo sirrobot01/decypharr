@@ -15,6 +15,7 @@ Real Debrid is one of the supported Debrid providers.
 ### Via Setup Wizard
 
 During first run:
+
 1. Select **Real Debrid** as provider type
 2. Paste your API key
 3. Continue setup

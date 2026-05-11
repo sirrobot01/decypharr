@@ -22,12 +22,23 @@ func (s *Storage) UpdateEntryItem(entry *Entry) error {
 }
 
 func (s *Storage) UpdateItem(item *EntryItem) error {
+	var oldFingerprint string
+	if existing, err := s.GetEntryItem(item.Name); err == nil {
+		oldFingerprint = EntryItemRepairFingerprint(existing)
+	}
+
 	pb := EntryItemToProto(item)
 	data, err := proto.Marshal(pb)
 	if err != nil {
 		return err
 	}
-	return s.entryItems.Put(item.Name, data, nil)
+	if err := s.entryItems.Put(item.Name, data, nil); err != nil {
+		return err
+	}
+	if oldFingerprint != EntryItemRepairFingerprint(item) {
+		s.MarkEntryDirty(item.Name, "", "entry_item_changed")
+	}
+	return nil
 }
 
 // GetEntryItem retrieves an entry item by name

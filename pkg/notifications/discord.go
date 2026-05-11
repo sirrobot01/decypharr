@@ -3,11 +3,12 @@ package notifications
 import (
 	"bytes"
 	"fmt"
-	json "github.com/bytedance/sonic"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	json "github.com/bytedance/sonic"
 
 	"github.com/sirrobot01/decypharr/internal/config"
 )

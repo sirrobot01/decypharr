@@ -80,13 +80,13 @@ Control how torrent folders are named:
 }
 ```
 
-| Value | Example |
-|-------|---------|
-| `filename` | `Movie.2024.1080p.mkv` |
-| `original` | `Original Torrent Name` |
-| `filename_no_ext` | `Movie.2024.1080p` |
+| Value             | Example                 |
+|-------------------|-------------------------|
+| `filename`        | `Movie.2024.1080p.mkv`  |
+| `original`        | `Original Torrent Name` |
+| `filename_no_ext` | `Movie.2024.1080p`      |
 | `original_no_ext` | `Original Torrent Name` |
-| `infohash` | `abc123def456...` |
+| `infohash`        | `abc123def456...`       |
 
 ## Streaming
 
@@ -138,6 +138,7 @@ For best performance, use [DFS mounting](../dfs/) instead of WebDAV.
 ### Slow Playback
 
 WebDAV has no local cache. Consider:
+
 - Using DFS/Rclone mount instead
 - Increasing client buffer size
 - Checking Debrid provider performance

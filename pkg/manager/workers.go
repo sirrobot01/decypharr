@@ -207,9 +207,11 @@ func (m *Manager) StartWorker(ctx context.Context) error {
 		}
 	}
 
-	// Load recurring repair jobs from storage
+	// Register the health checker sweep with the scheduler if enabled.
 	if m.repair != nil {
-		m.repair.LoadRecurringJobs()
+		if err := m.repair.Start(ctx); err != nil {
+			m.logger.Warn().Err(err).Msg("Failed to start repair service")
+		}
 	}
 
 	// Start the scheduler

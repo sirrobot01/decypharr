@@ -1,6 +1,6 @@
 name: Feature Request
 description: 'Suggest an idea for Decypharr'
-labels: ['Type: Feature Request', 'Status: Needs Triage']
+labels: [ 'Type: Feature Request', 'Status: Needs Triage' ]
 body:
   - type: checkboxes
     attributes:

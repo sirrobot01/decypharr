@@ -8,6 +8,7 @@ Decypharr supports direct NNTP streaming from Usenet providers - no additional d
 ## How It Works
 
 Decypharr connects directly to NNTP servers to:
+
 1. Parse NZB files for segment information
 2. Stream segments on-demand for playback
 3. Download and assemble complete files
@@ -83,6 +84,7 @@ Lower `priority` = higher preference.
 - Provider `max_connections`: Per-provider limit
 
 **Example:**
+
 - Global: `15`
 - Provider A: `20`
 - Provider B: `10`
@@ -158,6 +160,7 @@ Streams use disk buffer for assembly. Ensure sufficient disk space.
 Arrs send NZB files to Decypharr via the Sabnzbd API endpoint:
 
 **In Sonarr/Radarr:**
+
 1. Add **Sabnzbd** download client
 2. Host: `http://decypharr:8282`
 3. API Key: Your Decypharr API token

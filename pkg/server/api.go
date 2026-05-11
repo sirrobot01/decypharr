@@ -16,7 +16,6 @@ import (
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/arr"
 	"github.com/sirrobot01/decypharr/pkg/manager"
-	repairpkg "github.com/sirrobot01/decypharr/pkg/repair"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sirrobot01/decypharr/pkg/version"
 	"github.com/sourcegraph/conc/iter"
@@ -210,80 +209,6 @@ func getNZBContentFromFile(fileHeader *multipart.FileHeader) ([]byte, error) {
 		return nil, err
 	}
 	return nzbContent, nil
-}
-
-func (s *Server) handleRepairMedia(w http.ResponseWriter, r *http.Request) {
-	var req RepairRequest
-	if err := json.ConfigDefault.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	scope := strings.TrimSpace(strings.ToLower(req.Scope))
-	if scope == "" {
-		scope = "arr"
-	}
-
-	var arrs []string
-	switch scope {
-	case "arr":
-		if req.ArrName != "" {
-			_arr := s.manager.Arr().Get(req.ArrName)
-			if _arr == nil {
-				http.Error(w, "No arrs found to repair", http.StatusNotFound)
-				return
-			}
-			arrs = append(arrs, req.ArrName)
-		}
-	case "managed_entries":
-		arrs = []string{repairpkg.ScopeManagedEntries}
-	default:
-		http.Error(w, "Invalid repair scope", http.StatusBadRequest)
-		return
-	}
-
-	autoProcess := req.AutoProcess
-	switch req.Mode {
-	case string(storage.RepairModeDetectOnly):
-		autoProcess = false
-	case string(storage.RepairModeDetectAndRepair):
-		autoProcess = true
-	}
-
-	// Validate recurring job requirements
-	if req.Recurring {
-		if req.Schedule == "" {
-			http.Error(w, "Schedule is required for recurring jobs", http.StatusBadRequest)
-			return
-		}
-		if _, err := utils.ConvertToJobDef(req.Schedule); err != nil {
-			http.Error(w, fmt.Sprintf("Invalid schedule format: %v", err), http.StatusBadRequest)
-			return
-		}
-	}
-
-	jobID, err := s.manager.Repair().AddJob(manager.RepairJobOptions{
-		Arrs:        arrs,
-		MediaIDs:    req.MediaIds,
-		AutoProcess: autoProcess,
-		Recurrent:   req.Recurring,
-		Schedule:    req.Schedule,
-		Strategy:    storage.RepairStrategy(req.Strategy),
-		Workers:     req.Workers,
-	})
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to repair: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	message := "Repair job started successfully"
-	if req.Recurring {
-		message = "Recurring repair job created and scheduled"
-	}
-	utils.JSONResponse(w, map[string]string{
-		"message": message,
-		"job_id":  jobID,
-	}, http.StatusOK)
 }
 
 func (s *Server) handleGetVersion(w http.ResponseWriter, r *http.Request) {
@@ -556,52 +481,247 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, map[string]string{"status": "success"}, http.StatusOK)
 }
 
-func (s *Server) handleGetRepairJobs(w http.ResponseWriter, r *http.Request) {
-	utils.JSONResponse(w, s.manager.Repair().GetJobs(), http.StatusOK)
+func (s *Server) handleGetRepairConfig(w http.ResponseWriter, r *http.Request) {
+	utils.JSONResponse(w, config.Get().Repair, http.StatusOK)
 }
 
-func (s *Server) handleProcessRepairJob(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if id == "" {
-		http.Error(w, "No job ID provided", http.StatusBadRequest)
+func (s *Server) handleUpdateRepairConfig(w http.ResponseWriter, r *http.Request) {
+	var req config.RepairConfig
+	if err := json.ConfigDefault.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := s.manager.Repair().ProcessJob(id); err != nil {
-		s.logger.Error().Err(err).Msg("Failed to process repair job")
+
+	if req.Enabled {
+		if strings.TrimSpace(req.Schedule) == "" {
+			http.Error(w, "Schedule is required when repair is enabled", http.StatusBadRequest)
+			return
+		}
+		if _, err := utils.ConvertToJobDef(req.Schedule); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid schedule: %v", err), http.StatusBadRequest)
+			return
+		}
+		if req.RecheckInterval != "" {
+			if _, err := utils.ParseDuration(req.RecheckInterval); err != nil {
+				http.Error(w, fmt.Sprintf("Invalid recheck_interval: %v", err), http.StatusBadRequest)
+				return
+			}
+		}
+		if req.Source != "" && req.Source != config.RepairSourceArr && req.Source != config.RepairSourceManaged {
+			http.Error(w, "Invalid source (must be 'arr' or 'managed')", http.StatusBadRequest)
+			return
+		}
 	}
-	w.WriteHeader(http.StatusOK)
+	if req.NNTPConnectionPercent < 0 || req.NNTPConnectionPercent > 100 {
+		http.Error(w, "Invalid nntp_connection_percent (must be between 0 and 100)", http.StatusBadRequest)
+		return
+	}
+
+	cfg := config.Get()
+	cfg.Repair = req
+	if err := cfg.Save(); err != nil {
+		s.logger.Error().Err(err).Msg("Failed to save repair config")
+		http.Error(w, "Failed to save config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if svc := s.manager.Repair(); svc != nil {
+		if err := svc.ApplyConfig(); err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to apply repair config")
+			http.Error(w, "Saved, but failed to apply: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	utils.JSONResponse(w, cfg.Repair, http.StatusOK)
 }
 
-func (s *Server) handleDeleteRepairJob(w http.ResponseWriter, r *http.Request) {
-	// Read ids from body
-	var req struct {
-		IDs []string `json:"ids"`
+func (s *Server) handleRepairStatus(w http.ResponseWriter, r *http.Request) {
+	svc := s.manager.Repair()
+	if svc == nil {
+		utils.JSONResponse(w, manager.RepairStatus{}, http.StatusOK)
+		return
 	}
-	if err := json.ConfigDefault.NewDecoder(r.Body).Decode(&req); err != nil {
+	utils.JSONResponse(w, svc.Status(), http.StatusOK)
+}
+
+func (s *Server) handleRunRepair(w http.ResponseWriter, r *http.Request) {
+	svc := s.manager.Repair()
+	if svc == nil {
+		http.Error(w, "Repair service not available", http.StatusServiceUnavailable)
+		return
+	}
+	id, err := svc.RunNow()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	utils.JSONResponse(w, map[string]string{"run_id": id}, http.StatusOK)
+}
+
+func (s *Server) handleStopRepair(w http.ResponseWriter, r *http.Request) {
+	svc := s.manager.Repair()
+	if svc == nil {
+		http.Error(w, "Repair service not available", http.StatusServiceUnavailable)
+		return
+	}
+	if err := svc.StopRun(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if len(req.IDs) == 0 {
-		http.Error(w, "No job IDs provided", http.StatusBadRequest)
-		return
-	}
-
-	s.manager.Repair().DeleteJobs(req.IDs)
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *Server) handleStopRepairJob(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if id == "" {
-		http.Error(w, "No job ID provided", http.StatusBadRequest)
+func (s *Server) handleListRepairRuns(w http.ResponseWriter, r *http.Request) {
+	runs, err := s.manager.Storage().ListRepairRuns()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := s.manager.Repair().StopJob(id); err != nil {
-		s.logger.Error().Err(err).Msg("Failed to stop repair job")
-		http.Error(w, "Failed to stop job: "+err.Error(), http.StatusInternalServerError)
+	utils.JSONResponse(w, runs, http.StatusOK)
+}
+
+func (s *Server) handleGetRepairRun(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		http.Error(w, "No run ID provided", http.StatusBadRequest)
+		return
+	}
+	run, err := s.manager.Storage().GetRepairRun(id)
+	if err != nil {
+		http.Error(w, "Run not found", http.StatusNotFound)
+		return
+	}
+	utils.JSONResponse(w, run, http.StatusOK)
+}
+
+func (s *Server) handleClearRepairRuns(w http.ResponseWriter, r *http.Request) {
+	if err := s.manager.Storage().ClearRepairRuns(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleListEntryHealth(w http.ResponseWriter, r *http.Request) {
+	statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
+	out := make([]*storage.EntryHealth, 0)
+	_ = s.manager.Storage().ForEachEntryHealth(func(state *storage.EntryHealth) error {
+		if statusFilter != "" && string(state.Status) != statusFilter {
+			return nil
+		}
+		out = append(out, state)
+		return nil
+	})
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].EntryName < out[j].EntryName
+	})
+	utils.JSONResponse(w, out, http.StatusOK)
+}
+
+func (s *Server) handleGetEntryHealth(w http.ResponseWriter, r *http.Request) {
+	name := utils.PathUnescape(chi.URLParam(r, "name"))
+	if name == "" {
+		http.Error(w, "No entry name provided", http.StatusBadRequest)
+		return
+	}
+	state, err := s.manager.Storage().GetEntryHealth(name)
+	if err != nil {
+		http.Error(w, "Entry health not found", http.StatusNotFound)
+		return
+	}
+	utils.JSONResponse(w, state, http.StatusOK)
+}
+
+func (s *Server) handleRecheckMedia(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Arr     string `json:"arr"`
+		MediaID string `json:"media_id"`
+		Fix     bool   `json:"fix"`
+	}
+	if err := json.ConfigDefault.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.MediaID) == "" {
+		http.Error(w, "media_id is required", http.StatusBadRequest)
+		return
+	}
+	svc := s.manager.Repair()
+	if svc == nil {
+		http.Error(w, "Repair service not available", http.StatusServiceUnavailable)
+		return
+	}
+	run, err := svc.RecheckMedia(s.manager.Context(), strings.TrimSpace(req.Arr), strings.TrimSpace(req.MediaID), req.Fix)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "already running") {
+			status = http.StatusConflict
+		}
+		// Returning the run record (when present) gives the caller the
+		// failure detail captured in storage as well as the message.
+		if run != nil {
+			utils.JSONResponse(w, map[string]interface{}{
+				"error": err.Error(),
+				"run":   run,
+			}, status)
+			return
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	utils.JSONResponse(w, run, http.StatusOK)
+}
+
+func (s *Server) handleRecheckEntry(w http.ResponseWriter, r *http.Request) {
+	name := utils.PathUnescape(chi.URLParam(r, "name"))
+	if name == "" {
+		http.Error(w, "No entry name provided", http.StatusBadRequest)
+		return
+	}
+	fix := r.URL.Query().Get("fix") == "true"
+	svc := s.manager.Repair()
+	if svc == nil {
+		http.Error(w, "Repair service not available", http.StatusServiceUnavailable)
+		return
+	}
+	state, err := svc.RecheckEntry(s.manager.Context(), name, fix)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	utils.JSONResponse(w, state, http.StatusOK)
+}
+
+// handleFixBroken kicks off the Arr delete + re-search pass on currently
+// broken entries. Body: {"names": ["...", ...]}. Empty/missing names ⇒ fix
+// every broken entry in storage.
+func (s *Server) handleFixBroken(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Names []string `json:"names,omitempty"`
+	}
+	// Body is optional; ignore decode errors for empty / missing bodies.
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := json.ConfigDefault.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	svc := s.manager.Repair()
+	if svc == nil {
+		http.Error(w, "Repair service not available", http.StatusServiceUnavailable)
+		return
+	}
+	run, err := svc.FixBroken(s.manager.Context(), req.Names)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "already running") {
+			status = http.StatusConflict
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	utils.JSONResponse(w, run, http.StatusOK)
 }
 
 func (s *Server) handleRefreshAPIToken(w http.ResponseWriter, _ *http.Request) {

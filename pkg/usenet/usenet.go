@@ -233,8 +233,8 @@ func (u *Usenet) createEntry(file *storage.NZBFile) (*fsEntry, error) {
 	}, nil
 }
 
-// getOrCreateEntryWithKey returns the fsEntry and its cache key to avoid redundant key computation.
-func (u *Usenet) getOrCreateEntryWithKey(ctx context.Context, nzoID, filename string) (*fsEntry, string, error) {
+// getOrCreateEntry returns the fsEntry and its cache key to avoid redundant key computation.
+func (u *Usenet) getOrCreateEntry(ctx context.Context, nzoID, filename string) (*fsEntry, string, error) {
 	key := fsKey(nzoID, filename)
 
 	// Fast path: entry already exists
@@ -276,13 +276,8 @@ func (u *Usenet) getOrCreateEntryWithKey(ctx context.Context, nzoID, filename st
 	return newEntry, key, nil
 }
 
-func (u *Usenet) getOrCreateEntry(ctx context.Context, nzoID, filename string) (*fsEntry, error) {
-	entry, _, err := u.getOrCreateEntryWithKey(ctx, nzoID, filename)
-	return entry, err
-}
-
-// releaseFSByKey releases an fs entry using a pre-computed key (avoids redundant allocation).
-func (u *Usenet) releaseFSByKey(key string) {
+// releaseFS releases an fs entry using a pre-computed key (avoids redundant allocation).
+func (u *Usenet) releaseFS(key string) {
 	entry, ok := u.fs.Load(key)
 	if !ok {
 		return
@@ -290,10 +285,6 @@ func (u *Usenet) releaseFSByKey(key string) {
 
 	entry.refCount.Add(-1)
 	entry.lastAccessed.Store(utils.NowUnix())
-}
-
-func (u *Usenet) releaseFS(nzoID, filename string) {
-	u.releaseFSByKey(fsKey(nzoID, filename))
 }
 
 // cleanupIdleFS removes sessions with refCount=0 that haven't been used recently
@@ -395,17 +386,20 @@ func (u *Usenet) Process(ctx context.Context, nzb *storage.NZB, groups map[strin
 	return updatedNZB, nil
 }
 
+// CheckFile probes the availability of a single NZB file. Connection use is
+// gated by the NNTP client's repair bank so concurrent probes don't starve
+// streaming traffic.
 func (u *Usenet) CheckFile(ctx context.Context, nzoID, filename string) error {
 	file, err := u.getFile(nzoID, filename)
 	if err != nil {
 		return fmt.Errorf("failed to get file: %w", err)
 	}
-
-	// Check if we have Segments
 	if len(file.Segments) == 0 {
 		return fmt.Errorf("file has no Segments: %s", filename)
 	}
-	return u.checkFileAvailability(ctx, file)
+	err = u.checkFileAvailability(ctx, file)
+	file.Segments = nil
+	return err
 }
 
 func (u *Usenet) checkFileAvailability(ctx context.Context, file *storage.NZBFile) error {
@@ -423,12 +417,10 @@ func (u *Usenet) checkFileAvailability(ctx context.Context, file *storage.NZBFil
 		Int("sample_percent", samplePercent).
 		Msg("Checking NZB File availability")
 
-	// Use pipelined batch STAT - much more efficient than individual calls.
-	// Cap connections to 2: STAT commands are fast and pipelined (50/batch),
-	// so 1-2 connections is sufficient. Using maxConnections here starves the
-	// download pool when multiple files are probed concurrently.
-	availCheckConns := min(u.maxConnections, 2)
-	result, err := u.nntp.BatchStat(ctx, availCheckConns, messageIDs)
+	// Pipelined batch STAT. The NNTP client gates each worker through its
+	// internal repair bank so concurrent availability checks don't starve
+	// streaming connections.
+	result, err := u.nntp.BatchStat(ctx, messageIDs)
 	if err != nil {
 		// Connection/system error - log and continue (don't fail availability check)
 		u.logger.Warn().
@@ -448,11 +440,6 @@ func (u *Usenet) checkFileAvailability(ctx context.Context, file *storage.NZBFil
 		notFoundCount := result.TotalCount - result.FoundCount - result.ErrorCount
 		if result.ErrorCount > 0 && notFoundCount == 0 {
 			// All failures were connection errors, not missing articles.
-			u.logger.Warn().
-				Str("file", file.Name).
-				Int("total_segments", len(file.Segments)).
-				Int("error_count", result.ErrorCount).
-				Msg("Could not verify all segments due to connection errors, skipping availability check")
 			return nil
 		}
 		// At least some segments are definitively missing.
@@ -557,21 +544,44 @@ func (u *Usenet) Close() error {
 }
 
 func (u *Usenet) getFile(nzoID, filename string) (*storage.NZBFile, error) {
-	// Load metadata
+	files, err := u.getFiles(nzoID, []string{filename})
+	if err != nil {
+		return nil, err
+	}
+	file := files[filename]
+	if file == nil {
+		return nil, fmt.Errorf("file %s not found in NZB %s", filename, nzoID)
+	}
+	return file, nil
+}
+
+func (u *Usenet) getFiles(nzoID string, filenames []string) (map[string]*storage.NZBFile, error) {
 	nzb, err := u.nzbStorage.GetNZB(nzoID)
 	if err != nil {
 		return nil, fmt.Errorf("metadata load failed: %w", err)
 	}
 
-	// Find file
-	file := nzb.GetFileByName(filename)
-	if file == nil {
-		return nil, fmt.Errorf("file %s not found in NZB %s", filename, nzoID)
+	requested := make(map[string]struct{}, len(filenames))
+	for _, filename := range filenames {
+		requested[filename] = struct{}{}
 	}
-	if file.NzbID == "" {
-		file.NzbID = nzoID // Ensure NZB ID is set for the file
+
+	files := make(map[string]*storage.NZBFile, len(requested))
+	for i := range nzb.Files {
+		source := nzb.Files[i]
+		if source.IsDeleted {
+			continue
+		}
+		if _, ok := requested[source.Name]; !ok {
+			continue
+		}
+		file := source
+		if file.NzbID == "" {
+			file.NzbID = nzoID
+		}
+		files[file.Name] = &file
 	}
-	return file, nil
+	return files, nil
 }
 
 func (u *Usenet) preStreamChecks(file *storage.NZBFile) error {
@@ -588,20 +598,6 @@ func (u *Usenet) preStreamChecks(file *storage.NZBFile) error {
 	return nil
 }
 
-// StreamSession represents an acquired streaming session that can be reused
-// for multiple chunk reads without per-chunk getOrCreateEntry/releaseFS overhead.
-type StreamSession struct {
-	u        *Usenet
-	entry    *fsEntry
-	key      string
-	fileSize int64
-}
-
-// FileSize returns the size of the file in the session.
-func (s *StreamSession) FileSize() int64 {
-	return s.fileSize
-}
-
 // Stream streams a file using the new streaming system with caching and worker limiting
 func (u *Usenet) Stream(ctx context.Context, nzoID, filename string, start, end int64, writer io.Writer) error {
 	if start < 0 {
@@ -611,13 +607,13 @@ func (u *Usenet) Stream(ctx context.Context, nzoID, filename string, start, end 
 		return fmt.Errorf("invalid byte range %d-%d", start, end)
 	}
 
-	// Use getOrCreateEntryWithKey to get both entry and key in one call,
+	// Use getOrCreateEntry to get both entry and key in one call,
 	// avoiding redundant key computation in releaseFS.
-	ufsEntry, key, err := u.getOrCreateEntryWithKey(ctx, nzoID, filename)
+	ufsEntry, key, err := u.getOrCreateEntry(ctx, nzoID, filename)
 	if err != nil {
 		return fmt.Errorf("failed to get or create file system: %w", err)
 	}
-	defer u.releaseFSByKey(key)
+	defer u.releaseFS(key)
 
 	// Use start/end directly - file segments are already positioned correctly
 	rangeStart := start
@@ -765,11 +761,11 @@ func (u *Usenet) Touch(ctx context.Context, nzoID, filename string) error {
 // Uses the shared entry/reader so the cache is available for Stream calls.
 func (u *Usenet) PreCache(ctx context.Context, nzoID, filename string) error {
 	// Use shared entry (same as Stream)
-	entry, key, err := u.getOrCreateEntryWithKey(ctx, nzoID, filename)
+	entry, key, err := u.getOrCreateEntry(ctx, nzoID, filename)
 	if err != nil {
 		return fmt.Errorf("failed to get or create entry: %w", err)
 	}
-	defer u.releaseFSByKey(key)
+	defer u.releaseFS(key)
 
 	if len(entry.volumes) == 0 {
 		return fmt.Errorf("no volumes available for file %s", filename)

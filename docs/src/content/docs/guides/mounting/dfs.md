@@ -42,20 +42,22 @@ In `config.json`:
 
 ### Key Settings
 
-| Setting | Purpose |
-|---------|---------|
-| `chunk_size` | Initial read chunk size (starts at 10MB, doubles on sequential reads) |
-| `disk_cache_size` | Max local cache before cleanup |
-| `cache_expiry` | Remove unused chunks after duration |
-| `daemon_timeout` | Unmount after idle time (empty = stay mounted) |
+| Setting           | Purpose                                                               |
+|-------------------|-----------------------------------------------------------------------|
+| `chunk_size`      | Initial read chunk size (starts at 10MB, doubles on sequential reads) |
+| `disk_cache_size` | Max local cache before cleanup                                        |
+| `cache_expiry`    | Remove unused chunks after duration                                   |
+| `daemon_timeout`  | Unmount after idle time (empty = stay mounted)                        |
 
 ## Performance Tuning
 
 **For Streaming:**
+
 - `chunk_size`: `10MB` - `20MB`
 - `disk_cache_size`: `50GB` - `100GB`
 
 **For Downloads:**
+
 - Enable larger `disk_cache_size` to avoid re-fetching
 
 ## Permissions
@@ -80,9 +82,9 @@ id plex
 
 ## vs Rclone
 
-| Feature | DFS | Rclone |
-|---------|-----|--------|
-| Streaming | Optimized sequential reads | General-purpose VFS |
-| Setup | Zero configuration | Multiple VFS modes |
-| Cache | Chunk-based with auto-expire | Full VFS cache system |
-| Resource Usage | Lower overhead | Higher (separate process) |
+| Feature        | DFS                          | Rclone                    |
+|----------------|------------------------------|---------------------------|
+| Streaming      | Optimized sequential reads   | General-purpose VFS       |
+| Setup          | Zero configuration           | Multiple VFS modes        |
+| Cache          | Chunk-based with auto-expire | Full VFS cache system     |
+| Resource Usage | Lower overhead               | Higher (separate process) |

@@ -71,6 +71,11 @@ func (h *Handler) Routes() chi.Router {
 	return r
 }
 
+func (h *Handler) IsDisabled() bool {
+	cfg := config.Get()
+	return cfg.DisableWebDav
+}
+
 func (h *Handler) handler(current *manager.FileInfo, children []manager.FileInfo, w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "HEAD":

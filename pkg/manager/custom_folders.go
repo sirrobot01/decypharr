@@ -65,12 +65,11 @@ func (m *Manager) initCustomFolders() {
 			case filterBLastAdded:
 				df.ageThreshold, _ = utils.ParseDuration(v)
 			case filterByFileCountGT, filterByFileCountLT:
-				fmt.Sscanf(v, "%d", &df.countThreshold)
+				_, _ = fmt.Sscanf(v, "%d", &df.countThreshold)
 			}
 			dirFilters[name] = append(dirFilters[name], df)
 		}
 		customFolders = append(customFolders, name)
-
 	}
 	m.customFolders = &CustomFolders{
 		filters: dirFilters,

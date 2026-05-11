@@ -7,12 +7,10 @@ import (
 	"strings"
 	"time"
 
-
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/nntp"
 	"github.com/sirrobot01/decypharr/pkg/usenet/parser"
-
 )
 
 func main() {
@@ -167,7 +165,6 @@ func main() {
 	fmt.Println("SUMMARY")
 	fmt.Println(strings.Repeat("=", 80))
 	fmt.Println(strings.Repeat("=", 80))
-
 
 	logger.Info().Msg("Test completed successfully")
 }

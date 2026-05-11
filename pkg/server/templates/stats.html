@@ -213,7 +213,7 @@
                         </h2>
                         <div class="flex gap-2">
                             <a href="{{.URLBase}}debug/logs/rclone" class="btn btn-sm btn-outline" target="_blank"
-                                id="rclone-logs-btn">
+                               id="rclone-logs-btn">
                                 <i class="bi bi-arrow-right"></i>
                                 View Logs
                             </a>
@@ -994,8 +994,8 @@
             try {
                 const response = await fetch(`${window.urlBase}debug/speedtest`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ protocol: 'nntp', provider: providerHost })
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({protocol: 'nntp', provider: providerHost})
                 });
 
                 if (!response.ok) {
@@ -1040,8 +1040,8 @@
             try {
                 const response = await fetch(`${window.urlBase}debug/speedtest`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ protocol: 'debrid', provider: providerName })
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({protocol: 'debrid', provider: providerName})
                 });
 
                 if (!response.ok) {

@@ -72,17 +72,17 @@ type AddMagnetSchema struct {
 }
 
 type torrentInfo struct {
-	ID               string  `json:"id"`
-	Filename         string  `json:"filename"`
-	OriginalFilename string  `json:"original_filename"`
-	Hash             string  `json:"hash"`
-	Bytes            int64   `json:"bytes"`
-	OriginalBytes    int64   `json:"original_bytes"`
-	Host             string  `json:"host"`
-	Split            int     `json:"split"`
-	Progress         float64 `json:"progress"`
-	Status           string  `json:"status"`
-	Added            time.Time  `json:"added"`
+	ID               string    `json:"id"`
+	Filename         string    `json:"filename"`
+	OriginalFilename string    `json:"original_filename"`
+	Hash             string    `json:"hash"`
+	Bytes            int64     `json:"bytes"`
+	OriginalBytes    int64     `json:"original_bytes"`
+	Host             string    `json:"host"`
+	Split            int       `json:"split"`
+	Progress         float64   `json:"progress"`
+	Status           string    `json:"status"`
+	Added            time.Time `json:"added"`
 	Files            []struct {
 		ID       int    `json:"id"`
 		Path     string `json:"path"`

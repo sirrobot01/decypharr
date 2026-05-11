@@ -1024,17 +1024,6 @@ func (p *RARParser) parseRAR4FileHeader(header *rar4Header, volumeIndex int, vol
 	}
 }
 
-// countStoredFiles counts files with store compression
-func countStoredFiles(files []*RARFileEntry) int {
-	count := 0
-	for _, file := range files {
-		if file.IsStored && !file.IsDirectory {
-			count++
-		}
-	}
-	return count
-}
-
 // buildVolumeOffsetMap builds a map of cumulative offsets for each volume
 func buildVolumeOffsetMap(volumeInfos []storage.ArchiveVolumeInfo) map[int]int64 {
 	offsetMap := make(map[int]int64)

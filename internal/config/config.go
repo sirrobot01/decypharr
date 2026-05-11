@@ -96,6 +96,36 @@ type Auth struct {
 	APIToken string `json:"api_token,omitempty"`
 }
 
+// RepairSource selects where the health checker enumerates entries from.
+type RepairSource string
+
+const (
+	RepairSourceArr     RepairSource = "arr"
+	RepairSourceManaged RepairSource = "managed"
+)
+
+// RepairConfig is the single, global configuration for the health checker.
+// When Enabled is true, a recurring sweep runs on Schedule and visits only
+// entries that are unhealthy, dirty, or older than RecheckInterval.
+type RepairConfig struct {
+	Enabled               bool         `json:"enabled,omitempty"`
+	Source                RepairSource `json:"source,omitempty"`
+	Schedule              string       `json:"schedule,omitempty"`
+	Workers               int          `json:"workers,omitempty"`
+	NNTPConnectionPercent int          `json:"nntp_connection_percent,omitempty"`
+	Strategy              string       `json:"strategy,omitempty"`
+	RecheckInterval       string       `json:"recheck_interval,omitempty"`
+	Arrs                  []string     `json:"arrs,omitempty"`
+	AutoRepair            bool         `json:"auto_repair,omitempty"`
+	NotifyOnComplete      bool         `json:"notify_on_complete,omitempty"`
+}
+
+func (r RepairConfig) IsZero() bool {
+	return !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
+		r.NNTPConnectionPercent == 0 && r.Strategy == "" && r.RecheckInterval == "" && len(r.Arrs) == 0 &&
+		!r.AutoRepair && !r.NotifyOnComplete
+}
+
 type Config struct {
 	// server
 	BindAddress string `json:"bind_address,omitempty"`
@@ -122,6 +152,8 @@ type Config struct {
 	NZBUserAgent       string   `json:"nzb_user_agent,omitempty"` // User agent for downloading NZBs
 	Auth               *Auth    `json:"-"`
 
+	DisableWebDav bool `json:"disable_webdav,omitempty"`
+
 	// Notifications configuration
 	Notifications Notifications `json:"notifications,omitempty"`
 
@@ -145,6 +177,8 @@ type Config struct {
 	RefreshDirs  string `json:"refresh_dirs,omitempty"`
 	Retries      int    `json:"retries,omitempty"`
 	SkipAutoMove bool   `json:"skip_auto_move,omitempty"`
+
+	Repair RepairConfig `json:"repair,omitzero"`
 }
 
 func (c *Config) JsonFile() string {
@@ -519,6 +553,27 @@ func (c *Config) setDefaults() {
 	// Set folder naming from first debrid if available
 	if len(c.Debrids) > 0 && c.FolderNaming == "" {
 		c.FolderNaming = WebDavFolderNaming(c.Debrids[0].FolderNaming)
+	}
+
+	c.applyRepairDefaults()
+}
+
+func (c *Config) applyRepairDefaults() {
+	if c.Repair.Source == "" {
+		c.Repair.Source = RepairSourceArr
+	}
+	if c.Repair.Workers <= 0 {
+		c.Repair.Workers = 5
+	}
+	if c.Repair.Strategy == "" {
+		c.Repair.Strategy = "per_entry"
+	}
+	if c.Repair.RecheckInterval == "" {
+		c.Repair.RecheckInterval = "168h"
+	}
+
+	if c.Repair.NNTPConnectionPercent == 0 {
+		c.Repair.NNTPConnectionPercent = 20
 	}
 }
 

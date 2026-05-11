@@ -17,13 +17,13 @@ Configuration is stored in `config.json`. Most settings can be managed via the W
 }
 ```
 
-| Field | Type | Description | Default |
-|-------|------|-------------|---------|
-| `bind_address` | string | IP to bind to | `0.0.0.0` |
-| `port` | string | Port to listen on | `8282` |
-| `url_base` | string | Base path for reverse proxy | `""` |
-| `app_url` | string | External URL for callbacks | Auto-detected |
-| `log_level` | string | Logging level (`debug`, `info`, `warn`, `error`) | `info` |
+| Field          | Type   | Description                                      | Default       |
+|----------------|--------|--------------------------------------------------|---------------|
+| `bind_address` | string | IP to bind to                                    | `0.0.0.0`     |
+| `port`         | string | Port to listen on                                | `8282`        |
+| `url_base`     | string | Base path for reverse proxy                      | `""`          |
+| `app_url`      | string | External URL for callbacks                       | Auto-detected |
+| `log_level`    | string | Logging level (`debug`, `info`, `warn`, `error`) | `info`        |
 
 ## Authentication
 
@@ -66,25 +66,25 @@ Array of Debrid services:
 
 ### Provider Fields
 
-| Field | Type | Description | Default |
-|-------|------|-------------|---------|
-| `provider` | string | Provider type: `realdebrid`, `alldebrid`, `debridlink`, `torbox` | **Required** |
-| `name` | string | Display name | Provider type |
-| `api_key` | string | API key from provider dashboard | **Required** |
-| `download_api_keys` | array | Additional keys for download rotation | `[api_key]` |
-| `download_uncached` | bool | Download torrents not in provider cache | `false` |
-| `rate_limit` | string | API rate limit (`200/minute`, `10/second`) | `200/minute` |
-| `repair_rate_limit` | string | Separate limit for repair operations | Same as `rate_limit` |
-| `download_rate_limit` | string | Separate limit for downloads | Same as `rate_limit` |
-| `proxy` | string | HTTP(S) proxy URL | `""` |
-| `unpack_rar` | bool | Auto-extract RAR archives | `true` |
-| `minimum_free_slot` | int | Minimum free torrent slots to use this provider | `0` |
-| `limit` | int | Max torrents allowed on this provider | `0` (unlimited) |
-| `workers` | int | Concurrent API workers | Auto (CPU * 50 / num_providers) |
-| `torrents_refresh_interval` | string | How often to refresh torrent list | `5m` |
-| `download_links_refresh_interval` | string | How often to refresh download links | `10m` |
-| `auto_expire_links_after` | string | Auto-remove links after duration | `24h` |
-| `user_agent` | string | Custom User-Agent header | Default |
+| Field                             | Type   | Description                                                      | Default                         |
+|-----------------------------------|--------|------------------------------------------------------------------|---------------------------------|
+| `provider`                        | string | Provider type: `realdebrid`, `alldebrid`, `debridlink`, `torbox` | **Required**                    |
+| `name`                            | string | Display name                                                     | Provider type                   |
+| `api_key`                         | string | API key from provider dashboard                                  | **Required**                    |
+| `download_api_keys`               | array  | Additional keys for download rotation                            | `[api_key]`                     |
+| `download_uncached`               | bool   | Download torrents not in provider cache                          | `false`                         |
+| `rate_limit`                      | string | API rate limit (`200/minute`, `10/second`)                       | `200/minute`                    |
+| `repair_rate_limit`               | string | Separate limit for repair operations                             | Same as `rate_limit`            |
+| `download_rate_limit`             | string | Separate limit for downloads                                     | Same as `rate_limit`            |
+| `proxy`                           | string | HTTP(S) proxy URL                                                | `""`                            |
+| `unpack_rar`                      | bool   | Auto-extract RAR archives                                        | `true`                          |
+| `minimum_free_slot`               | int    | Minimum free torrent slots to use this provider                  | `0`                             |
+| `limit`                           | int    | Max torrents allowed on this provider                            | `0` (unlimited)                 |
+| `workers`                         | int    | Concurrent API workers                                           | Auto (CPU * 50 / num_providers) |
+| `torrents_refresh_interval`       | string | How often to refresh torrent list                                | `5m`                            |
+| `download_links_refresh_interval` | string | How often to refresh download links                              | `10m`                           |
+| `auto_expire_links_after`         | string | Auto-remove links after duration                                 | `24h`                           |
+| `user_agent`                      | string | Custom User-Agent header                                         | Default                         |
 
 ## Usenet
 
@@ -115,28 +115,28 @@ Array of Debrid services:
 
 ### Usenet Fields
 
-| Field | Type | Description | Default |
-|-------|------|-------------|---------|
-| `providers` | array | NNTP server configurations | `[]` |
-| `max_connections` | int | Max connections per file/stream | `15` |
-| `read_ahead` | string | Prefetch buffer size | `16MB` |
-| `processing_timeout` | string | Max time for NZB processing | `10m` |
-| `availability_sample_percent` | int | % of segments to check (1-100) | `10` |
-| `max_concurrent_nzb` | int | Parallel NZB processing limit | `2` |
-| `disk_buffer_path` | string | Disk buffer location | `{main_path}/usenet/streams` |
-| `skip_repair` | bool | Disable NZB repair operations | `false` |
+| Field                         | Type   | Description                     | Default                      |
+|-------------------------------|--------|---------------------------------|------------------------------|
+| `providers`                   | array  | NNTP server configurations      | `[]`                         |
+| `max_connections`             | int    | Max connections per file/stream | `15`                         |
+| `read_ahead`                  | string | Prefetch buffer size            | `16MB`                       |
+| `processing_timeout`          | string | Max time for NZB processing     | `10m`                        |
+| `availability_sample_percent` | int    | % of segments to check (1-100)  | `10`                         |
+| `max_concurrent_nzb`          | int    | Parallel NZB processing limit   | `2`                          |
+| `disk_buffer_path`            | string | Disk buffer location            | `{main_path}/usenet/streams` |
+| `skip_repair`                 | bool   | Disable NZB repair operations   | `false`                      |
 
 ### Provider Fields
 
-| Field | Type | Description | Default |
-|-------|------|-------------|---------|
-| `host` | string | NNTP server hostname | **Required** |
-| `port` | int | NNTP port | `119` (563 for SSL) |
-| `username` | string | NNTP username | **Required** |
-| `password` | string | NNTP password | **Required** |
-| `ssl` | bool | Use SSL/TLS | `false` |
-| `max_connections` | int | Max connections to this server | `20` |
-| `priority` | int | Provider priority (lower = higher) | Index + 1 |
+| Field             | Type   | Description                        | Default             |
+|-------------------|--------|------------------------------------|---------------------|
+| `host`            | string | NNTP server hostname               | **Required**        |
+| `port`            | int    | NNTP port                          | `119` (563 for SSL) |
+| `username`        | string | NNTP username                      | **Required**        |
+| `password`        | string | NNTP password                      | **Required**        |
+| `ssl`             | bool   | Use SSL/TLS                        | `false`             |
+| `max_connections` | int    | Max connections to this server     | `20`                |
+| `priority`        | int    | Provider priority (lower = higher) | Index + 1           |
 
 ## Mounting
 
@@ -153,12 +153,12 @@ Mount configuration determines how files are exposed on the filesystem.
 }
 ```
 
-| Type | Description |
-|------|-------------|
-| `dfs` | Custom VFS optimized for streaming |
-| `rclone` | Embedded Rclone with full VFS features |
+| Type              | Description                            |
+|-------------------|----------------------------------------|
+| `dfs`             | Custom VFS optimized for streaming     |
+| `rclone`          | Embedded Rclone with full VFS features |
 | `external_rclone` | Connect to existing Rclone RC instance |
-| `none` | No filesystem mounting |
+| `none`            | No filesystem mounting                 |
 
 ### DFS Configuration
 
@@ -184,19 +184,19 @@ Mount configuration determines how files are exposed on the filesystem.
 }
 ```
 
-| Field | Description | Default |
-|-------|-------------|---------|
-| `cache_dir` | Local cache storage | Required |
-| `chunk_size` | Initial chunk size for reads | `10MB` |
-| `disk_cache_size` | Max disk cache size | `0` (unlimited) |
-| `cache_expiry` | Chunk expiry time | `1h` |
-| `cache_cleanup_interval` | Cache cleanup frequency | `10m` |
-| `daemon_timeout` | Idle timeout before unmount | `""` (never) |
-| `uid` | File owner UID | Current user |
-| `gid` | File owner GID | Current group |
-| `umask` | Permission mask | `022` |
-| `allow_other` | Allow other users to access | `false` |
-| `default_permissions` | Enable permission checks | `false` |
+| Field                    | Description                  | Default         |
+|--------------------------|------------------------------|-----------------|
+| `cache_dir`              | Local cache storage          | Required        |
+| `chunk_size`             | Initial chunk size for reads | `10MB`          |
+| `disk_cache_size`        | Max disk cache size          | `0` (unlimited) |
+| `cache_expiry`           | Chunk expiry time            | `1h`            |
+| `cache_cleanup_interval` | Cache cleanup frequency      | `10m`           |
+| `daemon_timeout`         | Idle timeout before unmount  | `""` (never)    |
+| `uid`                    | File owner UID               | Current user    |
+| `gid`                    | File owner GID               | Current group   |
+| `umask`                  | Permission mask              | `022`           |
+| `allow_other`            | Allow other users to access  | `false`         |
+| `default_permissions`    | Enable permission checks     | `false`         |
 
 ### Rclone Configuration
 
@@ -220,17 +220,17 @@ Mount configuration determines how files are exposed on the filesystem.
 }
 ```
 
-| Field | Description | Default |
-|-------|-------------|---------|
-| `cache_dir` | VFS cache directory | Required |
-| `vfs_cache_mode` | `off`, `minimal`, `writes`, `full` | `writes` |
-| `vfs_cache_max_size` | Max VFS cache size | `0` (unlimited) |
-| `vfs_read_chunk_size` | Read chunk size | `128MB` |
-| `vfs_read_ahead` | Read-ahead buffer | `0` |
-| `buffer_size` | I/O buffer size | `16MB` |
-| `bw_limit` | Bandwidth limit | `0` (unlimited) |
-| `transfers` | Concurrent transfers | `4` |
-| `uid` / `gid` | File ownership | Current user |
+| Field                 | Description                        | Default         |
+|-----------------------|------------------------------------|-----------------|
+| `cache_dir`           | VFS cache directory                | Required        |
+| `vfs_cache_mode`      | `off`, `minimal`, `writes`, `full` | `writes`        |
+| `vfs_cache_max_size`  | Max VFS cache size                 | `0` (unlimited) |
+| `vfs_read_chunk_size` | Read chunk size                    | `128MB`         |
+| `vfs_read_ahead`      | Read-ahead buffer                  | `0`             |
+| `buffer_size`         | I/O buffer size                    | `16MB`          |
+| `bw_limit`            | Bandwidth limit                    | `0` (unlimited) |
+| `transfers`           | Concurrent transfers               | `4`             |
+| `uid` / `gid`         | File ownership                     | Current user    |
 
 ### External Rclone
 
@@ -249,31 +249,37 @@ Mount configuration determines how files are exposed on the filesystem.
 
 Connect to an existing Rclone instance's RC API.
 
-## Repair Worker
+## Health Checker
 
 ```json
 {
   "repair": {
     "enabled": true,
-    "interval": "30m",
-    "auto_process": false,
-    "workers": 2,
-    "strategy": "per_file"
+    "source": "arr",
+    "schedule": "0 4 * * *",
+    "workers": 5,
+    "strategy": "per_entry",
+    "recheck_interval": "168h",
+    "auto_repair": true,
+    "nntp_connection_percent": 20
   }
 }
 ```
 
-| Field | Description | Default |
-|-------|-------------|---------|
-| `enabled` | Enable repair worker | `false` |
-| `interval` | Check interval | `30m` |
-| `auto_process` | Auto-fix detected issues | `false` |
-| `workers` | Concurrent repair workers | `2` |
-| `strategy` | `per_file` or `per_torrent` | `per_file` |
+| Field                     | Description                                                                | Default     |
+|---------------------------|----------------------------------------------------------------------------|-------------|
+| `enabled`                 | Master switch for the recurring sweep                                      | `false`     |
+| `source`                  | `arr` (walk Arr media) or `managed` (walk managed entries)                 | `arr`       |
+| `schedule`                | Cron expression. Required when enabled                                     | —           |
+| `workers`                 | Concurrent probe workers                                                   | `5`         |
+| `strategy`                | `per_entry` (stop at first broken file) or `per_file` (probe every file)   | `per_entry` |
+| `recheck_interval`        | How long a healthy entry stays fresh before becoming a candidate again     | `168h`      |
+| `arrs`                    | Optional Arr filter when `source=arr`. Empty = all eligible                | `[]`        |
+| `auto_repair`             | When `true`, brokens are repaired in-sweep. When `false`, detect-only      | `false`     |
+| `notify_on_complete`      | Send a notification when a sweep finishes                                  | `false`     |
+| `nntp_connection_percent` | Share of NNTP connections probes may use, to avoid starving downloads      | `20`        |
 
-**Strategies:**
-- `per_file`: Check/repair each file independently
-- `per_torrent`: Check all files in a torrent together
+See the [Health Checker & Repair guide](/guides/repair/) for the full model, API, and Browse-page integration.
 
 ## Arr Configuration
 
@@ -293,16 +299,16 @@ Connect to an existing Rclone instance's RC API.
 }
 ```
 
-| Field | Description | Default |
-|-------|-------------|---------|
-| `name` | Display name | Required |
-| `host` | Arr URL | Required |
-| `token` | Arr API key | Required |
-| `cleanup` | Auto-remove completed downloads | `true` |
-| `skip_repair` | Skip repair for this Arr | `false` |
-| `download_uncached` | Download uncached torrents | `false` |
-| `selected_debrid` | Force specific Debrid provider | `""` (auto) |
-| `source` | Config source (`auto`, `config`) | `config` |
+| Field               | Description                      | Default     |
+|---------------------|----------------------------------|-------------|
+| `name`              | Display name                     | Required    |
+| `host`              | Arr URL                          | Required    |
+| `token`             | Arr API key                      | Required    |
+| `cleanup`           | Auto-remove completed downloads  | `true`      |
+| `skip_repair`       | Skip repair for this Arr         | `false`     |
+| `download_uncached` | Download uncached torrents       | `false`     |
+| `selected_debrid`   | Force specific Debrid provider   | `""` (auto) |
+| `source`            | Config source (`auto`, `config`) | `config`    |
 
 ## Environment Variables
 

@@ -170,12 +170,7 @@ func computeOffsets(segments []SegmentMeta) []int64 {
 	offsets := make([]int64, len(segments)+1)
 
 	// Check if segments have explicit offsets
-	usesExplicit := false
 	if len(segments) > 0 && segments[0].EndOffset > 0 {
-		usesExplicit = true
-	}
-
-	if usesExplicit {
 		for i, seg := range segments {
 			offsets[i] = seg.StartOffset
 		}
@@ -291,7 +286,6 @@ func (sc *SegmentCache) SegmentDataSize(segIdx int) int64 {
 	}
 	return size
 }
-
 
 // Put writes segment data directly to disk (for streaming writes).
 func (sc *SegmentCache) Put(segIdx int, data []byte) error {

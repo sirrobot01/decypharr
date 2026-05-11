@@ -255,7 +255,10 @@ func (dls *Downloaders) Download(ctx context.Context, r ranges.Range) error {
 
 	// Fast path: already have it
 	if dls.item.HasRange(r) {
-		dls.ensureDownloaderLocked(r)
+		if err := dls.ensureDownloaderLocked(r); err != nil {
+			dls.mu.Unlock()
+			return err
+		}
 		dls.mu.Unlock()
 		return nil
 	}

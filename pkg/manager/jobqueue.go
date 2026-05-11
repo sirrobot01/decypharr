@@ -24,10 +24,10 @@ const (
 type Job struct {
 	ID        string
 	Type      JobType
-	Request   *ImportRequest             // The original import request
-	NZBMeta   *storage.NZB               // NZB metadata (set after parse, before worker processes)
+	Request   *ImportRequest               // The original import request
+	NZBMeta   *storage.NZB                 // NZB metadata (set after parse, before worker processes)
 	NZBGroups map[string]*parser.FileGroup // NZB file groups (set after parse)
-	Entry     *storage.Entry             // Entry created during processing
+	Entry     *storage.Entry               // Entry created during processing
 	CreatedAt time.Time
 }
 
@@ -40,8 +40,6 @@ func NewJob(jobType JobType, req *ImportRequest) *Job {
 		CreatedAt: time.Now(),
 	}
 }
-
-
 
 // JobQueue is a unified, unbounded, thread-safe job queue with a fixed worker pool.
 // It replaces the separate ImportRequest queue, nzbJobQueue, and unbounded goroutine

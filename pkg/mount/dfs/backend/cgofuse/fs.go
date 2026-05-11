@@ -260,6 +260,20 @@ func (f *FS) Read(path string, buff []byte, off int64, fh uint64) int {
 	if off+int64(size) > handle.info.Size() {
 		size = int(handle.info.Size() - off)
 	}
+
+	// Static content (e.g. version.txt): serve from in-memory buffer. These
+	// files have no reader because IsRemote() is false when content is set.
+	if content := handle.info.Content(); len(content) > 0 {
+		if off >= int64(len(content)) {
+			return 0
+		}
+		end := off + int64(size)
+		if end > int64(len(content)) {
+			end = int64(len(content))
+		}
+		return copy(buff, content[off:end])
+	}
+
 	if handle.reader == nil {
 		return -fuse.EIO
 	}

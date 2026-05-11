@@ -5,10 +5,11 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	json "github.com/bytedance/sonic"
 	"io"
 	"net/http"
 	"time"
+
+	json "github.com/bytedance/sonic"
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/request"
@@ -83,14 +84,8 @@ func (r *Client) Do(ctx context.Context, req Request, res any) error {
 	}
 
 	if res != nil {
-		respBody, err := io.ReadAll(response.Body)
-		if err != nil {
+		if err := json.ConfigDefault.NewDecoder(response.Body).Decode(res); err != nil && err != io.EOF {
 			return err
-		}
-		if len(respBody) > 0 {
-			if err := json.Unmarshal(respBody, res); err != nil {
-				return err
-			}
 		}
 	}
 

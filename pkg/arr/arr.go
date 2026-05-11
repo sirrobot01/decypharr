@@ -3,13 +3,14 @@ package arr
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"fmt"
-	json "github.com/bytedance/sonic"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
 
+	json "github.com/bytedance/sonic"
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
@@ -36,7 +37,10 @@ var (
 
 func getSharedClient() *request.Client {
 	sharedOnce.Do(func() {
-		sharedClient = request.Default()
+		sharedClient = request.New(
+			request.WithTimeout(0),
+			request.WithMaxRetries(5),
+		)
 	})
 	return sharedClient
 }
@@ -76,9 +80,15 @@ func New(name, host, token string, cleanup, skipRepair bool, downloadUncached *b
 	}
 }
 
-func (a *Arr) Request(method, endpoint string, payload interface{}, res any) (*http.Response, error) {
+// RequestCtx issues an HTTP request bound to ctx. Cancellation of ctx
+// cancels the in-flight HTTP call — this is what lets the repair pipeline
+// abort long Sonarr enumerations when a user presses Stop.
+func (a *Arr) RequestCtx(ctx context.Context, method, endpoint string, payload interface{}, res any) (*http.Response, error) {
 	if a.Token == "" || a.Host == "" {
 		return nil, fmt.Errorf("arr not configured")
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	url, err := utils.JoinURL(a.Host, endpoint)
 	if err != nil {
@@ -94,7 +104,7 @@ func (a *Arr) Request(method, endpoint string, payload interface{}, res any) (*h
 		body = bytes.NewReader(data)
 	}
 
-	req, err := http.NewRequest(method, url, body)
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -107,21 +117,24 @@ func (a *Arr) Request(method, endpoint string, payload interface{}, res any) (*h
 		return nil, err
 	}
 
-	// Parse success result if provided
+	// Parse success result if provided. Stream-decode directly from the
+	// response body so large payloads (e.g. full Sonarr series lists) don't
+	// sit on the heap as raw bytes alongside the decoded object graph.
 	if res != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		defer resp.Body.Close()
-		respBody, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return resp, fmt.Errorf("failed to read response: %w", err)
-		}
-		if len(respBody) > 0 {
-			if err := json.Unmarshal(respBody, res); err != nil {
-				return resp, fmt.Errorf("failed to unmarshal response: %w", err)
-			}
+		dec := json.ConfigDefault.NewDecoder(resp.Body)
+		if err := dec.Decode(res); err != nil && err != io.EOF {
+			return resp, fmt.Errorf("failed to decode response: %w", err)
 		}
 	}
 
 	return resp, nil
+}
+
+// Request is the no-context shim for legacy callers. Prefer RequestCtx for
+// any code path that should be cancellable (repair, etc.).
+func (a *Arr) Request(method, endpoint string, payload interface{}, res any) (*http.Response, error) {
+	return a.RequestCtx(context.Background(), method, endpoint, payload, res)
 }
 
 func (a *Arr) Validate() error {
@@ -309,14 +322,24 @@ func (s *Storage) Monitor() {
 	wg.Wait()
 }
 
-func (a *Arr) Refresh() {
+func (a *Arr) Refresh() error {
 	payload := struct {
 		Name string `json:"name"`
 	}{
 		Name: "RefreshMonitoredDownloads",
 	}
 
-	_, _ = a.Request(http.MethodPost, "api/v3/command", payload, nil)
+	resp, err := a.Request(http.MethodPost, "api/v3/command", payload, nil)
+	if err != nil {
+		return err
+	}
+	if resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("failed to refresh monitored downloads: %s", resp.Status)
+	}
+	return nil
 }
 
 func inferType(host, name string) Type {

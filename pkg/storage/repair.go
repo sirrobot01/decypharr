@@ -1,272 +1,360 @@
 package storage
 
 import (
-	"encoding/json"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
-	"strings"
+	"strconv"
 	"time"
 
+	json "github.com/bytedance/sonic"
 	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/pkg/arr"
 )
 
-type JobStatus string
-type RepairMode string
-type JobStage string
-type RepairActionStatus string
+// RepairStrategy controls how the probe groups files for a single entry.
 type RepairStrategy string
 
 const (
-	RepairStrategyPerFile    RepairStrategy = "per_file"
-	RepairStrategyPerTorrent RepairStrategy = "per_torrent"
+	RepairStrategyPerEntry RepairStrategy = "per_entry"
+	RepairStrategyPerFile  RepairStrategy = "per_file"
+)
+
+type RepairRunStatus string
+type RepairRunStage string
+type RepairRunTrigger string
+
+const (
+	RepairRunRunning   RepairRunStatus = "running"
+	RepairRunCompleted RepairRunStatus = "completed"
+	RepairRunFailed    RepairRunStatus = "failed"
+	RepairRunCancelled RepairRunStatus = "cancelled"
 )
 
 const (
-	JobStarted    JobStatus = "started"
-	JobPending    JobStatus = "pending"
-	JobFailed     JobStatus = "failed"
-	JobCompleted  JobStatus = "completed"
-	JobProcessing JobStatus = "processing"
-	JobCancelled  JobStatus = "cancelled"
+	RepairStageSelecting RepairRunStage = "selecting"
+	RepairStageProbing   RepairRunStage = "probing"
+	RepairStageRepairing RepairRunStage = "repairing"
+	RepairStageDone      RepairRunStage = "done"
 )
 
 const (
-	RepairModeDetectOnly      RepairMode = "detect_only"
-	RepairModeDetectAndRepair RepairMode = "detect_and_repair"
+	RepairTriggerScheduled RepairRunTrigger = "scheduled"
+	RepairTriggerManual    RepairRunTrigger = "manual"
 )
 
-const (
-	JobStageQueued      JobStage = "queued"
-	JobStageDiscovering JobStage = "discovering"
-	JobStageProbing     JobStage = "probing"
-	JobStagePlanning    JobStage = "planning"
-	JobStageExecuting   JobStage = "executing"
-	JobStageVerifying   JobStage = "verifying"
-	JobStageCompleted   JobStage = "completed"
-	JobStageFailed      JobStage = "failed"
-	JobStageCancelled   JobStage = "cancelled"
-)
-
-const (
-	RepairActionPlanned   RepairActionStatus = "planned"
-	RepairActionRunning   RepairActionStatus = "running"
-	RepairActionSucceeded RepairActionStatus = "succeeded"
-	RepairActionFailed    RepairActionStatus = "failed"
-	RepairActionSkipped   RepairActionStatus = "skipped"
-)
-
-type RepairStats struct {
-	Discovered int `json:"discovered"`
-	Probed     int `json:"probed"`
-	Broken     int `json:"broken"`
-	Planned    int `json:"planned"`
-	Executed   int `json:"executed"`
-	Fixed      int `json:"fixed"`
-	Failed     int `json:"failed"`
-	Unknown    int `json:"unknown"`
+type RepairRunStats struct {
+	Candidates   int `json:"candidates"`
+	SkippedFresh int `json:"skipped_fresh"`
+	Probed       int `json:"probed"`
+	Healthy      int `json:"healthy"`
+	Broken       int `json:"broken"`
+	Unknown      int `json:"unknown"`
+	Repaired     int `json:"repaired"`
+	RepairFailed int `json:"repair_failed"`
 }
 
-type RepairAction struct {
-	ID          string             `json:"id"`
-	Type        string             `json:"type"`
-	EntryID     string             `json:"entry_id"`
-	Protocol    config.Protocol    `json:"protocol"`
-	Status      RepairActionStatus `json:"status"`
-	Error       string             `json:"error,omitempty"`
-	StartedAt   time.Time          `json:"started_at,omitempty"`
-	CompletedAt time.Time          `json:"completed_at,omitempty"`
+// RepairRun is the append-only history record produced by a single sweep.
+// Counters and stage are mutated live during the run so the status endpoint
+// can report progress without holding any in-memory state.
+type RepairRun struct {
+	ID           string           `json:"id"`
+	Trigger      RepairRunTrigger `json:"trigger"`
+	Status       RepairRunStatus  `json:"status"`
+	Stage        RepairRunStage   `json:"stage,omitempty"`
+	StartedAt    time.Time        `json:"started_at"`
+	UpdatedAt    time.Time        `json:"updated_at"`
+	CompletedAt  time.Time        `json:"completed_at,omitempty"`
+	Stats        RepairRunStats   `json:"stats"`
+	Error        string           `json:"error,omitempty"`
+	CancelReason string           `json:"cancel_reason,omitempty"`
+	Source       string           `json:"source,omitempty"`
 }
 
-type Job struct {
-	ID          string                       `json:"id"`
-	Arrs        []string                     `json:"arrs"`
-	MediaIDs    []string                     `json:"media_ids"`
-	StartedAt   time.Time                    `json:"created_at"`
-	BrokenItems map[string][]arr.ContentFile `json:"broken_items"`
-	Status      JobStatus                    `json:"status"`
-	CompletedAt time.Time                    `json:"finished_at"`
-	FailedAt    time.Time                    `json:"failed_at"`
-	AutoProcess bool                         `json:"auto_process"`
-	Recurrent   bool                         `json:"recurrent"`
-	Schedule    string                       `json:"schedule,omitempty"`
-	Strategy    RepairStrategy               `json:"strategy,omitempty"`
-	Workers     int                          `json:"workers,omitempty"`
-	Error       string                       `json:"error"`
-
-	UpdatedAt time.Time       `json:"updated_at"`
-	UniqueKey string          `json:"unique_key,omitempty"`
-	Mode      RepairMode      `json:"mode,omitempty"`
-	Stage     JobStage        `json:"stage,omitempty"`
-	Stats     RepairStats     `json:"stats"`
-	Actions   []*RepairAction `json:"actions,omitempty"`
-}
-
-func (j *Job) DiscordContext() string {
-	format := `
-		**ID**: %s
-		**arrs**: %s
-		**Media IDs**: %s
-		**Status**: %s
-		**Mode**: %s
-		**Stage**: %s
-		**Started At**: %s
-		**Completed At**: %s
-		**Broken**: %d
-		**Fixed**: %d
-`
-	dateFmt := "2006-01-02 15:04:05"
-	return fmt.Sprintf(
-		format,
-		j.ID,
-		strings.Join(j.Arrs, ","),
-		strings.Join(j.MediaIDs, ", "),
-		j.Status,
-		j.Mode,
-		j.Stage,
-		j.StartedAt.Format(dateFmt),
-		j.CompletedAt.Format(dateFmt),
-		j.Stats.Broken,
-		j.Stats.Fixed,
-	)
-}
-
-func RepairJobKey(recurrent bool, arrs, mediaIDs []string, mode RepairMode, schedule string) string {
-	arrCopy := append([]string(nil), arrs...)
-	mediaCopy := append([]string(nil), mediaIDs...)
-	sort.Strings(arrCopy)
-	sort.Strings(mediaCopy)
-	prefix := "oneoff"
-	if recurrent {
-		prefix = "recurring"
+// NormalizeRepairStrategy maps user-supplied values to a known strategy.
+// Unknown / empty input falls back to per_entry.
+func NormalizeRepairStrategy(strategy RepairStrategy) RepairStrategy {
+	switch strategy {
+	case RepairStrategyPerFile:
+		return RepairStrategyPerFile
+	default:
+		return RepairStrategyPerEntry
 	}
-	return fmt.Sprintf("%s|%s|%s|%s|%s", prefix, strings.Join(arrCopy, ","), strings.Join(mediaCopy, ","), mode, schedule)
 }
 
-func (s *Storage) SaveRepairJob(key string, job *Job) error {
-	if job == nil {
-		return fmt.Errorf("job is nil")
-	}
 
-	if key != "" {
-		job.UniqueKey = key
+func (s *Storage) SaveRepairRun(run *RepairRun) error {
+	if run == nil || run.ID == "" {
+		return fmt.Errorf("repair run is missing id")
 	}
-	job.UpdatedAt = time.Now()
-
-	data, err := json.Marshal(job)
+	run.UpdatedAt = time.Now()
+	data, err := json.Marshal(run)
 	if err != nil {
 		return err
 	}
-
-	if err := s.repairJobs.Put(job.ID, data, nil); err != nil {
-		return err
-	}
-
-	if key != "" && key != job.ID {
-		_ = s.repairKeys.Put(key, []byte(job.ID), nil)
-	}
-	return nil
+	return s.repairRuns.Put(run.ID, data, nil)
 }
 
-func (s *Storage) GetRepairJob(id string) (*Job, error) {
-	data, err := s.repairJobs.Get(id)
+func (s *Storage) GetRepairRun(id string) (*RepairRun, error) {
+	if id == "" {
+		return nil, fmt.Errorf("repair run id is empty")
+	}
+	data, err := s.repairRuns.Get(id)
 	if err != nil {
 		return nil, err
 	}
-
-	var job Job
-	if err := json.Unmarshal(data, &job); err != nil {
+	var run RepairRun
+	if err := json.Unmarshal(data, &run); err != nil {
 		return nil, err
 	}
-	if job.ID == "" {
-		job.ID = id
+	if run.ID == "" {
+		run.ID = id
 	}
-	return &job, nil
+	return &run, nil
 }
 
-func (s *Storage) GetRepairJobByUniqueKey(uniqueKey string) *Job {
-	if uniqueKey == "" {
-		return nil
-	}
-
-	jobIDData, err := s.repairKeys.Get(uniqueKey)
-	if err == nil {
-		job, getErr := s.GetRepairJob(string(jobIDData))
-		if getErr == nil {
-			return job
+// ListRepairRuns returns runs sorted newest-first.
+func (s *Storage) ListRepairRuns() ([]*RepairRun, error) {
+	runs := make([]*RepairRun, 0)
+	err := s.repairRuns.ForEach(func(key string, value []byte) error {
+		var run RepairRun
+		if err := json.Unmarshal(value, &run); err != nil {
+			return nil
 		}
-	}
-
-	jobs, err := s.LoadAllRepairJobs()
-	if err != nil {
-		return nil
-	}
-	for _, job := range jobs {
-		if job.UniqueKey == uniqueKey {
-			return job
+		if run.ID == "" {
+			run.ID = key
 		}
-	}
-	return nil
+		runs = append(runs, &run)
+		return nil
+	})
+	sort.Slice(runs, func(i, j int) bool {
+		return runs[i].StartedAt.After(runs[j].StartedAt)
+	})
+	return runs, err
 }
 
-func (s *Storage) DeleteRepairJob(id string) error {
+func (s *Storage) DeleteRepairRun(id string) error {
 	if id == "" {
 		return nil
 	}
+	return s.repairRuns.Delete(id)
+}
 
-	if err := s.repairJobs.Delete(id); err != nil {
+// PruneRepairRuns keeps the newest `keep` runs and deletes the rest. Runs in
+// status running are always retained.
+func (s *Storage) PruneRepairRuns(keep int) error {
+	if keep <= 0 {
+		keep = 100
+	}
+	runs, err := s.ListRepairRuns()
+	if err != nil {
 		return err
 	}
-
-	keysToDelete := make([]string, 0)
-	_ = s.repairKeys.ForEach(func(key string, value []byte) error {
-		if string(value) == id {
-			keysToDelete = append(keysToDelete, key)
-		}
+	if len(runs) <= keep {
 		return nil
-	})
-	for _, key := range keysToDelete {
-		_ = s.repairKeys.Delete(key)
 	}
-	return nil
-}
-
-func (s *Storage) SaveAllRepairJobs(jobs map[string]*Job) error {
-	for key, job := range jobs {
-		if err := s.SaveRepairJob(key, job); err != nil {
-			return err
+	for _, run := range runs[keep:] {
+		if run.Status == RepairRunRunning {
+			continue
 		}
+		_ = s.repairRuns.Delete(run.ID)
 	}
 	return nil
 }
 
-func (s *Storage) LoadAllRepairJobs() ([]*Job, error) {
-	jobs := make([]*Job, 0)
-	_ = s.repairJobs.ForEach(func(key string, value []byte) error {
-		var job Job
-		if err := json.Unmarshal(value, &job); err != nil {
+// ClearRepairRuns deletes every non-running run.
+func (s *Storage) ClearRepairRuns() error {
+	runs, err := s.ListRepairRuns()
+	if err != nil {
+		return err
+	}
+	for _, run := range runs {
+		if run.Status == RepairRunRunning {
+			continue
+		}
+		_ = s.repairRuns.Delete(run.ID)
+	}
+	return nil
+}
+
+
+// HealthStatus is the rolled-up state of an entry as seen by the repair system.
+type HealthStatus string
+
+const (
+	HealthUnknown     HealthStatus = "unknown"
+	HealthHealthy     HealthStatus = "healthy"
+	HealthBroken      HealthStatus = "broken"
+	HealthRepairing   HealthStatus = "repairing"
+	HealthUnsupported HealthStatus = "unsupported"
+	HealthStale       HealthStatus = "stale"
+)
+
+// ArrKind narrows BrokenFile.ArrName to a typed Arr (sonarr / radarr / ...).
+type ArrKind string
+
+const (
+	ArrKindSonarr  ArrKind = "sonarr"
+	ArrKindRadarr  ArrKind = "radarr"
+	ArrKindLidarr  ArrKind = "lidarr"
+	ArrKindReadarr ArrKind = "readarr"
+	ArrKindOther   ArrKind = "other"
+)
+
+// BrokenFile carries everything the repair pipeline needs to act on a single
+// broken file: where it lives in storage, which infohash it belongs to, and —
+// when an Arr knows about it — the Arr-side identifiers needed to delete and
+// re-search without another lookup.
+type BrokenFile struct {
+	EntryName string          `json:"entry_name"`
+	FileName  string          `json:"file_name"`
+	InfoHash  string          `json:"info_hash,omitempty"`
+	Protocol  config.Protocol `json:"protocol,omitempty"`
+	Reason    string          `json:"reason,omitempty"`
+	Size      int64           `json:"size,omitempty"`
+
+	// Arr re-acquire payload. Empty when source=managed or when no Arr owns
+	// the file.
+	ArrName    string  `json:"arr_name,omitempty"`
+	ArrKind    ArrKind `json:"arr_kind,omitempty"`
+	MediaID    int     `json:"media_id,omitempty"`
+	EpisodeID  int     `json:"episode_id,omitempty"`
+	ArrFileID  int     `json:"arr_file_id,omitempty"`
+	TargetPath string  `json:"target_path,omitempty"`
+	SourcePath string  `json:"source_path,omitempty"`
+}
+
+// EntryHealth is the source of truth for repair decisions. It is keyed by
+// EntryName (the folder-name shared across files of the same release) and is
+// updated live during a sweep — once when probing starts, once when it
+// finishes.
+type EntryHealth struct {
+	EntryName     string          `json:"entry_name"`
+	Protocol      config.Protocol `json:"protocol,omitempty"`
+	Status        HealthStatus    `json:"status"`
+	Fingerprint   string          `json:"fingerprint,omitempty"`
+	FileCount     int             `json:"file_count"`
+	BrokenCount   int             `json:"broken_count"`
+	BrokenFiles   []BrokenFile    `json:"broken_files,omitempty"`
+	FailureReason string          `json:"failure_reason,omitempty"`
+
+	Dirty       bool   `json:"dirty"`
+	DirtyReason string `json:"dirty_reason,omitempty"`
+
+	LastCheckedAt  time.Time    `json:"last_checked_at,omitempty"`
+	LastOKAt       time.Time    `json:"last_ok_at,omitempty"`
+	LastFailedAt   time.Time    `json:"last_failed_at,omitempty"`
+	LastRepairAt   time.Time    `json:"last_repair_at,omitempty"`
+	NextCheckDueAt time.Time    `json:"next_check_due_at,omitempty"`
+	ActiveRunID    string       `json:"active_run_id,omitempty"`
+	PreviousStatus HealthStatus `json:"previous_status,omitempty"`
+
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// IsDue reports whether this entry should be visited by the next sweep, given a
+// recheck interval. Entries that have never been checked, that are dirty, or
+// whose last status was anything other than healthy/unsupported are always due.
+func (h *EntryHealth) IsDue(now time.Time, recheck time.Duration) bool {
+	if h == nil {
+		return true
+	}
+	if h.Dirty {
+		return true
+	}
+	if h.LastCheckedAt.IsZero() {
+		return true
+	}
+	switch h.Status {
+	case HealthHealthy, HealthUnsupported:
+		// fall through to staleness check
+	default:
+		return true
+	}
+	if recheck <= 0 {
+		return false
+	}
+	return now.Sub(h.LastCheckedAt) >= recheck
+}
+
+func (s *Storage) SaveEntryHealth(state *EntryHealth) error {
+	if state == nil || state.EntryName == "" {
+		return fmt.Errorf("entry health is missing entry name")
+	}
+	state.UpdatedAt = time.Now()
+	state.BrokenCount = len(state.BrokenFiles)
+	data, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	return s.repairState.Put(state.EntryName, data, nil)
+}
+
+func (s *Storage) GetEntryHealth(entryName string) (*EntryHealth, error) {
+	if entryName == "" {
+		return nil, fmt.Errorf("entry name is empty")
+	}
+	data, err := s.repairState.Get(entryName)
+	if err != nil {
+		return nil, err
+	}
+	var state EntryHealth
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, err
+	}
+	if state.EntryName == "" {
+		state.EntryName = entryName
+	}
+	return &state, nil
+}
+
+func (s *Storage) ForEachEntryHealth(fn func(*EntryHealth) error) error {
+	return s.repairState.ForEach(func(key string, value []byte) error {
+		var state EntryHealth
+		if err := json.Unmarshal(value, &state); err != nil {
 			return nil
 		}
-		if job.ID == "" {
-			job.ID = key
+		if state.EntryName == "" {
+			state.EntryName = key
 		}
-		jobs = append(jobs, &job)
-		return nil
+		return fn(&state)
 	})
-	return jobs, nil
 }
 
-func (s *Storage) CountRepairJobs() (int, error) {
-	return s.repairJobs.Len(), nil
+func (s *Storage) DeleteEntryHealth(entryName string) error {
+	if entryName == "" || !s.repairState.Exists(entryName) {
+		return nil
+	}
+	return s.repairState.Delete(entryName)
 }
 
-// CountRepairJobsByStatus counts repair jobs grouped by status.
-// Only unmarshals the minimal {Status} field from each job, avoiding full deserialization.
-func (s *Storage) CountRepairJobsByStatus() map[JobStatus]int {
-	counts := make(map[JobStatus]int)
-	_ = s.repairJobs.ForEach(func(_ string, value []byte) error {
+// MarkEntryDirty flags an entry's health as out-of-date so the next sweep will
+// re-probe it. Called from the storage layer whenever the underlying file set
+// of an entry mutates.
+func (s *Storage) MarkEntryDirty(entryName string, protocol config.Protocol, reason string) {
+	if entryName == "" {
+		return
+	}
+	state, err := s.GetEntryHealth(entryName)
+	if err != nil || state == nil {
+		state = &EntryHealth{EntryName: entryName, Status: HealthUnknown}
+	}
+	if protocol != "" {
+		state.Protocol = protocol
+	}
+	state.Dirty = true
+	state.DirtyReason = reason
+	state.NextCheckDueAt = time.Time{}
+	_ = s.SaveEntryHealth(state)
+}
+
+// CountEntryHealthByStatus returns a per-status histogram without loading full
+// EntryHealth payloads.
+func (s *Storage) CountEntryHealthByStatus() map[HealthStatus]int {
+	counts := make(map[HealthStatus]int)
+	_ = s.repairState.ForEach(func(_ string, value []byte) error {
 		var stub struct {
-			Status JobStatus `json:"status"`
+			Status HealthStatus `json:"status"`
 		}
 		if err := json.Unmarshal(value, &stub); err == nil && stub.Status != "" {
 			counts[stub.Status]++
@@ -276,27 +364,43 @@ func (s *Storage) CountRepairJobsByStatus() map[JobStatus]int {
 	return counts
 }
 
-func (s *Storage) PrepareRepairDataV2() error {
-	invalidJobIDs := make([]string, 0)
-	_ = s.repairJobs.ForEach(func(key string, value []byte) error {
-		var job Job
-		if err := json.Unmarshal(value, &job); err != nil || job.ID == "" {
-			invalidJobIDs = append(invalidJobIDs, key)
+// EntryItemRepairFingerprint produces a deterministic hash of the file set
+// inside an EntryItem. When this hash changes between two snapshots, the
+// repair system knows the underlying files changed and the entry needs to be
+// re-probed even if its last status was healthy.
+func EntryItemRepairFingerprint(item *EntryItem) string {
+	if item == nil || len(item.Files) == 0 {
+		return ""
+	}
+
+	names := make([]string, 0, len(item.Files))
+	for name := range item.Files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	h := sha256.New()
+	for _, name := range names {
+		file := item.Files[name]
+		if file == nil {
+			continue
 		}
-		return nil
-	})
-
-	for _, id := range invalidJobIDs {
-		_ = s.repairJobs.Delete(id)
+		h.Write([]byte(name))
+		h.Write([]byte{0})
+		h.Write([]byte(file.InfoHash))
+		h.Write([]byte{0})
+		h.Write([]byte(strconv.FormatInt(file.Size, 10)))
+		h.Write([]byte{0})
+		if file.Deleted {
+			h.Write([]byte("deleted"))
+		}
+		if file.ByteRange != nil {
+			h.Write([]byte(strconv.FormatInt(file.ByteRange[0], 10)))
+			h.Write([]byte{':'})
+			h.Write([]byte(strconv.FormatInt(file.ByteRange[1], 10)))
+		}
+		h.Write([]byte{0xff})
 	}
-
-	keys := make([]string, 0)
-	_ = s.repairKeys.ForEach(func(key string, value []byte) error {
-		keys = append(keys, key)
-		return nil
-	})
-	for _, key := range keys {
-		_ = s.repairKeys.Delete(key)
-	}
-	return nil
+	return hex.EncodeToString(h.Sum(nil))
 }
+

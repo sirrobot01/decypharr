@@ -1,1037 +1,647 @@
-// Repair management for Decypharr (v2-aware)
+// Repair v2 — health checker dashboard.
+//
+// Settings live in the global Settings page; this controller only handles
+// status, run/stop, and history. Polls /api/repair/status while a run is
+// active so the UI reflects live progress.
 class RepairManager {
     constructor() {
-        this.state = {
-            jobs: [],
-            currentJob: null,
-            allBrokenItems: [],
-            filteredItems: [],
-            currentPage: 1,
-            currentItemsPage: 1,
-            itemsPerPage: 10,
-            itemsPerModalPage: 20,
-            sortBy: 'created_at',
-            sortDirection: 'desc'
-        };
-
-        this.refs = {
-            repairForm: document.getElementById('repairForm'),
-            repairScope: document.getElementById('repairScope'),
-            arrSelect: document.getElementById('arrSelect'),
-            // arrHelpText: removed in new design or implicitly handled
-            mediaIds: document.getElementById('mediaIds'),
-            // mediaHelpText: removed/changed
-            repairMode: document.getElementById('repairMode'),
-            submitBtn: document.getElementById('submitRepair'),
-            repairWorkers: document.getElementById('repairWorkers'),
-
-            jobsTableBody: document.getElementById('jobsTableBody'),
-            jobsPagination: document.getElementById('jobsPagination'),
-            noJobsMessage: document.getElementById('noJobsMessage'),
-            refreshJobs: document.getElementById('refreshJobs'),
-            deleteSelectedJobs: document.getElementById('deleteSelectedJobs'),
-            selectAllJobs: document.getElementById('selectAllJobs'),
-
-            jobDetailsModal: document.getElementById('jobDetailsModal'),
-            modalJobId: document.getElementById('modalJobId'),
-            modalJobStatus: document.getElementById('modalJobStatus'),
-            modalJobStage: document.getElementById('modalJobStage'),
-            modalJobStarted: document.getElementById('modalJobStarted'),
-            modalJobCompleted: document.getElementById('modalJobCompleted'),
-            modalJobArrs: document.getElementById('modalJobArrs'),
-            modalJobMediaIds: document.getElementById('modalJobMediaIds'),
-            modalJobMode: document.getElementById('modalJobMode'),
-            modalJobAutoProcess: document.getElementById('modalJobAutoProcess'),
-            modalJobError: document.getElementById('modalJobError'),
-            errorContainer: document.getElementById('errorContainer'),
-
-            modalStatDiscovered: document.getElementById('modalStatDiscovered'),
-            modalStatProbed: document.getElementById('modalStatProbed'),
-            modalStatBroken: document.getElementById('modalStatBroken'),
-            modalStatUnknown: document.getElementById('modalStatUnknown'),
-            modalStatPlanned: document.getElementById('modalStatPlanned'),
-            modalStatExecuted: document.getElementById('modalStatExecuted'),
-            modalStatFixed: document.getElementById('modalStatFixed'),
-            modalStatFailed: document.getElementById('modalStatFailed'),
-
-            actionItemsTableBody: document.getElementById('actionItemsTableBody'),
-            noActionsMessage: document.getElementById('noActionsMessage'),
-
-            brokenItemsTableBody: document.getElementById('brokenItemsTableBody'),
-            itemsPagination: document.getElementById('itemsPagination'),
-            noBrokenItemsMessage: document.getElementById('noBrokenItemsMessage'),
-            noFilteredItemsMessage: document.getElementById('noFilteredItemsMessage'),
-            totalItemsCount: document.getElementById('totalItemsCount'),
-            modalFooterStats: document.getElementById('modalFooterStats'),
-
-            itemSearchInput: document.getElementById('itemSearchInput'),
-            arrFilterSelect: document.getElementById('arrFilterSelect'),
-            pathFilterSelect: document.getElementById('pathFilterSelect'),
-            clearFiltersBtn: document.getElementById('clearFiltersBtn'),
-
-            processJobBtn: document.getElementById('processJobBtn'),
-            stopJobBtn: document.getElementById('stopJobBtn'),
-
-            repairStrategy: document.getElementById('repairStrategy'),
-            repairWorkers: document.getElementById('repairWorkers'),
-            recurringToggle: document.getElementById('recurringToggle'),
-            scheduleContainer: document.getElementById('scheduleContainer'),
-            scheduleInput: document.getElementById('scheduleInput'),
-            modalJobStrategy: document.getElementById('modalJobStrategy'),
-            modalJobWorkers: document.getElementById('modalJobWorkers'),
-            modalJobSchedule: document.getElementById('modalJobSchedule')
-        };
-
-        this.init();
+        this.api = (window.API || '/api').replace(/\/$/, '');
+        this.statusTimer = null;
+        this.activeRunId = null;
+        this.brokenState = {items: [], page: 1, pageSize: 25};
+        this.bind();
+        this.loadAll();
     }
 
-    init() {
-        this.bindEvents();
-        this.syncScopeUI();
-        this.syncModeUI();
-        this.loadArrInstances();
-        this.loadJobs();
-        this.startAutoRefresh();
-    }
-
-    bindEvents() {
-        this.refs.repairForm?.addEventListener('submit', (e) => this.handleFormSubmit(e));
-        this.refs.refreshJobs?.addEventListener('click', () => this.loadJobs());
-        this.refs.deleteSelectedJobs?.addEventListener('click', () => this.deleteSelectedJobs());
-        this.refs.selectAllJobs?.addEventListener('change', (e) => this.toggleSelectAllJobs(e.target.checked));
-
-        this.refs.repairMode?.addEventListener('change', () => this.syncModeUI());
-        this.refs.repairScope?.addEventListener('change', () => {
-            this.syncScopeUI();
-            this.syncModeUI();
+    bind() {
+        const $ = (id) => document.getElementById(id);
+        $('runNowBtn')?.addEventListener('click', () => this.runNow());
+        $('stopRunBtn')?.addEventListener('click', () => this.stopRun());
+        $('fixBrokenBtn')?.addEventListener('click', () => this.fixBroken());
+        $('viewBrokenBtn')?.addEventListener('click', () => this.openBrokenModal());
+        $('refreshHistoryBtn')?.addEventListener('click', () => this.loadHistory());
+        $('refreshBrokenBtn')?.addEventListener('click', () => this.loadBroken());
+        $('clearHistoryBtn')?.addEventListener('click', () => this.clearHistory());
+        $('recheckMediaForm')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.recheckMedia();
         });
-
-        this.refs.processJobBtn?.addEventListener('click', () => this.processCurrentJob());
-        this.refs.stopJobBtn?.addEventListener('click', () => this.stopCurrentJob());
-
-        this.refs.itemSearchInput?.addEventListener('input', window.decypharrUtils.debounce(() => this.applyFilters(), 300));
-        this.refs.arrFilterSelect?.addEventListener('change', () => this.applyFilters());
-        this.refs.pathFilterSelect?.addEventListener('change', () => this.applyFilters());
-        this.refs.clearFiltersBtn?.addEventListener('click', () => this.clearFilters());
-
-        this.refs.jobsTableBody?.addEventListener('click', (e) => this.handleJobTableClick(e));
-        this.refs.brokenItemsTableBody?.addEventListener('click', (e) => this.handleItemTableClick(e));
     }
 
-    getSelectedScope() {
-        const scope = this.refs.repairScope?.value;
-        return scope === 'managed_entries' ? 'managed_entries' : 'arr';
+    async loadAll() {
+        await Promise.all([this.loadStatus(), this.loadHistory(), this.loadArrs()]);
     }
 
-    isManagedEntriesScope() {
-        return this.getSelectedScope() === 'managed_entries';
-    }
-
-    setScope(scope) {
-        if (this.refs.repairScope) {
-            this.refs.repairScope.value = scope;
-            this.syncScopeUI();
+    openBrokenModal() {
+        const modal = document.getElementById('brokenModal');
+        if (!modal) return;
+        // Fetch fresh data on every open.
+        this.loadBroken();
+        if (typeof modal.showModal === 'function') {
+            modal.showModal();
+        } else {
+            modal.setAttribute('open', '');
         }
     }
 
-    setMode(mode) {
-        if (this.refs.repairMode) {
-            this.refs.repairMode.value = mode;
-            this.syncModeUI();
-        }
+    isBrokenModalOpen() {
+        const modal = document.getElementById('brokenModal');
+        return !!(modal && modal.open);
     }
 
-    syncScopeUI() {
-        const scope = this.getSelectedScope();
-        const managedEntriesScope = scope === 'managed_entries';
+    updateBrokenCount(n) {
+        const badge = document.getElementById('brokenCountBadge');
+        if (badge) {
+            badge.textContent = n;
+            badge.classList.toggle('hidden', n === 0);
+        }
+        const modalCount = document.getElementById('brokenModalCount');
+        if (modalCount) modalCount.textContent = n;
+    }
 
-        // Update cards
-        document.querySelectorAll('.selection-card').forEach(card => {
-            const isSelected = card.dataset.value === scope;
-            card.classList.toggle('active', isSelected);
-            card.classList.toggle('border-primary', isSelected && scope === 'arr');
-            card.classList.toggle('border-secondary', isSelected && scope === 'managed_entries');
-
-            // Toggle check icon
-            const checkIcon = card.querySelector('.check-icon');
-            if (checkIcon) checkIcon.classList.toggle('hidden', !isSelected);
-        });
-
-        // Update Arr Select visibility/state
-        const arrContainer = document.getElementById('arrSelectContainer');
-        if (arrContainer) {
-            if (managedEntriesScope) {
-                arrContainer.classList.add('opacity-50', 'pointer-events-none');
-                if (this.refs.arrSelect) {
-                    this.refs.arrSelect.value = '';
-                    this.refs.arrSelect.disabled = true;
-                }
-            } else {
-                arrContainer.classList.remove('opacity-50', 'pointer-events-none');
-                if (this.refs.arrSelect) this.refs.arrSelect.disabled = false;
+    async loadArrs() {
+        try {
+            const arrs = await this.fetchJSON(`${this.api}/arrs`);
+            const sel = document.getElementById('recheckArr');
+            if (!sel) return;
+            const placeholder = sel.querySelector('option[value=""]');
+            sel.innerHTML = '';
+            if (placeholder) sel.appendChild(placeholder);
+            for (const a of arrs || []) {
+                if (!a || !a.name) continue;
+                const opt = document.createElement('option');
+                opt.value = a.name;
+                opt.textContent = a.name;
+                sel.appendChild(opt);
             }
-        }
-
-        // Update inputs
-        if (this.refs.mediaIds) {
-            this.refs.mediaIds.placeholder = managedEntriesScope ? 'optional: infohash, entry name' : '123, 456';
-        }
-
-        const mediaHelpText = document.getElementById('mediaHelpText');
-        if (mediaHelpText) {
-            mediaHelpText.textContent = managedEntriesScope
-                ? 'Optional: infohash or entry name'
-                : 'TVDB/TMDB IDs, comma-separated';
+        } catch (e) {
+            console.error('Failed to load arrs', e);
         }
     }
 
-    syncModeUI() {
-        const mode = this.refs.repairMode.value;
-        const isRepair = mode === 'detect_and_repair';
-
-        // Update mode cards
-        document.querySelectorAll('.mode-card').forEach(card => {
-            const isSelected = card.dataset.value === mode;
-            card.classList.toggle('active', isSelected);
-            card.classList.toggle('border-info', isSelected && mode === 'detect_only');
-            card.classList.toggle('border-warning', isSelected && mode === 'detect_and_repair');
-        });
-
-        // Update submit button
-        if (this.refs.submitBtn) {
-            const icon = isRepair ? 'bi-wrench-adjustable' : 'bi-search';
-            const text = isRepair ? 'Start Detect + Repair' : 'Start Detect Only';
-            this.refs.submitBtn.innerHTML = `<i class="bi ${icon} text-xl"></i><span>${text}</span>`;
+    async recheckMedia() {
+        const $ = (id) => document.getElementById(id);
+        const mediaId = $('recheckMediaId').value.trim();
+        if (!mediaId) {
+            this.toast('Media id is required', 'warning');
+            return;
         }
-    }
-
-    async loadArrInstances() {
-        try {
-            const response = await window.decypharrUtils.fetcher('/api/arrs');
-            if (!response.ok) throw new Error('Failed to load Arr instances');
-
-            const arrs = await response.json();
-            this.refs.arrSelect.innerHTML = '<option value="">Select an Arr instance</option>';
-
-            arrs.forEach((arr) => {
-                const option = document.createElement('option');
-                option.value = arr.name;
-                option.textContent = `${arr.name} (${arr.host})`;
-                this.refs.arrSelect.appendChild(option);
-            });
-        } catch (error) {
-            console.error('Error loading Arr instances:', error);
-            window.decypharrUtils.createToast('Failed to load Arr instances', 'error');
-        }
-    }
-
-    async handleFormSubmit(e) {
-        e.preventDefault();
-
-        const scope = this.getSelectedScope();
-        const arr = this.refs.arrSelect.value;
-        const mediaIdsValue = this.refs.mediaIds.value.trim();
-        const mode = this.refs.repairMode.value || 'detect_only';
-        const schedule = this.refs.scheduleInput?.value.trim() || '';
-        const recurring = schedule.length > 0;
-
-        const mediaIds = mediaIdsValue
-            ? mediaIdsValue.split(',').map((id) => id.trim()).filter(Boolean)
-            : [];
-
-        const strategy = this.refs.repairStrategy?.value || 'per_torrent';
-        const workers = parseInt(this.refs.repairWorkers?.value, 10) || 5;
-
-        const requestBody = {
-            arr,
-            mediaIds: mediaIds.length > 0 ? mediaIds : null,
-            scope,
-            mode,
-            autoProcess: mode === 'detect_and_repair',
-            strategy,
-            workers,
-            recurring,
-            schedule
+        const body = {
+            arr: $('recheckArr').value,
+            media_id: mediaId,
+            fix: $('recheckFix').checked,
         };
-
+        const btn = $('recheckMediaBtn');
+        const out = $('recheckMediaResult');
+        btn.disabled = true;
+        out.classList.add('hidden');
+        out.textContent = '';
         try {
-            window.decypharrUtils.setButtonLoading(this.refs.submitBtn, true);
-
-            const response = await window.decypharrUtils.fetcher('/api/repair', {
+            const res = await fetch(`${this.api}/repair/recheck/media`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestBody)
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body),
             });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(errorText || 'Failed to start repair');
+            const text = await res.text();
+            let data = null;
+            try {
+                data = text ? JSON.parse(text) : null;
+            } catch { /* leave null */
             }
-
-            const result = await response.json();
-            window.decypharrUtils.createToast(
-                `Repair run started. ID: ${result.job_id?.substring(0, 8) || 'unknown'}`,
-                'success'
-            );
-
-            this.refs.mediaIds.value = '';
-            await this.loadJobs();
-        } catch (error) {
-            console.error('Error starting repair:', error);
-            window.decypharrUtils.createToast(`Error starting repair: ${error.message}`, 'error');
-        } finally {
-            window.decypharrUtils.setButtonLoading(this.refs.submitBtn, false);
-        }
-    }
-
-    async loadJobs() {
-        try {
-            const response = await window.decypharrUtils.fetcher('/api/repair/jobs');
-            if (!response.ok) throw new Error('Failed to fetch jobs');
-
-            const data = await response.json();
-            this.state.jobs = Array.isArray(data) ? data : [];
-            this.renderJobsTable();
-        } catch (error) {
-            console.error('Error loading jobs:', error);
-            window.decypharrUtils.createToast('Error loading repair jobs', 'error');
-        }
-    }
-
-    extractStats(job) {
-        const zero = {
-            discovered: 0,
-            probed: 0,
-            broken: 0,
-            planned: 0,
-            executed: 0,
-            fixed: 0,
-            failed: 0,
-            unknown: 0
-        };
-
-        const stats = { ...zero, ...(job?.stats || {}) };
-        if (stats.broken === 0 && job?.broken_items) {
-            stats.broken = Object.values(job.broken_items).reduce((sum, items) => sum + (items?.length || 0), 0);
-        }
-        return stats;
-    }
-
-    getJobStatus(status) {
-        const map = {
-            pending: { text: 'Pending', class: 'badge-warning' },
-            started: { text: 'Running', class: 'badge-primary' },
-            processing: { text: 'Executing', class: 'badge-info' },
-            completed: { text: 'Completed', class: 'badge-success' },
-            failed: { text: 'Failed', class: 'badge-error' },
-            cancelled: { text: 'Cancelled', class: 'badge-ghost' }
-        };
-        return map[status] || { text: status || 'unknown', class: 'badge-ghost' };
-    }
-
-    getJobStage(stage) {
-        const map = {
-            queued: { text: 'Queued', class: 'badge-ghost' },
-            discovering: { text: 'Discovering', class: 'badge-primary' },
-            probing: { text: 'Probing', class: 'badge-primary' },
-            planning: { text: 'Planning', class: 'badge-info' },
-            executing: { text: 'Executing', class: 'badge-warning' },
-            verifying: { text: 'Verifying', class: 'badge-warning' },
-            completed: { text: 'Completed', class: 'badge-success' },
-            failed: { text: 'Failed', class: 'badge-error' },
-            cancelled: { text: 'Cancelled', class: 'badge-ghost' }
-        };
-        return map[stage] || { text: stage || '-', class: 'badge-ghost' };
-    }
-
-    formatMode(mode, autoProcess) {
-        if (!mode) {
-            return autoProcess ? 'Detect + Repair' : 'Detect Only';
-        }
-        return mode === 'detect_and_repair' ? 'Detect + Repair' : 'Detect Only';
-    }
-
-    getSortedJobs() {
-        const jobs = [...this.state.jobs];
-
-        jobs.sort((a, b) => {
-            let valueA = '';
-            let valueB = '';
-
-            switch (this.state.sortBy) {
-                case 'created_at':
-                    valueA = new Date(a.created_at || a.started_at || 0).getTime();
-                    valueB = new Date(b.created_at || b.started_at || 0).getTime();
-                    break;
-                case 'status':
-                    valueA = a.status || '';
-                    valueB = b.status || '';
-                    break;
-                default:
-                    valueA = a[this.state.sortBy] || '';
-                    valueB = b[this.state.sortBy] || '';
+            if (!res.ok) {
+                const msg = (data && (data.error || data.message)) || text || `HTTP ${res.status}`;
+                throw new Error(msg);
             }
-
-            if (typeof valueA === 'string') {
-                return this.state.sortDirection === 'asc'
-                    ? valueA.localeCompare(valueB)
-                    : valueB.localeCompare(valueA);
-            }
-            return this.state.sortDirection === 'asc' ? valueA - valueB : valueB - valueA;
-        });
-
-        return jobs;
+            // Server kicks the recheck off in the background and returns a
+            // run record immediately. Reload so the dashboard reflects the
+            // new active run; status polling takes it from there.
+            this.toast('Recheck started', 'success');
+            window.location.reload();
+        } catch (e) {
+            out.classList.remove('hidden');
+            out.innerHTML = `<span class="text-error">Recheck failed: ${this.escape(e.message)}</span>`;
+            btn.disabled = false;
+        }
     }
 
-    renderJobsTable() {
-        const jobs = this.getSortedJobs();
-        const totalPages = Math.max(1, Math.ceil(jobs.length / this.state.itemsPerPage));
-        if (this.state.currentPage > totalPages) {
-            this.state.currentPage = totalPages;
-        }
-
-        const startIndex = (this.state.currentPage - 1) * this.state.itemsPerPage;
-        const endIndex = Math.min(startIndex + this.state.itemsPerPage, jobs.length);
-        const pageJobs = jobs.slice(startIndex, endIndex);
-
-        this.refs.jobsTableBody.innerHTML = '';
-        this.refs.jobsPagination.innerHTML = '';
-
-        this.refs.selectAllJobs.checked = false;
-        this.refs.deleteSelectedJobs.disabled = true;
-
-        if (jobs.length === 0) {
-            this.refs.noJobsMessage.classList.remove('hidden');
+    renderRecheckResult(container, run) {
+        if (!container) return;
+        if (!run) {
+            container.classList.add('hidden');
             return;
         }
-
-        this.refs.noJobsMessage.classList.add('hidden');
-
-        pageJobs.forEach((job) => {
-            this.refs.jobsTableBody.appendChild(this.createJobRow(job));
-        });
-
-        this.renderJobsPagination(totalPages);
-        this.updateJobSelectionState();
-    }
-
-    createJobRow(job) {
-        const row = document.createElement('tr');
-        row.className = 'hover:bg-base-200 transition-colors';
-        row.dataset.jobId = job.id;
-
-        const status = this.getJobStatus(job.status);
-        const stage = this.getJobStage(job.stage);
-        const modeText = this.formatMode(job.mode, job.auto_process);
-        const startedDate = this.formatDate(job.created_at);
-        const stats = this.extractStats(job);
-        const canDelete = !['started', 'processing'].includes(job.status);
-
-        const arrs = (job.arrs && job.arrs.length > 0) ? job.arrs : ['managed_entries'];
-        const isRecurring = job.recurrent && job.schedule;
-        const typeBadge = isRecurring
-            ? `<div class="badge badge-info badge-sm tooltip" data-tip="${window.decypharrUtils.escapeHtml(job.schedule || '')}"><i class="bi bi-arrow-repeat mr-1"></i>Recurring</div>`
-            : `<div class="badge badge-ghost badge-sm">One-off</div>`;
-
-        row.innerHTML = `
-            <td>
-                <label class="cursor-pointer">
-                    <input type="checkbox" class="checkbox checkbox-sm checkbox-primary job-checkbox"
-                           value="${job.id}" ${canDelete ? '' : 'disabled'}>
-                </label>
-            </td>
-            <td>
-                <button class="btn btn-ghost btn-xs font-mono view-job" data-job-id="${job.id}">
-                    ${window.decypharrUtils.escapeHtml(job.id.substring(0, 8))}...
-                </button>
-            </td>
-            <td>
-                <div class="flex flex-wrap gap-1">
-                    ${arrs.map((arr) => `<div class="badge badge-secondary badge-xs">${window.decypharrUtils.escapeHtml(arr)}</div>`).join('')}
-                </div>
-            </td>
-            <td>
-                <time class="text-sm" datetime="${window.decypharrUtils.escapeHtml(job.created_at || '')}">${startedDate}</time>
-            </td>
-            <td><div class="badge ${status.class} badge-sm">${status.text}</div></td>
-            <td><div class="badge ${stage.class} badge-sm">${stage.text}</div></td>
-            <td>${typeBadge}</td>
-            <td><div class="badge badge-outline badge-sm">${modeText}</div></td>
-            <td>
-                <div class="text-xs font-mono leading-tight">
-                    B:${stats.broken} F:${stats.fixed} U:${stats.unknown}
-                </div>
-            </td>
-            <td>
-                <div class="flex gap-1">
-                    ${job.status === 'pending' && !isRecurring ? `
-                        <button class="btn btn-primary btn-xs process-job" data-job-id="${job.id}" title="Execute pending run">
-                            <i class="bi bi-play-fill"></i>
-                        </button>` : ''}
-                    ${['started', 'processing'].includes(job.status) ? `
-                        <button class="btn btn-warning btn-xs stop-job" data-job-id="${job.id}" title="Stop run">
-                            <i class="bi bi-stop-fill"></i>
-                        </button>` : ''}
-                    ${canDelete ? `
-                        <button class="btn btn-error btn-xs delete-job" data-job-id="${job.id}" title="Delete run">
-                            <i class="bi bi-trash"></i>
-                        </button>` : `
-                        <button class="btn btn-error btn-xs" disabled><i class="bi bi-trash"></i></button>`}
-                </div>
-            </td>
+        container.classList.remove('hidden');
+        const stats = run.stats || {};
+        const status = run.status || 'unknown';
+        const cls = {
+            running: 'badge-info',
+            completed: 'badge-success',
+            failed: 'badge-error',
+            cancelled: 'badge-warning',
+        }[status] || 'badge-ghost';
+        container.innerHTML = `
+            <div class="flex flex-wrap gap-3 items-center">
+                <span class="badge ${cls}">${this.escape(status)}</span>
+                <span class="font-mono text-xs">${this.escape(run.id || '')}</span>
+                ${run.source ? `<span class="opacity-70 text-xs">${this.escape(run.source)}</span>` : ''}
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 mt-3 text-xs">
+                <div>Candidates: <strong>${stats.candidates ?? 0}</strong></div>
+                <div>Probed: <strong>${stats.probed ?? 0}</strong></div>
+                <div class="${stats.broken ? 'text-error' : ''}">Broken: <strong>${stats.broken ?? 0}</strong></div>
+                <div class="${stats.healthy ? 'text-success' : ''}">Healthy: <strong>${stats.healthy ?? 0}</strong></div>
+                <div class="${stats.repaired ? 'text-success' : ''}">Repaired: <strong>${stats.repaired ?? 0}</strong></div>
+                <div class="${stats.repair_failed ? 'text-error' : ''}">Repair fail: <strong>${stats.repair_failed ?? 0}</strong></div>
+            </div>
+            ${run.error ? `<div class="mt-2 text-error text-xs">${this.escape(run.error)}</div>` : ''}
         `;
-
-        return row;
     }
 
-    renderJobsPagination(totalPages) {
-        if (totalPages <= 1) return;
-
-        const pagination = document.createElement('div');
-        pagination.className = 'join';
-
-        const prevBtn = document.createElement('button');
-        prevBtn.className = `join-item btn btn-sm ${this.state.currentPage === 1 ? 'btn-disabled' : ''}`;
-        prevBtn.innerHTML = '<i class="bi bi-chevron-left"></i>';
-        prevBtn.disabled = this.state.currentPage === 1;
-        if (this.state.currentPage > 1) {
-            prevBtn.addEventListener('click', () => {
-                this.state.currentPage--;
-                this.renderJobsTable();
-            });
-        }
-        pagination.appendChild(prevBtn);
-
-        const maxButtons = 5;
-        let startPage = Math.max(1, this.state.currentPage - Math.floor(maxButtons / 2));
-        let endPage = Math.min(totalPages, startPage + maxButtons - 1);
-        if (endPage - startPage + 1 < maxButtons) {
-            startPage = Math.max(1, endPage - maxButtons + 1);
-        }
-
-        for (let i = startPage; i <= endPage; i++) {
-            const pageBtn = document.createElement('button');
-            pageBtn.className = `join-item btn btn-sm ${i === this.state.currentPage ? 'btn-active' : ''}`;
-            pageBtn.textContent = i;
-            pageBtn.addEventListener('click', () => {
-                this.state.currentPage = i;
-                this.renderJobsTable();
-            });
-            pagination.appendChild(pageBtn);
-        }
-
-        const nextBtn = document.createElement('button');
-        nextBtn.className = `join-item btn btn-sm ${this.state.currentPage === totalPages ? 'btn-disabled' : ''}`;
-        nextBtn.innerHTML = '<i class="bi bi-chevron-right"></i>';
-        nextBtn.disabled = this.state.currentPage === totalPages;
-        if (this.state.currentPage < totalPages) {
-            nextBtn.addEventListener('click', () => {
-                this.state.currentPage++;
-                this.renderJobsTable();
-            });
-        }
-        pagination.appendChild(nextBtn);
-
-        this.refs.jobsPagination.appendChild(pagination);
+    escape(s) {
+        const div = document.createElement('div');
+        div.textContent = s == null ? '' : String(s);
+        return div.innerHTML;
     }
 
-    handleJobTableClick(e) {
-        const checkbox = e.target.closest('.job-checkbox');
-        if (checkbox) {
-            this.updateJobSelectionState();
+    async runNow() {
+        try {
+            const res = await fetch(`${this.api}/repair/run`, {method: 'POST'});
+            if (!res.ok) {
+                const txt = await res.text();
+                throw new Error(txt || `HTTP ${res.status}`);
+            }
+            this.toast('Sweep started', 'success');
+            await this.loadStatus();
+        } catch (e) {
+            this.toast(`Run failed: ${e.message}`, 'error');
+        }
+    }
+
+    async fixBroken() {
+        if (!confirm('Send delete + re-search for every currently broken entry to its Arr?')) return;
+        const btn = document.getElementById('fixBrokenBtn');
+        if (btn) btn.disabled = true;
+        try {
+            const res = await fetch(`${this.api}/repair/fix`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({}),
+            });
+            const text = await res.text();
+            if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
+            this.toast('Fix-broken started', 'success');
+            window.location.reload();
+        } catch (e) {
+            this.toast(`Fix failed: ${e.message}`, 'error');
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    async stopRun() {
+        try {
+            const res = await fetch(`${this.api}/repair/stop`, {method: 'POST'});
+            if (!res.ok) {
+                const txt = await res.text();
+                throw new Error(txt || `HTTP ${res.status}`);
+            }
+            this.toast('Stop requested', 'info');
+            await this.loadStatus();
+        } catch (e) {
+            this.toast(`Stop failed: ${e.message}`, 'error');
+        }
+    }
+
+    async clearHistory() {
+        if (!confirm('Clear all run history?')) return;
+        try {
+            const res = await fetch(`${this.api}/repair/runs`, {method: 'DELETE'});
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            await this.loadHistory();
+        } catch (e) {
+            this.toast(`Clear failed: ${e.message}`, 'error');
+        }
+    }
+
+    async loadStatus() {
+        try {
+            const status = await this.fetchJSON(`${this.api}/repair/status`);
+            this.renderStatus(status || {});
+            this.scheduleStatusPoll(status);
+        } catch (e) {
+            console.error('Failed to load status', e);
+        }
+    }
+
+    scheduleStatusPoll(status) {
+        const isRunning = !!(status && status.active_run);
+        const wasRunning = this.wasRunning === true;
+        this.wasRunning = isRunning;
+        // Run ended → refresh history. Only refetch the broken modal contents
+        // when it's actually open; the count badge is already updated from
+        // status.health_counts on every poll.
+        if (wasRunning && !isRunning) {
+            this.loadHistory();
+            if (this.isBrokenModalOpen()) this.loadBroken();
+        }
+        if (this.statusTimer) {
+            clearTimeout(this.statusTimer);
+            this.statusTimer = null;
+        }
+        const delay = isRunning ? 2000 : 15000;
+        this.statusTimer = setTimeout(() => this.loadStatus(), delay);
+    }
+
+    renderStatus(status) {
+        const line = document.getElementById('repairStatusLine');
+        const stop = document.getElementById('stopRunBtn');
+        const run = document.getElementById('runNowBtn');
+        const panel = document.getElementById('activeRunPanel');
+        const grid = document.getElementById('healthCountsGrid');
+
+        if (!status.enabled) {
+            line.textContent = 'Repair is disabled. Enable it in Settings → Repair, or click "Run now" for a one-off check.';
+        } else {
+            const next = status.next_run_at ? new Date(status.next_run_at).toLocaleString() : 'unknown';
+            line.textContent = `Repair enabled · next scheduled run: ${next}`;
+        }
+
+        const brokenCount = (status.health_counts || {}).broken || 0;
+        this.updateBrokenCount(brokenCount);
+        const fix = document.getElementById('fixBrokenBtn');
+        if (fix) fix.disabled = !!status.active_run || brokenCount === 0;
+        const view = document.getElementById('viewBrokenBtn');
+        if (view) view.disabled = brokenCount === 0;
+
+        if (status.active_run) {
+            stop.disabled = false;
+            run.disabled = true;
+            panel.classList.remove('hidden');
+            this.activeRunId = status.active_run.id;
+            document.getElementById('activeRunStage').textContent = status.active_run.stage || 'running';
+            document.getElementById('activeRunIdText').textContent = status.active_run.id || '-';
+            document.getElementById('activeRunStarted').textContent = status.active_run.started_at
+                ? new Date(status.active_run.started_at).toLocaleString()
+                : '-';
+            this.renderRunStats(document.getElementById('activeRunStats'), status.active_run.stats || {});
+        } else {
+            stop.disabled = true;
+            run.disabled = false;
+            panel.classList.add('hidden');
+            this.activeRunId = null;
+            document.getElementById('activeRunStage').textContent = '-';
+            document.getElementById('activeRunIdText').textContent = '-';
+            document.getElementById('activeRunStarted').textContent = '-';
+        }
+
+        const counts = status.health_counts || {};
+        const order = ['healthy', 'broken', 'repairing', 'stale', 'unknown', 'unsupported'];
+        grid.innerHTML = '';
+        for (const key of order) {
+            const n = counts[key] || 0;
+            const card = document.createElement('div');
+            card.className = 'stat bg-base-200 rounded-box p-3';
+            card.innerHTML = `
+                <div class="stat-title text-xs capitalize">${key}</div>
+                <div class="stat-value text-lg ${this.healthColor(key)}">${n}</div>
+            `;
+            grid.appendChild(card);
+        }
+    }
+
+    renderRunStats(container, stats) {
+        if (!container) return;
+        const fields = [
+            ['candidates', 'Candidates'],
+            ['skipped_fresh', 'Skipped'],
+            ['probed', 'Probed'],
+            ['healthy', 'Healthy'],
+            ['broken', 'Broken'],
+            ['repaired', 'Repaired'],
+            ['repair_failed', 'Repair fail'],
+        ];
+        container.innerHTML = '';
+        for (const [k, label] of fields) {
+            const el = document.createElement('div');
+            el.className = 'bg-base-100 rounded p-2';
+            el.innerHTML = `<div class="text-[10px] opacity-60 uppercase">${label}</div><div class="font-mono">${stats[k] || 0}</div>`;
+            container.appendChild(el);
+        }
+    }
+
+    healthColor(status) {
+        switch (status) {
+            case 'healthy':
+                return 'text-success';
+            case 'broken':
+                return 'text-error';
+            case 'repairing':
+                return 'text-info';
+            case 'stale':
+                return 'text-warning';
+            case 'unsupported':
+                return 'text-base-content/60';
+            default:
+                return '';
+        }
+    }
+
+    async loadHistory() {
+        try {
+            const runs = await this.fetchJSON(`${this.api}/repair/runs`);
+            this.renderHistory(runs || []);
+        } catch (e) {
+            console.error('Failed to load history', e);
+        }
+    }
+
+    async loadBroken() {
+        try {
+            const list = await this.fetchJSON(`${this.api}/repair/health?status=broken`);
+            this.renderBroken(list || []);
+        } catch (e) {
+            console.error('Failed to load broken entries', e);
+        }
+    }
+
+    renderBroken(entries) {
+        this.updateBrokenCount(entries.length);
+
+        // Sort: most recently failed first, then by name.
+        entries.sort((a, b) => {
+            const ta = a.last_failed_at ? new Date(a.last_failed_at).getTime() : 0;
+            const tb = b.last_failed_at ? new Date(b.last_failed_at).getTime() : 0;
+            if (ta !== tb) return tb - ta;
+            return (a.entry_name || '').localeCompare(b.entry_name || '');
+        });
+
+        this.brokenState.items = entries;
+        // Clamp current page so a shrinking list doesn't strand the user on an empty page.
+        const totalPages = Math.max(1, Math.ceil(entries.length / this.brokenState.pageSize));
+        if (this.brokenState.page > totalPages) this.brokenState.page = totalPages;
+        if (this.brokenState.page < 1) this.brokenState.page = 1;
+        this.renderBrokenPage();
+    }
+
+    renderBrokenPage() {
+        const tbody = document.getElementById('brokenTableBody');
+        const empty = document.getElementById('noBrokenMessage');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+
+        const {items, page, pageSize} = this.brokenState;
+        if (!items.length) {
+            empty?.classList.remove('hidden');
+            this.renderBrokenPagination();
             return;
         }
+        empty?.classList.add('hidden');
 
-        const target = e.target.closest('button');
-        if (!target) return;
+        const start = (page - 1) * pageSize;
+        const slice = items.slice(start, start + pageSize);
 
-        const jobId = target.dataset.jobId;
-        if (!jobId) return;
+        for (const h of slice) {
+            const rowId = `broken-row-${this.slug(h.entry_name)}`;
+            const fileCount = h.file_count ?? 0;
+            const brokenCount = h.broken_count ?? (h.broken_files?.length ?? 0);
+            const lastChecked = h.last_checked_at ? new Date(h.last_checked_at).toLocaleString() : '-';
+            const lastRepair = h.last_repair_at ? new Date(h.last_repair_at).toLocaleString() : '-';
+            const reason = h.failure_reason || '-';
 
-        if (target.classList.contains('view-job')) {
-            this.viewJobDetails(jobId);
-        } else if (target.classList.contains('process-job')) {
-            this.processJob(jobId);
-        } else if (target.classList.contains('stop-job')) {
-            this.stopJob(jobId);
-        } else if (target.classList.contains('delete-job')) {
-            this.deleteJob(jobId);
-        }
-    }
-
-    async viewJobDetails(jobId) {
-        const job = this.state.jobs.find((j) => j.id === jobId);
-        if (!job) return;
-
-        this.state.currentJob = job;
-        this.populateJobModal(job);
-        this.refs.jobDetailsModal.showModal();
-    }
-
-    populateJobModal(job) {
-        const status = this.getJobStatus(job.status);
-        const stage = this.getJobStage(job.stage);
-        const stats = this.extractStats(job);
-
-        this.refs.modalJobId.textContent = job.id.substring(0, 8);
-        this.refs.modalJobStatus.innerHTML = `<span class="badge ${status.class}">${status.text}</span>`;
-        this.refs.modalJobStage.innerHTML = `<span class="badge ${stage.class}">${stage.text}</span>`;
-        this.refs.modalJobStarted.textContent = this.formatDate(job.created_at);
-        this.refs.modalJobCompleted.textContent = this.formatDate(job.finished_at);
-
-        this.refs.modalJobArrs.textContent = (job.arrs && job.arrs.length > 0) ? job.arrs.join(', ') : 'managed_entries';
-        this.refs.modalJobMediaIds.textContent = (job.media_ids && job.media_ids.length > 0) ? job.media_ids.join(', ') : 'All media';
-        this.refs.modalJobMode.textContent = this.formatMode(job.mode, job.auto_process);
-        this.refs.modalJobAutoProcess.textContent = job.auto_process ? 'Yes' : 'No';
-        if (this.refs.modalJobStrategy) {
-            const strategyMap = { per_torrent: 'Per Torrent', per_file: 'Per File' };
-            this.refs.modalJobStrategy.textContent = strategyMap[job.strategy] || job.strategy || 'Per Torrent';
-        }
-        if (this.refs.modalJobWorkers) {
-            this.refs.modalJobWorkers.textContent = job.workers || '5';
-        }
-        if (this.refs.modalJobSchedule) {
-            this.refs.modalJobSchedule.textContent = (job.recurrent && job.schedule) ? job.schedule : 'N/A';
-        }
-
-        this.setStat(this.refs.modalStatDiscovered, stats.discovered);
-        this.setStat(this.refs.modalStatProbed, stats.probed);
-        this.setStat(this.refs.modalStatBroken, stats.broken);
-        this.setStat(this.refs.modalStatUnknown, stats.unknown);
-        this.setStat(this.refs.modalStatPlanned, stats.planned);
-        this.setStat(this.refs.modalStatExecuted, stats.executed);
-        this.setStat(this.refs.modalStatFixed, stats.fixed);
-        this.setStat(this.refs.modalStatFailed, stats.failed);
-
-        if (job.error) {
-            this.refs.modalJobError.textContent = job.error;
-            this.refs.errorContainer.classList.remove('hidden');
-        } else {
-            this.refs.errorContainer.classList.add('hidden');
-        }
-
-        this.refs.processJobBtn.classList.toggle('hidden', job.status !== 'pending');
-        this.refs.stopJobBtn.classList.toggle('hidden', !['started', 'processing'].includes(job.status));
-
-        this.renderActions(job.actions || []);
-
-        if (job.broken_items) {
-            this.state.allBrokenItems = this.processItemsData(job.broken_items);
-            this.state.filteredItems = [...this.state.allBrokenItems];
-        } else {
-            this.state.allBrokenItems = [];
-            this.state.filteredItems = [];
-        }
-
-        this.populateArrFilter();
-        this.state.currentItemsPage = 1;
-        this.renderBrokenItemsTable();
-        this.updateItemsStats();
-    }
-
-    renderActions(actions) {
-        this.refs.actionItemsTableBody.innerHTML = '';
-
-        if (!actions || actions.length === 0) {
-            this.refs.noActionsMessage.classList.remove('hidden');
-            return;
-        }
-
-        this.refs.noActionsMessage.classList.add('hidden');
-
-        actions.forEach((action) => {
-            const row = document.createElement('tr');
-            const status = this.getActionStatus(action.status);
-
-            row.innerHTML = `
-                <td class="font-mono text-xs">${window.decypharrUtils.escapeHtml(action.type || '-')}</td>
-                <td>${window.decypharrUtils.escapeHtml(action.protocol || '-')}</td>
-                <td class="font-mono text-xs">${window.decypharrUtils.escapeHtml((action.entry_id || '-').substring(0, 16))}</td>
-                <td><span class="badge ${status.class} badge-xs">${status.text}</span></td>
-                <td class="text-xs">${this.formatDate(action.started_at)}</td>
-                <td class="text-xs">${this.formatDate(action.completed_at)}</td>
-                <td class="text-xs text-error max-w-56 truncate" title="${window.decypharrUtils.escapeHtml(action.error || '')}">
-                    ${window.decypharrUtils.escapeHtml(action.error || '-')}
+            const tr = document.createElement('tr');
+            tr.className = 'cursor-pointer hover:bg-base-200';
+            tr.innerHTML = `
+                <td class="w-8">
+                    <i class="bi bi-chevron-right transition-transform" id="${rowId}-caret"></i>
+                </td>
+                <td class="font-mono text-sm break-all">${this.escape(h.entry_name)}</td>
+                <td><span class="badge badge-ghost badge-sm">${this.escape(h.protocol || 'unknown')}</span></td>
+                <td>${fileCount}</td>
+                <td class="text-error font-medium">${brokenCount}</td>
+                <td class="text-xs">${this.escape(reason)}</td>
+                <td class="text-xs">${lastChecked}</td>
+                <td class="text-xs">${lastRepair}</td>
+                <td class="text-right whitespace-nowrap">
+                    <button class="btn btn-xs btn-outline" data-action="recheck" data-name="${this.escapeAttr(h.entry_name)}" aria-label="Recheck ${this.escape(h.entry_name)}">
+                        <i class="bi bi-search-heart"></i>
+                    </button>
+                    <button class="btn btn-xs btn-error btn-outline" data-action="fix" data-name="${this.escapeAttr(h.entry_name)}" aria-label="Fix ${this.escape(h.entry_name)}">
+                        <i class="bi bi-bandaid"></i>
+                    </button>
                 </td>
             `;
-            this.refs.actionItemsTableBody.appendChild(row);
-        });
-    }
+            tbody.appendChild(tr);
 
-    getActionStatus(status) {
-        const map = {
-            planned: { text: 'Planned', class: 'badge-ghost' },
-            running: { text: 'Running', class: 'badge-primary' },
-            succeeded: { text: 'Succeeded', class: 'badge-success' },
-            failed: { text: 'Failed', class: 'badge-error' },
-            skipped: { text: 'Skipped', class: 'badge-warning' }
-        };
-        return map[status] || { text: status || '-', class: 'badge-ghost' };
-    }
+            const detail = document.createElement('tr');
+            detail.id = rowId;
+            detail.className = 'hidden';
+            detail.innerHTML = `
+                <td colspan="9" class="bg-base-200/40 p-0">
+                    <div class="p-4 space-y-2">
+                        ${this.renderBrokenFiles(h.broken_files || [])}
+                    </div>
+                </td>
+            `;
+            tbody.appendChild(detail);
 
-    setStat(ref, value) {
-        if (ref) {
-            ref.textContent = Number(value || 0).toString();
-        }
-    }
-
-    processItemsData(brokenItems) {
-        const items = [];
-
-        Object.entries(brokenItems).forEach(([arrName, entries]) => {
-            (entries || []).forEach((item, index) => {
-                items.push({
-                    id: `${arrName}-${index}`,
-                    arr: arrName,
-                    path: item.path || item.file_path || item.targetPath || 'Unknown path',
-                    size: item.size || 0,
-                    type: this.getFileType(item.path || item.targetPath || ''),
-                    fileId: item.fileId || item.id || `${arrName}-${index}`
-                });
+            tr.addEventListener('click', (ev) => {
+                if (ev.target.closest('[data-action]')) return;
+                const hidden = detail.classList.toggle('hidden');
+                const caret = document.getElementById(`${rowId}-caret`);
+                if (caret) caret.style.transform = hidden ? '' : 'rotate(90deg)';
             });
-        });
-
-        return items;
-    }
-
-    getFileType(path) {
-        const movieExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm'];
-        const tvIndicators = ['/tv/', '/television/', '/series/', '/shows/'];
-
-        const lower = path.toLowerCase();
-        if (tvIndicators.some((indicator) => lower.includes(indicator))) return 'tv';
-        if (movieExtensions.some((ext) => lower.endsWith(ext))) {
-            return lower.includes('/movies/') || lower.includes('/films/') ? 'movie' : 'tv';
+            tr.querySelector('[data-action="recheck"]')?.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                this.recheckOne(h.entry_name);
+            });
+            tr.querySelector('[data-action="fix"]')?.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                this.fixOne(h.entry_name);
+            });
         }
-        return 'other';
+        this.renderBrokenPagination();
     }
 
-    populateArrFilter() {
-        this.refs.arrFilterSelect.innerHTML = '<option value="">All Arrs</option>';
-        const uniqueArrs = [...new Set(this.state.allBrokenItems.map((item) => item.arr))];
+    renderBrokenPagination() {
+        const bar = document.getElementById('brokenPaginationBar');
+        const info = document.getElementById('brokenPaginationInfo');
+        const controls = document.getElementById('brokenPaginationControls');
+        if (!bar || !info || !controls) return;
 
-        uniqueArrs.forEach((arr) => {
-            const option = document.createElement('option');
-            option.value = arr;
-            option.textContent = arr;
-            this.refs.arrFilterSelect.appendChild(option);
-        });
-    }
+        const {items, page, pageSize} = this.brokenState;
+        const total = items.length;
+        if (total === 0) {
+            bar.classList.add('hidden');
+            return;
+        }
+        bar.classList.remove('hidden');
 
-    applyFilters() {
-        const searchTerm = this.refs.itemSearchInput.value.toLowerCase();
-        const arrFilter = this.refs.arrFilterSelect.value;
-        const pathFilter = this.refs.pathFilterSelect.value;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        const start = (page - 1) * pageSize + 1;
+        const end = Math.min(start + pageSize - 1, total);
+        info.textContent = `Showing ${start}-${end} of ${total}`;
 
-        this.state.filteredItems = this.state.allBrokenItems.filter((item) => {
-            const matchesSearch = !searchTerm || item.path.toLowerCase().includes(searchTerm);
-            const matchesArr = !arrFilter || item.arr === arrFilter;
-            const matchesPath = !pathFilter || item.type === pathFilter;
-            return matchesSearch && matchesArr && matchesPath;
-        });
-
-        this.state.currentItemsPage = 1;
-        this.renderBrokenItemsTable();
-        this.updateItemsStats();
-    }
-
-    clearFilters() {
-        this.refs.itemSearchInput.value = '';
-        this.refs.arrFilterSelect.value = '';
-        this.refs.pathFilterSelect.value = '';
-        this.applyFilters();
-    }
-
-    renderBrokenItemsTable() {
-        this.refs.brokenItemsTableBody.innerHTML = '';
-        this.refs.itemsPagination.innerHTML = '';
-
-        if (this.state.allBrokenItems.length === 0) {
-            this.refs.noBrokenItemsMessage.classList.remove('hidden');
-            this.refs.noFilteredItemsMessage.classList.add('hidden');
+        if (totalPages <= 1) {
+            controls.innerHTML = '';
             return;
         }
 
-        if (this.state.filteredItems.length === 0) {
-            this.refs.noBrokenItemsMessage.classList.add('hidden');
-            this.refs.noFilteredItemsMessage.classList.remove('hidden');
-            return;
+        let html = `<button class="join-item btn btn-sm ${page === 1 ? 'btn-disabled' : ''}"
+                            onclick="window.repairManager.goToBrokenPage(${page - 1})">«</button>`;
+        for (let i = 1; i <= totalPages; i++) {
+            if (i === 1 || i === totalPages || (i >= page - 2 && i <= page + 2)) {
+                html += `<button class="join-item btn btn-sm ${i === page ? 'btn-active' : ''}"
+                                onclick="window.repairManager.goToBrokenPage(${i})">${i}</button>`;
+            } else if (i === page - 3 || i === page + 3) {
+                html += `<button class="join-item btn btn-sm btn-disabled">…</button>`;
+            }
         }
-
-        this.refs.noBrokenItemsMessage.classList.add('hidden');
-        this.refs.noFilteredItemsMessage.classList.add('hidden');
-
-        const totalPages = Math.ceil(this.state.filteredItems.length / this.state.itemsPerModalPage);
-        const startIndex = (this.state.currentItemsPage - 1) * this.state.itemsPerModalPage;
-        const endIndex = Math.min(startIndex + this.state.itemsPerModalPage, this.state.filteredItems.length);
-        const pageItems = this.state.filteredItems.slice(startIndex, endIndex);
-
-        pageItems.forEach((item) => {
-            this.refs.brokenItemsTableBody.appendChild(this.createBrokenItemRow(item));
-        });
-
-        this.renderItemsPagination(totalPages);
+        html += `<button class="join-item btn btn-sm ${page === totalPages ? 'btn-disabled' : ''}"
+                         onclick="window.repairManager.goToBrokenPage(${page + 1})">»</button>`;
+        controls.innerHTML = html;
     }
 
-    createBrokenItemRow(item) {
-        const row = document.createElement('tr');
-        row.className = 'hover:bg-base-200 transition-colors';
+    goToBrokenPage(p) {
+        const totalPages = Math.max(1, Math.ceil(this.brokenState.items.length / this.brokenState.pageSize));
+        if (p < 1 || p > totalPages || p === this.brokenState.page) return;
+        this.brokenState.page = p;
+        this.renderBrokenPage();
+    }
 
-        const typeColor = {
-            movie: 'badge-primary',
-            tv: 'badge-secondary',
-            other: 'badge-ghost'
-        };
-
-        row.innerHTML = `
-            <td><div class="badge badge-info badge-xs">${window.decypharrUtils.escapeHtml(item.arr)}</div></td>
-            <td>
-                <div class="text-sm max-w-xs truncate" title="${window.decypharrUtils.escapeHtml(item.path)}">
-                    ${window.decypharrUtils.escapeHtml(item.path)}
-                </div>
-            </td>
-            <td><div class="badge ${typeColor[item.type]} badge-xs">${item.type}</div></td>
-            <td><span class="text-sm font-mono">${window.decypharrUtils.formatBytes(item.size)}</span></td>
+    renderBrokenFiles(files) {
+        if (!files.length) {
+            return `<div class="text-sm opacity-60">No broken file details.</div>`;
+        }
+        const rows = files.map(f => {
+            const arr = f.arr_name ? `${this.escape(f.arr_name)}${f.arr_kind ? ` (${this.escape(f.arr_kind)})` : ''}` : '<span class="opacity-50">—</span>';
+            const ids = [];
+            if (f.media_id) ids.push(`media:${f.media_id}`);
+            if (f.episode_id) ids.push(`ep:${f.episode_id}`);
+            if (f.arr_file_id) ids.push(`file:${f.arr_file_id}`);
+            const idStr = ids.length ? `<span class="font-mono text-[10px] opacity-70">${ids.join(' · ')}</span>` : '';
+            const size = f.size ? this.formatBytes(f.size) : '-';
+            return `
+                <tr>
+                    <td class="font-mono text-xs break-all">${this.escape(f.file_name || '')}</td>
+                    <td class="text-xs">${this.escape(f.reason || '-')}</td>
+                    <td class="text-xs">${size}</td>
+                    <td class="text-xs">${arr}</td>
+                    <td>${idStr}</td>
+                </tr>
+            `;
+        }).join('');
+        return `
+            <div class="overflow-x-auto">
+                <table class="table table-xs">
+                    <thead><tr><th>File</th><th>Reason</th><th>Size</th><th>Arr</th><th>Ids</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
         `;
-
-        return row;
     }
 
-    renderItemsPagination(totalPages) {
-        if (totalPages <= 1) return;
-
-        const pagination = document.createElement('div');
-        pagination.className = 'join';
-
-        const prevBtn = document.createElement('button');
-        prevBtn.className = `join-item btn btn-sm ${this.state.currentItemsPage === 1 ? 'btn-disabled' : ''}`;
-        prevBtn.innerHTML = '<i class="bi bi-chevron-left"></i>';
-        prevBtn.disabled = this.state.currentItemsPage === 1;
-        if (this.state.currentItemsPage > 1) {
-            prevBtn.addEventListener('click', () => {
-                this.state.currentItemsPage--;
-                this.renderBrokenItemsTable();
-            });
-        }
-        pagination.appendChild(prevBtn);
-
-        const maxButtons = 5;
-        let startPage = Math.max(1, this.state.currentItemsPage - Math.floor(maxButtons / 2));
-        let endPage = Math.min(totalPages, startPage + maxButtons - 1);
-        if (endPage - startPage + 1 < maxButtons) {
-            startPage = Math.max(1, endPage - maxButtons + 1);
-        }
-
-        for (let i = startPage; i <= endPage; i++) {
-            const pageBtn = document.createElement('button');
-            pageBtn.className = `join-item btn btn-sm ${i === this.state.currentItemsPage ? 'btn-active' : ''}`;
-            pageBtn.textContent = i;
-            pageBtn.addEventListener('click', () => {
-                this.state.currentItemsPage = i;
-                this.renderBrokenItemsTable();
-            });
-            pagination.appendChild(pageBtn);
-        }
-
-        const nextBtn = document.createElement('button');
-        nextBtn.className = `join-item btn btn-sm ${this.state.currentItemsPage === totalPages ? 'btn-disabled' : ''}`;
-        nextBtn.innerHTML = '<i class="bi bi-chevron-right"></i>';
-        nextBtn.disabled = this.state.currentItemsPage === totalPages;
-        if (this.state.currentItemsPage < totalPages) {
-            nextBtn.addEventListener('click', () => {
-                this.state.currentItemsPage++;
-                this.renderBrokenItemsTable();
-            });
-        }
-        pagination.appendChild(nextBtn);
-
-        this.refs.itemsPagination.appendChild(pagination);
-    }
-
-    updateItemsStats() {
-        this.refs.totalItemsCount.textContent = this.state.allBrokenItems.length;
-        this.refs.modalFooterStats.textContent =
-            `Total: ${this.state.allBrokenItems.length} | Filtered: ${this.state.filteredItems.length}`;
-    }
-
-    async processJob(jobId) {
+    async recheckOne(name) {
         try {
-            const response = await window.decypharrUtils.fetcher(`/api/repair/jobs/${jobId}/process`, {
-                method: 'POST'
-            });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(errorText || 'Failed to process job');
-            }
-
-            window.decypharrUtils.createToast('Repair execution started', 'success');
-            await this.loadJobs();
-        } catch (error) {
-            console.error('Error processing job:', error);
-            window.decypharrUtils.createToast(`Error processing job: ${error.message}`, 'error');
+            const res = await fetch(`${this.api}/repair/health/${encodeURIComponent(name)}/check`, {method: 'POST'});
+            if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+            this.toast(`Recheck started for ${name}`, 'success');
+            // Recheck flips the entry to repairing; refresh shortly so the row updates.
+            setTimeout(() => { this.loadBroken(); this.loadStatus(); }, 800);
+        } catch (e) {
+            this.toast(`Recheck failed: ${e.message}`, 'error');
         }
     }
 
-    async stopJob(jobId) {
-        if (!confirm('Are you sure you want to stop this run?')) return;
-
+    async fixOne(name) {
+        if (!confirm(`Send delete + re-search for "${name}" to its Arr?`)) return;
         try {
-            const response = await window.decypharrUtils.fetcher(`/api/repair/jobs/${jobId}/stop`, {
-                method: 'POST'
+            const res = await fetch(`${this.api}/repair/fix`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({names: [name]}),
             });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(errorText || 'Failed to stop run');
-            }
-
-            window.decypharrUtils.createToast('Stop requested', 'success');
-            await this.loadJobs();
-        } catch (error) {
-            console.error('Error stopping job:', error);
-            window.decypharrUtils.createToast(`Error stopping job: ${error.message}`, 'error');
+            if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+            this.toast(`Fix started for ${name}`, 'success');
+            window.location.reload();
+        } catch (e) {
+            this.toast(`Fix failed: ${e.message}`, 'error');
         }
     }
 
-    async deleteJob(jobId) {
-        if (!confirm('Are you sure you want to delete this run?')) return;
+    slug(s) {
+        return String(s || '').replace(/[^a-zA-Z0-9_-]+/g, '_');
+    }
 
-        try {
-            const response = await window.decypharrUtils.fetcher('/api/repair/jobs', {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ids: [jobId] })
-            });
+    escapeAttr(s) {
+        return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
 
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(errorText || 'Failed to delete run');
-            }
+    formatBytes(n) {
+        if (!n || n < 0) return '-';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        let i = 0;
+        let v = n;
+        while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+        return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
+    }
 
-            window.decypharrUtils.createToast('Run deleted', 'success');
-            await this.loadJobs();
-        } catch (error) {
-            console.error('Error deleting job:', error);
-            window.decypharrUtils.createToast(`Error deleting job: ${error.message}`, 'error');
+    renderHistory(runs) {
+        const tbody = document.getElementById('runsTableBody');
+        const empty = document.getElementById('noRunsMessage');
+        tbody.innerHTML = '';
+        if (!runs.length) {
+            empty.classList.remove('hidden');
+            return;
+        }
+        empty.classList.add('hidden');
+        for (const run of runs) {
+            const tr = document.createElement('tr');
+            const start = run.started_at ? new Date(run.started_at) : null;
+            const end = run.completed_at ? new Date(run.completed_at) : null;
+            const duration = start && end ? this.formatDuration(end - start) : (start ? 'running' : '-');
+            tr.innerHTML = `
+                <td class="font-mono text-sm">${start ? start.toLocaleString() : '-'}</td>
+                <td>${run.trigger || '-'}</td>
+                <td>${this.statusBadge(run.status)}</td>
+                <td>${run.stats?.probed ?? 0}</td>
+                <td class="${run.stats?.broken ? 'text-error font-medium' : ''}">${run.stats?.broken ?? 0}</td>
+                <td class="${run.stats?.repaired ? 'text-success font-medium' : ''}">${run.stats?.repaired ?? 0}</td>
+                <td>${duration}</td>
+                <td class="text-xs text-error">${run.error || ''}</td>
+            `;
+            tbody.appendChild(tr);
         }
     }
 
-    async deleteSelectedJobs() {
-        const selectedIds = Array.from(document.querySelectorAll('.job-checkbox:checked')).map((checkbox) => checkbox.value);
-        if (selectedIds.length === 0) return;
-
-        if (!confirm(`Are you sure you want to delete ${selectedIds.length} run(s)?`)) return;
-
-        try {
-            const response = await window.decypharrUtils.fetcher('/api/repair/jobs', {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ids: selectedIds })
-            });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(errorText || 'Failed to delete runs');
-            }
-
-            window.decypharrUtils.createToast(`${selectedIds.length} run(s) deleted`, 'success');
-            await this.loadJobs();
-        } catch (error) {
-            console.error('Error deleting jobs:', error);
-            window.decypharrUtils.createToast(`Error deleting jobs: ${error.message}`, 'error');
-        }
+    statusBadge(status) {
+        const cls = {
+            running: 'badge-info',
+            completed: 'badge-success',
+            failed: 'badge-error',
+            cancelled: 'badge-warning',
+        }[status] || 'badge-ghost';
+        return `<span class="badge ${cls}">${status || 'unknown'}</span>`;
     }
 
-    toggleSelectAllJobs(checked) {
-        const checkboxes = document.querySelectorAll('.job-checkbox:not(:disabled)');
-        checkboxes.forEach((checkbox) => {
-            checkbox.checked = checked;
-        });
-        this.updateJobSelectionState();
+    formatDuration(ms) {
+        if (!ms || ms < 0) return '-';
+        const s = Math.round(ms / 1000);
+        if (s < 60) return `${s}s`;
+        const m = Math.floor(s / 60);
+        const r = s % 60;
+        return `${m}m ${r}s`;
     }
 
-    updateJobSelectionState() {
-        const checkedBoxes = document.querySelectorAll('.job-checkbox:checked');
-        const enabledBoxes = document.querySelectorAll('.job-checkbox:not(:disabled)');
-
-        this.refs.deleteSelectedJobs.disabled = checkedBoxes.length === 0;
-
-        if (enabledBoxes.length === 0) {
-            this.refs.selectAllJobs.checked = false;
-            this.refs.selectAllJobs.indeterminate = false;
-        } else if (checkedBoxes.length === enabledBoxes.length) {
-            this.refs.selectAllJobs.checked = true;
-            this.refs.selectAllJobs.indeterminate = false;
-        } else if (checkedBoxes.length > 0) {
-            this.refs.selectAllJobs.checked = false;
-            this.refs.selectAllJobs.indeterminate = true;
-        } else {
-            this.refs.selectAllJobs.checked = false;
-            this.refs.selectAllJobs.indeterminate = false;
-        }
+    async fetchJSON(url) {
+        const res = await fetch(url, {credentials: 'same-origin'});
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
     }
 
-    async processCurrentJob() {
-        if (!this.state.currentJob) return;
-        await this.processJob(this.state.currentJob.id);
-        this.refs.jobDetailsModal.close();
-    }
-
-    async stopCurrentJob() {
-        if (!this.state.currentJob) return;
-        await this.stopJob(this.state.currentJob.id);
-        this.refs.jobDetailsModal.close();
-    }
-
-    handleItemTableClick(_e) {
-        // kept for parity/future interaction; no-op for now
-    }
-
-    startAutoRefresh() {
-        this.refreshInterval = setInterval(() => {
-            const hasActiveJobs = this.state.jobs.some((job) => ['started', 'processing'].includes(job.status));
-            if (hasActiveJobs || !this.refs.jobDetailsModal?.open) {
-                this.loadJobs();
-            }
-        }, 10000);
-
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                if (this.refreshInterval) {
-                    clearInterval(this.refreshInterval);
-                    this.refreshInterval = null;
-                }
-            } else if (!this.refreshInterval) {
-                this.startAutoRefresh();
-            }
-        });
-
-        window.addEventListener('beforeunload', () => {
-            if (this.refreshInterval) {
-                clearInterval(this.refreshInterval);
-            }
-        });
-    }
-
-    formatDate(value) {
-        if (!value) return 'N/A';
-        const d = new Date(value);
-        if (Number.isNaN(d.getTime())) return 'N/A';
-        return d.toLocaleString();
+    toast(message, type = 'info') {
+        if (typeof window.toast === 'function') return window.toast(message, type);
+        if (typeof window.showToast === 'function') return window.showToast(message, type);
+        console.log(`[${type}]`, message);
     }
 }
 
-const RepairUtils = {
-    formatRepairStatus(status, error = null) {
-        const map = {
-            pending: { icon: 'bi-clock', class: 'text-warning', message: 'Waiting to run' },
-            started: { icon: 'bi-play-circle', class: 'text-primary', message: 'Repair in progress' },
-            processing: { icon: 'bi-gear', class: 'text-info', message: 'Executing actions' },
-            completed: { icon: 'bi-check-circle', class: 'text-success', message: 'Repair completed successfully' },
-            failed: { icon: 'bi-x-circle', class: 'text-error', message: error || 'Repair failed' },
-            cancelled: { icon: 'bi-stop-circle', class: 'text-warning', message: 'Repair was cancelled' }
-        };
-        return map[status] || { icon: 'bi-question-circle', class: 'text-gray-500', message: `Unknown status: ${status}` };
-    }
-};
+window.RepairManager = RepairManager;

@@ -25,8 +25,10 @@
 
             <!-- Error state -->
             <div id="error-state" class="alert alert-error hidden mb-4">
-                <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none"
+                     viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
                 </svg>
                 <span id="error-message">An error occurred</span>
             </div>
@@ -34,26 +36,30 @@
             <!-- Step 1: Authentication -->
             <div id="step-1" class="setup-step hidden">
                 <h3 class="text-xl font-semibold mb-4">Step 1: Authentication Setup (Optional)</h3>
-                <p class="text-sm text-gray-500 mb-4">Set up a username and password to protect your instance, or skip to continue without authentication.</p>
+                <p class="text-sm text-gray-500 mb-4">Set up a username and password to protect your instance, or skip
+                    to continue without authentication.</p>
 
                 <form id="auth-form" class="space-y-4">
                     <div>
                         <label class="label" for="auth-username">
                             <span>Username</span>
                         </label>
-                        <input type="text" class="input input-bordered w-full" id="auth-username" name="username" placeholder="Enter username">
+                        <input type="text" class="input input-bordered w-full" id="auth-username" name="username"
+                               placeholder="Enter username">
                     </div>
                     <div>
                         <label class="label" for="auth-password">
                             <span>Password</span>
                         </label>
-                        <input type="password" class="input input-bordered w-full" id="auth-password" name="password" placeholder="Enter password">
+                        <input type="password" class="input input-bordered w-full" id="auth-password" name="password"
+                               placeholder="Enter password">
                     </div>
                     <div>
                         <label class="label" for="auth-confirm-password">
                             <span>Confirm Password</span>
                         </label>
-                        <input type="password" class="input input-bordered w-full" id="auth-confirm-password" name="confirm_password" placeholder="Re-enter password">
+                        <input type="password" class="input input-bordered w-full" id="auth-confirm-password"
+                               name="confirm_password" placeholder="Re-enter password">
                     </div>
                 </form>
 
@@ -67,7 +73,8 @@
             <div id="step-2" class="setup-step hidden">
                 <h3 class="text-xl font-semibold mb-2">Step 2: Add Debrid Account (Optional)</h3>
                 <p class="text-sm text-gray-500">Configure a debrid service to download and stream cached content.</p>
-                <p class="text-xs text-warning mb-4">You must configure at least one Debrid or Usenet provider before finishing the setup.</p>
+                <p class="text-xs text-warning mb-4">You must configure at least one Debrid or Usenet provider before
+                    finishing the setup.</p>
 
                 <form id="debrid-form" class="space-y-4">
                     <div>
@@ -86,7 +93,8 @@
                         <label class="label" for="debrid-api-key">
                             <span>API Key</span>
                         </label>
-                        <input type="text" class="input input-bordered w-full" id="debrid-api-key" name="api_key" placeholder="Enter your API key" required>
+                        <input type="text" class="input input-bordered w-full" id="debrid-api-key" name="api_key"
+                               placeholder="Enter your API key" required>
                         <label class="label">
                             <span class="label-text-alt">Get your API key from your debrid provider's website</span>
                         </label>
@@ -106,7 +114,8 @@
             <div id="step-3" class="setup-step hidden">
                 <h3 class="text-xl font-semibold mb-2">Step 3: Usenet Configuration (Optional)</h3>
                 <p class="text-sm text-gray-500">Add a usenet provider to enable NZB streaming and downloading.</p>
-                <p class="text-xs text-warning mb-4">Either this usenet provider or the previous debrid step must be configured.</p>
+                <p class="text-xs text-warning mb-4">Either this usenet provider or the previous debrid step must be
+                    configured.</p>
 
                 <form id="usenet-form" class="space-y-4">
                     <div id="usenet-config" class="space-y-4">
@@ -115,13 +124,15 @@
                                 <label class="label" for="usenet-host">
                                     <span>Server Host</span>
                                 </label>
-                                <input type="text" class="input input-bordered w-full" id="usenet-host" name="host" placeholder="news.example.com">
+                                <input type="text" class="input input-bordered w-full" id="usenet-host" name="host"
+                                       placeholder="news.example.com">
                             </div>
                             <div>
                                 <label class="label" for="usenet-port">
                                     <span>Port</span>
                                 </label>
-                                <input type="number" class="input input-bordered w-full" id="usenet-port" name="port" placeholder="563">
+                                <input type="number" class="input input-bordered w-full" id="usenet-port" name="port"
+                                       placeholder="563">
                             </div>
                         </div>
                         <div class="grid grid-cols-2 gap-4">
@@ -129,13 +140,15 @@
                                 <label class="label" for="usenet-username">
                                     <span>Username</span>
                                 </label>
-                                <input type="text" class="input input-bordered w-full" id="usenet-username" name="username" placeholder="Your usenet username">
+                                <input type="text" class="input input-bordered w-full" id="usenet-username"
+                                       name="username" placeholder="Your usenet username">
                             </div>
                             <div>
                                 <label class="label" for="usenet-password">
                                     <span>Password</span>
                                 </label>
-                                <input type="password" class="input input-bordered w-full" id="usenet-password" name="password" placeholder="Your usenet password">
+                                <input type="password" class="input input-bordered w-full" id="usenet-password"
+                                       name="password" placeholder="Your usenet password">
                             </div>
                         </div>
 
@@ -144,7 +157,8 @@
                                 <label class="label" for="usenet-max-connections">
                                     <span>Max Connections</span>
                                 </label>
-                                <input type="number" class="input input-bordered w-full" id="usenet-max-connections" name="max_connections" placeholder="30" min="1">
+                                <input type="number" class="input input-bordered w-full" id="usenet-max-connections"
+                                       name="max_connections" placeholder="30" min="1">
                                 <label class="label">
                                     <span class="label-text-alt">Total connections to provider</span>
                                 </label>
@@ -153,7 +167,9 @@
                                 <label class="label" for="usenet-max-connections-per-reader">
                                     <span>Connections Per Stream</span>
                                 </label>
-                                <input type="number" class="input input-bordered w-full" id="usenet-max-connections-per-reader" name="reader_connections" placeholder="15" min="1">
+                                <input type="number" class="input input-bordered w-full"
+                                       id="usenet-max-connections-per-reader" name="reader_connections" placeholder="15"
+                                       min="1">
                                 <label class="label">
                                     <span class="label-text-alt">Higher = faster streaming</span>
                                 </label>
@@ -174,14 +190,16 @@
             <!-- Step 4: Download Folder -->
             <div id="step-4" class="setup-step hidden">
                 <h3 class="text-xl font-semibold mb-4">Step 4: Download Folder</h3>
-                <p class="text-sm text-gray-500 mb-4">Specify where downloaded files should be stored on your system.</p>
+                <p class="text-sm text-gray-500 mb-4">Specify where downloaded files should be stored on your
+                    system.</p>
 
                 <form id="download-form" class="space-y-4">
                     <div>
                         <label class="label" for="download-folder">
                             <span>Download Folder Path</span>
                         </label>
-                        <input type="text" class="input input-bordered w-full" id="download-folder" name="download_folder" placeholder="/path/to/downloads" required>
+                        <input type="text" class="input input-bordered w-full" id="download-folder"
+                               name="download_folder" placeholder="/path/to/downloads" required>
                         <label class="label">
                             <span class="label-text-alt">Full path to the folder where files will be downloaded</span>
                         </label>
@@ -197,7 +215,8 @@
             <!-- Step 5: Mount System -->
             <div id="step-5" class="setup-step hidden">
                 <h3 class="text-xl font-semibold mb-4">Step 5: Mount System Configuration</h3>
-                <p class="text-sm text-gray-500 mb-4">Choose and configure your preferred mount system for accessing files.</p>
+                <p class="text-sm text-gray-500 mb-4">Choose and configure your preferred mount system for accessing
+                    files.</p>
 
                 <form id="mount-form" class="space-y-4">
                     <div>
@@ -206,15 +225,18 @@
                         </label>
                         <div class="flex gap-4">
                             <label class="label cursor-pointer gap-2">
-                                <input type="radio" name="mount_type" value="dfs" class="radio" id="mount-type-dfs" checked>
+                                <input type="radio" name="mount_type" value="dfs" class="radio" id="mount-type-dfs"
+                                       checked>
                                 <span class="label-text">DFS (Decypharr File System)</span>
                             </label>
                             <label class="label cursor-pointer gap-2">
-                                <input type="radio" name="mount_type" value="rclone" class="radio" id="mount-type-rclone">
+                                <input type="radio" name="mount_type" value="rclone" class="radio"
+                                       id="mount-type-rclone">
                                 <span class="label-text">Rclone</span>
                             </label>
                             <label class="label cursor-pointer gap-2">
-                                <input type="radio" name="mount_type" value="external_rclone" class="radio" id="mount-type-external">
+                                <input type="radio" name="mount_type" value="external_rclone" class="radio"
+                                       id="mount-type-external">
                                 <span class="label-text">External Mount</span>
                             </label>
                             <label class="label cursor-pointer gap-2">
@@ -228,7 +250,8 @@
                         <label class="label" for="mount-path">
                             <span>Mount Path</span>
                         </label>
-                        <input type="text" class="input input-bordered w-full" id="mount-path" name="mount_path" placeholder="/mnt/decypharr" required>
+                        <input type="text" class="input input-bordered w-full" id="mount-path" name="mount_path"
+                               placeholder="/mnt/decypharr" required>
                         <label class="label">
                             <span class="label-text-alt">Path where the filesystem will be mounted</span>
                         </label>
@@ -238,7 +261,8 @@
                         <label class="label" for="cache-dir">
                             <span>Cache Directory</span>
                         </label>
-                        <input type="text" class="input input-bordered w-full" id="cache-dir" name="cache_dir" placeholder="/tmp/decypharr-cache" required>
+                        <input type="text" class="input input-bordered w-full" id="cache-dir" name="cache_dir"
+                               placeholder="/tmp/decypharr-cache" required>
                         <label class="label">
                             <span class="label-text-alt">Directory for caching file chunks</span>
                         </label>
@@ -251,7 +275,8 @@
                             <label class="label" for="rclone-buffer-size">
                                 <span>Buffer Size (Optional)</span>
                             </label>
-                            <input type="text" class="input input-bordered w-full" id="rclone-buffer-size" name="rclone_buffer_size" placeholder="e.g., 128M">
+                            <input type="text" class="input input-bordered w-full" id="rclone-buffer-size"
+                                   name="rclone_buffer_size" placeholder="e.g., 128M">
                         </div>
                     </div>
                 </form>
@@ -310,8 +335,10 @@
                 </div>
 
                 <div class="alert alert-info mt-6">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                         class="stroke-current shrink-0 w-6 h-6">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                     </svg>
                     <span>The application will restart after you click finish to apply these changes.</span>
                 </div>

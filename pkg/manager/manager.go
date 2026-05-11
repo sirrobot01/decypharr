@@ -32,7 +32,7 @@ import (
 type Manager struct {
 	storage      *storage.Storage
 	migrator     *Migrator
-	repair       RepairManager
+	repair       *Repair
 	clients      *xsync.Map[string, debrid.Client]
 	arr          *arr.Storage
 	logger       zerolog.Logger
@@ -65,16 +65,21 @@ type Manager struct {
 	startTime     time.Time
 	usenetTimeout time.Duration
 
-	rootInfo       *FileInfo
-	entry          *EntryCache
-	downloader     *Downloader
-	usenet         *usenet.Usenet
+	rootInfo   *FileInfo
+	entry      *EntryCache
+	downloader *Downloader
+	usenet     *usenet.Usenet
 
 	// Debrid speed test results storage
 	debridSpeedTestResults *xsync.Map[string, debridTypes.SpeedTestResult]
 
 	// Active streams tracking
 	activeStreams *xsync.Map[string, *ActiveStream]
+
+	// In-flight queue-processor dispatches, keyed by InfoHash, to prevent
+	// duplicate goroutines from processing the same entry when the scheduler
+	// re-fires before the previous pass has updated the queue row.
+	processingEntries *xsync.Map[string, struct{}]
 
 	// NZB processing worker pool (unbounded queue)
 	nzbQueue      *nzbJobQueue
@@ -110,15 +115,15 @@ func New() *Manager {
 			MinVersion:         tls.VersionTLS12,
 			ClientSessionCache: tls.NewLRUClientSessionCache(200),
 		},
-		TLSHandshakeTimeout:   20 * time.Second,
-		MaxIdleConns:          1000,
-		MaxIdleConnsPerHost:   500,
-		MaxConnsPerHost:       500,
-		IdleConnTimeout:       120 * time.Second,
-		DisableCompression:    false, // Enable compression for better multiplexing
-		DialContext:           dialer.DialContext,
-		Proxy:                 http.ProxyFromEnvironment,
-		MaxResponseHeaderBytes: 1 << 20, // 1MB header buffer for CDN responses
+		TLSHandshakeTimeout:    20 * time.Second,
+		MaxIdleConns:           1000,
+		MaxIdleConnsPerHost:    500,
+		MaxConnsPerHost:        500,
+		IdleConnTimeout:        120 * time.Second,
+		DisableCompression:     false, // Enable compression for better multiplexing
+		DialContext:            dialer.DialContext,
+		Proxy:                  http.ProxyFromEnvironment,
+		MaxResponseHeaderBytes: 1 << 20,  // 1MB header buffer for CDN responses
 		WriteBufferSize:        32 << 10, // 32KB write buffer
 		ReadBufferSize:         32 << 10, // 32KB read buffer
 	}
@@ -147,6 +152,7 @@ func New() *Manager {
 		usenetTimeout:          usenetTimeout,
 		debridSpeedTestResults: xsync.NewMap[string, debridTypes.SpeedTestResult](),
 		activeStreams:          xsync.NewMap[string, *ActiveStream](),
+		processingEntries:      xsync.NewMap[string, struct{}](),
 	}
 
 	instance.init()
@@ -223,6 +229,9 @@ func (m *Manager) init() {
 
 	// Initialize notifications service
 	m.Notifications = notifications.New(&m.config.Notifications, m.logger)
+
+	// Initialize repair service. It registers with the scheduler in StartWorker.
+	m.repair = NewRepair(m)
 }
 
 func (m *Manager) initUsenet() {

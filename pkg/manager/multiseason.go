@@ -4,6 +4,7 @@ import (
 	"crypto/md5"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -108,7 +109,6 @@ func convertToMultiSeason(torrent *storage.Entry, seasons []SeasonInfo) []*stora
 		seasonResults = append(seasonResults, seasonTorrent)
 	}
 	return seasonResults
-
 }
 
 func replaceMultiSeasonPattern(name string, targetSeason int) string {
@@ -234,10 +234,11 @@ func inferSeasonFromPath(path string, knownSeasons map[int]bool) int {
 
 // Helper to get sorted season list for logging
 func getSortedSeasons(seasons map[int]bool) []int {
-	var result []int
+	result := make([]int, 0, len(seasons))
 	for season := range seasons {
 		result = append(result, season)
 	}
+	sort.Ints(result)
 	return result
 }
 

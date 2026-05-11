@@ -60,20 +60,17 @@ func NewFS(ctx context.Context, client *nntp.Client, maxConcurrent int, prefetch
 	}
 
 	for _, vol := range volumes {
-		if err := f.registerVolume(vol); err != nil {
-			return nil, err
-		}
+		f.registerVolume(vol)
 	}
 
 	return f, nil
 }
 
 // registerVolume adds or updates a Volume in the filesystem.
-func (f *FS) registerVolume(vol *types.Volume) error {
+func (f *FS) registerVolume(vol *types.Volume) {
 	key := normalizePath(vol.Name)
 
 	f.volumes.Store(key, vol)
-	return nil
 }
 
 // Open implements fs.FS to provide access to virtual RAR volumes.

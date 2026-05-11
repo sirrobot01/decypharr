@@ -2,14 +2,14 @@
 
 const fs = require('fs');
 const path = require('path');
-const { minify } = require('terser');
+const {minify} = require('terser');
 
 const sourceDir = './pkg/server/assets/js';
 const buildDir = './pkg/server/assets/build/js';
 
 // Create build directory
 if (!fs.existsSync(buildDir)) {
-    fs.mkdirSync(buildDir, { recursive: true });
+    fs.mkdirSync(buildDir, {recursive: true});
 }
 
 // Minify options
@@ -56,9 +56,9 @@ async function minifyFile(inputPath, outputPath) {
         const minifiedSize = fs.statSync(outputPath).size;
         const reduction = ((originalSize - minifiedSize) / originalSize * 100).toFixed(1);
 
-        console.log(`   ✓ ${path.basename(inputPath)}: ${(originalSize/1024).toFixed(1)}KB → ${(minifiedSize/1024).toFixed(1)}KB (${reduction}% reduction)`);
+        console.log(`   ✓ ${path.basename(inputPath)}: ${(originalSize / 1024).toFixed(1)}KB → ${(minifiedSize / 1024).toFixed(1)}KB (${reduction}% reduction)`);
 
-        return { original: originalSize, minified: minifiedSize };
+        return {original: originalSize, minified: minifiedSize};
 
     } catch (error) {
         console.error(`   ✗ Error minifying ${inputPath}:`, error.message);
@@ -73,7 +73,7 @@ async function minifyAllJS() {
         // Check if source directory exists
         if (!fs.existsSync(sourceDir)) {
             console.log(`Creating source directory ${sourceDir}...`);
-            fs.mkdirSync(sourceDir, { recursive: true });
+            fs.mkdirSync(sourceDir, {recursive: true});
             console.log('ℹ️  No JavaScript files found to minify');
             return;
         }
@@ -106,7 +106,7 @@ async function minifyAllJS() {
         if (processedFiles > 0) {
             const totalReduction = ((totalOriginal - totalMinified) / totalOriginal * 100).toFixed(1);
             console.log(`\nSuccessfully minified ${processedFiles}/${jsFiles.length} JavaScript file(s)`);
-            console.log(`📊 Total: ${(totalOriginal/1024).toFixed(1)}KB → ${(totalMinified/1024).toFixed(1)}KB (${totalReduction}% reduction)`);
+            console.log(`📊 Total: ${(totalOriginal / 1024).toFixed(1)}KB → ${(totalMinified / 1024).toFixed(1)}KB (${totalReduction}% reduction)`);
         }
 
     } catch (error) {

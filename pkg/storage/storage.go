@@ -12,18 +12,21 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-var storeNames = []string{"entries", "queue", "items", "repair_jobs", "repair_keys"}
+var storeNames = []string{"entries", "queue", "items", "repair_state", "repair_runs"}
+
+// legacyStoreNames are buckets from the v1 repair system. They are removed
+// on startup so they don't accumulate dead data.
+var legacyStoreNames = []string{"repair_jobs", "repair_keys"}
 
 // Storage handles persistence using HybridStore
 type Storage struct {
-	// HybridStore instances for different data types
-	entries    *hybrid.Store // cached entries
-	queue      *hybrid.Store // queued entries
-	entryItems *hybrid.Store // name -> infohash index
-	repairJobs *hybrid.Store // repair jobs
-	repairKeys *hybrid.Store // repair unique keys
-	dir        string
-	logger     zerolog.Logger
+	entries     *hybrid.Store
+	queue       *hybrid.Store
+	entryItems  *hybrid.Store
+	repairState *hybrid.Store
+	repairRuns  *hybrid.Store
+	dir         string
+	logger      zerolog.Logger
 }
 
 func createItemStores(baseDir string, baseConfig hybrid.Config) (map[string]*hybrid.Store, error) {
@@ -33,7 +36,6 @@ func createItemStores(baseDir string, baseConfig hybrid.Config) (map[string]*hyb
 		config.DataPath = filepath.Join(baseDir, name+".db")
 		store, err := hybrid.New(config)
 		if err != nil {
-			// Cleanup previously created stores
 			for _, it := range items {
 				_ = it.Close()
 			}
@@ -44,7 +46,19 @@ func createItemStores(baseDir string, baseConfig hybrid.Config) (map[string]*hyb
 	return items, nil
 }
 
-// NewStorage creates a new storage instance with HybridStore
+func dropLegacyStores(baseDir string, log zerolog.Logger) {
+	for _, name := range legacyStoreNames {
+		path := filepath.Join(baseDir, name+".db")
+		if _, err := os.Stat(path); err == nil {
+			if err := os.RemoveAll(path); err != nil {
+				log.Warn().Err(err).Str("path", path).Msg("Failed to remove legacy repair bucket")
+			} else {
+				log.Info().Str("path", path).Msg("Removed legacy repair bucket")
+			}
+		}
+	}
+}
+
 func NewStorage(dbPath string) (*Storage, error) {
 	dbPath = filepath.Clean(dbPath)
 	if err := os.MkdirAll(dbPath, 0755); err != nil {
@@ -53,7 +67,8 @@ func NewStorage(dbPath string) (*Storage, error) {
 
 	log := logger.New("storage")
 
-	// Base config
+	dropLegacyStores(dbPath, log)
+
 	baseConfig := hybrid.Config{
 		CacheSize:           5000,
 		SyncInterval:        time.Second,
@@ -61,26 +76,19 @@ func NewStorage(dbPath string) (*Storage, error) {
 		AutoCompact:         true,
 	}
 
-	// Create item stores
 	itemStores, err := createItemStores(dbPath, baseConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create item stores: %w", err)
 	}
 
-	entries := itemStores["entries"]
-	queue := itemStores["queue"]
-	entryItems := itemStores["items"]
-	repairJobs := itemStores["repair_jobs"]
-	repairKeys := itemStores["repair_keys"]
-
 	s := &Storage{
-		entries:    entries,
-		queue:      queue,
-		entryItems: entryItems,
-		repairJobs: repairJobs,
-		repairKeys: repairKeys,
-		dir:        dbPath,
-		logger:     log,
+		entries:     itemStores["entries"],
+		queue:       itemStores["queue"],
+		entryItems:  itemStores["items"],
+		repairState: itemStores["repair_state"],
+		repairRuns:  itemStores["repair_runs"],
+		dir:         dbPath,
+		logger:      log,
 	}
 
 	if count, err := s.MigrateMetadata(); err != nil {
@@ -92,31 +100,14 @@ func NewStorage(dbPath string) (*Storage, error) {
 	return s, nil
 }
 
-// Close closes all storage components
 func (s *Storage) Close() error {
 	var errs []error
-	if s.entries != nil {
-		if err := s.entries.Close(); err != nil {
-			errs = append(errs, err)
+	stores := []*hybrid.Store{s.entries, s.queue, s.entryItems, s.repairState, s.repairRuns}
+	for _, store := range stores {
+		if store == nil {
+			continue
 		}
-	}
-	if s.queue != nil {
-		if err := s.queue.Close(); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	if s.entryItems != nil {
-		if err := s.entryItems.Close(); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	if s.repairJobs != nil {
-		if err := s.repairJobs.Close(); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	if s.repairKeys != nil {
-		if err := s.repairKeys.Close(); err != nil {
+		if err := store.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -129,7 +120,7 @@ func (s *Storage) Close() error {
 // DiskSize returns the total on-disk size of all stores (O(1), no filesystem walk).
 func (s *Storage) DiskSize() int64 {
 	var size int64
-	for _, store := range []*hybrid.Store{s.entries, s.queue, s.entryItems, s.repairJobs, s.repairKeys} {
+	for _, store := range []*hybrid.Store{s.entries, s.queue, s.entryItems, s.repairState, s.repairRuns} {
 		if store != nil {
 			size += store.DiskSize()
 		}
@@ -161,45 +152,27 @@ func (s *Storage) GetMigrationStatus() (*SystemMigrationStatus, error) {
 }
 
 func (s *Storage) copyFrom(other *Storage) error {
-	// Copy entries
-	err := other.entries.ForEach(func(key string, value []byte) error {
-		return s.entries.Put(key, value, nil)
-	})
-	if err != nil {
-		return fmt.Errorf("failed to copy entries: %w", err)
+	pairs := []struct {
+		name string
+		from *hybrid.Store
+		to   *hybrid.Store
+	}{
+		{"entries", other.entries, s.entries},
+		{"queue", other.queue, s.queue},
+		{"items", other.entryItems, s.entryItems},
+		{"repair_state", other.repairState, s.repairState},
+		{"repair_runs", other.repairRuns, s.repairRuns},
 	}
 
-	// Copy queue
-	err = other.queue.ForEach(func(key string, value []byte) error {
-		return s.queue.Put(key, value, nil)
-	})
-	if err != nil {
-		return fmt.Errorf("failed to copy queue: %w", err)
+	for _, p := range pairs {
+		if p.from == nil || p.to == nil {
+			continue
+		}
+		if err := p.from.ForEach(func(key string, value []byte) error {
+			return p.to.Put(key, value, nil)
+		}); err != nil {
+			return fmt.Errorf("failed to copy %s: %w", p.name, err)
+		}
 	}
-
-	// Copy entry items
-	err = other.entryItems.ForEach(func(key string, value []byte) error {
-		return s.entryItems.Put(key, value, nil)
-	})
-	if err != nil {
-		return fmt.Errorf("failed to copy entry items: %w", err)
-	}
-
-	// Copy repair jobs
-	err = other.repairJobs.ForEach(func(key string, value []byte) error {
-		return s.repairJobs.Put(key, value, nil)
-	})
-	if err != nil {
-		return fmt.Errorf("failed to copy repair jobs: %w", err)
-	}
-
-	// Copy repair keys
-	err = other.repairKeys.ForEach(func(key string, value []byte) error {
-		return s.repairKeys.Put(key, value, nil)
-	})
-	if err != nil {
-		return fmt.Errorf("failed to copy repair keys: %w", err)
-	}
-
 	return nil
 }

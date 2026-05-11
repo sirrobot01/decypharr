@@ -47,7 +47,6 @@ func (s *SABnzbd) handleAPI(w http.ResponseWriter, r *http.Request) {
 		// Default to queue if no mode specified
 		s.logger.Warn().Str("mode", mode).Msg("Unknown API mode, returning 404")
 		http.Error(w, "Not Found", http.StatusNotFound)
-
 	}
 }
 
@@ -592,7 +591,7 @@ func (s *SABnzbd) addNZBFile(ctx context.Context, content []byte, filename strin
 
 	cfg := config.Get()
 
-	importReq := manager.NewNZBRequest(filename, s.downloadFolder, content, arr, action, cfg.CallbackURL, manager.ImportTypeSABnzbd, cfg.SkipMultiSeason)
+	importReq := manager.NewNZBRequest(filename, s.downloadFolder, content, arr, action, cfg.Notifications.CallbackURL, manager.ImportTypeSABnzbd, cfg.SkipMultiSeason)
 	id, err := s.manager.AddNewNZB(ctx, importReq)
 	if err != nil {
 		return "", err

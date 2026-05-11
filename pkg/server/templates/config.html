@@ -5,7 +5,9 @@
         <i class="bi bi-exclamation-triangle text-xl"></i>
         <div>
             <h3 class="font-bold">Configuration Required</h3>
-            <div class="text-sm">Your configuration is incomplete ({{ .SetupError }}). Please complete the setup below.</div>
+            <div class="text-sm">Your configuration is incomplete ({{ .SetupError }}). Please complete the setup
+                below.
+            </div>
         </div>
     </div>
     {{ end }}
@@ -16,40 +18,46 @@
                 <div class="border-b border-base-300 mb-8">
                     <nav class="flex gap-8" aria-label="Configuration Tabs">
                         <button type="button"
-                            class="tab-button active flex items-center gap-2 py-3 px-1 border-b-2 border-primary text-primary font-medium text-sm"
-                            data-tab="general">
+                                class="tab-button active flex items-center gap-2 py-3 px-1 border-b-2 border-primary text-primary font-medium text-sm"
+                                data-tab="general">
                             <i class="bi bi-gear text-lg"></i>
                             <span class="hidden sm:inline">General</span>
                         </button>
                         <button type="button"
-                            class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
-                            data-tab="providers">
+                                class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                data-tab="providers">
                             <i class="bi bi-collection text-lg"></i>
                             <span class="hidden sm:inline">Providers</span>
                         </button>
                         <button type="button"
-                            class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
-                            data-tab="auth">
+                                class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                data-tab="auth">
                             <i class="bi bi-download text-lg"></i>
                             <span class="hidden sm:inline">Auth</span>
                         </button>
                         <button type="button"
-                            class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
-                            data-tab="arrs">
+                                class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                data-tab="arrs">
                             <i class="bi bi-collection text-lg"></i>
                             <span class="hidden sm:inline">*Arrs</span>
                         </button>
                         <button type="button"
-                            class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
-                            data-tab="notifications">
+                                class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                data-tab="notifications">
                             <i class="bi bi-bell text-lg"></i>
                             <span class="hidden sm:inline">Notifications</span>
                         </button>
                         <button type="button"
-                            class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
-                            data-tab="mounts">
+                                class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                data-tab="mounts">
                             <i class="bi bi-hdd-stack text-lg"></i>
                             <span class="hidden sm:inline">Mounts</span>
+                        </button>
+                        <button type="button"
+                                class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                data-tab="repair">
+                            <i class="bi bi-heart-pulse text-lg"></i>
+                            <span class="hidden sm:inline">Repair</span>
                         </button>
                     </nav>
                 </div>
@@ -86,7 +94,7 @@
                                         <span class="font-medium">Magnet Link Handler</span>
                                     </label>
                                     <button type="button" class="btn btn-primary w-full"
-                                        onclick="registerMagnetLinkHandler();" id="registerMagnetLink">
+                                            onclick="registerMagnetLinkHandler();" id="registerMagnetLink">
                                         <i class="bi bi-magnet mr-2"></i>Register Magnet Handler
                                     </button>
                                 </div>
@@ -98,7 +106,7 @@
                                         <span class="font-medium">URL Base</span>
                                     </label>
                                     <input type="text" class="input w-full" id="urlBase" name="url_base"
-                                        placeholder="/">
+                                           placeholder="/">
                                     <span class="text-sm opacity-70">URL base for the application</span>
                                 </div>
 
@@ -107,7 +115,7 @@
                                         <span class="font-medium">Bind Address</span>
                                     </label>
                                     <input type="text" class="input w-full" id="bindAddress" name="bind_address"
-                                        placeholder="0.0.0.0">
+                                           placeholder="0.0.0.0">
                                     <span class="text-sm opacity-70">Bind address (default: all interfaces)</span>
                                 </div>
 
@@ -123,7 +131,7 @@
                                         <span class="font-medium">Application URL</span>
                                     </label>
                                     <input type="text" class="input w-full" id="appUrl" name="app_url"
-                                        placeholder="http://192.168.0.1:8282">
+                                           placeholder="http://192.168.0.1:8282">
                                     <span class="text-sm opacity-70">Full URL to access to the application</span>
                                 </div>
                                 <div>
@@ -131,7 +139,7 @@
                                         <span class="font-medium">Minimum File Size</span>
                                     </label>
                                     <input type="text" class="input w-full" id="minFileSize" name="min_file_size"
-                                        placeholder="10MB">
+                                           placeholder="10MB">
                                     <span class="text-sm opacity-70">Minimum file size to download</span>
                                 </div>
 
@@ -140,7 +148,7 @@
                                         <span class="font-medium">Maximum File Size</span>
                                     </label>
                                     <input type="text" class="input w-full" id="maxFileSize" name="max_file_size"
-                                        placeholder="50GB">
+                                           placeholder="50GB">
                                     <span class="text-sm opacity-70">Maximum file size to download</span>
                                 </div>
                             </div>
@@ -151,7 +159,7 @@
                                         <span class="font-medium">Allowed File Extensions</span>
                                     </label>
                                     <textarea class="textarea w-full" id="allowedExtensions" name="allowed_file_types"
-                                        placeholder="mkv, mp4, avi, mov"></textarea>
+                                              placeholder="mkv, mp4, avi, mov"></textarea>
                                     <span class="text-sm opacity-70">Comma-separated list of allowed file
                                         extensions</span>
                                 </div>
@@ -169,7 +177,7 @@
                                                 <span class="font-medium">Download Folder</span>
                                             </label>
                                             <input type="text" class="input w-full" name="download_folder"
-                                                id="download_folder" placeholder="/mnt/symlinks/">
+                                                   id="download_folder" placeholder="/mnt/symlinks/">
                                             <span class="text-sm opacity-70">Folder where downloaded files will be
                                                 stored(this is your qbittorent download folder)</span>
                                         </div>
@@ -178,7 +186,7 @@
                                                 <span class="font-medium">Refresh Interval</span>
                                             </label>
                                             <input type="text" class="input w-full" name="refresh_interval"
-                                                id="refresh_interval" placeholder="30s">
+                                                   id="refresh_interval" placeholder="30s">
                                             <span class="text-sm opacity-70">How often to refresh torrent status (e.g.,
                                                 30s, 1m)</span>
                                         </div>
@@ -187,7 +195,7 @@
                                                 <span class="font-medium">Remove Stalled After</span>
                                             </label>
                                             <input type="text" class="input w-full" id="removeStalledAfter"
-                                                name="remove_stalled_after" placeholder="1h">
+                                                   name="remove_stalled_after" placeholder="1h">
                                             <span class="text-sm opacity-70">Duration before removing stalled
                                                 torrents</span>
                                         </div>
@@ -202,7 +210,7 @@
                                         <div>
                                             <label class="label cursor-pointer justify-start gap-3">
                                                 <input type="checkbox" class="checkbox checkbox-primary"
-                                                    name="skip_pre_cache" id="skip_pre_cache">
+                                                       name="skip_pre_cache" id="skip_pre_cache">
                                                 <div>
                                                     <span class="font-medium">Skip Pre-Cache</span>
                                                     <div class="label-text-alt">Disable pre-caching to speed up imports
@@ -213,14 +221,15 @@
                                         <div>
                                             <label class="label cursor-pointer justify-start gap-3">
                                                 <input type="checkbox" class="checkbox checkbox-primary"
-                                                    name="always_rm_tracker_urls" id="always_rm_tracker_urls">
+                                                       name="always_rm_tracker_urls" id="always_rm_tracker_urls">
                                                 <div>
                                                     <span class="font-medium">Always Remove Tracker URLs</span>
                                                     <div class="label-text-alt">Allows you to <a
                                                             href="https://docs.decypharr.com/"
                                                             class="link link-hover font-semibold"
                                                             target="_blank">download private tracker torrents</a> with
-                                                        lower risk</div>
+                                                        lower risk
+                                                    </div>
                                                 </div>
                                             </label>
                                         </div>
@@ -268,6 +277,15 @@
 
                             <div class="space-y-6">
                                 <div class="space-y-4">
+                                    <div>
+                                        <label class="label cursor-pointer justify-start gap-3">
+                                            <input type="checkbox" class="checkbox checkbox-lg checkbox-primary"
+                                                   name="disable_webdav" id="disable_webdav">
+                                            <div>
+                                                <span class="label-text font-medium text-lg">Disable WebDAV</span>
+                                            </div>
+                                        </label>
+                                    </div>
                                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                                         <div>
                                             <label class="label" for="folder_naming">
@@ -304,7 +322,7 @@
                                         <h3 class="text-xl font-bold flex items-center mt-8 mb-4">
                                             <i class="bi bi-folder-symlink mr-3 text-info"></i>Virtual Folders
                                             <button type="button" id="addVirtualFolderBtn"
-                                                class="btn btn-sm btn-info ml-auto">
+                                                    class="btn btn-sm btn-info ml-auto">
                                                 <i class="bi bi-plus mr-2"></i>Add Virtual Folder
                                             </button>
                                         </h3>
@@ -336,13 +354,13 @@
                         <div class="border-b border-base-300 mb-6">
                             <nav class="flex gap-4" aria-label="Provider Type Tabs">
                                 <button type="button"
-                                    class="provider-subtab-button active py-2 px-4 border-b-2 border-secondary text-secondary font-medium text-sm"
-                                    data-provider-tab="debrid">
+                                        class="provider-subtab-button active py-2 px-4 border-b-2 border-secondary text-secondary font-medium text-sm"
+                                        data-provider-tab="debrid">
                                     <i class="bi bi-cloud mr-2"></i>Debrid
                                 </button>
                                 <button type="button"
-                                    class="provider-subtab-button py-2 px-4 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
-                                    data-provider-tab="usenet">
+                                        class="provider-subtab-button py-2 px-4 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                        data-provider-tab="usenet">
                                     <i class="bi bi-newspaper mr-2"></i>Usenet
                                 </button>
                             </nav>
@@ -378,7 +396,7 @@
                                                     <span class="font-medium">Max Connections Per File</span>
                                                 </label>
                                                 <input type="number" class="input w-full" name="usenet.max_connections"
-                                                    id="usenet.max_connections" min="1" placeholder="10">
+                                                       id="usenet.max_connections" min="1" placeholder="10">
                                                 <span class="text-sm opacity-70">Connections per file for parsing and
                                                     streaming (default: 10)</span>
                                             </div>
@@ -387,7 +405,7 @@
                                                     <span class="font-medium">Read Ahead</span>
                                                 </label>
                                                 <input type="text" class="input w-full" name="usenet.read_ahead"
-                                                    id="usenet.read_ahead" min="1" placeholder="16MB">
+                                                       id="usenet.read_ahead" min="1" placeholder="16MB">
                                                 <span class="text-sm opacity-70">Amount of data to read ahead when streaming
                                                     (default: 16MB)</span>
                                             </div>
@@ -396,7 +414,7 @@
                                                     <span class="font-medium">Processing Timeout</span>
                                                 </label>
                                                 <input type="text" class="input w-full" name="usenet.processing_timeout"
-                                                    id="usenet.processing_timeout" placeholder="5m">
+                                                       id="usenet.processing_timeout" placeholder="5m">
                                                 <span class="text-sm opacity-70">Timeout for NZB processing (default:
                                                     5m)</span>
                                             </div>
@@ -405,9 +423,9 @@
                                                     <span class="font-medium">Availability Sample %</span>
                                                 </label>
                                                 <input type="number" class="input w-full"
-                                                    name="usenet.availability_sample_percent"
-                                                    id="usenet.availability_sample_percent" min="1" max="100"
-                                                    placeholder="10">
+                                                       name="usenet.availability_sample_percent"
+                                                       id="usenet.availability_sample_percent" min="1" max="100"
+                                                       placeholder="10">
                                                 <span class="text-sm opacity-70">Percentage of segments to check for
                                                     availability (1-100, default: 10)</span>
                                             </div>
@@ -416,8 +434,8 @@
                                                     <span class="font-medium">Max Concurrent NZB Processing</span>
                                                 </label>
                                                 <input type="number" class="input w-full"
-                                                    name="usenet.max_concurrent_nzb" id="usenet.max_concurrent_nzb"
-                                                    min="1" placeholder="2">
+                                                       name="usenet.max_concurrent_nzb" id="usenet.max_concurrent_nzb"
+                                                       min="1" placeholder="2">
                                                 <span class="text-sm opacity-70">How many NZBs to parse in parallel
                                                     (default: 2)</span>
                                             </div>
@@ -426,13 +444,14 @@
                                                     <span class="font-medium">Disk Buffer Path</span>
                                                 </label>
                                                 <input type="text" class="input w-full"
-                                                       name="usenet.disk_buffer_path" id="usenet.disk_buffer_path" placeholder="/cache">
+                                                       name="usenet.disk_buffer_path" id="usenet.disk_buffer_path"
+                                                       placeholder="/cache">
                                                 <span class="text-sm opacity-70">Path for disk buffering during streaming</span>
                                             </div>
                                             <div>
                                                 <label class="label cursor-pointer justify-start gap-3">
                                                     <input type="checkbox" class="checkbox checkbox-primary"
-                                                        name="usenet.skip_repair" id="usenet.skip_repair">
+                                                           name="usenet.skip_repair" id="usenet.skip_repair">
                                                     <div>
                                                         <span class="label-text font-medium">Skip NZB Repair</span>
                                                         <div class="label-text-alt">Skip NZBs when repairing entries
@@ -488,7 +507,7 @@
                                         <span class="font-medium">Username</span>
                                     </label>
                                     <input type="text" id="auth-username" name="auth_username" class="input w-full"
-                                        placeholder="Enter username (leave empty to disable auth)">
+                                           placeholder="Enter username (leave empty to disable auth)">
                                     <span class="text-sm opacity-70">Leave empty to disable authentication</span>
                                 </div>
                                 <div>
@@ -497,7 +516,7 @@
                                     </label>
                                     <div class="password-toggle-container">
                                         <input type="password" id="auth-password" name="auth_password"
-                                            class="input input-has-toggle" placeholder="Enter password">
+                                               class="input input-has-toggle" placeholder="Enter password">
                                         <button type="button" class="password-toggle-btn">
                                             <i class="bi bi-eye"></i>
                                         </button>
@@ -510,7 +529,7 @@
                                     </label>
                                     <div class="password-toggle-container">
                                         <input type="password" id="auth-password-confirm" name="auth_password_confirm"
-                                            class="input input-has-toggle" placeholder="Confirm password">
+                                               class="input input-has-toggle" placeholder="Confirm password">
                                         <button type="button" class="password-toggle-btn">
                                             <i class="bi bi-eye"></i>
                                         </button>
@@ -523,15 +542,15 @@
                                     </label>
                                     <div class="join w-full">
                                         <input type="text" id="api-token-display"
-                                            class="input join-item flex-1 font-mono" placeholder="No token generated"
-                                            readonly>
+                                               class="input join-item flex-1 font-mono" placeholder="No token generated"
+                                               readonly>
                                         <button type="button" id="copy-token-btn" class="btn btn-outline join-item"
-                                            onclick="copyAPIToken();">
+                                                onclick="copyAPIToken();">
                                             <i class="bi bi-copy"></i>
                                         </button>
                                         <button type="button" id="refresh-token-btn"
-                                            class="btn btn-outline btn-secondary join-item"
-                                            onclick="refreshAPIToken();">
+                                                class="btn btn-outline btn-secondary join-item"
+                                                onclick="refreshAPIToken();">
                                             <i class="bi bi-arrow-clockwise"></i>
                                         </button>
                                     </div>
@@ -541,7 +560,7 @@
                             </div>
                             <div class="flex justify-end items-center mt-5">
                                 <button type="button" id="update-auth-btn" class="btn btn-primary"
-                                    onclick="updateAuthSettings();">
+                                        onclick="updateAuthSettings();">
                                     <i class="bi bi-shield-check mr-2"></i>Update Authentication
                                 </button>
                             </div>
@@ -580,7 +599,7 @@
                                 <div>
                                     <label class="label cursor-pointer justify-start gap-3">
                                         <input type="checkbox" class="checkbox checkbox-lg checkbox-primary"
-                                            name="notifications.enabled" id="notifications.enabled">
+                                               name="notifications.enabled" id="notifications.enabled">
                                         <div>
                                             <span class="label-text font-medium text-lg">Enable Notifications</span>
                                             <div class="label-text-alt">Send notifications for configured events</div>
@@ -594,8 +613,8 @@
                                             <span class="font-medium">Discord Webhook URL</span>
                                         </label>
                                         <textarea class="textarea w-full" id="notifications.webhook_url"
-                                            name="notifications.webhook_url"
-                                            placeholder="https://discord.com/api/webhooks/..."></textarea>
+                                                  name="notifications.webhook_url"
+                                                  placeholder="https://discord.com/api/webhooks/..."></textarea>
                                         <span class="text-sm opacity-70">Discord webhook URL for sending
                                             notifications</span>
                                     </div>
@@ -605,7 +624,8 @@
                                             <span class="font-medium">Callback URL</span>
                                         </label>
                                         <input type="text" class="input w-full" id="notifications.callback_url"
-                                            name="notifications.callback_url" placeholder="http://example.com/callback">
+                                               name="notifications.callback_url"
+                                               placeholder="http://example.com/callback">
                                         <span class="text-sm opacity-70">HTTP endpoint for status callbacks (JSON
                                             POST)</span>
                                     </div>
@@ -620,7 +640,7 @@
                                         <div>
                                             <label class="label cursor-pointer justify-start gap-2">
                                                 <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
-                                                    name="notifications.events[]" value="download_complete">
+                                                       name="notifications.events[]" value="download_complete">
                                                 <div>
                                                     <span class="font-medium text-sm">Download Complete</span>
                                                     <div class="label-text-alt">When a download finishes successfully
@@ -632,7 +652,7 @@
                                         <div>
                                             <label class="label cursor-pointer justify-start gap-2">
                                                 <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
-                                                    name="notifications.events[]" value="download_failed">
+                                                       name="notifications.events[]" value="download_failed">
                                                 <div>
                                                     <span class="font-medium text-sm">Download Failed</span>
                                                     <div class="label-text-alt">When a download fails</div>
@@ -643,7 +663,7 @@
                                         <div>
                                             <label class="label cursor-pointer justify-start gap-2">
                                                 <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
-                                                    name="notifications.events[]" value="repair_pending">
+                                                       name="notifications.events[]" value="repair_pending">
                                                 <div>
                                                     <span class="font-medium text-sm">Repair Pending</span>
                                                     <div class="label-text-alt">When repair finds issues awaiting action
@@ -655,7 +675,7 @@
                                         <div>
                                             <label class="label cursor-pointer justify-start gap-2">
                                                 <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
-                                                    name="notifications.events[]" value="repair_complete">
+                                                       name="notifications.events[]" value="repair_complete">
                                                 <div>
                                                     <span class="font-medium text-sm">Repair Complete</span>
                                                     <div class="label-text-alt">When repair finishes successfully</div>
@@ -666,7 +686,7 @@
                                         <div>
                                             <label class="label cursor-pointer justify-start gap-2">
                                                 <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
-                                                    name="notifications.events[]" value="repair_failed">
+                                                       name="notifications.events[]" value="repair_failed">
                                                 <div>
                                                     <span class="font-medium text-sm">Repair Failed</span>
                                                     <div class="label-text-alt">When repair encounters an error</div>
@@ -677,7 +697,7 @@
                                         <div>
                                             <label class="label cursor-pointer justify-start gap-2">
                                                 <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
-                                                    name="notifications.events[]" value="repair_cancelled">
+                                                       name="notifications.events[]" value="repair_cancelled">
                                                 <div>
                                                     <span class="font-medium text-sm">Repair Cancelled</span>
                                                     <div class="label-text-alt">When repair job is cancelled</div>
@@ -703,36 +723,36 @@
                             </label>
                             <div class="">
                                 <label
-                                    class="label cursor-pointer justify-start gap-3 p-3 border border-base-300 rounded-lg hover:bg-base-200 transition-colors">
+                                        class="label cursor-pointer justify-start gap-3 p-3 border border-base-300 rounded-lg hover:bg-base-200 transition-colors">
                                     <input type="radio" class="radio radio-primary" name="mount.type" value="dfs"
-                                        id="mount.type.dfs" checked>
+                                           id="mount.type.dfs" checked>
                                     <div>
                                         <span class="font-medium">DFS (Decypharr Filesystem)</span>
                                         <div class="label-text-alt">Built-in filesystem implementation</div>
                                     </div>
                                 </label>
                                 <label
-                                    class="label cursor-pointer justify-start gap-3 p-3 border border-base-300 rounded-lg hover:bg-base-200 transition-colors">
+                                        class="label cursor-pointer justify-start gap-3 p-3 border border-base-300 rounded-lg hover:bg-base-200 transition-colors">
                                     <input type="radio" class="radio radio-primary" name="mount.type" value="rclone"
-                                        id="mount.type.rclone">
+                                           id="mount.type.rclone">
                                     <div>
                                         <span class="font-medium">Rclone</span>
                                         <div class="label-text-alt">Managed rclone mount</div>
                                     </div>
                                 </label>
                                 <label
-                                    class="label cursor-pointer justify-start gap-3 p-3 border border-base-300 rounded-lg hover:bg-base-200 transition-colors">
+                                        class="label cursor-pointer justify-start gap-3 p-3 border border-base-300 rounded-lg hover:bg-base-200 transition-colors">
                                     <input type="radio" class="radio radio-primary" name="mount.type"
-                                        value="external_rclone" id="mount.type.external_rclone">
+                                           value="external_rclone" id="mount.type.external_rclone">
                                     <div>
                                         <span class="font-medium">External Rclone</span>
                                         <div class="label-text-alt">Connect to existing rclone instance</div>
                                     </div>
                                 </label>
                                 <label
-                                    class="label cursor-pointer justify-start gap-3 p-3 border border-base-300 rounded-lg hover:bg-base-200 transition-colors">
+                                        class="label cursor-pointer justify-start gap-3 p-3 border border-base-300 rounded-lg hover:bg-base-200 transition-colors">
                                     <input type="radio" class="radio radio-primary" name="mount.type" value="none"
-                                        id="mount.type.none">
+                                           id="mount.type.none">
                                     <div>
                                         <span class="font-medium">No Mount</span>
                                         <div class="label-text-alt">Disable mounting functionality</div>
@@ -746,7 +766,7 @@
                                 <span class="font-medium">Mount Path</span>
                             </label>
                             <input type="text" class="input w-full" name="mount.mount_path" id="mount.mount_path"
-                                placeholder="/mnt/dfs">
+                                   placeholder="/mnt/dfs">
                             <span class="text-sm opacity-70">Path where the selected mount will be mounted (e.g., /mnt/dfs)</span>
                         </div>
 
@@ -754,18 +774,18 @@
                         <div class="border-b border-base-300 mb-6">
                             <nav class="flex gap-4" aria-label="Mount Type Tabs">
                                 <button type="button"
-                                    class="mount-subtab-button active py-2 px-4 border-b-2 border-primary text-primary font-medium text-sm"
-                                    data-mount-tab="dfs">
+                                        class="mount-subtab-button active py-2 px-4 border-b-2 border-primary text-primary font-medium text-sm"
+                                        data-mount-tab="dfs">
                                     <i class="bi bi-file-earmark-code mr-2"></i>DFS
                                 </button>
                                 <button type="button"
-                                    class="mount-subtab-button py-2 px-4 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
-                                    data-mount-tab="rclone">
+                                        class="mount-subtab-button py-2 px-4 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                        data-mount-tab="rclone">
                                     <i class="bi bi-cloud mr-2"></i>Rclone
                                 </button>
                                 <button type="button"
-                                    class="mount-subtab-button py-2 px-4 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
-                                    data-mount-tab="external_rclone">
+                                        class="mount-subtab-button py-2 px-4 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                        data-mount-tab="external_rclone">
                                     <i class="bi bi-cloud mr-2"></i>External Rclone
                                 </button>
                             </nav>
@@ -791,7 +811,7 @@
                                                     <span class="font-medium">Cache Directory</span>
                                                 </label>
                                                 <input type="text" class="input w-full" name="mount.dfs.cache_dir"
-                                                    id="mount.dfs.cache_dir" placeholder="/tmp/dfs-cache">
+                                                       id="mount.dfs.cache_dir" placeholder="/tmp/dfs-cache">
                                                 <span class="text-sm opacity-70">Directory for DFS cache files</span>
                                             </div>
 
@@ -800,7 +820,7 @@
                                                     <span class="font-medium">Disk Cache Size</span>
                                                 </label>
                                                 <input type="text" class="input w-full" name="mount.dfs.disk_cache_size"
-                                                    id="mount.dfs.disk_cache_size" placeholder="5GB">
+                                                       id="mount.dfs.disk_cache_size" placeholder="5GB">
                                                 <span class="text-sm opacity-70">Maximum disk cache size (e.g., 5GB,
                                                     10GB)</span>
                                             </div>
@@ -810,7 +830,7 @@
                                                     <span class="font-medium">Cache Expiry</span>
                                                 </label>
                                                 <input type="text" class="input w-full" name="mount.dfs.cache_expiry"
-                                                    id="mount.dfs.cache_expiry" placeholder="24h">
+                                                       id="mount.dfs.cache_expiry" placeholder="24h">
                                                 <span class="text-sm opacity-70">How long to keep cache entries (e.g.,
                                                     24h, 1d)</span>
                                             </div>
@@ -820,8 +840,8 @@
                                                     <span class="font-medium">Cache Cleanup Interval</span>
                                                 </label>
                                                 <input type="text" class="input w-full"
-                                                    name="mount.dfs.cache_cleanup_interval"
-                                                    id="mount.dfs.cache_cleanup_interval" placeholder="5m">
+                                                       name="mount.dfs.cache_cleanup_interval"
+                                                       id="mount.dfs.cache_cleanup_interval" placeholder="5m">
                                                 <span class="text-sm opacity-70">How often to clean cache</span>
                                             </div>
 
@@ -830,7 +850,7 @@
                                                     <span class="font-medium">Chunk Size</span>
                                                 </label>
                                                 <input type="text" class="input w-full" name="mount.dfs.chunk_size"
-                                                    id="mount.dfs.chunk_size" placeholder="8MB">
+                                                       id="mount.dfs.chunk_size" placeholder="8MB">
                                                 <span class="text-sm opacity-70">Size of data chunks (e.g., 4MB,
                                                     8MB)</span>
                                             </div>
@@ -840,7 +860,7 @@
                                                     <span class="font-medium">Read Ahead Size</span>
                                                 </label>
                                                 <input type="text" class="input w-full" name="mount.dfs.read_ahead_size"
-                                                    id="mount.dfs.read_ahead_size" placeholder="128MB">
+                                                       id="mount.dfs.read_ahead_size" placeholder="128MB">
                                                 <span class="text-sm opacity-70">Read ahead buffer size</span>
                                             </div>
 
@@ -849,7 +869,7 @@
                                                     <span class="font-medium">Daemon Timeout</span>
                                                 </label>
                                                 <input type="text" class="input w-full" name="mount.dfs.daemon_timeout"
-                                                    id="mount.dfs.daemon_timeout" placeholder="10s">
+                                                       id="mount.dfs.daemon_timeout" placeholder="10s">
                                                 <span class="text-sm opacity-70">Daemon idle timeout</span>
                                             </div>
                                             <div>
@@ -930,7 +950,7 @@
                                                     <span class="font-medium">Rclone RC Port</span>
                                                 </label>
                                                 <input type="text" class="input w-full" name="mount.rclone.port"
-                                                    id="mount.rclone.port" placeholder="5572">
+                                                       id="mount.rclone.port" placeholder="5572">
                                                 <span class="text-sm opacity-70">Port for Rclone Remote Control (RC)
                                                     interface</span>
                                             </div>
@@ -940,7 +960,7 @@
                                                     <span class="font-medium">Log Level</span>
                                                 </label>
                                                 <select class="select w-full" name="mount.rclone.log_level"
-                                                    id="mount.rclone.log_level">
+                                                        id="mount.rclone.log_level">
                                                     <option value="INFO">INFO</option>
                                                     <option value="DEBUG">DEBUG</option>
                                                     <option value="NOTICE">NOTICE</option>
@@ -953,7 +973,7 @@
                                                     <span class="font-medium">User ID (PUID)</span>
                                                 </label>
                                                 <input type="number" class="input w-full" name="mount.rclone.uid"
-                                                    id="mount.rclone.uid" placeholder="1000" min="0">
+                                                       id="mount.rclone.uid" placeholder="1000" min="0">
                                                 <span class="text-sm opacity-70">User ID for mounted files (0 = current
                                                     user)</span>
                                             </div>
@@ -963,7 +983,7 @@
                                                     <span class="font-medium">Group ID (PGID)</span>
                                                 </label>
                                                 <input type="number" class="input w-full" name="mount.rclone.gid"
-                                                    id="mount.rclone.gid" placeholder="1000" min="0">
+                                                       id="mount.rclone.gid" placeholder="1000" min="0">
                                                 <span class="text-sm opacity-70">Group ID for mounted files (0 = current
                                                     group)</span>
                                             </div>
@@ -972,7 +992,7 @@
                                                     <span class="font-medium">UMASK</span>
                                                 </label>
                                                 <input type="text" class="input w-full" name="mount.rclone.umask"
-                                                    id="mount.rclone.umask" placeholder="0022">
+                                                       id="mount.rclone.umask" placeholder="0022">
                                                 <span class="text-sm opacity-70">Umask</span>
                                             </div>
                                             <div>
@@ -980,7 +1000,7 @@
                                                     <span class="font-medium">Buffer Size</span>
                                                 </label>
                                                 <input type="text" class="input w-full" name="mount.rclone.buffer_size"
-                                                    id="mount.rclone.buffer_size" placeholder="10M">
+                                                       id="mount.rclone.buffer_size" placeholder="10M">
                                                 <span class="text-sm opacity-70">Buffer Size(This caches to memory, be
                                                     wary!!)</span>
                                             </div>
@@ -989,7 +1009,7 @@
                                                     <span class="font-medium">Bandwidth Limit</span>
                                                 </label>
                                                 <input type="text" class="input w-full" name="mount.rclone.bw_limit"
-                                                    id="mount.rclone.bw_limit" placeholder="100M">
+                                                       id="mount.rclone.bw_limit" placeholder="100M">
                                                 <span class="text-sm opacity-70">Bandwidth limit (e.g., 100M, 1G, leave
                                                     empty for unlimited)</span>
                                             </div>
@@ -998,7 +1018,7 @@
                                                     <span class="font-medium">Attribute Caching Timeout</span>
                                                 </label>
                                                 <input type="text" class="input w-full" name="mount.rclone.attr_timeout"
-                                                    id="mount.rclone.attr_timeout" placeholder="1s">
+                                                       id="mount.rclone.attr_timeout" placeholder="1s">
                                                 <span class="text-sm opacity-70">How long the kernel caches the
                                                     attributes (size, modification time, etc.)</span>
                                             </div>
@@ -1007,7 +1027,7 @@
                                                     <span class="font-medium">Transfers</span>
                                                 </label>
                                                 <input type="number" class="input w-full" name="mount.rclone.transfers"
-                                                    id="mount.rclone.transfers" placeholder="8" min="1">
+                                                       id="mount.rclone.transfers" placeholder="8" min="1">
                                                 <span class="text-sm opacity-70">Number of file transfers to run in
                                                     parallel</span>
                                             </div>
@@ -1025,7 +1045,7 @@
                                                     <span class="font-medium">Cache Directory</span>
                                                 </label>
                                                 <input type="text" class="input w-full" name="mount.rclone.cache_dir"
-                                                    id="mount.rclone.cache_dir" placeholder="/tmp/rclone">
+                                                       id="mount.rclone.cache_dir" placeholder="/tmp/rclone">
                                                 <span class="text-sm opacity-70">Directory for rclone cache files (leave
                                                     empty for system default)</span>
                                             </div>
@@ -1035,7 +1055,7 @@
                                                     <span class="font-medium">VFS Cache Mode</span>
                                                 </label>
                                                 <select class="select w-full" name="mount.rclone.vfs_cache_mode"
-                                                    id="mount.rclone.vfs_cache_mode">
+                                                        id="mount.rclone.vfs_cache_mode">
                                                     <option value="off">Off - No caching</option>
                                                     <option value="minimal">Minimal - Cache file structure only</option>
                                                     <option value="writes">Writes - Cache writes for better performance
@@ -1051,8 +1071,8 @@
                                                     <span class="font-medium">VFS Cache Max Size</span>
                                                 </label>
                                                 <input type="text" class="input w-full"
-                                                    name="mount.rclone.vfs_cache_max_size"
-                                                    id="mount.rclone.vfs_cache_max_size" placeholder="1G">
+                                                       name="mount.rclone.vfs_cache_max_size"
+                                                       id="mount.rclone.vfs_cache_max_size" placeholder="1G">
                                                 <span class="text-sm opacity-70">Maximum cache size (e.g., 1G, 500M,
                                                     leave empty for unlimited)</span>
                                             </div>
@@ -1062,8 +1082,8 @@
                                                     <span class="font-medium">VFS Cache Max Age</span>
                                                 </label>
                                                 <input type="text" class="input w-full"
-                                                    name="mount.rclone.vfs_cache_max_age"
-                                                    id="mount.rclone.vfs_cache_max_age" placeholder="1h">
+                                                       name="mount.rclone.vfs_cache_max_age"
+                                                       id="mount.rclone.vfs_cache_max_age" placeholder="1h">
                                                 <span class="text-sm opacity-70">Maximum age of cache entries (e.g., 1h,
                                                     30m)</span>
                                             </div>
@@ -1073,8 +1093,8 @@
                                                     <span class="font-medium">Read Chunk Size</span>
                                                 </label>
                                                 <input type="text" class="input w-full"
-                                                    name="mount.rclone.vfs_read_chunk_size"
-                                                    id="mount.rclone.vfs_read_chunk_size" placeholder="128M">
+                                                       name="mount.rclone.vfs_read_chunk_size"
+                                                       id="mount.rclone.vfs_read_chunk_size" placeholder="128M">
                                                 <span class="text-sm opacity-70">Size of data chunks to read (e.g.,
                                                     128M, 64M)</span>
                                             </div>
@@ -1084,8 +1104,8 @@
                                                     <span class="font-medium">Read Chunk Size Limit</span>
                                                 </label>
                                                 <input type="text" class="input w-full"
-                                                    name="mount.rclone.vfs_read_chunk_size_limit"
-                                                    id="mount.rclone.vfs_read_chunk_size_limit" placeholder="128M">
+                                                       name="mount.rclone.vfs_read_chunk_size_limit"
+                                                       id="mount.rclone.vfs_read_chunk_size_limit" placeholder="128M">
                                                 <span class="text-sm opacity-70">Limit Read Chunk Size</span>
                                             </div>
 
@@ -1094,8 +1114,9 @@
                                                     <span class="font-medium">VFS Read Ahead</span>
                                                 </label>
                                                 <input type="text" class="input w-full"
-                                                    name="mount.rclone.vfs_read_ahead" id="mount.rclone.vfs_read_ahead"
-                                                    placeholder="128k">
+                                                       name="mount.rclone.vfs_read_ahead"
+                                                       id="mount.rclone.vfs_read_ahead"
+                                                       placeholder="128k">
                                                 <span class="text-sm opacity-70">Read ahead buffer size (e.g., 128k,
                                                     256k)</span>
                                             </div>
@@ -1105,8 +1126,9 @@
                                                     <span class="font-medium">Directory Cache Time</span>
                                                 </label>
                                                 <input type="text" class="input w-full"
-                                                    name="mount.rclone.dir_cache_time" id="mount.rclone.dir_cache_time"
-                                                    placeholder="5m">
+                                                       name="mount.rclone.dir_cache_time"
+                                                       id="mount.rclone.dir_cache_time"
+                                                       placeholder="5m">
                                                 <span class="text-sm opacity-70">How long to cache directory listings
                                                     (e.g., 5m, 10m)</span>
                                             </div>
@@ -1116,8 +1138,8 @@
                                                     <span class="font-medium">VFS Cache Poll Interval</span>
                                                 </label>
                                                 <input type="text" class="input w-full"
-                                                    name="mount.rclone.vfs_cache_poll_interval"
-                                                    id="mount.rclone.vfs_cache_poll_interval" placeholder="1h">
+                                                       name="mount.rclone.vfs_cache_poll_interval"
+                                                       id="mount.rclone.vfs_cache_poll_interval" placeholder="1h">
                                                 <span class="text-sm opacity-70">How often VFS cache dir gets
                                                     cleaned</span>
                                             </div>
@@ -1127,8 +1149,8 @@
                                                     <span class="font-medium">VFS Cache Min Free Space</span>
                                                 </label>
                                                 <input type="text" class="input w-full"
-                                                    name="mount.rclone.vfs_cache_min_free_space"
-                                                    id="mount.rclone.vfs_cache_min_free_space" placeholder="1G">
+                                                       name="mount.rclone.vfs_cache_min_free_space"
+                                                       id="mount.rclone.vfs_cache_min_free_space" placeholder="1G">
                                                 <span class="text-sm opacity-70">Target minimum free space on the disk
                                                     containing the cache</span>
                                             </div>
@@ -1138,8 +1160,8 @@
                                                     <span class="font-medium">VFS Disk Space Total</span>
                                                 </label>
                                                 <input type="text" class="input w-full"
-                                                    name="mount.rclone.vfs_disk_space_total"
-                                                    id="mount.rclone.vfs_disk_space_total" placeholder="1G">
+                                                       name="mount.rclone.vfs_disk_space_total"
+                                                       id="mount.rclone.vfs_disk_space_total" placeholder="1G">
                                                 <span class="text-sm opacity-70">Specify the total space of disk</span>
                                             </div>
 
@@ -1148,8 +1170,8 @@
                                                     <span class="font-medium">VFS Read Chunk Streams</span>
                                                 </label>
                                                 <input type="number" class="input w-full"
-                                                    name="mount.rclone.vfs_read_chunk_streams"
-                                                    id="mount.rclone.vfs_read_chunk_streams" placeholder="4" min="0">
+                                                       name="mount.rclone.vfs_read_chunk_streams"
+                                                       id="mount.rclone.vfs_read_chunk_streams" placeholder="4" min="0">
                                                 <span class="text-sm opacity-70">The number of parallel streams to read
                                                     at once</span>
                                             </div>
@@ -1166,7 +1188,7 @@
                                             <div>
                                                 <label class="label cursor-pointer justify-start gap-3">
                                                     <input type="checkbox" class="checkbox checkbox-primary"
-                                                        name="mount.rclone.no_modtime" id="mount.rclone.no_modtime">
+                                                           name="mount.rclone.no_modtime" id="mount.rclone.no_modtime">
                                                     <div>
                                                         <span class="font-medium">No Modification Time</span>
                                                         <div class="label-text-alt">Don't read/write modification times
@@ -1178,7 +1200,8 @@
                                             <div>
                                                 <label class="label cursor-pointer justify-start gap-3">
                                                     <input type="checkbox" class="checkbox checkbox-primary"
-                                                        name="mount.rclone.no_checksum" id="mount.rclone.no_checksum">
+                                                           name="mount.rclone.no_checksum"
+                                                           id="mount.rclone.no_checksum">
                                                     <div>
                                                         <span class="font-medium">No Checksum</span>
                                                         <div class="label-text-alt">Don't checksum files on upload</div>
@@ -1188,9 +1211,9 @@
 
                                             <div>
                                                 <label class="label cursor-pointer justify-start gap-3"
-                                                    for="mount.rclone.async_read">
+                                                       for="mount.rclone.async_read">
                                                     <input type="checkbox" class="checkbox checkbox-primary"
-                                                        name="mount.rclone.async_read" id="mount.rclone.async_read">
+                                                           name="mount.rclone.async_read" id="mount.rclone.async_read">
                                                     <div>
                                                         <span class="font-medium">Async Read</span>
                                                         <div class="label-text-alt">Use asynchronous reads</div>
@@ -1200,27 +1223,29 @@
 
                                             <div>
                                                 <label class="label cursor-pointer justify-start gap-3"
-                                                    for="mount.rclone.vfs_fast_fingerprint">
+                                                       for="mount.rclone.vfs_fast_fingerprint">
                                                     <input type="checkbox" class="checkbox checkbox-primary"
-                                                        name="mount.rclone.vfs_fast_fingerprint"
-                                                        id="mount.rclone.vfs_fast_fingerprint">
+                                                           name="mount.rclone.vfs_fast_fingerprint"
+                                                           id="mount.rclone.vfs_fast_fingerprint">
                                                     <div>
                                                         <span class="font-medium">VFS Fast Fingerprint</span>
                                                         <div class="label-text-alt">Use fast (less accurate)
-                                                            fingerprints for change detection</div>
+                                                            fingerprints for change detection
+                                                        </div>
                                                     </div>
                                                 </label>
                                             </div>
 
                                             <div>
                                                 <label class="label cursor-pointer justify-start gap-3"
-                                                    for="mount.rclone.use_mmap">
+                                                       for="mount.rclone.use_mmap">
                                                     <input type="checkbox" class="checkbox checkbox-primary"
-                                                        name="mount.rclone.use_mmap" id="mount.rclone.use_mmap">
+                                                           name="mount.rclone.use_mmap" id="mount.rclone.use_mmap">
                                                     <div>
                                                         <span class="font-medium">Use Mmap</span>
                                                         <div class="label-text-alt">Use fast (less accurate)
-                                                            fingerprints for change detection</div>
+                                                            fingerprints for change detection
+                                                        </div>
                                                     </div>
                                                 </label>
                                             </div>
@@ -1251,9 +1276,9 @@
                                                     <span class="font-medium">Rclone RC URL</span>
                                                 </label>
                                                 <input type="url" class="input w-full"
-                                                    name="mount.external_rclone.rc_url"
-                                                    id="mount.external_rclone.rc_url"
-                                                    placeholder="http://localhost:9990">
+                                                       name="mount.external_rclone.rc_url"
+                                                       id="mount.external_rclone.rc_url"
+                                                       placeholder="http://localhost:9990">
                                                 <span class="text-sm opacity-70">RC URL (speeds up imports)</span>
                                             </div>
                                             <div>
@@ -1261,8 +1286,8 @@
                                                     <span class="font-medium">Rclone RC User</span>
                                                 </label>
                                                 <input type="text" class="input w-full"
-                                                    name="mount.external_rclone.rc_username"
-                                                    id="mount.external_rclone.rc_username" placeholder="admin">
+                                                       name="mount.external_rclone.rc_username"
+                                                       id="mount.external_rclone.rc_username" placeholder="admin">
                                                 <span class="text-sm opacity-70">RC username</span>
                                             </div>
                                             <div>
@@ -1270,14 +1295,114 @@
                                                     <span class="font-medium">Rclone RC Password</span>
                                                 </label>
                                                 <input type="password" class="input w-full"
-                                                    name="mount.external_rclone.rc_password"
-                                                    id="mount.external_rclone.rc_password">
+                                                       name="mount.external_rclone.rc_password"
+                                                       id="mount.external_rclone.rc_password">
                                                 <span class="text-sm opacity-70">RC password</span>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-content hidden" data-tab-content="repair">
+                    <div class="space-y-6">
+                        <div>
+                            <label class="label cursor-pointer justify-start gap-3">
+                                <input type="checkbox" class="checkbox checkbox-lg checkbox-primary"
+                                       id="repair.enabled" name="repair.enabled">
+                                <div>
+                                    <span class="label-text font-medium text-lg">Enable Repair</span>
+                                    <div class="label-text-alt">When off, the scheduled sweep is unregistered. Per-entry
+                                        rechecks from the Browse
+                                        page still work.
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <div>
+                                <label class="label" for="repair.source">
+                                    <span class="font-medium">Source</span>
+                                </label>
+                                <select class="select w-full" name="repair.source" id="repair.source">
+                                    <option value="arr">Arr (Sonarr / Radarr)</option>
+                                    <option value="managed">Managed entries</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label class="label" for="repair.arrs">
+                                    <span class="font-medium">Arrs to include
+                                        <span class="opacity-60 font-normal">(empty = all eligible)</span>
+                                    </span>
+                                </label>
+                                <select class="select w-full" name="repair.arrs" id="repair.arrs" multiple
+                                        size="3"></select>
+                            </div>
+
+                            <div>
+                                <label class="label" for="repair.schedule">
+                                    <span class="font-medium">Schedule</span>
+                                </label>
+                                <input type="text" class="input w-full" name="repair.schedule" id="repair.schedule"
+                                       placeholder="e.g. 6h, 04:00, 0 4 * * *">
+                                <span class="label-text-alt opacity-70">Cron expression or interval. Required when enabled.</span>
+                            </div>
+
+                            <div>
+                                <label class="label" for="repair.recheck_interval">
+                                    <span class="font-medium">Recheck interval</span>
+                                </label>
+                                <input type="text" class="input w-full" name="repair.recheck_interval"
+                                       id="repair.recheck_interval"
+                                       placeholder="168h">
+                                <span class="label-text-alt opacity-70">Skip entries probed more recently than this.</span>
+                            </div>
+
+                            <div>
+                                <label class="label" for="repair.workers">
+                                    <span class="font-medium">Workers</span>
+                                </label>
+                                <input type="number" min="1" class="input w-full" name="repair.workers"
+                                       id="repair.workers" value="5">
+                            </div>
+
+                            <div>
+                                <label class="label" for="repair.nntp_connection_percent">
+                                    <span class="font-medium">NNTP repair connections (%)</span>
+                                </label>
+                                <input type="number" min="1" max="100" class="input w-full"
+                                       name="repair.nntp_connection_percent" id="repair.nntp_connection_percent"
+                                       value="20">
+                                <span class="label-text-alt opacity-70">Maximum percentage of all NNTP connections a repair run may borrow.</span>
+                            </div>
+
+                            <div>
+                                <label class="label" for="repair.strategy">
+                                    <span class="font-medium">Strategy</span>
+                                </label>
+                                <select class="select w-full" name="repair.strategy" id="repair.strategy">
+                                    <option value="per_entry">Per entry</option>
+                                    <option value="per_file">Per file</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <label class="label cursor-pointer justify-start gap-3">
+                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
+                                       id="repair.auto_repair" name="repair.auto_repair">
+                                <span class="label-text font-medium">Auto-repair when broken</span>
+                            </label>
+                            <label class="label cursor-pointer justify-start gap-3">
+                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
+                                       id="repair.notify_on_complete" name="repair.notify_on_complete">
+                                <span class="label-text font-medium">Notify on completion</span>
+                            </label>
                         </div>
                     </div>
                 </div>

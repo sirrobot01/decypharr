@@ -3,17 +3,17 @@ package manager
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	grab "github.com/cavaliergopher/grab/v3"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/pkg/notifications"
@@ -31,9 +31,14 @@ type Downloader struct {
 }
 
 const (
-	multipartThreshold   int64 = 128 << 20 // 128 MiB
-	multipartMinPartSize int64 = 32 << 20  // 32 MiB
-	multipartMaxParts          = 4
+	symlinkMountWaitTimeout     = 30 * time.Minute
+	symlinkScanInitialInterval  = 100 * time.Millisecond
+	symlinkScanMaxInterval      = 2 * time.Second
+	symlinkReadyTimeout         = 2 * time.Minute
+	symlinkReadyInitialInterval = 200 * time.Millisecond
+	symlinkReadyMaxInterval     = 2 * time.Second
+	symlinkLogEveryAttempts     = 10
+	symlinkLogSampleSize        = 8
 )
 
 type downloadLogMeta struct {
@@ -71,6 +76,13 @@ func NewDownloadManager(manager *Manager) *Downloader {
 }
 
 func (d *Downloader) download(torrent *storage.Entry) error {
+	// Mark as in-flight up front so the queue scheduler skips this entry while
+	// we're iterating seasons / creating symlinks (processSymlink only flips
+	// this flag after its own directory scan, which is too late for the parent
+	// of a multi-season torrent).
+	torrent.IsDownloading = true
+	_ = d.manager.queue.Update(torrent)
+
 	var (
 		isMultiSeason bool
 		seasons       []SeasonInfo
@@ -80,18 +92,20 @@ func (d *Downloader) download(torrent *storage.Entry) error {
 	}
 	torrentMountPath := d.manager.GetTorrentMountPath(torrent)
 	if isMultiSeason {
-
 		seasonResults := convertToMultiSeason(torrent, seasons)
 		for _, result := range seasonResults {
 			if err := d.manager.queue.Add(result); err != nil {
 				d.logger.Error().Err(err).Msgf("Failed to save season torrent")
 				continue
 			}
-			// Then process the symlinks for each season torrent
 			if err := d.process(result, torrentMountPath); err != nil {
 				d.markAsError(result, err)
 			}
 		}
+		// Parent has been fanned out into season entries; mark it complete so
+		// it leaves the downloading queue instead of getting re-processed.
+		d.completeEntry(torrent)
+		return nil
 	}
 	return d.process(torrent, torrentMountPath)
 }
@@ -105,7 +119,7 @@ func (d *Downloader) process(entry *storage.Entry, mountPath string) error {
 	case config.DownloadActionStrm:
 		return d.processStrm(entry)
 	case config.DownloadActionNone:
-		d.markAsCompleted(entry)
+		d.completeEntry(entry)
 		// Remove entry from queue
 		_ = d.manager.queue.Delete(entry.InfoHash, nil)
 		return nil
@@ -114,11 +128,19 @@ func (d *Downloader) process(entry *storage.Entry, mountPath string) error {
 	}
 }
 
+func (d *Downloader) completeEntry(entry *storage.Entry) {
+	d.markAsCompleted(entry)
+	d.notifyCompleted(entry)
+	d.triggerArrRefresh(entry)
+}
+
 func (d *Downloader) markAsCompleted(entry *storage.Entry) {
 	// Mark as completed
 	entry.MarkAsCompleted(entry.DownloadPath())
 	_ = d.manager.queue.Update(entry)
+}
 
+func (d *Downloader) notifyCompleted(entry *storage.Entry) {
 	// Send notification
 	msg := fmt.Sprintf("Download completed: %s [%s] -> %s", entry.Name, entry.Category, entry.DownloadPath())
 	d.manager.Notifications.Notify(notifications.Event{
@@ -127,11 +149,21 @@ func (d *Downloader) markAsCompleted(entry *storage.Entry) {
 		Entry:   entry,
 		Message: msg,
 	})
+}
 
-	// Trigger arr refresh
+func (d *Downloader) triggerArrRefresh(entry *storage.Entry) {
 	go func() {
 		a := d.manager.arr.GetOrCreate(entry.Category)
-		a.Refresh()
+		if a == nil || a.Host == "" || a.Token == "" {
+			return
+		}
+		if err := a.Refresh(); err != nil {
+			d.logger.Debug().
+				Err(err).
+				Str("arr", a.Name).
+				Str("entry", entry.Name).
+				Msg("Failed to trigger Arr refresh")
+		}
 	}()
 }
 
@@ -163,56 +195,17 @@ func (d *Downloader) processSymlink(entry *storage.Entry, mountPath string) erro
 		return fmt.Errorf("failed to create directory: %s: %v", torrentSymlinkPath, err)
 	}
 
-	// Track pending files
-	remainingFiles := make(map[string]*storage.File)
-	for _, file := range files {
-		remainingFiles[file.Name] = file
-	}
-
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	timeout := time.After(30 * time.Minute)
-	filePaths := make([]string, 0, len(remainingFiles))
-
-	var checkDirectory func(string) // Recursive function
-	checkDirectory = func(dirPath string) {
-		entries, err := os.ReadDir(dirPath)
-		if err != nil {
-			return
-		}
-
-		for _, item := range entries {
-			entryName := item.Name()
-			fullPath := filepath.Join(dirPath, entryName)
-
-			// Check if this matches a remaining file
-			if file, exists := remainingFiles[entryName]; exists {
-				fileSymlinkPath := filepath.Join(torrentSymlinkPath, file.Name)
-
-				if err := os.Symlink(fullPath, fileSymlinkPath); err == nil || os.IsExist(err) {
-					filePaths = append(filePaths, fileSymlinkPath)
-					delete(remainingFiles, entryName)
-					d.logger.Info().Msgf("File is ready: %s/%s", entry.GetFolder(), file.Name)
-				}
-			} else if item.IsDir() {
-				// If not found and it's a directory, check inside
-				checkDirectory(fullPath)
-			}
-		}
-	}
-
-	for len(remainingFiles) > 0 {
-		select {
-		case <-ticker.C:
-			checkDirectory(mountPath)
-
-		case <-timeout:
-			return fmt.Errorf("timeout waiting for files: %d files still pending", len(remainingFiles))
-		}
+	filePaths, err := d.createSymlinksWhenMountFilesAppear(entry, files, mountPath, torrentSymlinkPath)
+	if err != nil {
+		return err
 	}
 
 	entry.IsDownloading = true
 	_ = d.manager.queue.Update(entry)
+
+	if err := d.waitForSymlinkFilesReady(filePaths, symlinkReadyTimeout); err != nil {
+		return err
+	}
 
 	// Run ffprobe on files to warm cache and trigger imports
 	if !d.manager.config.SkipPreCache && len(filePaths) > 0 {
@@ -228,9 +221,242 @@ func (d *Downloader) processSymlink(entry *storage.Entry, mountPath string) erro
 		}
 	}
 
-	d.markAsCompleted(entry)
+	d.completeEntry(entry)
 
 	return nil
+}
+
+func (d *Downloader) createSymlinksWhenMountFilesAppear(entry *storage.Entry, files []*storage.File, mountPath string, symlinkDir string) ([]string, error) {
+	remainingFiles := make(map[string]*storage.File, len(files))
+	for _, file := range files {
+		remainingFiles[file.Name] = file
+	}
+
+	filePaths := make([]string, 0, len(remainingFiles))
+	deadline := time.Now().Add(symlinkMountWaitTimeout)
+	delay := symlinkScanInitialInterval
+	attempt := 0
+	var lastScanErr error
+	var scanErr error
+
+	var checkDirectory func(string) error
+	checkDirectory = func(dirPath string) error {
+		entries, err := os.ReadDir(dirPath)
+		if err != nil {
+			if scanErr == nil {
+				scanErr = err
+			}
+			return nil
+		}
+
+		for _, item := range entries {
+			entryName := item.Name()
+			fullPath := filepath.Join(dirPath, entryName)
+
+			if file, exists := remainingFiles[entryName]; exists {
+				fileSymlinkPath := filepath.Join(symlinkDir, file.Name)
+				if err := os.Symlink(fullPath, fileSymlinkPath); err != nil && !os.IsExist(err) {
+					return fmt.Errorf("failed to create symlink %s -> %s: %w", fileSymlinkPath, fullPath, err)
+				}
+				filePaths = append(filePaths, fileSymlinkPath)
+				delete(remainingFiles, entryName)
+				d.logger.Info().Msgf("File is ready: %s/%s", entry.GetFolder(), file.Name)
+				continue
+			}
+
+			if item.IsDir() {
+				if err := checkDirectory(fullPath); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+
+	for len(remainingFiles) > 0 {
+		attempt++
+		scanErr = nil
+		if err := checkDirectory(mountPath); err != nil {
+			return nil, err
+		}
+		lastScanErr = scanErr
+		if len(remainingFiles) == 0 {
+			break
+		}
+
+		if time.Now().After(deadline) {
+			pending := pendingMountFileNames(remainingFiles, symlinkLogSampleSize)
+			if lastScanErr != nil {
+				return nil, fmt.Errorf("timeout waiting for mount files: %d files still pending (%s): last scan error: %w", len(remainingFiles), strings.Join(pending, ", "), lastScanErr)
+			}
+			return nil, fmt.Errorf("timeout waiting for mount files: %d files still pending (%s)", len(remainingFiles), strings.Join(pending, ", "))
+		}
+
+		if shouldLogSymlinkWaitAttempt(attempt) {
+			d.logger.Debug().
+				Err(lastScanErr).
+				Str("entry", entry.Name).
+				Str("mount_path", mountPath).
+				Int("pending", len(remainingFiles)).
+				Strs("sample", pendingMountFileNames(remainingFiles, symlinkLogSampleSize)).
+				Msg("Waiting for mount files before creating symlinks")
+		}
+
+		if err := d.sleepUntilNextSymlinkAttempt(delay, deadline); err != nil {
+			return nil, err
+		}
+		delay = nextSymlinkBackoff(delay, symlinkScanMaxInterval)
+	}
+
+	return filePaths, nil
+}
+
+func (d *Downloader) waitForSymlinkFilesReady(filePaths []string, timeout time.Duration) error {
+	if len(filePaths) == 0 {
+		return nil
+	}
+
+	pending := make(map[string]error, len(filePaths))
+	for _, path := range filePaths {
+		pending[path] = nil
+	}
+
+	deadline := time.Now().Add(timeout)
+	delay := symlinkReadyInitialInterval
+	attempt := 0
+
+	for len(pending) > 0 {
+		attempt++
+		for path := range pending {
+			if err := verifySymlinkFileReady(path); err != nil {
+				pending[path] = err
+				continue
+			}
+			delete(pending, path)
+		}
+		if len(pending) == 0 {
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout waiting for symlink files to be ready: %d files still pending (%s)", len(pending), strings.Join(pendingSymlinkFileStatuses(pending, symlinkLogSampleSize), ", "))
+		}
+
+		if shouldLogSymlinkWaitAttempt(attempt) {
+			d.logger.Debug().
+				Int("pending", len(pending)).
+				Strs("sample", pendingSymlinkFileStatuses(pending, symlinkLogSampleSize)).
+				Msg("Waiting for symlink files to resolve")
+		}
+
+		if err := d.sleepUntilNextSymlinkAttempt(delay, deadline); err != nil {
+			return err
+		}
+		delay = nextSymlinkBackoff(delay, symlinkReadyMaxInterval)
+	}
+
+	return nil
+}
+
+func verifySymlinkFileReady(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("symlink not available: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return fmt.Errorf("path is not a symlink")
+	}
+
+	targetInfo, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("symlink target not available: %w", err)
+	}
+	if targetInfo.IsDir() {
+		return fmt.Errorf("symlink target is a directory")
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("symlink target cannot be opened: %w", err)
+	}
+	return f.Close()
+}
+
+func (d *Downloader) sleepUntilNextSymlinkAttempt(delay time.Duration, deadline time.Time) error {
+	if remaining := time.Until(deadline); remaining < delay {
+		delay = remaining
+	}
+	if delay <= 0 {
+		return nil
+	}
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	ctx := d.operationContext()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (d *Downloader) operationContext() context.Context {
+	if d.manager != nil && d.manager.ctx != nil {
+		return d.manager.ctx
+	}
+	return context.Background()
+}
+
+func nextSymlinkBackoff(current time.Duration, maxDelay time.Duration) time.Duration {
+	current *= 2
+	if current > maxDelay {
+		return maxDelay
+	}
+	return current
+}
+
+func shouldLogSymlinkWaitAttempt(attempt int) bool {
+	return attempt == 1 || attempt%symlinkLogEveryAttempts == 0
+}
+
+func pendingMountFileNames(files map[string]*storage.File, limit int) []string {
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return limitedStringSample(names, limit)
+}
+
+func pendingSymlinkFileStatuses(files map[string]error, limit int) []string {
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	statuses := make([]string, 0, len(paths))
+	for _, path := range paths {
+		err := files[path]
+		status := path
+		if err != nil {
+			status = fmt.Sprintf("%s: %s", path, err.Error())
+		}
+		statuses = append(statuses, status)
+	}
+	return limitedStringSample(statuses, limit)
+}
+
+func limitedStringSample(values []string, limit int) []string {
+	if limit <= 0 || len(values) <= limit {
+		return values
+	}
+
+	sample := append([]string(nil), values[:limit]...)
+	sample = append(sample, fmt.Sprintf("... %d more", len(values)-limit))
+	return sample
 }
 
 // processDownload downloads all files for an entry with progress tracking
@@ -318,7 +544,7 @@ func (d *Downloader) processTorrentDownload(entry *storage.Entry) error {
 	if err := p.Wait(); err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
-	d.markAsCompleted(entry)
+	d.completeEntry(entry)
 	d.logger.Info().Msgf("Downloaded all files for %s", entry.Name)
 	return nil
 }
@@ -397,14 +623,13 @@ func (d *Downloader) processUsenetDownload(entry *storage.Entry) error {
 		return fmt.Errorf("NZB download failed: %w", err)
 	}
 
-	d.markAsCompleted(entry)
+	d.completeEntry(entry)
 	d.logger.Info().Msgf("Downloaded all NZB files for %s", entry.Name)
 	return nil
 }
 
 // processStrm creates symlinks for torrent files
 func (d *Downloader) processStrm(torrent *storage.Entry) error {
-
 	files := torrent.GetActiveFiles()
 	d.logger.Info().Msgf("Creating .strm for %d files ...", len(files))
 
@@ -433,7 +658,7 @@ func (d *Downloader) processStrm(torrent *storage.Entry) error {
 			return fmt.Errorf("failed to create .strm file: %s: %v", strmFilePath, err)
 		}
 	}
-	d.markAsCompleted(torrent)
+	d.completeEntry(torrent)
 	d.logger.Info().Str("destination", torrentSymlinkPath).Msgf("Created .strm files for %s", torrent.Name)
 	return nil
 }
@@ -478,229 +703,70 @@ func (d *Downloader) detectMultiSeason(torrent *storage.Entry) (bool, []SeasonIn
 	return true, seasons
 }
 
-// localDownloader downloads a file and uses multipart ranges for large full-file transfers when supported.
+// localDownloader downloads a file with grab so interrupted local downloads can resume cleanly.
 func (d *Downloader) localDownloader(downloadURL, filename string, byterange *[2]int64, progressCallback func(int64, int64)) error {
-	if byterange == nil {
-		meta, totalSize, err := d.probeMultipartSupport(downloadURL)
-		if err == nil && totalSize >= multipartThreshold {
-			partSize := multipartPartSize(totalSize)
-			parts := int((totalSize + partSize - 1) / partSize)
-			if parts >= 2 {
-				return d.multipartDownloader(downloadURL, filename, totalSize, progressCallback, meta, partSize)
-			}
-		}
-	}
-
 	startTime := time.Now()
 	requestedRange := "full"
-	var downloaded atomic.Int64
-	req, err := d.newDownloadRequest(d.manager.ctx, downloadURL, requestedRange)
+	req, err := grab.NewRequest(filename, downloadURL)
 	if err != nil {
 		return err
 	}
+	req = req.WithContext(d.manager.ctx)
+	req.BufferSize = 1 << 20
+	req.HTTPRequest.Header.Set("User-Agent", "Decypharr[QBitTorrent]")
+	req.HTTPRequest.Header.Set("Accept", "*/*")
+	req.HTTPRequest.Header.Set("Accept-Encoding", "identity")
 
-	// Set byte range if specified
 	if byterange != nil {
 		requestedRange = fmt.Sprintf("bytes=%d-%d", byterange[0], byterange[1])
-		req.Header.Set("Range", requestedRange)
+		req.NoResume = true
+		req.HTTPRequest.Header.Set("Range", requestedRange)
 	}
 
-	resp, err := d.manager.streamClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	meta := d.buildDownloadLogMeta(req, resp, requestedRange, "single", 1)
-	defer d.logDownloadCompletion(filename, startTime, &downloaded, meta)
+	client := grab.NewClient()
+	client.BufferSize = 1 << 20
+	client.HTTPClient = d.manager.streamClient
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		return fmt.Errorf("unexpected status %d for %s", resp.StatusCode, downloadURL)
+	resp := client.Do(req)
+	if resp == nil {
+		return fmt.Errorf("grab returned nil response for %s", downloadURL)
 	}
 
-	f, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	// Optimized 1MB buffer for HTTP/2 multiplexing
-	// Larger buffer = fewer syscalls = better throughput
-	buffer := make([]byte, 1<<20) // 1MB
-
-	// Progress tracking with faster updates
 	var lastReported int64
-
-	// Report progress more frequently (every 500ms) for better UX
 	t := time.NewTicker(500 * time.Millisecond)
 	defer t.Stop()
-
-	done := make(chan error, 1)
-	go func() {
-		// Use io.CopyBuffer with our optimized buffer
-		_, err := io.CopyBuffer(f, io.TeeReader(resp.Body, &countWriter{n: &downloaded}), buffer)
-		done <- err
+	defer func() {
+		var downloaded atomic.Int64
+		downloaded.Store(resp.BytesComplete())
+		meta := d.buildDownloadLogMeta(req.HTTPRequest, resp.HTTPResponse, requestedRange, "grab", 1)
+		d.logDownloadCompletion(filename, startTime, &downloaded, meta)
 	}()
 
 	for {
 		select {
 		case <-t.C:
-			current := downloaded.Load()
-			elapsed := time.Since(startTime).Seconds()
-			speed := int64(0)
-			if elapsed > 0 {
-				speed = int64(float64(current) / elapsed)
-			}
-			// Smoothing: only report if speed changed significantly or bytes changed
+			current := resp.BytesComplete()
+			speed := int64(resp.BytesPerSecond())
 			if current != lastReported && progressCallback != nil {
 				progressCallback(current-lastReported, speed)
 				lastReported = current
 			}
-		case err := <-done:
-			// Report final bytes
+		case <-resp.Done:
 			if progressCallback != nil {
-				final := downloaded.Load()
+				final := resp.BytesComplete()
 				if final != lastReported {
-					elapsed := time.Since(startTime).Seconds()
-					finalSpeed := int64(0)
-					if elapsed > 0 {
-						finalSpeed = int64(float64(final) / elapsed)
-					}
-					progressCallback(final-lastReported, finalSpeed)
+					progressCallback(final-lastReported, int64(resp.BytesPerSecond()))
 				}
 			}
-			return err
-		}
-	}
-}
-
-func (d *Downloader) multipartDownloader(downloadURL, filename string, totalSize int64, progressCallback func(int64, int64), meta downloadLogMeta, partSize int64) error {
-	startTime := time.Now()
-	var downloaded atomic.Int64
-	meta.transferMode = "multipart"
-	meta.parts = int((totalSize + partSize - 1) / partSize)
-	meta.requestRange = fmt.Sprintf("multipart/%d", meta.parts)
-	meta.contentRange = fmt.Sprintf("bytes */%d", totalSize)
-	defer d.logDownloadCompletion(filename, startTime, &downloaded, meta)
-
-	f, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	if err := f.Truncate(totalSize); err != nil {
-		return err
-	}
-
-	ctx, cancel := context.WithCancel(d.manager.ctx)
-	defer cancel()
-
-	done := make(chan error, 1)
-	go func() {
-		p := pool.New().WithErrors().WithFirstError().WithMaxGoroutines(meta.parts)
-		for part := 0; part < meta.parts; part++ {
-			start := int64(part) * partSize
-			end := min(start+partSize-1, totalSize-1)
-			writeOffset := start
-			rangeHeader := fmt.Sprintf("bytes=%d-%d", start, end)
-
-			p.Go(func() error {
-				req, err := d.newDownloadRequest(ctx, downloadURL, rangeHeader)
-				if err != nil {
-					return err
+			if err := resp.Err(); err != nil {
+				if grab.IsStatusCodeError(err) && resp.HTTPResponse != nil {
+					return fmt.Errorf("unexpected status %d for %s", resp.HTTPResponse.StatusCode, downloadURL)
 				}
-
-				resp, err := d.manager.streamClient.Do(req)
-				if err != nil {
-					return err
-				}
-				defer resp.Body.Close()
-
-				if resp.StatusCode != http.StatusPartialContent {
-					return fmt.Errorf("multipart request %s returned status %d", rangeHeader, resp.StatusCode)
-				}
-
-				buffer := make([]byte, 1<<20)
-				_, err = io.CopyBuffer(io.NewOffsetWriter(f, writeOffset), io.TeeReader(resp.Body, &countWriter{n: &downloaded}), buffer)
 				return err
-			})
-		}
-
-		done <- p.Wait()
-	}()
-
-	var lastReported int64
-	t := time.NewTicker(500 * time.Millisecond)
-	defer t.Stop()
-
-	for {
-		select {
-		case <-t.C:
-			current := downloaded.Load()
-			elapsed := time.Since(startTime).Seconds()
-			speed := int64(0)
-			if elapsed > 0 {
-				speed = int64(float64(current) / elapsed)
 			}
-			if current != lastReported && progressCallback != nil {
-				progressCallback(current-lastReported, speed)
-				lastReported = current
-			}
-		case err := <-done:
-			if progressCallback != nil {
-				final := downloaded.Load()
-				if final != lastReported {
-					elapsed := time.Since(startTime).Seconds()
-					finalSpeed := int64(0)
-					if elapsed > 0 {
-						finalSpeed = int64(float64(final) / elapsed)
-					}
-					progressCallback(final-lastReported, finalSpeed)
-				}
-			}
-			return err
+			return nil
 		}
 	}
-}
-
-func (d *Downloader) probeMultipartSupport(downloadURL string) (downloadLogMeta, int64, error) {
-	rangeHeader := "bytes=0-0"
-	req, err := d.newDownloadRequest(d.manager.ctx, downloadURL, rangeHeader)
-	if err != nil {
-		return downloadLogMeta{}, 0, err
-	}
-
-	resp, err := d.manager.streamClient.Do(req)
-	if err != nil {
-		return downloadLogMeta{}, 0, err
-	}
-	defer resp.Body.Close()
-
-	meta := d.buildDownloadLogMeta(req, resp, rangeHeader, "probe", 1)
-	if resp.StatusCode != http.StatusPartialContent {
-		return meta, 0, fmt.Errorf("range probe returned status %d", resp.StatusCode)
-	}
-
-	totalSize, err := parseTotalSize(resp.Header.Get("Content-Range"))
-	if err != nil {
-		return meta, 0, err
-	}
-
-	return meta, totalSize, nil
-}
-
-func (d *Downloader) newDownloadRequest(ctx context.Context, downloadURL, rangeHeader string) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "Decypharr[QBitTorrent]")
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Accept-Encoding", "identity")
-	if rangeHeader != "" && rangeHeader != "full" {
-		req.Header.Set("Range", rangeHeader)
-	}
-	return req, nil
 }
 
 func (d *Downloader) buildDownloadLogMeta(req *http.Request, resp *http.Response, requestedRange, transferMode string, parts int) downloadLogMeta {
@@ -759,38 +825,4 @@ func (d *Downloader) logDownloadCompletion(filename string, startTime time.Time,
 		Dur("duration", elapsed).
 		Float64("speed_mbps", speedMBps).
 		Msg("download transfer completed")
-}
-
-func multipartPartSize(totalSize int64) int64 {
-	partSize := max(multipartMinPartSize, (totalSize+multipartMaxParts-1)/multipartMaxParts)
-	if partSize <= 0 {
-		return multipartMinPartSize
-	}
-	return partSize
-}
-
-func parseTotalSize(contentRange string) (int64, error) {
-	if contentRange == "" {
-		return 0, fmt.Errorf("missing Content-Range header")
-	}
-	parts := strings.Split(contentRange, "/")
-	if len(parts) != 2 {
-		return 0, fmt.Errorf("invalid Content-Range header: %s", contentRange)
-	}
-	totalSize, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid Content-Range total size: %w", err)
-	}
-	return totalSize, nil
-}
-
-// countWriter is a minimal io.Writer that atomically counts bytes written
-type countWriter struct {
-	n *atomic.Int64
-}
-
-func (cw *countWriter) Write(p []byte) (int, error) {
-	n := len(p)
-	cw.n.Add(int64(n))
-	return n, nil
 }

@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Decypharr - {{.Title}}</title>
 
-    <link href="{{.URLBase}}assets/css/styles.css" rel="stylesheet" type="text/css" />
+    <link href="{{.URLBase}}assets/css/styles.css" rel="stylesheet" type="text/css"/>
 
     <link rel="apple-touch-icon" sizes="180x180" href="{{.URLBase}}images/favicon/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="{{.URLBase}}images/favicon/favicon-32x32.png">
@@ -17,7 +17,7 @@
 
     <script>
         // Early theme detection to prevent FOUC
-        (function() {
+        (function () {
             const savedTheme = localStorage.getItem('theme');
             if (savedTheme) {
                 document.documentElement.setAttribute('data-theme', savedTheme);
@@ -45,19 +45,19 @@
                 </svg>
             </div>
             <ul class="menu menu-sm dropdown-content mt-3 z-[1] p-2 shadow-lg bg-base-100 rounded-box w-52 border border-base-300">
-                <li><a href="{{.URLBase}}" class="{{if eq .Page "index"}}menu-active{{end}}">
+                <li><a href="{{.URLBase}}" class="{{if eq .Page " index"}}menu-active{{end}}">
                     <i class="bi bi-grid-3x3-gap text-primary"></i>Dashboard
                     </a></li>
-                <li><a href="{{.URLBase}}download" class="{{if eq .Page "download"}}menu-active{{end}}">
+                <li><a href="{{.URLBase}}download" class="{{if eq .Page " download"}}menu-active{{end}}">
                     <i class="bi bi-cloud-download text-secondary"></i>Download
                     </a></li>
-                <li><a href="{{.URLBase}}browse" class="{{if eq .Page "browse"}}menu-active{{end}}">
+                <li><a href="{{.URLBase}}browse" class="{{if eq .Page " browse"}}menu-active{{end}}">
                     <i class="bi bi-folder2-open text-primary"></i>Browse
                     </a></li>
-                <li><a href="{{.URLBase}}repair" class="{{if eq .Page "repair"}}menu-active{{end}}">
+                <li><a href="{{.URLBase}}repair" class="{{if eq .Page " repair"}}menu-active{{end}}">
                     <i class="bi bi-wrench-adjustable text-accent"></i>Repair
                     </a></li>
-                <li><a href="{{.URLBase}}settings" class="{{if eq .Page "config"}}menu-active{{end}}">
+                <li><a href="{{.URLBase}}settings" class="{{if eq .Page " config"}}menu-active{{end}}">
                     <i class="bi bi-gear text-info"></i>Settings
                     </a></li>
                 <li><a href="{{.URLBase}}logs" target="_blank">
@@ -73,23 +73,28 @@
 
     <div class="navbar-center hidden lg:flex">
         <ul class="menu menu-horizontal px-1 gap-1">
-            <li><a href="{{.URLBase}}" class="{{if eq .Page "index"}}menu-active{{end}} tooltip tooltip-bottom" data-tip="Dashboard">
+            <li><a href="{{.URLBase}}" class="{{if eq .Page " index"}}menu-active{{end}} tooltip tooltip-bottom"
+                data-tip="Dashboard">
                 <i class="bi bi-grid-3x3-gap"></i>
                 <span class="hidden xl:inline">Dashboard</span>
                 </a></li>
-            <li><a href="{{.URLBase}}download" class="{{if eq .Page "download"}}menu-active{{end}} tooltip tooltip-bottom" data-tip="Add Downloads">
+            <li><a href="{{.URLBase}}download" class="{{if eq .Page " download"}}menu-active{{end}} tooltip
+                tooltip-bottom" data-tip="Add Downloads">
                 <i class="bi bi-cloud-download"></i>
                 <span class="hidden xl:inline">Download</span>
                 </a></li>
-            <li><a href="{{.URLBase}}browse" class="{{if eq .Page "browse"}}menu-active{{end}} tooltip tooltip-bottom" data-tip="Browse Torrents">
+            <li><a href="{{.URLBase}}browse" class="{{if eq .Page " browse"}}menu-active{{end}} tooltip tooltip-bottom"
+                data-tip="Browse Torrents">
                 <i class="bi bi-folder2-open"></i>
                 <span class="hidden xl:inline">Browse</span>
                 </a></li>
-            <li><a href="{{.URLBase}}repair" class="{{if eq .Page "repair"}}menu-active{{end}} tooltip tooltip-bottom" data-tip="Repair Media">
+            <li><a href="{{.URLBase}}repair" class="{{if eq .Page " repair"}}menu-active{{end}} tooltip tooltip-bottom"
+                data-tip="Repair Media">
                 <i class="bi bi-wrench-adjustable"></i>
                 <span class="hidden xl:inline">Repair</span>
                 </a></li>
-            <li><a href="{{.URLBase}}settings" class="{{if eq .Page "config"}}menu-active{{end}} tooltip tooltip-bottom" data-tip="Settings">
+            <li><a href="{{.URLBase}}settings" class="{{if eq .Page " config"}}menu-active{{end}} tooltip
+                tooltip-bottom" data-tip="Settings">
                 <i class="bi bi-gear"></i>
                 <span class="hidden xl:inline">Settings</span>
                 </a></li>
@@ -104,7 +109,7 @@
         <div class="flex items-center gap-3">
             <div class="tooltip tooltip-left">
                 <label class="swap swap-rotate btn btn-ghost btn-circle hover:bg-base-300 transition-colors">
-                    <input type="checkbox" id="themeToggle" class="theme-controller" />
+                    <input type="checkbox" id="themeToggle" class="theme-controller"/>
                     <i class="swap-off bi bi-sun text-lg text-warning"></i>
                     <i class="swap-on bi bi-moon-stars text-lg text-info"></i>
                 </label>
@@ -118,7 +123,8 @@
             </div>
 
             <div class="tooltip tooltip-left" data-tip="Current Version">
-                <div class="badge badge-primary font-mono text-xs hover:badge-primary-focus transition-colors cursor-pointer" id="version-badge">
+                <div class="badge badge-primary font-mono text-xs hover:badge-primary-focus transition-colors cursor-pointer"
+                     id="version-badge">
                     Loading...
                 </div>
             </div>

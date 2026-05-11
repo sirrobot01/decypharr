@@ -13,7 +13,7 @@ const buildDir = {
 // Create directories
 Object.values(buildDir).forEach(dir => {
     if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
+        fs.mkdirSync(dir, {recursive: true});
     }
 });
 
@@ -94,7 +94,7 @@ async function downloadAssets() {
         // Write fixed CSS to source directory so it can be minified
         const biCSSSourcePath = path.join('./pkg/server/assets/css', 'bootstrap-icons.css');
         fs.writeFileSync(biCSSSourcePath, fixedCSS);
-        console.log(`   ✓ Downloaded Bootstrap Icons CSS (${(fixedCSS.length/1024).toFixed(1)}KB)`);
+        console.log(`   ✓ Downloaded Bootstrap Icons CSS (${(fixedCSS.length / 1024).toFixed(1)}KB)`);
 
         // Download other assets
         for (const download of downloads) {

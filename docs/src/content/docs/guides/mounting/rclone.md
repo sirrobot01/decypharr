@@ -27,12 +27,12 @@ Decypharr includes an embedded Rclone instance with full VFS support.
 
 ## VFS Cache Modes
 
-| Mode | Description | Use Case |
-|------|-------------|----------|
-| `off` | No caching | Low disk space |
-| `minimal` | Small metadata cache | Light usage |
-| `writes` | Cache writes only | Streaming + occasional writes |
-| `full` | Full read/write cache | Best performance |
+| Mode      | Description           | Use Case                      |
+|-----------|-----------------------|-------------------------------|
+| `off`     | No caching            | Low disk space                |
+| `minimal` | Small metadata cache  | Light usage                   |
+| `writes`  | Cache writes only     | Streaming + occasional writes |
+| `full`    | Full read/write cache | Best performance              |
 
 **Recommended**: `writes` for most use cases
 

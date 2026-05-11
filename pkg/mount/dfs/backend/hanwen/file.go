@@ -39,10 +39,11 @@ var (
 func NewFile(vfsManager *vfs.Manager, config *config.FuseConfig, info *manager.FileInfo, log zerolog.Logger) *File {
 	rlLogger := logger.NewRateLimitedLogger(logger.WithLogger(log.With().Str("file", info.Name()).Logger()))
 	return &File{
-		config: config,
-		logger: rlLogger.Rate(fmt.Sprintf("%s/%s", info.Parent(), info.Name())),
-		info:   info,
-		vfs:    vfsManager,
+		config:  config,
+		logger:  rlLogger.Rate(fmt.Sprintf("%s/%s", info.Parent(), info.Name())),
+		info:    info,
+		vfs:     vfsManager,
+		content: info.Content(),
 	}
 }
 

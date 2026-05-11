@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Tensai75/nzbparser"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/nntp"
@@ -40,7 +41,6 @@ type fileAnalysisResult struct {
 	fileSize     int64 // Total decoded size of the NZB file entry.
 	lastFileSize int64 // Total decoded size of the last NZB file entry in the group.
 	segmentSize  int64 // Decoded size of a single yEnc part/segment.
-	totalParts   int64 // Total yEnc parts for the file entry (if provided).
 }
 
 type contentResult struct {
@@ -169,7 +169,7 @@ func (p *NZBParser) Parse(ctx context.Context, filename string, content []byte) 
 		return nil, nil, fmt.Errorf("no segments available to stat in NZB")
 	}
 
-	nzb.ID = generateID(nzb)
+	nzb.ID = uuid.New().String()
 	return nzb, fileGroups, nil
 }
 
@@ -892,15 +892,4 @@ func (p *NZBParser) detectFileTypeFromContent(data []byte) storage.NZBFileType {
 	}
 
 	return storage.NZBFileTypeUnknown
-}
-
-// Calculate total archive Size from all RAR parts in the group
-func (p *NZBParser) calculateTotalArchiveSize(group *FileGroup) int64 {
-	var total int64
-	for _, file := range group.Files {
-		for _, segment := range file.Segments {
-			total += int64(segment.Bytes)
-		}
-	}
-	return total
 }

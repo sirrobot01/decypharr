@@ -78,7 +78,6 @@ func (f *Fixer) FixTorrent(ctx context.Context, entry *storage.Entry, skipCurren
 	}
 	// Check if repair is already in flight
 	if req, exists := f.inFlightRepairs.Load(entry.InfoHash); exists {
-
 		// Wait for existing repair to complete
 		select {
 		case result := <-req.result:
@@ -109,7 +108,6 @@ func (f *Fixer) FixTorrent(ctx context.Context, entry *storage.Entry, skipCurren
 	totalAttempts := 0
 
 	for _, debridName := range attemptOrder {
-
 		// Check if entry has been marked as failed to re-insert
 		if f.IsFailedToReinsert(entry.InfoHash, debridName) {
 			continue
@@ -132,8 +130,10 @@ func (f *Fixer) FixTorrent(ctx context.Context, entry *storage.Entry, skipCurren
 			Int("attempt", totalAttempts+1).
 			Msg("Attempting re-insertion")
 
-		// Attempt re-insertion on this debrid
-		success, err := f.MoveTorrent(entry, debridName, true)
+		// Force a fresh submit only for the broken active provider; for any other
+		// debrid, let MoveTorrent reuse an existing valid placement if present.
+		reinsert := debridName == entry.ActiveProvider
+		success, err := f.MoveTorrent(entry, debridName, reinsert)
 		totalAttempts++
 
 		if success {
@@ -163,6 +163,7 @@ func (f *Fixer) FixTorrent(ctx context.Context, entry *storage.Entry, skipCurren
 
 	// All debrids failed - mark as completely failed
 	f.manager.logger.Error().
+		Err(lastErr).
 		Str("infohash", entry.InfoHash).
 		Int("attempts", totalAttempts).
 		Msg("All re-insertion attempts failed")
@@ -205,20 +206,24 @@ func (f *Fixer) MoveTorrent(entry *storage.Entry, debridName string, reinsert bo
 		return false, fmt.Errorf("debrid client %s not found", debridName)
 	}
 
-	// Check if placement already exists on this debrid
-	placement, hasPlacement := entry.Providers[entry.ActiveProvider]
-	var oldID string
-	if hasPlacement && placement != nil && placement.ID != "" && !reinsert {
-		// Activate the existing placement
-		if err := entry.ActivatePlacement(debridName); err != nil {
-			return false, fmt.Errorf("failed to activate existing placement: %w", err)
+	// Prefer activating an existing, completed placement on the target debrid
+	// before re-submitting the magnet. Skipped when reinsert=true — e.g. the
+	// current active provider just failed and its placement is presumed stale.
+	if !reinsert {
+		if target, ok := entry.Providers[debridName]; ok && target != nil && target.ID != "" && target.Status == types.TorrentStatusDownloaded {
+			if err := entry.ActivatePlacement(debridName); err == nil {
+				entry.Bad = false
+				entry.UpdatedAt = time.Now()
+				return true, nil
+			}
+			// Activation failed — fall through to a fresh submit.
 		}
-		entry.Bad = false
-		entry.UpdatedAt = time.Now()
-		return true, nil
 	}
-	if placement != nil {
-		oldID = placement.ID
+
+	// Capture the source provider's torrent ID for post-migration cleanup.
+	var oldID string
+	if source, ok := entry.Providers[entry.ActiveProvider]; ok && source != nil {
+		oldID = source.ID
 	}
 
 	// Construct magnet

@@ -1,3 +1,7 @@
+// The repair service is the manager's health-checker. When enabled in config
+// it registers a recurring sweep that probes only the entries that need
+// probing (unhealthy, dirty, or stale) and persists per-entry health live
+// during the run.
 package manager
 
 import (
@@ -5,292 +9,429 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
-	"github.com/puzpuzpuz/xsync/v4"
+	"github.com/go-co-op/gocron/v2"
+	"github.com/google/uuid"
+	"github.com/rs/zerolog"
+
 	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/customerror"
+	"github.com/sirrobot01/decypharr/internal/logger"
+	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/notifications"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
-// RepairJobCounts holds per-status counts of repair jobs.
-type RepairJobCounts struct {
-	Active    int `json:"active_jobs"`
-	Pending   int `json:"pending_jobs"`
-	Completed int `json:"completed_jobs"`
-	Failed    int `json:"failed_jobs"`
+// RepairStatus is the snapshot returned by the /api/repair/status endpoint.
+type RepairStatus struct {
+	Enabled      bool                         `json:"enabled"`
+	NextRunAt    *time.Time                   `json:"next_run_at,omitempty"`
+	ActiveRun    *storage.RepairRun           `json:"active_run,omitempty"`
+	LastRun      *storage.RepairRun           `json:"last_run,omitempty"`
+	HealthCounts map[storage.HealthStatus]int `json:"health_counts"`
 }
-
-type RepairJobOptions struct {
-	Arrs        []string
-	MediaIDs    []string
-	AutoProcess bool
-	Recurrent   bool
-	Schedule    string
-	Strategy    storage.RepairStrategy
-	Workers     int
-}
-
-type RepairManager interface {
-	AddJob(opts RepairJobOptions) (string, error)
-	StopJob(id string) error
-	ProcessJob(id string) error
-	DeleteJobs(ids []string)
-	GetJobs() []*storage.Job
-	JobStats() RepairJobCounts
-	LoadRecurringJobs()
-	Stop()
-}
-
-type FileProbeStatus string
 
 const (
-	FileProbeHealthy FileProbeStatus = "healthy"
-	FileProbeBroken  FileProbeStatus = "broken"
-	FileProbeUnknown FileProbeStatus = "unknown"
+	repairSchedulerTag    = "repair-sweep"
+	repairDefaultWorkers  = 5
+	repairDefaultRecheck  = 7 * 24 * time.Hour
+	repairHistoryRetained = 100
+	// At most this many files probed concurrently within a single entry. The
+	// outer worker count comes from cfg.Repair.Workers.
+	repairFilesPerEntry    = 2
+	repairStopDrainTimeout = 30 * time.Second
 )
 
-type FileProbeResult struct {
-	Name     string          `json:"name"`
-	InfoHash string          `json:"info_hash"`
-	Protocol config.Protocol `json:"protocol"`
-	Status   FileProbeStatus `json:"status"`
-	Reason   string          `json:"reason,omitempty"`
+// Repair is the health-check / auto-repair service. One instance per Manager.
+type Repair struct {
+	manager   *Manager
+	scheduler gocron.Scheduler
+	logger    zerolog.Logger
+
+	mu          sync.Mutex
+	parentCtx   context.Context
+	activeRunID string
+	cancelRun   context.CancelFunc
+	scheduled   bool
+	runWG       sync.WaitGroup
 }
 
-func (m *Manager) ProbeEntryFiles(ctx context.Context, item *storage.EntryItem, filenames []string, strategy ...storage.RepairStrategy) []FileProbeResult {
-	if item == nil {
+// NewRepair builds the repair service for the given manager. Call
+// Repair.Start to register the recurring sweep with the scheduler.
+func NewRepair(m *Manager) *Repair {
+	return &Repair{
+		manager:   m,
+		scheduler: m.scheduler,
+		logger:    logger.New("repair"),
+		parentCtx: context.Background(),
+	}
+}
+
+func (r *Repair) cfg() config.RepairConfig { return config.Get().Repair }
+
+func (r *Repair) workers() int {
+	if w := r.cfg().Workers; w > 0 {
+		return w
+	}
+	return repairDefaultWorkers
+}
+
+func (r *Repair) recheckInterval() time.Duration {
+	raw := r.cfg().RecheckInterval
+	if raw == "" {
+		return repairDefaultRecheck
+	}
+	d, err := utils.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return repairDefaultRecheck
+	}
+	return d
+}
+
+// Start registers the recurring sweep with the scheduler if repair is
+// enabled. It also reconciles any orphaned state left by a previous process:
+// runs marked running flip to cancelled; entries stuck on `repairing` revert
+// to their previous status. Idempotent.
+func (r *Repair) Start(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.parentCtx = ctx
+
+	r.reconcileOrphans()
+
+	cfg := r.cfg()
+	if !cfg.Enabled {
+		r.logger.Info().Msg("Repair disabled in config")
 		return nil
 	}
-
-	if len(item.Files) == 0 {
-		results := make([]FileProbeResult, 0, len(filenames))
-		for _, name := range filenames {
-			results = append(results, FileProbeResult{Name: name, Status: FileProbeUnknown, Reason: "missing_entry_item"})
-		}
-		return results
+	if strings.TrimSpace(cfg.Schedule) == "" {
+		return fmt.Errorf("repair enabled but schedule is empty")
 	}
 
-	cfg := config.Get()
-	probeStrategy := storage.RepairStrategyPerTorrent
-	if len(strategy) > 0 && strategy[0] != "" {
-		probeStrategy = strategy[0]
+	jd, err := utils.ConvertToJobDef(cfg.Schedule)
+	if err != nil {
+		return fmt.Errorf("invalid repair schedule %q: %w", cfg.Schedule, err)
 	}
-	files := make(map[string]*storage.File)
 
-	if len(filenames) > 0 {
-		for _, name := range filenames {
-			if f, ok := item.Files[name]; ok {
-				files[name] = f
+	r.scheduler.RemoveByTags(repairSchedulerTag)
+	if _, err := r.scheduler.NewJob(jd,
+		gocron.NewTask(func() {
+			if _, err := r.runSweep(storage.RepairTriggerScheduled); err != nil {
+				r.logger.Warn().Err(err).Msg("Scheduled repair sweep skipped")
+			}
+		}),
+		gocron.WithTags(repairSchedulerTag),
+	); err != nil {
+		return fmt.Errorf("failed to register repair sweep: %w", err)
+	}
+	r.scheduled = true
+	r.logger.Info().Str("schedule", cfg.Schedule).Msg("Repair sweep scheduled")
+	return nil
+}
+
+// Stop cancels any running sweep and unregisters the scheduled job. It blocks
+// until the sweep goroutine exits (bounded by repairStopDrainTimeout) so
+// in-flight saves don't race with storage.Close.
+func (r *Repair) Stop() {
+	r.mu.Lock()
+	cancel := r.cancelRun
+	r.cancelRun = nil
+	r.activeRunID = ""
+	if r.scheduled {
+		r.scheduler.RemoveByTags(repairSchedulerTag)
+		r.scheduled = false
+	}
+	r.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		r.runWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(repairStopDrainTimeout):
+		r.logger.Warn().Dur("timeout", repairStopDrainTimeout).Msg("Repair: drain timed out")
+	}
+}
+
+// ApplyConfig reconciles the scheduler with the latest repair config. Called
+// after /api/repair/config is updated.
+func (r *Repair) ApplyConfig() error {
+	r.Stop()
+	return r.Start(r.parentCtx)
+}
+
+// RunNow triggers a manual sweep. Returns the new run ID.
+func (r *Repair) RunNow() (string, error) {
+	return r.runSweep(storage.RepairTriggerManual)
+}
+
+// StopRun cancels the currently-active sweep, if any. The run record is also
+// flipped to cancelled in storage immediately so the UI sees the stop on the
+// next poll, even before the goroutine unwinds.
+func (r *Repair) StopRun() error {
+	r.mu.Lock()
+	cancel := r.cancelRun
+	id := r.activeRunID
+	r.mu.Unlock()
+	if cancel == nil {
+		return errors.New("no active repair run")
+	}
+
+	if id != "" {
+		if run, err := r.manager.storage.GetRepairRun(id); err == nil && run != nil && run.Status == storage.RepairRunRunning {
+			run.Status = storage.RepairRunCancelled
+			run.Stage = storage.RepairStageDone
+			run.CancelReason = "stopped by user"
+			run.CompletedAt = time.Now()
+			if err := r.manager.storage.SaveRepairRun(run); err != nil {
+				r.logger.Warn().Err(err).Str("run_id", id).Msg("Stop: failed to persist optimistic cancel")
 			}
 		}
-	} else {
-		files = item.Files
 	}
 
-	if len(files) == 0 {
-		return nil
+	r.logger.Info().Str("run_id", id).Msg("Cancelling repair run")
+	cancel()
+	return nil
+}
+
+// Status reports the current repair state for the API.
+func (r *Repair) Status() RepairStatus {
+	cfg := r.cfg()
+	st := RepairStatus{
+		Enabled:      cfg.Enabled,
+		HealthCounts: r.manager.storage.CountEntryHealthByStatus(),
 	}
-	results := make(map[string]FileProbeResult, len(files))
+	if next := r.nextScheduledRun(); next != nil {
+		st.NextRunAt = next
+	}
 
-	for name, file := range files {
-		select {
-		case <-ctx.Done():
-			return flattenProbeResults(results, files)
-		default:
+	r.mu.Lock()
+	activeID := r.activeRunID
+	r.mu.Unlock()
+	if activeID != "" {
+		if run, err := r.manager.storage.GetRepairRun(activeID); err == nil {
+			st.ActiveRun = run
 		}
+	}
 
-		entry, err := m.GetEntryByName(item.Name, name)
-		if err != nil {
-			results[name] = FileProbeResult{
-				Name:     name,
-				InfoHash: file.InfoHash,
-				Status:   FileProbeUnknown,
-				Reason:   "entry_not_found",
-			}
-			continue
-		}
-
-		result := FileProbeResult{
-			Name:     name,
-			InfoHash: file.InfoHash,
-			Protocol: entry.Protocol,
-			Status:   FileProbeHealthy,
-		}
-
-		if entry.IsNZB() && cfg.Usenet.SkipRepair {
-			result.Status = FileProbeUnknown
-			result.Reason = "usenet_repair_disabled"
-			results[name] = result
-			continue
-		}
-
-		if entry.IsNZB() {
-			if m.usenet == nil {
-				result.Status = FileProbeUnknown
-				result.Reason = "usenet_client_not_configured"
-				results[name] = result
+	if runs, err := r.manager.storage.ListRepairRuns(); err == nil {
+		for _, run := range runs {
+			if st.ActiveRun != nil && run.ID == st.ActiveRun.ID {
 				continue
 			}
-
-			if err := m.usenet.CheckFile(ctx, entry.InfoHash, file.Name); err != nil {
-				if errors.Is(err, customerror.UsenetSegmentMissingError) {
-					result.Status = FileProbeBroken
-					result.Reason = "usenet_segment_missing"
-				} else {
-					result.Status = FileProbeUnknown
-					result.Reason = "usenet_probe_error"
-				}
+			if run.Status == storage.RepairRunRunning {
+				continue
 			}
-			results[name] = result
-			continue
-		}
-
-		client := m.ProviderClient(entry.ActiveProvider)
-		if client == nil {
-			result.Status = FileProbeUnknown
-			result.Reason = "provider_client_not_found"
-			results[name] = result
-			continue
-		}
-		if !client.SupportsCheck() {
-			result.Status = FileProbeUnknown
-			result.Reason = "provider_check_unsupported"
-			results[name] = result
-			continue
-		}
-
-		placement := entry.GetActiveProvider()
-		if placement == nil || placement.Files == nil {
-			result.Status = FileProbeBroken
-			result.Reason = "missing_active_placement"
-			results[name] = result
-			continue
-		}
-
-		placementFile, exist := placement.Files[name]
-		if !exist {
-			result.Status = FileProbeBroken
-			result.Reason = "missing_provider_file_link"
-			results[name] = result
-			continue
-		}
-
-		link := cmp.Or(placementFile.Link, placementFile.Id)
-		if link == "" {
-			result.Status = FileProbeBroken
-			result.Reason = "empty_provider_link"
-			results[name] = result
-			continue
-		}
-
-		if err := client.CheckFile(ctx, file.InfoHash, link); err != nil {
-			if errors.Is(err, customerror.HosterUnavailableError) {
-				result.Status = FileProbeBroken
-				result.Reason = "hoster_unavailable"
-			} else {
-				result.Status = FileProbeUnknown
-				result.Reason = "provider_probe_error"
-			}
-		}
-		results[name] = result
-	}
-
-	if probeStrategy == storage.RepairStrategyPerTorrent {
-		brokenInfohashes := make(map[string]struct{})
-		for _, result := range results {
-			if result.Status == FileProbeBroken {
-				brokenInfohashes[result.InfoHash] = struct{}{}
-			}
-		}
-		if len(brokenInfohashes) > 0 {
-			for name, result := range results {
-				if _, broken := brokenInfohashes[result.InfoHash]; broken {
-					result.Status = FileProbeBroken
-					if result.Reason == "" {
-						result.Reason = "torrent_wide_failure"
-					}
-					results[name] = result
-				}
-			}
+			st.LastRun = run
+			break
 		}
 	}
-
-	final := flattenProbeResults(results, files)
-
-	// Time to attempt a repair for torrent files
-	brokenByHash := make(map[string]struct{})
-	for _, result := range final {
-		if result.Protocol == config.ProtocolTorrent && result.Status == FileProbeBroken {
-			brokenByHash[result.InfoHash] = struct{}{}
-		}
-	}
-
-	fixedHashes := xsync.NewMap[string, struct{}]()
-	var wg sync.WaitGroup
-	for infoHash := range brokenByHash {
-		wg.Add(1)
-		go func(infoHash string) {
-			defer wg.Done()
-			entry, err := m.GetEntry(infoHash)
-			if err != nil {
-				return
-			}
-			if err := m.ReinsertEntry(context.Background(), entry); err != nil {
-				return
-			}
-			fixedHashes.Store(infoHash, struct{}{})
-		}(infoHash)
-	}
-	wg.Wait()
-
-	// Update results for successfully repaired torrents
-	for i, result := range final {
-		if _, fixed := fixedHashes.Load(result.InfoHash); fixed && result.Status == FileProbeBroken {
-			final[i].Status = FileProbeHealthy
-			final[i].Reason = "repaired"
-		}
-	}
-
-	return final
+	return st
 }
 
-func flattenProbeResults(results map[string]FileProbeResult, files map[string]*storage.File) []FileProbeResult {
-	out := make([]FileProbeResult, 0, len(files))
-	for name, file := range files {
-		result, ok := results[name]
-		if !ok {
-			result = FileProbeResult{
-				Name:     name,
-				InfoHash: file.InfoHash,
-				Status:   FileProbeUnknown,
-				Reason:   "not_probed",
+func (r *Repair) nextScheduledRun() *time.Time {
+	if !r.scheduled {
+		return nil
+	}
+	for _, j := range r.scheduler.Jobs() {
+		for _, tag := range j.Tags() {
+			if tag != repairSchedulerTag {
+				continue
+			}
+			if next, err := j.NextRun(); err == nil {
+				return &next
 			}
 		}
-		if result.Name == "" {
-			result.Name = name
-		}
-		out = append(out, result)
 	}
-	return out
+	return nil
 }
 
-func (m *Manager) GetBrokenFiles(item *storage.EntryItem, filenames []string) []string {
-	results := m.ProbeEntryFiles(context.Background(), item, filenames)
-	brokenSet := make(map[string]struct{})
-	for _, result := range results {
-		if result.Status == FileProbeBroken {
-			brokenSet[result.Name] = struct{}{}
+// reconcileOrphans cleans up state left by a previous process that died
+// mid-sweep. Called from Start under r.mu.
+func (r *Repair) reconcileOrphans() {
+	s := r.manager.storage
+	if s == nil {
+		return
+	}
+
+	if runs, err := s.ListRepairRuns(); err == nil {
+		now := time.Now()
+		n := 0
+		for _, run := range runs {
+			if run == nil || run.Status != storage.RepairRunRunning {
+				continue
+			}
+			run.Status = storage.RepairRunCancelled
+			run.Stage = storage.RepairStageDone
+			run.CompletedAt = now
+			run.CancelReason = "interrupted by restart"
+			if err := s.SaveRepairRun(run); err != nil {
+				r.logger.Warn().Err(err).Str("run_id", run.ID).Msg("Reconcile: failed to persist orphaned run")
+				continue
+			}
+			n++
+		}
+		if n > 0 {
+			r.logger.Info().Int("count", n).Msg("Reconciled orphaned repair runs")
 		}
 	}
 
-	brokenFiles := make([]string, 0, len(brokenSet))
-	for name := range brokenSet {
-		brokenFiles = append(brokenFiles, name)
+	cleared := 0
+	_ = s.ForEachEntryHealth(func(state *storage.EntryHealth) error {
+		if state == nil || state.ActiveRunID == "" {
+			return nil
+		}
+		if state.PreviousStatus != "" {
+			state.Status = state.PreviousStatus
+		} else {
+			state.Status = storage.HealthUnknown
+		}
+		state.ActiveRunID = ""
+		state.PreviousStatus = ""
+		if err := s.SaveEntryHealth(state); err == nil {
+			cleared++
+		}
+		return nil
+	})
+	if cleared > 0 {
+		r.logger.Info().Int("count", cleared).Msg("Reverted entries stuck on 'repairing'")
 	}
-	return brokenFiles
 }
 
+// runSweep is the entry-point shared by RunNow and the scheduled callback. It
+// guards against concurrent runs, persists the run record, then dispatches.
+func (r *Repair) runSweep(trigger storage.RepairRunTrigger) (string, error) {
+	cfg := r.cfg()
+	if !cfg.Enabled && trigger == storage.RepairTriggerScheduled {
+		return "", errors.New("repair disabled")
+	}
+
+	r.mu.Lock()
+	if r.activeRunID != "" {
+		id := r.activeRunID
+		r.mu.Unlock()
+		return id, errors.New("repair already running")
+	}
+
+	runCtx, cancel := context.WithCancel(r.parentCtx)
+	run := &storage.RepairRun{
+		ID:        uuid.NewString(),
+		Trigger:   trigger,
+		Status:    storage.RepairRunRunning,
+		Stage:     storage.RepairStageSelecting,
+		StartedAt: time.Now(),
+		Source:    string(cfg.Source),
+	}
+	r.activeRunID = run.ID
+	r.cancelRun = cancel
+	r.mu.Unlock()
+
+	if err := r.manager.storage.SaveRepairRun(run); err != nil {
+		r.mu.Lock()
+		r.activeRunID = ""
+		r.cancelRun = nil
+		r.mu.Unlock()
+		cancel()
+		return "", fmt.Errorf("failed to persist repair run: %w", err)
+	}
+
+	r.runWG.Add(1)
+	go func() {
+		defer r.runWG.Done()
+		defer func() {
+			r.mu.Lock()
+			if r.activeRunID == run.ID {
+				r.activeRunID = ""
+				r.cancelRun = nil
+			}
+			r.mu.Unlock()
+			cancel()
+		}()
+		r.executeSweep(runCtx, run)
+	}()
+
+	r.logger.Info().Str("run_id", run.ID).Str("trigger", string(trigger)).Msg("Repair sweep started")
+	return run.ID, nil
+}
+
+func (r *Repair) finalizeRun(run *storage.RepairRun, status storage.RepairRunStatus, errStr, cancelReason string) {
+	// A user-initiated cancel that already landed in storage must not be
+	// clobbered by a sweep that completed successfully after Stop was pressed.
+	if existing, err := r.manager.storage.GetRepairRun(run.ID); err == nil && existing != nil && existing.Status == storage.RepairRunCancelled {
+		status = storage.RepairRunCancelled
+		if cancelReason == "" {
+			cancelReason = existing.CancelReason
+		}
+	}
+
+	run.Status = status
+	run.Stage = storage.RepairStageDone
+	run.CompletedAt = time.Now()
+	if errStr != "" {
+		run.Error = errStr
+	}
+	if cancelReason != "" {
+		run.CancelReason = cancelReason
+	}
+	if err := r.manager.storage.SaveRepairRun(run); err != nil {
+		r.logger.Warn().Err(err).Str("run_id", run.ID).Msg("Failed to persist final run state")
+	}
+	_ = r.manager.storage.PruneRepairRuns(repairHistoryRetained)
+
+	if r.cfg().NotifyOnComplete && r.manager.Notifications != nil {
+		if event := notificationEventFor(status); event != "" {
+			r.manager.Notifications.Notify(notifications.Event{
+				Type:    event,
+				Status:  string(status),
+				Message: discordContextFor(run),
+			})
+		}
+	}
+}
+
+func notificationEventFor(status storage.RepairRunStatus) config.NotificationEvent {
+	switch status {
+	case storage.RepairRunCompleted:
+		return config.EventRepairComplete
+	case storage.RepairRunFailed:
+		return config.EventRepairFailed
+	case storage.RepairRunCancelled:
+		return config.EventRepairCancelled
+	}
+	return ""
+}
+
+func discordContextFor(run *storage.RepairRun) string {
+	const dateFmt = "2006-01-02 15:04:05"
+	return fmt.Sprintf(
+		"\n**Run**: %s\n**Trigger**: %s\n**Source**: %s\n**Status**: %s\n**Started**: %s\n**Completed**: %s\n**Probed**: %d (broken: %d, repaired: %d)\n",
+		run.ID, run.Trigger, run.Source, run.Status,
+		run.StartedAt.Format(dateFmt), run.CompletedAt.Format(dateFmt),
+		run.Stats.Probed, run.Stats.Broken, run.Stats.Repaired,
+	)
+}
+
+func (r *Repair) saveRun(run *storage.RepairRun) {
+	if err := r.manager.storage.SaveRepairRun(run); err != nil {
+		r.logger.Trace().Err(err).Str("run_id", run.ID).Msg("Failed to persist run progress")
+	}
+}
+
+func (r *Repair) saveHealth(state *storage.EntryHealth) {
+	if err := r.manager.storage.SaveEntryHealth(state); err != nil {
+		r.logger.Trace().Err(err).Str("entry", state.EntryName).Msg("Failed to persist entry health")
+	}
+}
+
+// ReinsertEntry attempts to fix a torrent by re-inserting it across debrids.
+// Used by the link service and by the repair auto-heal pass.
 func (m *Manager) ReinsertEntry(ctx context.Context, entry *storage.Entry) error {
 	if m.fixer == nil {
 		return fmt.Errorf("fixer not initialized")
@@ -303,4 +444,18 @@ func (m *Manager) ReinsertEntry(ctx context.Context, entry *storage.Entry) error
 		return fmt.Errorf("failed to re-insert torrent")
 	}
 	return nil
+}
+
+// linkOf returns the resolvable link/id for a torrent file in its active
+// provider placement, or "" when no link is available.
+func linkOf(entry *storage.Entry, name string) string {
+	pe := entry.GetActiveProvider()
+	if pe == nil || pe.Files == nil {
+		return ""
+	}
+	f, ok := pe.Files[name]
+	if !ok || f == nil {
+		return ""
+	}
+	return cmp.Or(f.Link, f.Id)
 }

@@ -4,9 +4,7 @@ import (
 	nntpyenc "github.com/sirrobot01/decypharr/internal/nntp/yenc"
 )
 
-
 type YencMetadata = nntpyenc.Metadata
-
 
 // Segment represents a usenet segment
 type Segment struct {

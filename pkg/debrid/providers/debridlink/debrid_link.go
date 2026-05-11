@@ -307,6 +307,12 @@ func (dl *DebridLink) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("debridlink API error: Status: %d", resp.StatusCode)
 	}
+	if resp.ContentLength == 0 {
+		return nil, fmt.Errorf("empty response from debridlink API")
+	}
+	if err := json.ConfigDefault.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, err
+	}
 	if !res.Success || res.Value == nil {
 		return nil, fmt.Errorf("error adding torrent")
 	}
@@ -420,9 +426,11 @@ func (dl *DebridLink) GetTorrents() ([]*types.Torrent, error) {
 	page := 0
 	perPage := 100
 	torrents := make([]*types.Torrent, 0)
+	var fetchErr error
 	for {
 		t, err := dl.getTorrents(page, perPage)
 		if err != nil {
+			fetchErr = err
 			break
 		}
 		if len(t) == 0 {
@@ -430,6 +438,9 @@ func (dl *DebridLink) GetTorrents() ([]*types.Torrent, error) {
 		}
 		torrents = append(torrents, t...)
 		page++
+	}
+	if fetchErr != nil {
+		return torrents, fetchErr
 	}
 	return torrents, nil
 }
@@ -448,7 +459,6 @@ func (dl *DebridLink) fetchDownloadLinks(account *account.Account) ([]types.Down
 			break
 		}
 		page++
-
 	}
 	return links, nil
 }

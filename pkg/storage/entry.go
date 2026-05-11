@@ -221,6 +221,7 @@ func (s *Storage) updateEntryItem(entry *Entry) {
 			item = ProtoToEntryItem(&pb)
 		}
 	}
+	oldFingerprint := EntryItemRepairFingerprint(item)
 
 	if item == nil {
 		item = &EntryItem{Name: name, Files: make(map[string]*File)}
@@ -237,9 +238,13 @@ func (s *Storage) updateEntryItem(entry *Entry) {
 	}
 
 	item.Size = item.GetSize()
+	newFingerprint := EntryItemRepairFingerprint(item)
 	pb := EntryItemToProto(item)
 	if data, err := proto.Marshal(pb); err == nil {
 		_ = s.entryItems.Put(name, data, nil)
+	}
+	if oldFingerprint != newFingerprint {
+		s.MarkEntryDirty(name, entry.Protocol, "entry_item_changed")
 	}
 }
 
@@ -269,6 +274,7 @@ func (s *Storage) removeFromEntryItem(entry *Entry) {
 
 	if len(item.Files) == 0 {
 		_ = s.entryItems.Delete(name)
+		_ = s.DeleteEntryHealth(name)
 		return
 	}
 
@@ -277,6 +283,7 @@ func (s *Storage) removeFromEntryItem(entry *Entry) {
 	if updatedData, err := proto.Marshal(updatedPb); err == nil {
 		_ = s.entryItems.Put(name, updatedData, nil)
 	}
+	s.MarkEntryDirty(name, entry.Protocol, "entry_item_changed")
 }
 
 // Queue operations

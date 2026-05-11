@@ -8,15 +8,15 @@ import (
 // Snapshot holds a point-in-time stats snapshot.
 // Using typed structs avoids map[string]any allocations on every JSON encode.
 type Snapshot struct {
-	System        SystemStats             `json:"system"`
-	Debrids       []types.Stats           `json:"debrids"`
-	Mount         MountStats              `json:"mount"`
-	Usenet        map[string]any          `json:"usenet,omitempty"`
-	ActiveStreams ActiveStreamStats       `json:"active_streams"`
-	Storage       StorageStats            `json:"storage"`
-	Queue         QueueStats              `json:"queue"`
-	Arrs          ArrStats                `json:"arrs"`
-	Repair        manager.RepairJobCounts `json:"repair"`
+	System        SystemStats       `json:"system"`
+	Debrids       []types.Stats     `json:"debrids"`
+	Mount         MountStats        `json:"mount"`
+	Usenet        map[string]any    `json:"usenet,omitempty"`
+	ActiveStreams ActiveStreamStats `json:"active_streams"`
+	Storage       StorageStats      `json:"storage"`
+	Queue         QueueStats        `json:"queue"`
+	Arrs          ArrStats          `json:"arrs"`
+	Repair        RepairStats       `json:"repair"`
 }
 
 type SystemStats struct {
@@ -44,8 +44,8 @@ type MountStats struct {
 }
 
 type ActiveStreamStats struct {
-	Count   int                      `json:"count"`
-	Streams []*manager.ActiveStream  `json:"streams"`
+	Count   int                     `json:"count"`
+	Streams []*manager.ActiveStream `json:"streams"`
 }
 
 type StorageStats struct {
@@ -62,3 +62,9 @@ type ArrStats struct {
 	Names []string `json:"names"`
 }
 
+// RepairStats is the dashboard view of the repair system's state.
+type RepairStats struct {
+	Enabled bool           `json:"enabled"`
+	Active  bool           `json:"active"`
+	Health  map[string]int `json:"health,omitempty"`
+}

@@ -291,7 +291,6 @@ func (r *RealDebrid) getSelectedFiles(t *types.Torrent, data torrentInfo) (map[s
 
 	// Standard case - map files to links
 	if len(selectedFiles) > len(data.Links) {
-		r.logger.Warn().Msgf("More files than links available: %d files, %d links for %s", len(selectedFiles), len(data.Links), t.Name)
 		return files, nil
 	}
 
@@ -299,8 +298,6 @@ func (r *RealDebrid) getSelectedFiles(t *types.Torrent, data torrentInfo) (map[s
 		if i < len(data.Links) {
 			f.Link = data.Links[i]
 			files[f.Name] = f
-		} else {
-			r.logger.Warn().Str("file", f.Name).Msg("No link available for file")
 		}
 	}
 
@@ -1157,7 +1154,6 @@ func (r *RealDebrid) SpeedTest(ctx context.Context) types.SpeedTestResult {
 
 	return result
 }
-
 
 func (r *RealDebrid) SupportsCheck() bool {
 	return true

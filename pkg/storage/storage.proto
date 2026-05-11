@@ -9,34 +9,34 @@ option go_package = "github.com/sirrobot01/decypharr/pkg/storage";
 // ============================================================================
 
 message FileProto {
-    string name = 1;
-    string path = 2;
-    int64 added_on_unix = 3;
-    int64 size = 4;
-    int64 byte_range_start = 5;
-    int64 byte_range_end = 6;
-    bool has_byte_range = 7;
-    bool deleted = 8;
-    string info_hash = 9;
+  string name = 1;
+  string path = 2;
+  int64 added_on_unix = 3;
+  int64 size = 4;
+  int64 byte_range_start = 5;
+  int64 byte_range_end = 6;
+  bool has_byte_range = 7;
+  bool deleted = 8;
+  string info_hash = 9;
 }
 
 message ProviderFileProto {
-    string id = 1;
-    string link = 2;
-    string path = 3;
+  string id = 1;
+  string link = 2;
+  string path = 3;
 }
 
 message ProviderEntryProto {
-    string provider = 1;
-    string id = 2;
-    int64 added_at_unix = 3;
-    int64 removed_at_unix = 4;
-    bool has_removed_at = 5;
-    string status = 6;
-    double progress = 7;
-    map<string, ProviderFileProto> files = 8;
-    int64 downloaded_at_unix = 9;
-    bool has_downloaded_at = 10;
+  string provider = 1;
+  string id = 2;
+  int64 added_at_unix = 3;
+  int64 removed_at_unix = 4;
+  bool has_removed_at = 5;
+  string status = 6;
+  double progress = 7;
+  map<string, ProviderFileProto> files = 8;
+  int64 downloaded_at_unix = 9;
+  bool has_downloaded_at = 10;
 }
 
 // ============================================================================
@@ -44,53 +44,53 @@ message ProviderEntryProto {
 // ============================================================================
 
 message EntryProto {
-    string protocol = 1;
-    string info_hash = 2;
-    string name = 3;
-    string original_filename = 4;
-    int64 size = 5;
-    int64 bytes = 6;
-    string magnet = 7;
+  string protocol = 1;
+  string info_hash = 2;
+  string name = 3;
+  string original_filename = 4;
+  int64 size = 5;
+  int64 bytes = 6;
+  string magnet = 7;
 
-    bool is_downloading = 8;
-    int64 size_downloaded = 9;
+  bool is_downloading = 8;
+  int64 size_downloaded = 9;
 
-    string active_provider = 10;
-    map<string, ProviderEntryProto> providers = 11;
-    map<string, FileProto> files = 12;
+  string active_provider = 10;
+  map<string, ProviderEntryProto> providers = 11;
+  map<string, FileProto> files = 12;
 
-    string state = 13;
-    string status = 14;
-    double progress = 15;
-    int64 speed = 16;
-    int32 seeders = 17;
+  string state = 13;
+  string status = 14;
+  double progress = 15;
+  int64 speed = 16;
+  int32 seeders = 17;
 
-    bool is_complete = 18;
-    bool bad = 19;
+  bool is_complete = 18;
+  bool bad = 19;
 
-    string category = 20;
-    repeated string tags = 21;
-    string mount_path = 22;
-    string save_path = 23;
-    string content_path = 24;
+  string category = 20;
+  repeated string tags = 21;
+  string mount_path = 22;
+  string save_path = 23;
+  string content_path = 24;
 
-    int64 added_on_unix = 25;
-    int64 created_at_unix = 26;
-    int64 updated_at_unix = 27;
-    int64 completed_at_unix = 28;
-    bool has_completed_at = 29;
-    int64 imported_at_unix = 30;
-    bool has_imported_at = 31;
+  int64 added_on_unix = 25;
+  int64 created_at_unix = 26;
+  int64 updated_at_unix = 27;
+  int64 completed_at_unix = 28;
+  bool has_completed_at = 29;
+  int64 imported_at_unix = 30;
+  bool has_imported_at = 31;
 
-    string action = 32;
-    bool download_uncached = 33;
-    string callback_url = 34;
-    bool skip_multi_season = 35;
+  string action = 32;
+  bool download_uncached = 33;
+  string callback_url = 34;
+  bool skip_multi_season = 35;
 
-    string last_error = 36;
-    int32 error_count = 37;
-    int64 last_error_time_unix = 38;
-    bool has_last_error_time = 39;
+  string last_error = 36;
+  int32 error_count = 37;
+  int64 last_error_time_unix = 38;
+  bool has_last_error_time = 39;
 }
 
 // ============================================================================
@@ -98,9 +98,9 @@ message EntryProto {
 // ============================================================================
 
 message EntryItemProto {
-    string name = 1;
-    map<string, FileProto> files = 2;
-    int64 size = 3;
+  string name = 1;
+  map<string, FileProto> files = 2;
+  int64 size = 3;
 }
 
 // ============================================================================
@@ -108,35 +108,35 @@ message EntryItemProto {
 // ============================================================================
 
 message ContentFileProto {
-    string name = 1;
-    string path = 2;
-    int32 id = 3;
-    int32 episode_id = 4;
-    int32 file_id = 5;
-    string target_path = 6;
-    bool is_symlink = 7;
-    bool is_broken = 8;
-    int32 season_number = 9;
-    bool processed = 10;
-    int64 size = 11;
+  string name = 1;
+  string path = 2;
+  int32 id = 3;
+  int32 episode_id = 4;
+  int32 file_id = 5;
+  string target_path = 6;
+  bool is_symlink = 7;
+  bool is_broken = 8;
+  int32 season_number = 9;
+  bool processed = 10;
+  int64 size = 11;
 }
 
 message JobProto {
-    string id = 1;
-    repeated string arrs = 2;
-    repeated string media_ids = 3;
-    int64 started_at_unix = 4;
-    map<string, BrokenItemsProto> broken_items = 5;
-    string status = 6;
-    int64 completed_at_unix = 7;
-    int64 failed_at_unix = 8;
-    bool auto_process = 9;
-    bool recurrent = 10;
-    string error = 11;
+  string id = 1;
+  repeated string arrs = 2;
+  repeated string media_ids = 3;
+  int64 started_at_unix = 4;
+  map<string, BrokenItemsProto> broken_items = 5;
+  string status = 6;
+  int64 completed_at_unix = 7;
+  int64 failed_at_unix = 8;
+  bool auto_process = 9;
+  bool recurrent = 10;
+  string error = 11;
 }
 
 message BrokenItemsProto {
-    repeated ContentFileProto files = 1;
+  repeated ContentFileProto files = 1;
 }
 
 // ============================================================================
@@ -144,18 +144,18 @@ message BrokenItemsProto {
 // ============================================================================
 
 message SwitcherJobProto {
-    string id = 1;
-    string info_hash = 2;
-    string source_provider = 3;
-    string target_provider = 4;
-    string status = 5;
-    double progress = 6;
-    string error = 7;
-    int64 created_at_unix = 8;
-    int64 completed_at_unix = 9;
-    bool has_completed_at = 10;
-    bool keep_old = 11;
-    bool wait_complete = 12;
+  string id = 1;
+  string info_hash = 2;
+  string source_provider = 3;
+  string target_provider = 4;
+  string status = 5;
+  double progress = 6;
+  string error = 7;
+  int64 created_at_unix = 8;
+  int64 completed_at_unix = 9;
+  bool has_completed_at = 10;
+  bool keep_old = 11;
+  bool wait_complete = 12;
 }
 
 // ============================================================================
@@ -163,11 +163,11 @@ message SwitcherJobProto {
 // ============================================================================
 
 message SystemMigrationStatusProto {
-    bool running = 1;
-    int32 total = 2;
-    int32 completed = 3;
-    int32 errors = 4;
-    int64 started_at_unix = 5;
-    int64 updated_at_unix = 6;
-    repeated string error_list = 7;
+  bool running = 1;
+  int32 total = 2;
+  int32 completed = 3;
+  int32 errors = 4;
+  int64 started_at_unix = 5;
+  int64 updated_at_unix = 6;
+  repeated string error_list = 7;
 }

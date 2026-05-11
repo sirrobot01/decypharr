@@ -196,14 +196,14 @@ class SetupWizard {
                 skip_auth: false,
             };
         } else {
-            this.setupState.step1 = { skip_auth: true };
+            this.setupState.step1 = {skip_auth: true};
         }
 
         this.goToStep(2);
     }
 
     handleSkipAuth() {
-        this.setupState.step1 = { skip_auth: true };
+        this.setupState.step1 = {skip_auth: true};
         this.goToStep(2);
     }
 
@@ -229,7 +229,7 @@ class SetupWizard {
     }
 
     handleSkipDebrid() {
-        this.setupState.step2 = { skip_debrid: true };
+        this.setupState.step2 = {skip_debrid: true};
         this.goToStep(3);
     }
 
@@ -295,7 +295,7 @@ class SetupWizard {
             };
         } else {
             // All fields empty - skip usenet
-            this.setupState.step3 = { skip_usenet: true };
+            this.setupState.step3 = {skip_usenet: true};
         }
 
         if (!this.ensureProviderRequirement()) {
@@ -306,7 +306,7 @@ class SetupWizard {
     }
 
     handleSkipUsenet() {
-        this.setupState.step3 = { skip_usenet: true };
+        this.setupState.step3 = {skip_usenet: true};
         if (!this.ensureProviderRequirement()) {
             return;
         }
@@ -481,12 +481,12 @@ class SetupWizard {
 
             const response = await window.decypharrUtils.fetcher('/api/setup/complete', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(setupData),
             });
 
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ error: 'Failed to complete setup' }));
+                const errorData = await response.json().catch(() => ({error: 'Failed to complete setup'}));
                 throw new Error(errorData.error || 'Failed to complete setup');
             }
 

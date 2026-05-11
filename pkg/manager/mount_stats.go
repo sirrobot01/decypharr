@@ -7,10 +7,10 @@ import (
 // MountStats is the unified stats struct returned by all MountManager implementations.
 // Each mount type populates only its relevant field.
 type MountStats struct {
-	Enabled  bool   `json:"enabled"`
-	Ready    bool   `json:"ready"`
-	Type     string `json:"type,omitempty"`
-	Error    string `json:"error,omitempty"`
+	Enabled  bool          `json:"enabled"`
+	Ready    bool          `json:"ready"`
+	Type     string        `json:"type,omitempty"`
+	Error    string        `json:"error,omitempty"`
 	DFS      *DFSDetail    `json:"dfs,omitempty"`
 	Rclone   *RcloneDetail `json:"rclone,omitempty"`
 	External *RcloneDetail `json:"external,omitempty"`

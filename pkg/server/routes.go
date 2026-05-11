@@ -48,12 +48,20 @@ func (s *Server) WebRoutes() http.Handler {
 			r.Get("/arrs", s.handleGetArrs)
 			r.Post("/add", s.handleAddContent)
 
-			// Repair operations
-			r.Post("/repair", s.handleRepairMedia)
-			r.Get("/repair/jobs", s.handleGetRepairJobs)
-			r.Post("/repair/jobs/{id}/process", s.handleProcessRepairJob)
-			r.Post("/repair/jobs/{id}/stop", s.handleStopRepairJob)
-			r.Delete("/repair/jobs", s.handleDeleteRepairJob)
+			// Repair / health-checker operations
+			r.Get("/repair/config", s.handleGetRepairConfig)
+			r.Put("/repair/config", s.handleUpdateRepairConfig)
+			r.Get("/repair/status", s.handleRepairStatus)
+			r.Post("/repair/run", s.handleRunRepair)
+			r.Post("/repair/stop", s.handleStopRepair)
+			r.Post("/repair/recheck/media", s.handleRecheckMedia)
+			r.Post("/repair/fix", s.handleFixBroken)
+			r.Get("/repair/runs", s.handleListRepairRuns)
+			r.Get("/repair/runs/{id}", s.handleGetRepairRun)
+			r.Delete("/repair/runs", s.handleClearRepairRuns)
+			r.Get("/repair/health", s.handleListEntryHealth)
+			r.Get("/repair/health/{name}", s.handleGetEntryHealth)
+			r.Post("/repair/health/{name}/check", s.handleRecheckEntry)
 
 			// Torrent management
 			r.Get("/torrents", s.handleGetTorrents)

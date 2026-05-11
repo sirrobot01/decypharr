@@ -6,57 +6,57 @@ option go_package = "github.com/sirrobot01/decypharr/pkg/usenet";
 
 // NZBSegment represents a segment with all necessary download info
 message NZBSegmentProto {
-    int32 number = 1;
-    string message_id = 2;
-    int64 bytes = 3;
-    int64 start_offset = 4;
-    int64 end_offset = 5;
-    string group = 6;
-    int64 segment_data_start = 7;
+  int32 number = 1;
+  string message_id = 2;
+  int64 bytes = 3;
+  int64 start_offset = 4;
+  int64 end_offset = 5;
+  string group = 6;
+  int64 segment_data_start = 7;
 }
 
 // NZBFile represents a grouped file with its Segments
 message NZBFileProto {
-    string nzb_id = 1;
-    string name = 2;
-    string internal_path = 3;
-    int64 size = 4;
-    int64 start_offset = 5;
-    repeated NZBSegmentProto segments = 6;
-    repeated string groups = 7;
-    string file_type = 8;
-    string password = 9;
-    bool is_deleted = 10;
-    bool is_stored = 11;
-    int64 segment_size = 12;
-    bytes encryption_key = 13;
-    bytes encryption_iv = 14;
-    bool is_encrypted = 15;
+  string nzb_id = 1;
+  string name = 2;
+  string internal_path = 3;
+  int64 size = 4;
+  int64 start_offset = 5;
+  repeated NZBSegmentProto segments = 6;
+  repeated string groups = 7;
+  string file_type = 8;
+  string password = 9;
+  bool is_deleted = 10;
+  bool is_stored = 11;
+  int64 segment_size = 12;
+  bytes encryption_key = 13;
+  bytes encryption_iv = 14;
+  bool is_encrypted = 15;
 }
 
 // NZB represents the full NZB metadata
 message NZBProto {
-    string id = 1;
-    string name = 2;
-    string title = 3;
-    string path = 4;
-    int64 total_size = 5;
-    int64 date_posted_unix = 6;
-    string category = 7;
-    repeated string groups = 8;
-    repeated NZBFileProto files = 9;
-    bool downloaded = 10;
-    int64 added_on_unix = 11;
-    int64 last_activity_unix = 12;
-    string status = 13;
-    double progress = 14;
-    double percentage = 15;
-    int64 size_downloaded = 16;
-    int64 eta = 17;
-    int64 speed = 18;
-    int64 completed_on_unix = 19;
-    bool is_bad = 20;
-    string storage = 21;
-    string fail_message = 22;
-    string password = 23;
+  string id = 1;
+  string name = 2;
+  string title = 3;
+  string path = 4;
+  int64 total_size = 5;
+  int64 date_posted_unix = 6;
+  string category = 7;
+  repeated string groups = 8;
+  repeated NZBFileProto files = 9;
+  bool downloaded = 10;
+  int64 added_on_unix = 11;
+  int64 last_activity_unix = 12;
+  string status = 13;
+  double progress = 14;
+  double percentage = 15;
+  int64 size_downloaded = 16;
+  int64 eta = 17;
+  int64 speed = 18;
+  int64 completed_on_unix = 19;
+  bool is_bad = 20;
+  string storage = 21;
+  string fail_message = 22;
+  string password = 23;
 }

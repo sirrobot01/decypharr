@@ -273,7 +273,7 @@ class DownloadManager {
             const dataTransfer = new DataTransfer();
             torrentFiles.forEach(file => dataTransfer.items.add(file));
             this.refs.torrentFiles.files = dataTransfer.files;
-            this.handleFileSelection({ target: { files: torrentFiles } }, 'torrent');
+            this.handleFileSelection({target: {files: torrentFiles}}, 'torrent');
         }
 
         if (nzbFiles.length > 0) {
@@ -281,7 +281,7 @@ class DownloadManager {
             const dataTransfer = new DataTransfer();
             dataTransfer.items.add(nzbFiles[0]);
             this.refs.nzbFile.files = dataTransfer.files;
-            this.handleFileSelection({ target: { files: [nzbFiles[0]] } }, 'nzb');
+            this.handleFileSelection({target: {files: [nzbFiles[0]]}}, 'nzb');
         }
 
         if (torrentFiles.length === 0 && nzbFiles.length === 0) {

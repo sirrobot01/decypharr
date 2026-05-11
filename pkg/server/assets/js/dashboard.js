@@ -142,8 +142,8 @@ class TorrentDashboard {
         this.refs.torrentContextMenu.querySelector('.torrent-name').textContent =
             this.state.selectedTorrentContextMenu.name;
 
-        const { pageX, pageY } = event;
-        const { clientWidth, clientHeight } = document.documentElement;
+        const {pageX, pageY} = event;
+        const {clientWidth, clientHeight} = document.documentElement;
         const menu = this.refs.torrentContextMenu;
 
         // Position the menu
@@ -349,24 +349,28 @@ class TorrentDashboard {
 
     renderStateBadge(state) {
         const stateMap = {
-            'pausedUP': { class: 'badge-success', text: 'Completed' },
-            'downloading': { class: 'badge-info', text: 'Downloading' },
-            'error': { class: 'badge-error', text: 'Error' },
-            'queued': { class: 'badge-ghost', text: 'Queued' },
-            'paused': { class: 'badge-warning', text: 'Paused' }
+            'pausedUP': {class: 'badge-success', text: 'Completed'},
+            'downloading': {class: 'badge-info', text: 'Downloading'},
+            'error': {class: 'badge-error', text: 'Error'},
+            'queued': {class: 'badge-ghost', text: 'Queued'},
+            'paused': {class: 'badge-warning', text: 'Paused'}
         };
 
-        const s = stateMap[state] || { class: 'badge-ghost', text: state };
+        const s = stateMap[state] || {class: 'badge-ghost', text: state};
         return `<span class="badge ${s.class} badge-sm">${s.text}</span>`;
     }
 
     renderProtocolBadge(protocol) {
         const protocolMap = {
-            'torrent': { class: 'badge-accent', icon: 'bi-magnet', text: 'Torrent' },
-            'nzb': { class: 'badge-secondary', icon: 'bi-newspaper', text: 'Usenet' }
+            'torrent': {class: 'badge-accent', icon: 'bi-magnet', text: 'Torrent'},
+            'nzb': {class: 'badge-secondary', icon: 'bi-newspaper', text: 'Usenet'}
         };
 
-        const p = protocolMap[protocol] || { class: 'badge-ghost', icon: 'bi-question-circle', text: protocol || 'Unknown' };
+        const p = protocolMap[protocol] || {
+            class: 'badge-ghost',
+            icon: 'bi-question-circle',
+            text: protocol || 'Unknown'
+        };
         return `<span class="badge ${p.class} badge-sm"><i class="${p.icon} mr-1"></i>${p.text}</span>`;
     }
 
@@ -376,8 +380,8 @@ class TorrentDashboard {
 
         this.refs.paginationInfo.textContent =
             this.state.total > 0 ?
-            `Showing ${start}-${end} of ${this.state.total} items` :
-            'No items found';
+                `Showing ${start}-${end} of ${this.state.total} items` :
+                'No items found';
 
         if (this.state.totalPages <= 1) {
             this.refs.paginationControls.innerHTML = '';
@@ -455,7 +459,7 @@ class TorrentDashboard {
 
         try {
             const url = `${window.urlBase}api/torrents/${category}/${hash}?removeFromDebrid=${removeFromDebrid}`;
-            const response = await window.decypharrUtils.fetcher(url, { method: 'DELETE' });
+            const response = await window.decypharrUtils.fetcher(url, {method: 'DELETE'});
 
             if (!response.ok) throw new Error('Failed to delete entry');
 
@@ -476,7 +480,7 @@ class TorrentDashboard {
         try {
             const hashes = Array.from(this.state.selectedEntries).join(',');
             const url = `${window.urlBase}api/torrents?hashes=${hashes}&removeFromDebrid=${removeFromDebrid}`;
-            const response = await window.decypharrUtils.fetcher(url, { method: 'DELETE' });
+            const response = await window.decypharrUtils.fetcher(url, {method: 'DELETE'});
 
             if (!response.ok) throw new Error('Failed to delete items');
 

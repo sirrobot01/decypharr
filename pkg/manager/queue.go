@@ -31,7 +31,7 @@ const (
 
 type ImportRequest struct {
 	Name             string                `json:"name"`
-	NZBContent       []byte                `json:"-,omitempty"`
+	NZBContent       []byte                `json:"-"`
 	Id               string                `json:"id"`
 	DownloadFolder   string                `json:"downloadFolder"`
 	SelectedDebrid   string                `json:"debrid"`
@@ -144,29 +144,32 @@ func (q *Queue) GetTorrent(infohash string) (*storage.Entry, error) {
 	return q.storage.GetQueued(infohash)
 }
 
-func (q *Queue) Delete(infohash string, cleanup func(t *storage.Entry) error) error {
-	// Wrap the cleanup function to ensure we always delete the entry files
-	deleteFile := func(entry *storage.Entry) {
-		// Delete the downloaded path if it exists
-		downloadedPath := entry.DownloadPath()
-		if downloadedPath != "" {
-			if err := os.RemoveAll(downloadedPath); err != nil {
-				q.logger.Error().Err(err).Str("path", downloadedPath).Msg("Failed to delete downloaded file")
-			}
-		}
+func (q *Queue) deleteEntryFiles(entry *storage.Entry) {
+	downloadedPath := entry.DownloadPath()
+	if downloadedPath == "" {
+		return
 	}
-	finalCleanup := func(entry *storage.Entry) error {
-		deleteFile(entry)
+	if err := os.RemoveAll(downloadedPath); err != nil {
+		q.logger.Error().Err(err).Str("path", downloadedPath).Msg("Failed to delete downloaded file")
+	}
+}
+
+func (q *Queue) wrapCleanupWithFileDelete(cleanup func(t *storage.Entry) error) func(*storage.Entry) error {
+	return func(entry *storage.Entry) error {
+		q.deleteEntryFiles(entry)
 		if cleanup != nil {
 			return cleanup(entry)
 		}
 		return nil
 	}
-	return q.storage.DeleteQueued(infohash, finalCleanup)
+}
+
+func (q *Queue) Delete(infohash string, cleanup func(t *storage.Entry) error) error {
+	return q.storage.DeleteQueued(infohash, q.wrapCleanupWithFileDelete(cleanup))
 }
 
 func (q *Queue) DeleteWhere(category string, protocol config.Protocol, state storage.TorrentState, hashes []string, cleanup func(t *storage.Entry) error) error {
-	return q.storage.DeleteWhereQueued(q.ListFilterFunc(category, protocol, state, hashes), cleanup)
+	return q.storage.DeleteWhereQueued(q.ListFilterFunc(category, protocol, state, hashes), q.wrapCleanupWithFileDelete(cleanup))
 }
 
 func (q *Queue) DeleteStalled() error {

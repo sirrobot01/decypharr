@@ -56,19 +56,6 @@ type ContentResponse struct {
 	ArrID string `json:"arr"`
 }
 
-type RepairRequest struct {
-	ArrName       string   `json:"arr"`
-	MediaIds      []string `json:"mediaIds"`
-	AutoProcess   bool     `json:"autoProcess"`
-	Mode          string   `json:"mode"`          // "detect_only" or "detect_and_repair"
-	Scope         string   `json:"scope"`         // "arr" or "managed_entries"
-	TorrentFilter string   `json:"torrentFilter"` // reserved for future scoped repair filtering
-	Recurring     bool     `json:"recurring"`
-	Schedule      string   `json:"schedule"`
-	Strategy      string   `json:"strategy"` // "per_file" or "per_torrent"
-	Workers       int      `json:"workers"`
-}
-
 type Server struct {
 	router       *chi.Mux
 	logger       zerolog.Logger
@@ -128,7 +115,10 @@ func New(mgr *manager.Manager) *Server {
 
 	routes := make(map[string]http.Handler)
 	routes["/api/v2"] = qb.Routes()
-	routes["/webdav"] = wd.Routes()
+
+	if !wd.IsDisabled() {
+		routes["/webdav"] = wd.Routes()
+	}
 	routes["/sabnzbd"] = sb.Routes()
 
 	r.Route(cfg.URLBase, func(r chi.Router) {
@@ -242,7 +232,6 @@ func (s *Server) getRcloneLogs(w http.ResponseWriter, r *http.Request) {
 		err := file.Close()
 		if err != nil {
 			return
-
 		}
 	}(file)
 

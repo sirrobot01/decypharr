@@ -467,7 +467,6 @@ func (sr *StreamingReader) Close() error {
 type Pool struct {
 	client *nntp.Client
 	config Config
-	logger zerolog.Logger
 
 	readers sync.Map // map[string]*StreamingReader
 }

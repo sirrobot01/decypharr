@@ -1,6 +1,8 @@
 package manager
 
 import (
+	"context"
+
 	"github.com/go-co-op/gocron/v2"
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/sirrobot01/decypharr/pkg/arr"
@@ -14,11 +16,9 @@ func (m *Manager) SetMountManager(mountMgr MountManager) {
 	m.mountManager = mountMgr
 }
 
-func (m *Manager) SetRepairManager(repairMgr RepairManager) {
-	m.repair = repairMgr
-}
-
-func (m *Manager) Repair() RepairManager {
+// Repair returns the repair service. It is created during init() so callers
+// can rely on a non-nil value once the manager has been constructed.
+func (m *Manager) Repair() *Repair {
 	return m.repair
 }
 
@@ -50,6 +50,10 @@ func (m *Manager) MountManager() MountManager {
 
 func (m *Manager) Storage() *storage.Storage {
 	return m.storage
+}
+
+func (m *Manager) Context() context.Context {
+	return m.ctx
 }
 
 func (m *Manager) Usenet() *usenet.Usenet {

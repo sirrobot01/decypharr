@@ -4,7 +4,6 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/usenet/types"
 )
 
-
 // VolumeToSegmentMeta converts a types.Volume to []SegmentMeta for the new reader.
 func VolumeToSegmentMeta(vol *types.Volume) []SegmentMeta {
 	if vol == nil || len(vol.Segments) == 0 {

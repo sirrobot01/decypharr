@@ -17,15 +17,21 @@ const (
 )
 
 type HistorySchema struct {
-	Page          int    `json:"page"`
-	PageSize      int    `json:"pageSize"`
-	SortKey       string `json:"sortKey"`
-	SortDirection string `json:"sortDirection"`
-	TotalRecords  int    `json:"totalRecords"`
-	Records       []struct {
-		ID         int    `json:"id"`
-		DownloadID string `json:"downloadId"`
-	} `json:"records"`
+	Page          int             `json:"page"`
+	PageSize      int             `json:"pageSize"`
+	SortKey       string          `json:"sortKey"`
+	SortDirection string          `json:"sortDirection"`
+	TotalRecords  int             `json:"totalRecords"`
+	Records       []HistoryRecord `json:"records"`
+}
+
+type HistoryRecord struct {
+	ID         int    `json:"id"`
+	DownloadID string `json:"downloadId"`
+	EventType  string `json:"eventType"`
+	EpisodeID  int    `json:"episodeId,omitempty"`
+	SeriesID   int    `json:"seriesId,omitempty"`
+	MovieID    int    `json:"movieId,omitempty"`
 }
 
 type QueueResponseScheme struct {
@@ -168,6 +174,70 @@ func (a *Arr) CleanupQueue() error {
 		}()
 	}
 
+	return nil
+}
+
+// FindGrabHistoryID returns the ID and downloadId of the most recent "grabbed"
+// history record for the given episode (Sonarr) or movie (Radarr). Returns
+// (0, "", nil) when no grab record is found (e.g. history trimmed, manual import).
+func (a *Arr) FindGrabHistoryID(mediaDBID int) (int, string, error) {
+	if a == nil {
+		return 0, "", fmt.Errorf("arr not configured")
+	}
+	if mediaDBID <= 0 {
+		return 0, "", nil
+	}
+
+	query := gourl.Values{}
+	query.Add("page", "1")
+	query.Add("pageSize", "50")
+	query.Add("sortKey", "date")
+	query.Add("sortDirection", "descending")
+	query.Add("eventType", "1") // 1 = grabbed
+
+	switch a.Type {
+	case Sonarr:
+		query.Add("episodeId", strconv.Itoa(mediaDBID))
+	case Radarr:
+		query.Add("movieIds", strconv.Itoa(mediaDBID))
+	default:
+		return 0, "", nil
+	}
+
+	var data HistorySchema
+	url := "api/v3/history?" + query.Encode()
+	resp, err := a.Request(http.MethodGet, url, nil, &data)
+	if err != nil {
+		return 0, "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return 0, "", fmt.Errorf("history lookup failed: %s", resp.Status)
+	}
+	if len(data.Records) == 0 {
+		return 0, "", nil
+	}
+	r := data.Records[0]
+	return r.ID, r.DownloadID, nil
+}
+
+// MarkHistoryFailed marks a grab history record as failed. This blocklists
+// the release in the arr and, if redownload is enabled, triggers a re-search
+// for whatever is currently missing from that grab's scope.
+func (a *Arr) MarkHistoryFailed(historyID int) error {
+	if a == nil {
+		return fmt.Errorf("arr not configured")
+	}
+	if historyID <= 0 {
+		return nil
+	}
+	url := fmt.Sprintf("api/v3/history/failed/%d", historyID)
+	resp, err := a.Request(http.MethodPost, url, nil, nil)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("history/failed %d: %s", historyID, resp.Status)
+	}
 	return nil
 }
 

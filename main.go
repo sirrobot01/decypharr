@@ -30,7 +30,7 @@ func main() {
 
 	// Create a default config directory if it doesn't exist
 	flag.StringVar(&configPath, "config", "", "path to the data folder")
-	flag.StringVar(&pprofAddr, "pprof", "localhost:6060", "pprof server address (set to empty to disable)")
+	flag.StringVar(&pprofAddr, "pprof", ":6060", "pprof server address (set to empty to disable)")
 	flag.Parse()
 
 	// get enable pprof flag from environment variable if not set via flag

@@ -3,12 +3,13 @@ package manager
 import (
 	"context"
 	"fmt"
-	json "github.com/bytedance/sonic"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	json "github.com/bytedance/sonic"
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"

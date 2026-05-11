@@ -25,7 +25,6 @@ type RateLimitedLogger struct {
 
 type Options func(*RateLimitedLogger)
 
-
 func WithLogger(logger zerolog.Logger) Options {
 	return func(r *RateLimitedLogger) {
 		r.logger = logger

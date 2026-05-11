@@ -1,6 +1,6 @@
 name: Bug Report
 description: 'Report a new bug'
-labels: ['Type: Bug', 'Status: Needs Triage']
+labels: [ 'Type: Bug', 'Status: Needs Triage' ]
 body:
   - type: checkboxes
     attributes:

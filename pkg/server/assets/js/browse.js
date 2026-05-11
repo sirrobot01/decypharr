@@ -14,7 +14,8 @@ class FileBrowser {
             parentDir: null,
             selectedEntry: null,
             selectedEntries: new Set(),
-            selectedEntryData: new Map()
+            selectedEntryData: new Map(),
+            health: new Map()
         };
 
         this.refs = {
@@ -33,15 +34,8 @@ class FileBrowser {
             bulkActionsBar: document.getElementById('bulkActionsBar'),
             selectedCount: document.getElementById('selectedCount'),
             bulkDownloadBtn: document.getElementById('bulkDownloadBtn'),
-            bulkRepairBtn: document.getElementById('bulkRepairBtn'),
             bulkDeleteBtn: document.getElementById('bulkDeleteBtn'),
             clearSelectionBtn: document.getElementById('clearSelectionBtn'),
-
-            // Modals
-            repairSelectionModal: document.getElementById('repairSelectionModal'),
-            repairSelectionCount: document.getElementById('repairSelectionCount'),
-            repairModeSelect: document.getElementById('repairModeSelect'),
-            confirmRepairBtn: document.getElementById('confirmRepairBtn'),
 
             // Context menu
             contextMenu: document.getElementById('contextMenu'),
@@ -105,18 +99,11 @@ class FileBrowser {
         if (this.refs.bulkDownloadBtn) {
             this.refs.bulkDownloadBtn.addEventListener('click', () => this.bulkDownload());
         }
-        if (this.refs.bulkRepairBtn) {
-            this.refs.bulkRepairBtn.addEventListener('click', () => this.openRepairModal());
-        }
         if (this.refs.bulkDeleteBtn) {
             this.refs.bulkDeleteBtn.addEventListener('click', () => this.bulkDelete());
         }
         if (this.refs.clearSelectionBtn) {
             this.refs.clearSelectionBtn.addEventListener('click', () => this.clearSelection());
-        }
-
-        if (this.refs.confirmRepairBtn) {
-            this.refs.confirmRepairBtn.addEventListener('click', () => this.executeRepairSelection());
         }
 
         // Hide context menu on click outside
@@ -253,7 +240,7 @@ class FileBrowser {
                 params.set('search', this.state.searchQuery);
             }
 
-            const response = await fetch(`${apiUrl}?${params}`, { signal: this.activeLoadController.signal });
+            const response = await fetch(`${apiUrl}?${params}`, {signal: this.activeLoadController.signal});
             if (!response.ok) throw new Error('Failed to load directory');
 
             const data = await response.json();
@@ -268,12 +255,79 @@ class FileBrowser {
             this.updateBreadcrumbs();
             this.renderEntries();
             this.renderPagination();
+            this.loadHealthForEntries();
         } catch (error) {
             if (error.name === 'AbortError') {
                 return;
             }
             console.error('Error loading entries:', error);
             window.createToast('Failed to load directory', 'error');
+        }
+    }
+
+    async loadHealthForEntries() {
+        const names = Array.from(new Set(this.state.entries
+            .filter((e) => e && e.name)
+            .map((e) => e.name)));
+        if (names.length === 0) return;
+        const results = await Promise.all(names.map(async (name) => {
+            try {
+                const res = await fetch(`${window.urlBase}api/repair/health/${encodeURIComponent(name)}`);
+                if (!res.ok) return [name, null];
+                const state = await res.json();
+                return [name, state];
+            } catch {
+                return [name, null];
+            }
+        }));
+        for (const [name, state] of results) {
+            if (state) this.state.health.set(name, state);
+        }
+        this.refreshHealthBadges();
+    }
+
+    refreshHealthBadges() {
+        document.querySelectorAll('[data-health-cell]').forEach((cell) => {
+            const name = cell.getAttribute('data-health-cell');
+            cell.innerHTML = this.healthBadge(this.state.health.get(name));
+        });
+    }
+
+    healthBadge(state) {
+        if (!state) {
+            return '<span class="badge badge-ghost badge-sm">unknown</span>';
+        }
+        const colors = {
+            healthy: 'badge-success',
+            broken: 'badge-error',
+            repairing: 'badge-info',
+            stale: 'badge-warning',
+            unsupported: 'badge-ghost',
+            unknown: 'badge-ghost',
+        };
+        const cls = colors[state.status] || 'badge-ghost';
+        const tooltip = state.last_checked_at
+            ? `last checked ${new Date(state.last_checked_at).toLocaleString()}`
+            : 'never checked';
+        return `<span class="badge ${cls} badge-sm" title="${this.escapeAttr(tooltip)}">${this.escapeHtml(state.status || 'unknown')}</span>`;
+    }
+
+    async recheckEntry(name, fix) {
+        try {
+            window.createToast?.(`Rechecking ${name}…`, 'info');
+            const url = `${window.urlBase}api/repair/health/${encodeURIComponent(name)}/check${fix ? '?fix=true' : ''}`;
+            const res = await fetch(url, {method: 'POST'});
+            if (!res.ok) {
+                const txt = await res.text();
+                throw new Error(txt || `HTTP ${res.status}`);
+            }
+            const state = await res.json();
+            this.state.health.set(name, state);
+            this.refreshHealthBadges();
+            window.createToast?.(`Health: ${state.status}`, state.status === 'broken' ? 'warning' : 'success');
+        } catch (e) {
+            console.error('Recheck failed', e);
+            window.createToast?.(`Recheck failed: ${e.message}`, 'error');
         }
     }
 
@@ -348,6 +402,9 @@ class FileBrowser {
                     <td>
                         ${entry.active_debrid ? `<span>${this.escapeHtml(entry.active_debrid)}</span>` : '-'}
                     </td>
+                    <td data-health-cell="${this.escapeAttr(entry.name)}">
+                        ${this.healthBadge(this.state.health.get(entry.name))}
+                    </td>
                     <td onclick="event.stopPropagation();">
                         <div class="dropdown dropdown-end">
                             <label tabindex="0" class="btn btn-ghost btn-xs">
@@ -359,6 +416,12 @@ class FileBrowser {
                                         <i class="bi bi-download"></i> Download
                                     </a></li>
                                 ` : ''}
+                                <li><a onclick="window.fileBrowser.recheckEntry('${this.escapeJs(entry.name)}', false)">
+                                    <i class="bi bi-search-heart"></i> Recheck health
+                                </a></li>
+                                <li><a onclick="window.fileBrowser.recheckEntry('${this.escapeJs(entry.name)}', true)">
+                                    <i class="bi bi-wrench-adjustable"></i> Recheck &amp; fix
+                                </a></li>
                                 ${entry.can_delete ? `
                                     <li><a onclick="window.fileBrowser.deleteTorrent('${this.escapeJs(entry.info_hash)}', '${this.escapeJs(entry.name)}')" class="text-error">
                                         <i class="bi bi-trash"></i> Delete
@@ -676,8 +739,8 @@ class FileBrowser {
         try {
             const response = await fetch(`${window.urlBase}api/browse/torrents/batch`, {
                 method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ids })
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ids})
             });
             if (!response.ok) throw new Error('Failed to delete selected items');
             window.createToast(`Deleted ${ids.length} torrent(s)`, 'success');
@@ -693,99 +756,14 @@ class FileBrowser {
         return Array.from(this.state.selectedEntryData.values()).filter(Boolean);
     }
 
-    openRepairModal() {
-        const selectedEntries = this.getSelectedEntries();
-        if (selectedEntries.length === 0) {
-            window.createToast('No items selected for repair', 'warning');
+    async bulkRecheck() {
+        const selected = this.getSelectedEntries();
+        if (!selected.length) {
+            window.createToast('No items selected', 'warning');
             return;
         }
-
-        if (this.refs.repairSelectionCount) {
-            this.refs.repairSelectionCount.textContent = selectedEntries.length;
-        }
-        if (this.refs.repairModeSelect) {
-            this.refs.repairModeSelect.value = 'detect_only';
-        }
-        this.refs.repairSelectionModal?.showModal();
-    }
-
-    buildRepairFilters(selectedEntries) {
-        const filters = new Set();
-
-        selectedEntries.forEach(entry => {
-            if (!entry || !entry.name) {
-                return;
-            }
-
-            if (entry.is_dir) {
-                if (!entry.info_hash && !entry.can_delete) {
-                    return;
-                }
-                if (entry.info_hash) {
-                    filters.add(entry.info_hash);
-                } else {
-                    filters.add(entry.name);
-                }
-                return;
-            }
-
-            if (entry.info_hash) {
-                filters.add(`${entry.info_hash}:${entry.name}`);
-            } else {
-                filters.add(entry.name);
-            }
-        });
-
-        return Array.from(filters);
-    }
-
-    async executeRepairSelection() {
-        const selectedEntries = this.getSelectedEntries();
-        if (selectedEntries.length === 0) {
-            window.createToast('No items selected for repair', 'warning');
-            return;
-        }
-
-        const mediaIds = this.buildRepairFilters(selectedEntries);
-        if (mediaIds.length === 0) {
-            window.createToast('Unable to derive repair filters from selection', 'warning');
-            return;
-        }
-
-        const mode = this.refs.repairModeSelect?.value || 'detect_only';
-        const payload = {
-            scope: 'managed_entries',
-            mode,
-            autoProcess: mode === 'detect_and_repair',
-            mediaIds
-        };
-
-        try {
-            if (this.refs.confirmRepairBtn) {
-                this.refs.confirmRepairBtn.disabled = true;
-            }
-
-            const response = await fetch(`${window.urlBase}api/repair`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(errorText || 'Failed to start repair');
-            }
-
-            const result = await response.json();
-            this.refs.repairSelectionModal?.close();
-            window.createToast(`Repair started (${mode === 'detect_and_repair' ? 'detect+repair' : 'detect only'}). ID: ${(result.job_id || '').substring(0, 8)}`, 'success');
-        } catch (error) {
-            console.error('Error starting repair:', error);
-            window.createToast(`Failed to start repair: ${error.message}`, 'error');
-        } finally {
-            if (this.refs.confirmRepairBtn) {
-                this.refs.confirmRepairBtn.disabled = false;
-            }
+        for (const entry of selected) {
+            if (entry?.name) await this.recheckEntry(entry.name, false);
         }
     }
 }

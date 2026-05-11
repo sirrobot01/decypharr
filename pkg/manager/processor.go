@@ -89,17 +89,26 @@ func (m *Manager) processQueuedEntries() {
 		if entry.IsDownloading {
 			continue
 		}
+		// Skip if a previous tick's goroutine hasn't finished yet for this hash.
+		if _, loaded := m.processingEntries.LoadOrStore(entry.InfoHash, struct{}{}); loaded {
+			continue
+		}
 		if entry.IsTorrent() {
 			if entry.ActiveProvider != "" {
 				go m.processQueuedTorrent(entry)
+			} else {
+				m.processingEntries.Delete(entry.InfoHash)
 			}
 		} else if entry.IsNZB() {
 			go m.processQueuedNZB(entry)
+		} else {
+			m.processingEntries.Delete(entry.InfoHash)
 		}
 	}
 }
 
 func (m *Manager) processQueuedNZB(entry *storage.Entry) {
+	defer m.processingEntries.Delete(entry.InfoHash)
 	// Check if the nzb is already processed
 	metadata, err := m.usenet.GetNZB(entry.InfoHash)
 	if err != nil {
@@ -139,6 +148,7 @@ func (m *Manager) processQueuedNZB(entry *storage.Entry) {
 }
 
 func (m *Manager) processQueuedTorrent(entry *storage.Entry) {
+	defer m.processingEntries.Delete(entry.InfoHash)
 	placement := entry.GetActiveProvider()
 	if placement == nil {
 		m.logger.Error().Str("name", entry.Name).Msg("No active placement found for queued entry")
@@ -304,7 +314,6 @@ func (m *Manager) processNewTorrent(torrent *storage.Entry, debridTorrent *debri
 
 	// Parse post-download action
 	go m.processAction(torrent)
-	return
 }
 
 // SendToDebrid submits a magnet to debrid service(s) - replaces debrid.Parse
@@ -332,7 +341,6 @@ func (m *Manager) SendToDebrid(ctx context.Context, importRequest *ImportRequest
 	errs := make([]error, 0, len(clients))
 
 	for _, db := range clients {
-
 		overrideDownloadUncached := false
 
 		if importRequest.DownloadUncached != nil {

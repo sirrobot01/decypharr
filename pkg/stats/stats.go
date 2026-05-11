@@ -163,7 +163,18 @@ func (c *Collector) collect() *Snapshot {
 	}
 
 	// --- Repair ---
-	snap.Repair = c.mgr.Repair().JobStats()
+	if svc := c.mgr.Repair(); svc != nil {
+		st := svc.Status()
+		health := make(map[string]int, len(st.HealthCounts))
+		for k, v := range st.HealthCounts {
+			health[string(k)] = v
+		}
+		snap.Repair = RepairStats{
+			Enabled: st.Enabled,
+			Active:  st.ActiveRun != nil,
+			Health:  health,
+		}
+	}
 
 	return snap
 }

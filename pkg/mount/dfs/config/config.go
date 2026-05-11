@@ -82,7 +82,6 @@ func ParseFuseConfig() *FuseConfig {
 		if err == nil {
 			fuseConfig.CacheDiskSize = size / int64(totalDebrids)
 		}
-
 	}
 
 	if cfg.CacheCleanupInterval != "" {
@@ -90,7 +89,6 @@ func ParseFuseConfig() *FuseConfig {
 		if err == nil {
 			fuseConfig.CacheCleanupInterval = interval
 		}
-
 	}
 
 	if cfg.ChunkSize != "" {
@@ -98,7 +96,6 @@ func ParseFuseConfig() *FuseConfig {
 		if err == nil {
 			fuseConfig.ChunkSize = size
 		}
-
 	}
 
 	if cfg.CacheExpiry != "" {
@@ -106,7 +103,6 @@ func ParseFuseConfig() *FuseConfig {
 		if err == nil {
 			fuseConfig.CacheExpiry = ttl
 		}
-
 	}
 
 	if cfg.ReadAheadSize != "" {
@@ -114,7 +110,6 @@ func ParseFuseConfig() *FuseConfig {
 		if err == nil {
 			fuseConfig.ReadAheadSize = size
 		}
-
 	}
 	// Otherwise keep the default (4) from DefaultFuseConfig()
 	fuseConfig.UID = cfg.UID
@@ -127,7 +122,6 @@ func ParseFuseConfig() *FuseConfig {
 		if err == nil {
 			fuseConfig.Umask = umask
 		}
-
 	}
 
 	// retry settings

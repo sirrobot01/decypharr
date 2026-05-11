@@ -190,14 +190,8 @@ func (c *Cache) scanDiskCandidates() ([]candidateEntry, int64) {
 
 			// Read and parse metadata
 			var info ItemInfo
-			metaData, metaErr := os.ReadFile(metaPath)
-			if metaErr != nil {
-				c.logger.Warn().Err(metaErr).Str("path", metaPath).Msg("failed to read cache metadata")
-				continue
-			}
-
-			if err := json.Unmarshal(metaData, &info); err != nil {
-				c.logger.Warn().Err(err).Str("path", metaPath).Msg("corrupt cache metadata")
+			if err := decodeJSONFile(metaPath, &info); err != nil {
+				c.logger.Warn().Err(err).Str("path", metaPath).Msg("failed to read or parse cache metadata")
 				continue
 			}
 
@@ -320,11 +314,9 @@ func (c *Cache) newItem(key, entryName, filename string, fileSize int64) (*Cache
 
 	// Try to load existing metadata
 	var info ItemInfo
-	if data, err := os.ReadFile(metaPath); err == nil {
-		if err := json.Unmarshal(data, &info); err != nil {
-			c.logger.Warn().Err(err).Str("key", key).Msg("corrupt metadata, resetting")
-			info = ItemInfo{}
-		}
+	if err := decodeJSONFile(metaPath, &info); err != nil && !os.IsNotExist(err) {
+		c.logger.Warn().Err(err).Str("key", key).Msg("corrupt metadata, resetting")
+		info = ItemInfo{}
 	}
 
 	// if cachePath is a directory, remove it to avoid conflicts with file creation
@@ -870,4 +862,19 @@ func (item *CacheItem) Close() error {
 func buildCacheKey(entryName, filename string) string {
 	// Create safe filesystem key
 	return fmt.Sprintf("%s/%s", entryName, filename)
+}
+
+// decodeJSONFile stream-decodes a JSON file into v, avoiding the intermediate
+// []byte slurp of os.ReadFile + json.Unmarshal. Keeps allocation proportional
+// to the decoded object rather than 2× the file size.
+func decodeJSONFile(path string, v interface{}) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := json.NewDecoder(f).Decode(v); err != nil && err != io.EOF {
+		return err
+	}
+	return nil
 }

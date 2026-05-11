@@ -35,7 +35,6 @@ func (m *Manager) syncTorrents(ctx context.Context) {
 		Msg("Initial sync of torrents from debrid clients completed")
 }
 
-
 // Refresh configuration constants
 const (
 	refreshBatchSize       = 500
@@ -66,7 +65,7 @@ func (m *Manager) refreshTorrents(ctx context.Context, provider string, debridCl
 }
 
 // doRefreshTorrents performs the actual refresh logic
-func (m *Manager) doRefreshTorrents(ctx context.Context, provider string, debridClient debrid.Client) error {
+func (m *Manager) doRefreshTorrents(_ context.Context, provider string, debridClient debrid.Client) error {
 	remote, err := debridClient.GetTorrents()
 	if err != nil {
 		m.logger.Error().Err(err).Str("debrid", provider).Msg("Failed to get remote")
@@ -485,4 +484,3 @@ func isComplete(files map[string]types.File) bool {
 	}
 	return true
 }
-

@@ -98,6 +98,58 @@ class ConfigManager {
 
         // Load notifications config
         this.populateNotificationSettings(config.notifications);
+
+        // Load repair config
+        this.populateRepairSettings(config.repair, config.arrs);
+    }
+
+    populateRepairSettings(repair, arrs) {
+        // Always refresh the arrs multi-select so it tracks the latest *Arrs config.
+        const arrsSelect = document.getElementById('repair.arrs');
+        if (arrsSelect) {
+            const wanted = new Set((repair && Array.isArray(repair.arrs)) ? repair.arrs : []);
+            arrsSelect.innerHTML = '';
+            for (const a of (arrs || [])) {
+                if (!a || !a.name) continue;
+                const opt = document.createElement('option');
+                opt.value = a.name;
+                opt.textContent = a.name;
+                if (wanted.has(a.name)) opt.selected = true;
+                arrsSelect.appendChild(opt);
+            }
+        }
+
+        if (!repair) return;
+        const $ = (id) => document.getElementById(id);
+        if ($('repair.enabled')) $('repair.enabled').checked = !!repair.enabled;
+        if ($('repair.source')) $('repair.source').value = repair.source || 'arr';
+        if ($('repair.schedule')) $('repair.schedule').value = repair.schedule || '';
+        if ($('repair.recheck_interval')) $('repair.recheck_interval').value = repair.recheck_interval || '';
+        if ($('repair.workers')) $('repair.workers').value = repair.workers || 5;
+        if ($('repair.nntp_connection_percent')) $('repair.nntp_connection_percent').value = repair.nntp_connection_percent || 20;
+        if ($('repair.strategy')) $('repair.strategy').value = repair.strategy || 'per_entry';
+        if ($('repair.auto_repair')) $('repair.auto_repair').checked = !!repair.auto_repair;
+        if ($('repair.notify_on_complete')) $('repair.notify_on_complete').checked = !!repair.notify_on_complete;
+    }
+
+    collectRepairConfig() {
+        const $ = (id) => document.getElementById(id);
+        const arrsSelect = $('repair.arrs');
+        const arrs = arrsSelect
+            ? Array.from(arrsSelect.selectedOptions).map((o) => o.value).filter(Boolean)
+            : [];
+        return {
+            enabled: $('repair.enabled')?.checked || false,
+            source: $('repair.source')?.value || 'arr',
+            schedule: $('repair.schedule')?.value.trim() || '',
+            recheck_interval: $('repair.recheck_interval')?.value.trim() || '',
+            workers: parseInt($('repair.workers')?.value, 10) || 0,
+            nntp_connection_percent: parseInt($('repair.nntp_connection_percent')?.value, 10) || 0,
+            strategy: $('repair.strategy')?.value || 'per_entry',
+            auto_repair: $('repair.auto_repair')?.checked || false,
+            notify_on_complete: $('repair.notify_on_complete')?.checked || false,
+            arrs,
+        };
     }
 
     populateGeneralSettings(config) {
@@ -106,8 +158,8 @@ class ConfigManager {
             'min_file_size', 'max_file_size', 'remove_stalled_after',
             'nzb_user_agent', 'download_folder', 'refresh_interval',
             'max_downloads', 'skip_pre_cache', 'always_rm_tracker_urls',
-            'folder_naming', 'refresh_dirs',
-            'default_download_action'
+            'folder_naming', 'refresh_dirs', 'disable_webdav',
+            'default_download_action', 'app_url'
         ];
 
         fields.forEach(field => {
@@ -298,7 +350,7 @@ class ConfigManager {
         // Add directories if they exist
         if (data.directories) {
             Object.entries(data.directories).forEach(([dirName, dirData]) => {
-                const dirIndex = this.addDirectory(this.debridCount, { name: dirName, ...dirData });
+                const dirIndex = this.addDirectory(this.debridCount, {name: dirName, ...dirData});
 
                 // Add filters if available
                 if (dirData.filters) {
@@ -1008,7 +1060,7 @@ class ConfigManager {
 
             const response = await window.decypharrUtils.fetcher('/api/config', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(config)
             });
 
@@ -1059,6 +1111,10 @@ class ConfigManager {
         if (config.mount.mount_path === "") {
             errors.push('Mount path is required when Rclone is enabled');
         }
+
+        if (config.repair?.enabled && !config.repair.schedule) {
+            errors.push('Repair: schedule is required when Repair is enabled');
+        }
         return {
             valid: errors.length === 0,
             errors
@@ -1095,6 +1151,7 @@ class ConfigManager {
             skip_pre_cache: document.querySelector('[name="skip_pre_cache"]').checked,
             always_rm_tracker_urls: document.querySelector('[name="always_rm_tracker_urls"]').checked,
             folder_naming: document.querySelector('[name="folder_naming"]')?.value || "",
+            disable_webdav: document.querySelector('[name="disable_webdav"]').checked,
             refresh_dirs: document.querySelector('[name="refresh_dirs"]')?.value || "",
             custom_folders: this.collectVirtualFolders(),
 
@@ -1111,7 +1168,10 @@ class ConfigManager {
             usenet: this.collectUsenetConfig(),
 
             // Collect notifications config
-            notifications: this.collectNotificationsConfig()
+            notifications: this.collectNotificationsConfig(),
+
+            // Collect repair config
+            repair: this.collectRepairConfig()
         };
     }
 
@@ -1529,7 +1589,7 @@ class ConfigManager {
                     }
                 });
 
-                customFolders[folderName] = { filters };
+                customFolders[folderName] = {filters};
             }
         });
 
@@ -1685,5 +1745,3 @@ class ConfigManager {
         `;
     }
 }
-
-

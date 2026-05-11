@@ -222,7 +222,7 @@ jobs:
   # Create GitHub release with all binaries
   release:
     runs-on: ubuntu-latest
-    needs: [prepare, build-linux, build-windows, build-darwin]
+    needs: [ prepare, build-linux, build-windows, build-darwin ]
     steps:
       - uses: actions/checkout@v5
         with:

@@ -44,6 +44,11 @@ type Client struct {
 	closed atomic.Bool
 	// Speed test results storage
 	speedTestResults *xsync.Map[string, SpeedTestResult]
+
+	// repairBank gates repair-mode availability checks so they can't starve
+	// streaming. Sized at construction from cfg.Repair.NNTPConnectionPercent;
+	// nil when repair has no NNTP budget.
+	repairBank *RepairBank
 }
 
 // SpeedTestResult holds the result of a provider speed test
@@ -171,6 +176,7 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		logger:           logger.New("nntp-client"),
 		speedTestResults: xsync.NewMap[string, SpeedTestResult](),
 	}
+	cm.repairBank = cm.newRepairBank(cfg.Repair.NNTPConnectionPercent)
 
 	// Start background reaper
 	go cm.reaper()
@@ -866,115 +872,105 @@ type chunkResult struct {
 	connErr  error        // Connection-level error (if any)
 }
 
-// BatchStat checks availability of multiple message IDs efficiently using pipelining.
-// Returns detailed per-segment results so caller can identify exactly which segments are missing.
-// Does NOT fail-fast: all chunks are processed to give complete visibility.
-func (c *Client) BatchStat(ctx context.Context, maxConnections int, messageIDs []string) (*BatchStatResult, error) {
+type batchStatState struct {
+	sawNotFound bool
+	sawOtherErr bool
+	lastErr     error
+}
+
+// BatchStat checks the availability of many message IDs using NNTP STAT,
+// pipelined across multiple connections. Each worker holds one repair-bank
+// token for its lifetime, so the total number of concurrent NNTP connections
+// used by all in-flight BatchStat calls never exceeds the bank's capacity.
+// When the client has no bank configured, a small default worker count is
+// used. Does NOT fail-fast: every chunk is processed so the caller sees
+// complete per-segment visibility.
+func (c *Client) BatchStat(ctx context.Context, messageIDs []string) (*BatchStatResult, error) {
 	if c.closed.Load() {
 		return nil, errors.New("nntp client is closed")
 	}
-
 	if len(messageIDs) == 0 {
 		return &BatchStatResult{}, nil
 	}
 
-	// Determine optimal concurrency based on pool size and message count
-	// Use fewer connections for small batches, more for large ones
-	maxWorkers := min(maxConnections, len(messageIDs), 20)
-	if maxWorkers < 1 {
-		maxWorkers = 1
-	}
-
-	// Optimal pipeline batch size: balance between latency and memory
+	// Pipeline depth per STAT round-trip. Balances RTT amortization against
+	// memory, cancellation latency, and connection-drop blast radius.
 	const pipelineBatchSize = 50
+	// Worker count when no bank is configured (no repair budget). Keeps
+	// non-repair callers cheap.
+	const defaultWorkers = 2
 
-	// Create work chunks with their start indices
 	type chunk struct {
 		startIdx   int
 		messageIDs []string
 	}
-	var chunks []chunk
+	chunks := make([]chunk, 0, (len(messageIDs)+pipelineBatchSize-1)/pipelineBatchSize)
 	for i := 0; i < len(messageIDs); i += pipelineBatchSize {
 		end := min(i+pipelineBatchSize, len(messageIDs))
 		chunks = append(chunks, chunk{startIdx: i, messageIDs: messageIDs[i:end]})
 	}
 
-	// Collect results from all workers
+	workers := defaultWorkers
+	if c.repairBank != nil {
+		workers = c.repairBank.Capacity()
+	}
+	workers = min(workers, len(chunks))
+	if workers < 1 {
+		workers = 1
+	}
+
+	chunksCh := make(chan chunk, len(chunks))
+	for _, ch := range chunks {
+		chunksCh <- ch
+	}
+	close(chunksCh)
+
 	resultsChan := make(chan chunkResult, len(chunks))
 	var wg sync.WaitGroup
-
-	// Semaphore to limit concurrent connections
-	sem := make(chan struct{}, maxWorkers)
-
-	for _, ch := range chunks {
-		// Check context but don't cancel other workers
-		if ctx.Err() != nil {
-			// Mark remaining chunks as context cancelled
-			resultsChan <- chunkResult{
-				startIdx: ch.startIdx,
-				connErr:  ctx.Err(),
-			}
-			continue
-		}
-
+	for i := 0; i < workers; i++ {
 		wg.Add(1)
-		chunkCopy := ch // Capture for goroutine
-
 		go func() {
 			defer wg.Done()
-
-			// Acquire semaphore slot
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			case <-ctx.Done():
-				resultsChan <- chunkResult{
-					startIdx: chunkCopy.startIdx,
-					connErr:  ctx.Err(),
+			// Hold one bank token for this worker's lifetime. With many
+			// in-flight callers, late workers block here until a token frees
+			// up — capping total concurrent connections at bank.Capacity().
+			release, err := c.repairBank.acquire(ctx)
+			if err != nil {
+				for ch := range chunksCh {
+					resultsChan <- chunkResult{startIdx: ch.startIdx, connErr: err}
 				}
 				return
 			}
+			defer release()
 
-			// Execute pipelined stat for this chunk
-			var chunkResults []StatResult
-			var connErr error
-
-			err := c.ExecuteWithFailover(ctx, func(conn *Connection) error {
-				var pipeErr error
-				chunkResults, pipeErr = conn.PipelinedStat(chunkCopy.messageIDs)
-				return pipeErr
-			})
-
-			if err != nil {
-				connErr = err
-			}
-
-			resultsChan <- chunkResult{
-				startIdx: chunkCopy.startIdx,
-				results:  chunkResults,
-				connErr:  connErr,
+			for ch := range chunksCh {
+				if ctx.Err() != nil {
+					resultsChan <- chunkResult{startIdx: ch.startIdx, connErr: ctx.Err()}
+					continue
+				}
+				chunkResults, err := c.batchStatAcrossProviders(ctx, ch.messageIDs)
+				resultsChan <- chunkResult{
+					startIdx: ch.startIdx,
+					results:  chunkResults,
+					connErr:  err,
+				}
 			}
 		}()
 	}
 
-	// Wait for all workers and close results channel
 	go func() {
 		wg.Wait()
 		close(resultsChan)
 	}()
 
-	// Aggregate results
 	allResults := make([]StatResult, len(messageIDs))
-	// Initialize with message IDs
 	for i, msgID := range messageIDs {
 		allResults[i].MessageID = msgID
 	}
 
-	var connectionErrors int
 	for cr := range resultsChan {
 		if cr.connErr != nil {
-			connectionErrors++
-			// Mark all messages in this chunk as errored
+			// Mark every message in this chunk as errored.
 			endIdx := cr.startIdx + pipelineBatchSize
 			if endIdx > len(messageIDs) {
 				endIdx = len(messageIDs)
@@ -985,8 +981,6 @@ func (c *Client) BatchStat(ctx context.Context, maxConnections int, messageIDs [
 			}
 			continue
 		}
-
-		// Copy per-segment results
 		for i, res := range cr.results {
 			idx := cr.startIdx + i
 			if idx < len(allResults) {
@@ -995,27 +989,131 @@ func (c *Client) BatchStat(ctx context.Context, maxConnections int, messageIDs [
 		}
 	}
 
-	// Build final result
 	result := &BatchStatResult{
 		Results:    allResults,
 		TotalCount: len(messageIDs),
 	}
-
 	for _, r := range allResults {
 		if r.Available {
 			result.FoundCount++
-		} else if r.Error != nil {
-			// Check if it's a real error vs article not found
-			var nntpErr *Error
-			if errors.As(r.Error, &nntpErr) && nntpErr.Type == ErrorTypeArticleNotFound {
-				// Article not found is not an "error" for counting purposes
+			continue
+		}
+		if r.Error == nil {
+			continue
+		}
+		// Article-not-found doesn't count as an error for the caller's
+		// availability decision; only true connection/protocol failures do.
+		var nntpErr *Error
+		if errors.As(r.Error, &nntpErr) && nntpErr.Type == ErrorTypeArticleNotFound {
+			continue
+		}
+		result.ErrorCount++
+	}
+	return result, nil
+}
+
+func (c *Client) batchStatAcrossProviders(ctx context.Context, messageIDs []string) ([]StatResult, error) {
+	results := make([]StatResult, len(messageIDs))
+	states := make([]batchStatState, len(messageIDs))
+	unresolved := make([]int, len(messageIDs))
+	for i, msgID := range messageIDs {
+		results[i].MessageID = msgID
+		unresolved[i] = i
+	}
+
+	for _, provider := range c.providers {
+		if len(unresolved) == 0 {
+			break
+		}
+		if ctx.Err() != nil {
+			return results, ctx.Err()
+		}
+
+		chunkIDs := make([]string, len(unresolved))
+		for i, idx := range unresolved {
+			chunkIDs[i] = messageIDs[idx]
+		}
+
+		providerResults, err := c.batchStatOnProvider(ctx, provider, chunkIDs)
+		if err != nil && len(providerResults) == 0 {
+			for _, idx := range unresolved {
+				states[idx].sawOtherErr = true
+				states[idx].lastErr = err
+			}
+			continue
+		}
+
+		nextUnresolved := make([]int, 0, len(unresolved))
+		for i, idx := range unresolved {
+			if i >= len(providerResults) {
+				states[idx].sawOtherErr = true
+				if err != nil {
+					states[idx].lastErr = err
+				} else {
+					states[idx].lastErr = NewConnectionError(fmt.Errorf("provider %s returned incomplete batch results", provider.Host))
+				}
+				nextUnresolved = append(nextUnresolved, idx)
 				continue
 			}
-			result.ErrorCount++
+
+			res := providerResults[i]
+			if res.Available {
+				results[idx] = res
+				continue
+			}
+
+			var nntpErr *Error
+			if res.Error != nil && errors.As(res.Error, &nntpErr) && nntpErr.Type == ErrorTypeArticleNotFound {
+				states[idx].sawNotFound = true
+			} else {
+				states[idx].sawOtherErr = true
+				if res.Error != nil {
+					states[idx].lastErr = res.Error
+				} else if err != nil {
+					states[idx].lastErr = err
+				} else {
+					states[idx].lastErr = NewConnectionError(fmt.Errorf("provider %s returned an empty STAT result for %s", provider.Host, res.MessageID))
+				}
+			}
+			nextUnresolved = append(nextUnresolved, idx)
+		}
+		unresolved = nextUnresolved
+	}
+
+	for _, idx := range unresolved {
+		switch {
+		case states[idx].sawNotFound && !states[idx].sawOtherErr:
+			results[idx].Available = false
+			results[idx].Error = classifyNNTPError(430, fmt.Sprintf("segment %s not found on any provider", results[idx].MessageID))
+		case states[idx].lastErr != nil:
+			results[idx].Available = false
+			results[idx].Error = states[idx].lastErr
+		case states[idx].sawNotFound:
+			results[idx].Available = false
+			results[idx].Error = NewConnectionError(fmt.Errorf("segment %s not found on some providers but could not be verified on others", results[idx].MessageID))
+		default:
+			results[idx].Available = false
+			results[idx].Error = NewConnectionError(fmt.Errorf("segment %s could not be verified on any provider", results[idx].MessageID))
 		}
 	}
 
-	return result, nil
+	return results, nil
+}
+
+func (c *Client) batchStatOnProvider(ctx context.Context, provider config.UsenetProvider, messageIDs []string) ([]StatResult, error) {
+	conn, providerCfg, err := c.getConnectionFromProvider(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+
+	results, statErr := conn.PipelinedStat(messageIDs)
+	if statErr != nil {
+		c.release(conn)
+		return results, statErr
+	}
+
+	c.returnOrReleaseConn(conn, providerCfg)
+	return results, nil
 }
 
 // Close shuts down the connection manager

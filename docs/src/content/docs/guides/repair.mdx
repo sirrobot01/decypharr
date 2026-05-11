@@ -1,16 +1,45 @@
 ---
-title: Repair Worker
-description: Automated file repair system.
+title: Health Checker & Repair
+description: Per-entry health tracking with scheduled sweeps and on-demand rechecks.
 ---
 
-The Repair Worker monitors your library for missing or broken files and attempts to fix them.
+The health checker tracks the state of every entry in your library and runs scheduled sweeps that re-probe only the entries that actually need checking. Each entry carries a health status visible in Browse, and you can force a recheck of a single entry at any time — independent of the global schedule.
 
-## How It Works
+## Concepts
 
-1. **Scan**: Checks files against provider availability
-2. **Detect**: Identifies missing segments, broken links, or expired downloads
-3. **Repair**: Re-adds torrents/NZBs or fetches new download links
-4. **Verify**: Confirms files are accessible
+### Entry health
+
+Every entry has exactly one health record with one of these statuses:
+
+| Status        | Meaning                                                        |
+|---------------|----------------------------------------------------------------|
+| `healthy`     | All probed files are reachable.                                |
+| `broken`      | At least one file failed its probe.                            |
+| `repairing`   | A sweep is currently probing or fixing this entry.             |
+| `unknown`     | Probe was inconclusive (no files broken, none confirmed OK).   |
+| `stale`       | Last check is older than `recheck_interval`.                   |
+| `unsupported` | The entry has no probe path on this protocol.                  |
+
+Each record also stores the file fingerprint, last-checked / last-OK / last-failed timestamps, the next-due time, and the list of broken files (with their Arr IDs when the source is Arr).
+
+When an entry's file set changes, its fingerprint is invalidated and the entry is marked **dirty**, forcing a re-probe on the next sweep.
+
+### Sweeps
+
+A **sweep** is a single pass that selects candidate entries, probes them, and (when `auto_repair` is on) attempts to fix the broken ones. Sweeps are recorded as **runs** (history-only — you cannot create a run by hand).
+
+A sweep does not scan your whole library every time. It selects only entries where:
+
+- status is not `healthy`, **or**
+- the entry is dirty, **or**
+- the entry has never been checked, **or**
+- the entry's `next_check_due_at` has passed.
+
+Healthy entries that haven't changed since the last successful check are skipped.
+
+### Single-entry recheck
+
+You can force a recheck on any one entry from the Browse UI or the API. This works even when the global health checker is disabled, does not produce a run record, and can optionally also repair (`fix=true`).
 
 ## Configuration
 
@@ -18,116 +47,131 @@ The Repair Worker monitors your library for missing or broken files and attempts
 {
   "repair": {
     "enabled": true,
-    "interval": "30m",
-    "auto_process": false,
-    "workers": 2,
-    "strategy": "per_file"
+    "source": "arr",
+    "schedule": "0 4 * * *",
+    "workers": 5,
+    "strategy": "per_entry",
+    "recheck_interval": "168h",
+    "arrs": [],
+    "auto_repair": true,
+    "notify_on_complete": false,
+    "nntp_connection_percent": 20
   }
 }
 ```
 
-| Field | Description | Default |
-|-------|-------------|---------|
-| `enabled` | Enable automatic repair | `false` |
-| `interval` | How often to start auto-repair | `30m` |
-| `auto_process` | Auto-fix detected issues | `false` |
-| `workers` | Concurrent repair operations | `2` |
-| `strategy` | `per_file` or `per_torrent` | `per_file` |
+| Field                     | Description                                                                              | Default     |
+|---------------------------|------------------------------------------------------------------------------------------|-------------|
+| `enabled`                 | Master switch. When off, no scheduled sweep runs (single rechecks still work).           | `false`     |
+| `source`                  | Where to enumerate from: `arr` (walk Arr media) or `managed` (walk managed entries).     | `arr`       |
+| `schedule`                | Cron expression for the recurring sweep. Required when `enabled` is `true`.              | —           |
+| `workers`                 | Number of concurrent probe workers.                                                      | `5`         |
+| `strategy`                | `per_entry` (stop after first broken file in an entry) or `per_file` (probe all files).  | `per_entry` |
+| `recheck_interval`        | How long a healthy entry's check stays fresh before it becomes a candidate again.        | `168h`      |
+| `arrs`                    | Optional filter when `source=arr`. Empty list means all eligible Arrs.                   | `[]`        |
+| `auto_repair`             | When `true`, brokens are repaired in the same sweep. When `false`, the sweep is detect-only. | `false` |
+| `notify_on_complete`      | Send a notification when a sweep finishes.                                               | `false`     |
+| `nntp_connection_percent` | Percentage of NNTP connections the probe is allowed to use. Avoids starving downloads.   | `20`        |
 
-## Strategies
+### Strategies
 
-### Per File
+- **`per_entry`** — probe stops at the first broken file in an entry. Faster on broken libraries; sufficient when you only need to know "is this entry intact?".
+- **`per_file`** — probe every file. Use when you want a complete broken-file list per entry (e.g. to drive a per-file Arr re-acquire).
 
-```json
-{
-  "repair": {
-    "strategy": "per_file"
-  }
-}
-```
+### Sources
 
-Check each file independently. Faster for large torrents with few issues.
+- **`arr`** — walks Sonarr / Radarr media, resolves each item to an entry through the symlink target, and probes that entry. Broken files are enriched with Arr identifiers so repair can call `DeleteFiles` + `SearchMissing` directly.
+- **`managed`** — walks managed entries directly. Used when you don't have an Arr in front, or for entries imported outside the Arr flow. NZB-only managed brokens have no Arr re-acquire path; they stay `broken` with `failure_reason=usenet_segment_missing` for you to react to manually.
 
-**Use when:**
-- Large multi-file torrents
-- Only occasional file failures
-- Want faster repairs
+## Workflow
 
-### Per Torrent
+1. The cron tick (or a manual **Run Now**) opens a new run.
+2. Candidates are selected per the rules above.
+3. For each candidate, the entry is marked `repairing` and probed by a worker.
+4. The entry's health is updated with the probe outcome (`healthy` / `broken` / `unknown`), broken files, fingerprint, and timestamps.
+5. If `auto_repair` is on and the entry has Arr-known broken files, they are batched per Arr and submitted via delete + search. After the repair attempt, only those entries are re-probed.
+6. The run record's stats are updated live throughout, so the status panel reflects progress without needing to wait for completion.
 
-```json
-{
-  "repair": {
-    "strategy": "per_torrent"
-  }
-}
-```
+A failure to persist a single entry's health update is logged but never aborts the sweep.
 
-Check all files in a torrent together. Ensures full torrent integrity.
+## Stop and disable
 
-**Use when:**
-- Need complete torrent verification
-- Don't mind slower checks
-- Want comprehensive validation
+- **Stop** cancels the active run. In-flight probes return at the next checkpoint, the run is marked `cancelled`, and entries that hadn't yet finished probing revert to their previous status.
+- **Disable** (`enabled=false`) cancels any in-flight run and unregisters the cron job. Per-entry health data is **kept**, so Browse badges stay meaningful and single-entry rechecks remain available.
 
-## Auto-Process
+## Singleton invariants
 
-```json
-{
-  "repair": {
-    "auto_process": true
-  }
-}
-```
+- At most one sweep runs at a time. Triggering a second one returns `409 Conflict`.
+- A force-recheck on an entry that is already being probed by the active sweep returns `409 Conflict`.
 
-- `false`: Detect issues and create repair jobs (manual trigger needed)
-- `true`: Automatically fix detected issues
+## API
 
-:::caution
-`auto_process: true` automatically deletes and re-adds torrents/NZBs which may cause unexpected behavior with some Arrs or providers. Use with caution and monitor logs.
-:::
+| Method   | Path                                  | Purpose                                                                  |
+|----------|---------------------------------------|--------------------------------------------------------------------------|
+| `GET`    | `/api/repair/config`                  | Read current config.                                                     |
+| `PUT`    | `/api/repair/config`                  | Update config (validates cron, workers, source).                         |
+| `GET`    | `/api/repair/status`                  | Active run summary, last completed run, and counts of entries by status. |
+| `POST`   | `/api/repair/run`                     | Trigger a sweep now.                                                     |
+| `POST`   | `/api/repair/stop`                    | Cancel the active run.                                                   |
+| `GET`    | `/api/repair/runs`                    | Run history.                                                             |
+| `GET`    | `/api/repair/runs/{id}`               | Run detail.                                                              |
+| `DELETE` | `/api/repair/runs`                    | Clear run history.                                                       |
+| `GET`    | `/api/repair/health`                  | List entry health (optional `?status=broken`).                           |
+| `GET`    | `/api/repair/health/{name}`           | Per-entry health, including the broken-file list.                        |
+| `POST`   | `/api/repair/health/{name}/check`     | Force-recheck this entry. Add `?fix=true` to also repair.                |
+| `POST`   | `/api/repair/recheck/media`           | Recheck a single Arr media item. Body: `{arr, media_id, fix}`.           |
 
-## Manual Repair
+### Examples
 
-### Via Web UI
-
-1. Go to **Repair** page
-2. Click **Start Repair**
-3. Review detected issues
-4. Click **Repair** on specific jobs
-
-### Via API
-
-Trigger manual scan:
+Run a sweep now:
 
 ```bash
-curl -X POST http://localhost:8282/api/repair \
+curl -X POST http://localhost:8282/api/repair/run \
   -H "Authorization: Bearer YOUR_API_TOKEN"
 ```
 
-Process specific job:
+Stop the active sweep:
 
 ```bash
-curl -X POST http://localhost:8282/api/repair/jobs/JOB_ID/process \
+curl -X POST http://localhost:8282/api/repair/stop \
   -H "Authorization: Bearer YOUR_API_TOKEN"
 ```
 
-## Per-Arr Skip Repair
+Force-recheck a single entry, and repair it if broken:
+
+```bash
+curl -X POST 'http://localhost:8282/api/repair/health/My.Show.S01/check?fix=true' \
+  -H "Authorization: Bearer YOUR_API_TOKEN"
+```
+
+Recheck a single Sonarr series:
+
+```bash
+curl -X POST http://localhost:8282/api/repair/recheck/media \
+  -H "Authorization: Bearer YOUR_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"arr":"Sonarr","media_id":"123","fix":true}'
+```
+
+## Browse page
+
+Each entry row carries a health badge whose colour reflects the current status (healthy / broken / repairing / unknown / stale / unsupported). Hovering shows the last-checked time, broken-file count, and top failure reason. The row's action menu has **Recheck** and **Recheck & fix**, and clicking the badge opens a side panel listing every broken file with its reason and Arr link.
+
+The badges flip live during a sweep — entries move through `repairing → healthy/broken` as the workers report results, without needing to refresh after the run finishes.
+
+## Per-Arr and per-protocol skips
 
 Disable repair for specific Arrs:
 
 ```json
 {
   "arrs": [
-    {
-      "name": "Sonarr",
-      "skip_repair": true
-    }
+    { "name": "Sonarr", "skip_repair": true }
   ]
 }
 ```
 
-Or globally for Usenet:
+Skip repair for all NZB / Usenet entries:
 
 ```json
 {
@@ -137,61 +181,49 @@ Or globally for Usenet:
 }
 ```
 
-## Repair Workflow
+## Rate limiting
 
-1. Repair Worker scans library every `interval`
-2. Detects issues based on provider availability and file integrity
-3. Creates repair jobs for detected issues
-4. If `auto_process: true`, processes jobs immediately; otherwise, waits for manual trigger
-5. Repair process re-adds torrents/NZBs or fetches new links
-6. Verifies repaired files are accessible
-
-## Troubleshooting
-
-### Repair Jobs Stuck
-
-Increase `workers`:
-
-```json
-{
-  "repair": {
-    "workers": 4
-  }
-}
-```
-
-### Too Many False Positives
-
-Increase `interval` to reduce scan frequency:
-
-```json
-{
-  "repair": {
-    "interval": "1h"
-  }
-}
-```
-
-### High Resource Usage
-
-1. Set `auto_process: false`
-2. Reduce `workers`
-3. Increase `interval`
-4. Skip repair for less critical Arrs
-
-## Rate Limiting
-
-Repair operations respect Debrid provider rate limits:
+Probes against debrid providers respect a separate rate limit so they don't starve regular downloads:
 
 ```json
 {
   "debrids": [
-    {
-      "provider": "realdebrid",
-      "repair_rate_limit": "60/minute"
-    }
+    { "provider": "realdebrid", "repair_rate_limit": "60/minute" }
   ]
 }
 ```
 
-Separate from normal `rate_limit` to avoid impacting regular usage.
+For Usenet probing, `nntp_connection_percent` (above) caps the share of NNTP connections the health checker uses.
+
+:::caution
+With `auto_repair: true`, a sweep deletes the broken Arr file records and triggers a search for replacements. Verification of those re-acquires happens later — the Arr import is asynchronous and the badge flips to `healthy` once the replacement file is in place.
+:::
+
+## Troubleshooting
+
+### Sweep takes too long
+
+Increase `workers`, or raise `recheck_interval` so fewer entries become candidates each tick:
+
+```json
+{
+  "repair": {
+    "workers": 10,
+    "recheck_interval": "336h"
+  }
+}
+```
+
+### Sweep is too aggressive
+
+Lower `workers`, lengthen `schedule`, or set `auto_repair: false` to run detect-only and review brokens before fixing.
+
+### One entry keeps flipping broken
+
+Open its detail panel from Browse to see the broken-file list and reason. For Arr-sourced entries you can use **Recheck & fix** for a one-shot repair without waiting for the next sweep.
+
+## Migration from v1
+
+The job-based repair system (`repair_jobs`, `repair_keys`, the **Add Job** UI) has been removed. On first boot of the new system the legacy buckets are dropped, and existing recurring schedules do **not** carry over — re-enable repair once with the new config.
+
+Per-entry health records (`repair_state`) are forward-compatible; new fields default to empty and populate on the next probe.

@@ -23,7 +23,6 @@ func parseBool(val string) bool {
 //	DECYPHARR_DEBRIDS__0__NAME=realdebrid
 //	DECYPHARR_DEBRIDS__0__API_KEY=abc123
 func (c *Config) applyEnvOverrides() {
-
 	// Root level fields
 	if val := getEnv("PORT"); val != "" {
 		c.Port = val

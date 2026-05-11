@@ -46,10 +46,10 @@
                                 <span class="text-sm opacity-70">Paste NZB URLs (one per line) or select multiple .nzb files</span>
                             </label>
                             <textarea type="text"
-                                   class="textarea h-24 font-mono text-sm mb-2"
-                                   id="nzbURL"
-                                   name="nzbURL"
-                                   placeholder="Paste your NZB URLs here, one per line...&#10;https://example.com/file1.nzb&#10;https://example.com/file2.nzb"></textarea>
+                                      class="textarea h-24 font-mono text-sm mb-2"
+                                      id="nzbURL"
+                                      name="nzbURL"
+                                      placeholder="Paste your NZB URLs here, one per line...&#10;https://example.com/file1.nzb&#10;https://example.com/file2.nzb"></textarea>
                             <input type="file"
                                    class="file-input w-full"
                                    id="nzbFile"
@@ -73,7 +73,7 @@
                             <option value="download">Download Files</option>
                             <option value="none">No Action</option>
                         </select>
-                            <span class="text-sm opacity-70">How to handle files after download completion</span>
+                        <span class="text-sm opacity-70">How to handle files after download completion</span>
                     </div>
 
                     <div>
@@ -85,7 +85,7 @@
                                id="downloadFolder"
                                name="downloadFolder"
                                placeholder="/downloads/torrents">
-                            <span class="text-sm opacity-70">Leave empty to use default qBittorrent folder</span>
+                        <span class="text-sm opacity-70">Leave empty to use default qBittorrent folder</span>
                     </div>
 
                     <div>
@@ -97,7 +97,7 @@
                                id="arr"
                                name="arr"
                                placeholder="sonarr, radarr, etc.">
-                            <span class="text-sm opacity-70">Optional: Specify which Arr service should handle this</span>
+                        <span class="text-sm opacity-70">Optional: Specify which Arr service should handle this</span>
                     </div>
 
                     {{ if .HasMultiDebrid }}
@@ -113,7 +113,7 @@
                             </option>
                             {{ end }}
                         </select>
-                            <span class="text-sm opacity-70">Choose which debrid service to use</span>
+                        <span class="text-sm opacity-70">Choose which debrid service to use</span>
                     </div>
                     {{ end }}
                 </div>
@@ -121,7 +121,8 @@
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 space-y-4">
                     <div>
                         <label class="label cursor-pointer justify-start gap-3">
-                            <input type="checkbox" class="checkbox checkbox-primary" name="downloadUncached" id="downloadUncached">
+                            <input type="checkbox" class="checkbox checkbox-primary" name="downloadUncached"
+                                   id="downloadUncached">
                             <div>
                                 <span class="label-text font-medium">Download Uncached Content</span>
                                 <div class="label-text-alt">Allow downloading of content not cached by debrid service
@@ -131,7 +132,8 @@
                     </div>
                     <div>
                         <label class="label cursor-pointer justify-start gap-3">
-                            <input type="checkbox" class="checkbox checkbox-primary" name="skipMultiSeason" id="skipMultiSeason">
+                            <input type="checkbox" class="checkbox checkbox-primary" name="skipMultiSeason"
+                                   id="skipMultiSeason">
                             <div>
                                 <span class="label-text font-medium">Skip Multi-Season Checker</span>
                                 <div class="label-text-alt">Skip the multi-season episode checker for TV shows</div>
@@ -140,10 +142,13 @@
                     </div>
                     <div>
                         <label class="label cursor-pointer justify-start gap-3">
-                            <input type="checkbox" class="checkbox checkbox-primary" name="rmTrackerUrls" id="rmTrackerUrls" {{ if .AlwaysRmTrackerUrls }}checked disabled{{ end }}>
+                            <input type="checkbox" class="checkbox checkbox-primary" name="rmTrackerUrls"
+                                   id="rmTrackerUrls" {{ if .AlwaysRmTrackerUrls }}checked disabled{{ end }}>
                             <div>
                                 <span class="label-text font-medium">Remove Tracker</span>
-                                <div class="label-text-alt">Allows you to <a href="https://docs.decypharr.com/" class="link link-hover font-semibold" target="_blank">download private tracker torrents</a> with lower risk</div>
+                                <div class="label-text-alt">Allows you to download private tracker torrents with lower
+                                    risk
+                                </div>
                             </div>
                         </label>
                     </div>

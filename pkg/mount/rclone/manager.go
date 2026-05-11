@@ -207,11 +207,7 @@ func (m *Manager) Stop() error {
 	m.cancel()
 
 	// Stopping mount
-	if err := m.stopMount(); err != nil {
-		m.logger.Error().Err(err).Msgf("Failed to unmount rclone filesystem")
-	} else {
-		m.logger.Info().Msgf("Successfully unmounted rclone filesystem")
-	}
+	m.stopMount()
 
 	if m.cmd != nil && m.cmd.Process != nil {
 		// Try graceful shutdown first
@@ -279,17 +275,16 @@ func (m *Manager) startMount(ctx context.Context) error {
 	return nil
 }
 
-func (m *Manager) stopMount() error {
+func (m *Manager) stopMount() {
 	if !m.IsMounted() {
 		m.logger.Info().Msgf("Mount is not mounted, skipping unmount")
-		return nil
+		return
 	}
 
 	m.logger.Info().Msg("Unmounting via RC")
 
 	m.unmount(m.ctx)
 	m.logger.Info().Msgf("Successfully unmounted %s", m.getMountInfo().LocalPath)
-	return nil
 }
 
 // IsReady returns true if the RC server is ready

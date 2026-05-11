@@ -27,6 +27,7 @@ curl http://localhost:8282/version
 ```
 
 **Response:**
+
 ```json
 {
   "version": "1.0.0"
@@ -64,6 +65,7 @@ curl -H "Authorization: Bearer TOKEN" \
 ```
 
 **Query Parameters:**
+
 - `category`: Filter by category
 - `hash`: Get specific torrent
 
@@ -97,33 +99,90 @@ curl -X DELETE \
   http://localhost:8282/api/torrents?category=sonarr&hash=abc123
 ```
 
-### POST /api/repair
+### GET /api/repair/config
 
-Trigger repair scan.
+Read the current health-checker config.
+
+### PUT /api/repair/config
+
+Update the health-checker config (validates cron, workers, source).
+
+### GET /api/repair/status
+
+Active run summary, last completed run, and counts of entries by status.
+
+### POST /api/repair/run
+
+Trigger a sweep now.
 
 ```bash
 curl -X POST \
   -H "Authorization: Bearer TOKEN" \
-  http://localhost:8282/api/repair
+  http://localhost:8282/api/repair/run
 ```
 
-### GET /api/repair/jobs
+Returns `409 Conflict` when a sweep is already running.
 
-List repair jobs.
+### POST /api/repair/stop
+
+Cancel the active sweep.
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer TOKEN" \
+  http://localhost:8282/api/repair/stop
+```
+
+### GET /api/repair/runs
+
+Run history.
 
 ```bash
 curl -H "Authorization: Bearer TOKEN" \
-  http://localhost:8282/api/repair/jobs
+  http://localhost:8282/api/repair/runs
 ```
 
-### POST /api/repair/jobs/{id}/process
+### GET /api/repair/runs/{id}
 
-Process specific repair job.
+Run detail.
+
+### DELETE /api/repair/runs
+
+Clear run history.
+
+### GET /api/repair/health
+
+List entry health. Optional `?status=broken` filter.
+
+```bash
+curl -H "Authorization: Bearer TOKEN" \
+  'http://localhost:8282/api/repair/health?status=broken'
+```
+
+### GET /api/repair/health/{name}
+
+Per-entry health, including the broken-file list.
+
+### POST /api/repair/health/{name}/check
+
+Force-recheck a single entry. Add `?fix=true` to also repair.
 
 ```bash
 curl -X POST \
   -H "Authorization: Bearer TOKEN" \
-  http://localhost:8282/api/repair/jobs/JOB_ID/process
+  'http://localhost:8282/api/repair/health/My.Show.S01/check?fix=true'
+```
+
+### POST /api/repair/recheck/media
+
+Recheck a single Arr media item.
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"arr":"Sonarr","media_id":"123","fix":true}' \
+  http://localhost:8282/api/repair/recheck/media
 ```
 
 ### GET /api/arrs
@@ -146,6 +205,7 @@ curl -X POST \
 ```
 
 **Response:**
+
 ```json
 {
   "api_token": "NEW_TOKEN"
@@ -228,6 +288,7 @@ Download specific file.
 ```
 
 **Status Codes:**
+
 - `200`: Success
 - `400`: Bad Request
 - `401`: Unauthorized (invalid token)

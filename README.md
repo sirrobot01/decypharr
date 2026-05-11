@@ -6,14 +6,14 @@
 
 ## What is Decypharr?
 
-Decypharr provides a unified interface for Sonarr, Radarr, and other *Arr applications to access Debrid providers and Usenet streaming.
+Decypharr provides a unified interface for Sonarr, Radarr, and other *Arr applications to access Debrid providers and
+Usenet streaming.
 
 ## Features
 
 - Mock Qbittorent and Sabnzbd API that supports the Arrs (Sonarr, Radarr, Lidarr etc)
 - Multiple Debrid and usenet providers support with a single interface
 - Direct Usenet streaming via NNTP (no separate download client required)
-
 
 ## Supported Debrid Providers
 
@@ -45,7 +45,9 @@ services:
       - apparmor:unconfined
 ```
 
-> Prefer not to self-host? A managed Decypharr instance is available via [ElfHosted](https://store.elfhosted.com/product/decypharr/?utm_source=github&utm_medium=readme&utm_campaign=decypharr-readme), preconfigured alongside Sonarr/Radarr to route requests to your debrid provider (7-day trial).
+> Prefer not to self-host? A managed Decypharr instance is available
+> via [ElfHosted](https://store.elfhosted.com/product/decypharr/?utm_source=github&utm_medium=readme&utm_campaign=decypharr-readme),
+> preconfigured alongside Sonarr/Radarr to route requests to your debrid provider (7-day trial).
 
 ## Documentation
 
@@ -56,4 +58,5 @@ For complete documentation, please visit our [Documentation](https://docs.decyph
 Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
+
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

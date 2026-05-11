@@ -116,13 +116,15 @@ func (m *Manager) GetEntries() []FileInfo {
 		}
 	}
 
-	// AddOrUpdate version.txt
+	// AddOrUpdate version.txt — size MUST equal len(content) or FUSE reads
+	// will hang/short-read waiting for bytes the backend never produces.
+	versionContent := []byte(version.GetInfo().String() + "\n")
 	subDirs = append(subDirs, FileInfo{
 		name:    "version.txt",
 		isDir:   false,
 		modTime: now,
-		size:    int64(len(version.GetInfo().String())),
-		content: []byte(version.GetInfo().Version),
+		size:    int64(len(versionContent)),
+		content: versionContent,
 	})
 	return subDirs
 }
@@ -304,7 +306,7 @@ func (m *Manager) getEntryChildren(group string) (*FileInfo, []FileInfo) {
 		}
 		return currentDir, infos
 	case "version.txt":
-		currentDir.content = []byte(version.GetInfo().Version)
+		currentDir.content = []byte(version.GetInfo().String() + "\n")
 		currentDir.size = int64(len(currentDir.content))
 		currentDir.isDir = false
 		return currentDir, nil

@@ -1,7 +1,6 @@
 package parser
 
 import (
-	"bytes"
 	"fmt"
 	"path"
 	"path/filepath"
@@ -11,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/Tensai75/nzbparser"
-	"github.com/google/uuid"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sirrobot01/decypharr/pkg/usenet/types"
@@ -48,13 +46,6 @@ func getRARVolumeOrder(filename string) int {
 
 	// Unknown pattern, put at end
 	return 999999
-}
-
-// sortRARVolumesByOrder sorts a slice in-place by RAR volume order using a key extractor function
-func sortRARVolumesByOrder[T any](items []T, getName func(T) string) {
-	sort.Slice(items, func(i, j int) bool {
-		return getRARVolumeOrder(getName(items[i])) < getRARVolumeOrder(getName(items[j]))
-	})
 }
 
 func wrapNZBFile(f *storage.NZBFile) ([]*storage.NZBFile, error) {
@@ -96,128 +87,6 @@ func determineNZBName(filename string, meta map[string]string) string {
 		filename = title
 	}
 	return utils.RemoveInvalidChars(filename)
-}
-
-func generateID(nzb *storage.NZB) string {
-	return uuid.New().String()
-}
-
-func convertRARVolumeParts(parts []*types.RARVolumePart) []types.RARVolumePart {
-	result := make([]types.RARVolumePart, len(parts))
-	for i, part := range parts {
-		result[i] = types.RARVolumePart{
-			Name:         filepath.Base(part.Name),
-			DataOffset:   part.DataOffset,
-			PackedSize:   part.PackedSize,
-			UnpackedSize: part.UnpackedSize,
-			Stored:       part.Stored,
-			Compressed:   !part.Stored,
-			PartNumber:   i,
-		}
-	}
-	return result
-}
-
-func DetectFileType(b []byte) string {
-	if len(b) == 0 {
-		return "unknown"
-	}
-
-	// --- RAR ---
-	if len(b) >= 7 && bytes.Equal(b[:7], []byte("Rar!\x1A\x07\x00")) {
-		return "rar4"
-	}
-	if len(b) >= 8 && bytes.Equal(b[:8], []byte("Rar!\x1A\x07\x01\x00")) {
-		return "rar5"
-	}
-
-	// --- ZIP ---
-	if len(b) >= 4 && bytes.Equal(b[:4], []byte{0x50, 0x4B, 0x03, 0x04}) {
-		return "zip"
-	}
-
-	// --- 7z ---
-	if len(b) >= 6 && bytes.Equal(b[:6], []byte{0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C}) {
-		return "7z"
-	}
-
-	// --- GZIP ---
-	if len(b) >= 2 && bytes.Equal(b[:2], []byte{0x1F, 0x8B}) {
-		return "gzip"
-	}
-
-	// --- TAR (ustar magic at offset 257) ---
-	if len(b) >= 265 && bytes.Equal(b[257:262], []byte("ustar")) {
-		return "tar"
-	}
-
-	// --- PDF ---
-	if len(b) >= 5 && bytes.Equal(b[:5], []byte("%PDF-")) {
-		return "pdf"
-	}
-
-	// --- JPEG ---
-	if len(b) >= 3 && bytes.Equal(b[:3], []byte{0xFF, 0xD8, 0xFF}) {
-		return "jpeg"
-	}
-
-	// --- PNG ---
-	if len(b) >= 8 && bytes.Equal(b[:8], []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}) {
-		return "png"
-	}
-
-	// --- GIF ---
-	if len(b) >= 6 && (bytes.Equal(b[:6], []byte("GIF87a")) ||
-		bytes.Equal(b[:6], []byte("GIF89a"))) {
-		return "gif"
-	}
-
-	// --- WebP (RIFF + WEBP) ---
-	if len(b) >= 12 &&
-		bytes.Equal(b[:4], []byte("RIFF")) &&
-		bytes.Equal(b[8:12], []byte("WEBP")) {
-		return "webp"
-	}
-
-	// --- MP4 / MOV (ISO Base Media File) ---
-	// "ftyp" is at position 4
-	if len(b) >= 12 && bytes.Equal(b[4:8], []byte("ftyp")) {
-		return "mp4"
-	}
-
-	// --- MKV / WebM (EBML magic) ---
-	if len(b) >= 4 && bytes.Equal(b[:4], []byte{0x1A, 0x45, 0xDF, 0xA3}) {
-		return "mkv"
-	}
-
-	// --- MP3 (ID3 or MPEG frame sync) ---
-	if len(b) >= 3 && bytes.Equal(b[:3], []byte("ID3")) {
-		return "mp3"
-	}
-	if len(b) >= 2 && b[0] == 0xFF && (b[1]&0xE0) == 0xE0 {
-		return "mp3"
-	}
-
-	// --- WAV ---
-	if len(b) >= 12 &&
-		bytes.Equal(b[:4], []byte("RIFF")) &&
-		bytes.Equal(b[8:12], []byte("WAVE")) {
-		return "wav"
-	}
-
-	// --- FLAC ---
-	if len(b) >= 4 && bytes.Equal(b[:4], []byte("fLaC")) {
-		return "flac"
-	}
-
-	// --- AVI ---
-	if len(b) >= 12 &&
-		bytes.Equal(b[:4], []byte("RIFF")) &&
-		bytes.Equal(b[8:12], []byte("AVI ")) {
-		return "avi"
-	}
-
-	return "unknown"
 }
 
 func determineExtension(group *FileGroup) string {

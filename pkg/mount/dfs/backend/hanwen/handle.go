@@ -40,11 +40,9 @@ func (fh *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRe
 		return nil, syscall.EBADF
 	}
 
-	if off >= fh.streamFile.Size() {
-		return fuse.ReadResultData([]byte{}), 0
-	}
-
-	// Handle static content
+	// Static content (e.g. version.txt): serve from the in-memory buffer.
+	// Check this first — streamFile is nil for static files, so dereferencing
+	// it below would panic.
 	if len(fh.file.content) > 0 {
 		data := fh.readFromStaticContent(off, int64(len(dest)))
 		return fuse.ReadResultData(data), 0
@@ -52,6 +50,10 @@ func (fh *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRe
 
 	if fh.streamFile == nil {
 		return nil, syscall.EIO
+	}
+
+	if off >= fh.streamFile.Size() {
+		return fuse.ReadResultData([]byte{}), 0
 	}
 
 	// Apply per-read timeout so a stalled download can't block this goroutine

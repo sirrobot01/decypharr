@@ -295,5 +295,4 @@ func (m *Manager) UpdateAccount(updatedAccount *Account) {
 		return
 	}
 	m.accounts.Store(updatedAccount.Token, updatedAccount)
-
 }

@@ -8,16 +8,19 @@ description: Solutions to common issues.
 ### Docker container won't start
 
 **Check logs:**
+
 ```bash
 docker logs decypharr
 ```
 
 **Common causes:**
+
 - Port 8282 already in use
 - Invalid volume paths
 - Permission issues on mounted directories
 
 **Fix:**
+
 ```yaml
 # docker-compose.yml
 services:
@@ -32,6 +35,7 @@ services:
 ### Binary: "permission denied"
 
 Make executable:
+
 ```bash
 chmod +x decypharr
 ./decypharr
@@ -54,17 +58,20 @@ chmod +x decypharr
 ### Mount point empty
 
 **Check mount status:**
+
 ```bash
 ls -la /mnt/decypharr
 mount | grep decypharr
 ```
 
 **Common causes:**
+
 - FUSE not available
 - Permission issues
 - Mount path doesn't exist
 
 **Fix (Docker):**
+
 ```yaml
 services:
   decypharr:
@@ -77,6 +84,7 @@ services:
 ```
 
 **Fix (Binary):**
+
 ```bash
 # Install FUSE
 sudo apt install fuse  # Debian/Ubuntu
@@ -117,6 +125,7 @@ Set correct UID/GID:
 ```
 
 Find your user ID:
+
 ```bash
 id your_username
 ```
@@ -133,10 +142,12 @@ id your_username
 ### "No free slots"
 
 **Check slots:**
+
 - Real Debrid: https://real-debrid.com/torrents
 - All Debrid: Dashboard
 
 **Solutions:**
+
 1. Remove old torrents manually
 2. Configure slot management:
    ```json
@@ -179,6 +190,7 @@ Or add more API keys:
 Links expire after `auto_expire_links_after` (default 24h). Repair worker should fix automatically.
 
 **Manual fix:**
+
 1. Go to Repair page
 2. Click "Scan Now"
 3. Process detected jobs
@@ -188,11 +200,13 @@ Links expire after `auto_expire_links_after` (default 24h). Repair worker should
 ### Connection failed to NNTP server
 
 **Check connectivity:**
+
 ```bash
 telnet news.provider.com 563
 ```
 
 **Verify config:**
+
 - Correct host/port
 - Valid username/password
 - SSL enabled if provider requires
@@ -276,6 +290,7 @@ volumes:
 ```
 
 **Check download action:**
+
 ```json
 {
   "arrs": [
@@ -296,16 +311,19 @@ Arr sync delay. Wait 1-2 minutes or trigger manual import in Arr.
 ### High CPU usage
 
 **Check:**
+
 ```bash
 docker stats decypharr
 ```
 
 **Causes:**
+
 - Too many concurrent workers
 - Repair loop
 - Usenet processing
 
 **Solutions:**
+
 1. Reduce workers:
    ```json
    {
@@ -331,6 +349,7 @@ docker stats decypharr
 Ensure sufficient disk space.
 
 For Rclone:
+
 ```json
 {
   "mount": {
@@ -344,6 +363,7 @@ For Rclone:
 ### Slow streaming/buffering
 
 **DFS:**
+
 ```json
 {
   "mount": {
@@ -356,6 +376,7 @@ For Rclone:
 ```
 
 **Usenet:**
+
 ```json
 {
   "usenet": {
@@ -366,6 +387,7 @@ For Rclone:
 ```
 
 **Check provider performance:**
+
 - Test speed from Debrid website
 - Try different Usenet provider
 - Check network bandwidth
@@ -375,6 +397,7 @@ For Rclone:
 Config stored in `config.json` (text). No separate database.
 
 If logs are large:
+
 ```json
 {"log_level": "warn"}
 ```
@@ -401,23 +424,25 @@ If logs are large:
 Clear browser cache or saved credentials.
 
 For apps, provide full URL with auth:
+
 ```
 http://username:password@decypharr:8282/webdav/
 ```
 
 ### Files won't play in WebDAV client
 
-WebDAV has no local cache - streaming depends on Debrid/Usenet speed. For better performance, use DFS mount instead of WebDAV.
+WebDAV has no local cache - streaming depends on Debrid/Usenet speed. For better performance, use DFS mount instead of
+WebDAV.
 
 ## Repair Worker Issues
 
 ### Repair jobs stuck "Processing"
 
-1. **Check workers:**
+1. **Raise workers:**
    ```json
-   {"repair": {"workers": 2}}
+   {"repair": {"workers": 10}}
    ```
-2. **Check rate limits** (might be throttled)
+2. **Check provider rate limits** (probes may be throttled by `repair_rate_limit` or `nntp_connection_percent`).
 3. **Restart Decypharr:**
    ```bash
    docker restart decypharr
@@ -425,24 +450,24 @@ WebDAV has no local cache - streaming depends on Debrid/Usenet speed. For better
 
 ### False positives in repair
 
-Increase scan interval:
+Lengthen `recheck_interval` so brief outages don't flap entries through `broken`, and turn off `auto_repair` to review brokens before they're acted on:
 
 ```json
 {
   "repair": {
-    "interval": "2h",
-    "auto_process": false
+    "recheck_interval": "336h",
+    "auto_repair": false
   }
 }
 ```
 
-Review jobs manually before processing.
+Brokens then sit in the Browse UI with their reason; you can fire **Recheck & fix** on individual entries.
 
 ### Repair not detecting issues
 
-1. **Verify repair enabled:**
+1. **Verify repair enabled and scheduled:**
    ```json
-   {"repair": {"enabled": true}}
+   {"repair": {"enabled": true, "schedule": "0 4 * * *"}}
    ```
 2. **Check per-Arr skip:**
    ```json
@@ -452,10 +477,15 @@ Review jobs manually before processing.
      ]
    }
    ```
-3. **Manual trigger:**
+3. **Trigger a sweep now:**
    ```bash
    curl -X POST -H "Authorization: Bearer TOKEN" \
-     http://localhost:8282/api/repair
+     http://localhost:8282/api/repair/run
+   ```
+4. **Force-recheck a specific entry:**
+   ```bash
+   curl -X POST -H "Authorization: Bearer TOKEN" \
+     'http://localhost:8282/api/repair/health/My.Show.S01/check?fix=true'
    ```
 
 ## Debugging
@@ -467,11 +497,13 @@ Review jobs manually before processing.
 ```
 
 **Docker:**
+
 ```bash
 docker logs -f decypharr
 ```
 
 **Binary:**
+
 ```bash
 ./decypharr 2>&1 | tee decypharr.log
 ```
@@ -479,12 +511,14 @@ docker logs -f decypharr
 ### Check configuration
 
 **View current config:**
+
 ```bash
 curl -H "Authorization: Bearer TOKEN" \
   http://localhost:8282/api/config | jq
 ```
 
 **Validate JSON:**
+
 ```bash
 cat /config/config.json | jq
 ```
@@ -503,11 +537,13 @@ curl -H "Authorization: Bearer TOKEN" \
 ### Reset to defaults
 
 **Backup current config:**
+
 ```bash
 cp /config/config.json /config/config.json.backup
 ```
 
 **Delete config:**
+
 ```bash
 rm /config/config.json
 ```
@@ -520,16 +556,17 @@ If you can't resolve the issue:
 
 1. **Check GitHub Issues:** https://github.com/sirrobot01/decypharr/issues
 2. **Provide:**
-   - Decypharr version (`/version`)
-   - Relevant logs (with `log_level: debug`)
-   - Config (sensitive values redacted)
-   - Steps to reproduce
+    - Decypharr version (`/version`)
+    - Relevant logs (with `log_level: debug`)
+    - Config (sensitive values redacted)
+    - Steps to reproduce
 3. **Include system info:**
-   - OS/Docker version
-   - Mount type
-   - Providers used
+    - OS/Docker version
+    - Mount type
+    - Providers used
 
 **Sanitize config before sharing:**
+
 ```bash
 cat config.json | sed 's/"api_key": ".*"/"api_key": "REDACTED"/g'
 ```

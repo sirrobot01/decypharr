@@ -221,7 +221,6 @@ func (m *Manager) unmount(ctx context.Context) {
 		mountInfo.Error = err.Error()
 	}
 	m.logger.Info().Msg("Unmount completed")
-	return
 }
 
 // createConfig creates an rclone config entry for the provider

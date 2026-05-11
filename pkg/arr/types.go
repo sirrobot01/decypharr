@@ -23,6 +23,7 @@ type ContentFile struct {
 	EpisodeId    int    `json:"showId"`
 	FileId       int    `json:"fileId"`
 	TargetPath   string `json:"targetPath"`
+	EntryName    string `json:"entryName,omitempty"`
 	IsSymlink    bool   `json:"isSymlink"`
 	IsBroken     bool   `json:"isBroken"`
 	SeasonNumber int    `json:"seasonNumber"`
@@ -33,7 +34,7 @@ type ContentFile struct {
 func (file *ContentFile) Delete() {
 	// This is useful for when sonarr bulk delete fails(this usually happens)
 	// and we need to delete the file manually
-	_ = os.Remove(file.Path) // nolint:errcheck
+	_ = os.Remove(file.Path) //nolint:nolintlint
 }
 
 type Content struct {

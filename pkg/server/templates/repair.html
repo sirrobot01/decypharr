@@ -12,468 +12,207 @@
     </div>
     {{ end }}
 
+    <!-- Status strip -->
     <div class="card bg-base-100 shadow-xl">
         <div class="card-body">
-            <h2 class="card-title text-2xl mb-6">
-                <i class="bi bi-tools mr-2 text-primary"></i>New Repair Job
-            </h2>
-
-            <form id="repairForm" class="space-y-8">
-                <!-- Section 1: Scope Selection (Cards) -->
-                <div class="space-y-2">
-                    <label class="font-bold text-base">1. What would you like to repair?</label>
-                    <input type="hidden" id="repairScope" name="scope" value="arr">
-
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <!-- Arr Media Card -->
-                        <div class="card bg-base-200 hover:bg-base-300 transition-all cursor-pointer border-2 border-transparent selection-card active"
-                            data-value="arr" onclick="repairManager.setScope('arr')">
-                            <div class="card-body p-4 flex flex-row items-center gap-3">
-                                <i class="bi bi-collection-play text-xl text-primary"></i>
-                                <div class="flex-1">
-                                    <h3 class="font-bold text-base">Arr Media Library</h3>
-                                    <p class="text-xs opacity-70">Scan files managed by Sonarr/Radarr</p>
-                                </div>
-                                <i class="bi bi-check-circle-fill text-primary text-lg hidden check-icon"></i>
-                            </div>
-                        </div>
-
-                        <!-- Managed Entries Card -->
-                        <div class="card bg-base-200 hover:bg-base-300 transition-all cursor-pointer border-2 border-transparent selection-card"
-                            data-value="managed_entries" onclick="repairManager.setScope('managed_entries')">
-                            <div class="card-body p-4 flex flex-row items-center gap-3">
-                                <i class="bi bi-database text-xl text-secondary"></i>
-                                <div class="flex-1">
-                                    <h3 class="font-bold text-base">Managed Entries</h3>
-                                    <p class="text-xs opacity-70">Scan internal database entries directly</p>
-                                </div>
-                                <i class="bi bi-check-circle-fill text-secondary text-lg hidden check-icon"></i>
-                            </div>
-                        </div>
-                    </div>
+            <div class="flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between">
+                <div>
+                    <h2 class="card-title text-2xl">
+                        <i class="bi bi-heart-pulse mr-2 text-primary"></i>Health Checker
+                    </h2>
+                    <p class="text-sm opacity-70 mt-1" id="repairStatusLine">Loading…</p>
+                    <p class="text-xs opacity-60 mt-1">
+                        Configure repair in
+                        <a href="{{.URLBase}}settings#repair" class="link link-hover font-medium">Settings → Repair</a>.
+                    </p>
                 </div>
-
-                <!-- Section 2: Target Details (Conditional) -->
-                <div id="targetDetailsContainer" class="p-4 bg-base-200/50 rounded-lg space-y-4">
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <!-- Arr Instance Select -->
-                        <div id="arrSelectContainer" class="form-control transition-all duration-300">
-                            <label class="label py-1" for="arrSelect">
-                                <span class="label-text font-medium">Arr Instance</span>
-                            </label>
-                            <select class="select select-bordered w-full" id="arrSelect">
-                                <option value="">Select an instance...</option>
-                            </select>
-                        </div>
-
-                        <!-- Media IDs Input -->
-                        <div class="form-control w-full">
-                            <label class="label py-1" for="mediaIds">
-                                <span class="label-text font-medium " id="mediaIdLabel">Media IDs <span
-                                        class="opacity-60 font-normal">(Optional)</span></span>
-                            </label>
-                            <input type="text" class="input input-bordered  w-full font-mono" id="mediaIds"
-                                placeholder="123, 456">
-                        </div>
-                    </div>
-                </div>
-
-                <div class="space-y-2">
-                    <div class="grid grid-cols-3 gap-3">
-
-                        <div class="form-control">
-                            <label class="label py-1" for="repairStrategy">
-                                <span class="label-text font-medium">Strategy</span>
-                            </label>
-                            <select class="select select-bordered w-full" id="repairStrategy">
-                                <option value="per_torrent" selected>Per Torrent</option>
-                                <option value="per_file">Per File</option>
-                            </select>
-                        </div>
-
-                        <div class="form-control">
-                            <label class="label py-1" for="repairWorkers">
-                                <span class="label-text font-medium">Workers</span>
-                            </label>
-                            <input type="number" class="input input-bordered w-full" id="repairWorkers"
-                                   min="1" value="5">
-                        </div>
-
-                        <div class="form-control">
-                            <label class="label py-1" for="scheduleInput">
-                        <span class="label-text font-bold text-base">3. Schedule <span
-                                class="text-xs font-normal opacity-60 ml-2">(Optional)</span></span>
-                            </label>
-                            <input type="text" class="input input-bordered w-full" id="scheduleInput"
-                                   placeholder="Cron expression (e.g. 04:00, 0 4 * * *) or interval (e.g. 6h)">
-                            <span class="label-text-alt mt-1 opacity-60">
-                        Leave empty for a one-time run. If set, this job will run repeatedly.
-                    </span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="space-y-2">
-                    <input type="hidden" id="repairMode" name="mode" value="detect_only">
-
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <!-- Mode Selection -->
-                        <div class="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div class="card bg-base-200 hover:bg-base-300 transition-all cursor-pointer border-2 border-transparent mode-card active"
-                                 data-value="detect_only" onclick="repairManager.setMode('detect_only');">
-                                <div class="card-body p-3 text-center flex flex-row items-center justify-center gap-2">
-                                    <i class="bi bi-search text-lg text-info"></i>
-                                    <div class="text-left">
-                                        <div class="font-bold">Detect Only</div>
-                                        <div class="text-[10px] opacity-70">Find broken files</div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="card bg-base-200 hover:bg-base-300 transition-all cursor-pointer border-2 border-transparent mode-card"
-                                 data-value="detect_and_repair" onclick="repairManager.setMode('detect_and_repair');">
-                                <div class="card-body p-3 text-center flex flex-row items-center justify-center gap-2">
-                                    <i class="bi bi-wrench-adjustable text-lg text-warning"></i>
-                                    <div class="text-left">
-                                        <div class="font-bold">Detect + Repair</div>
-                                        <div class="text-[10px] opacity-70">Attempt to fix files</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Submit Action -->
-                <div class="pt-2">
-                    <button type="submit" class="btn btn-primary w-full shadow-lg gap-2" id="submitRepair">
-                        <i class="bi bi-play-fill text-lg"></i>
-                        <span>Start Repair Job</span>
+                <div class="flex flex-wrap gap-2">
+                    <button id="runNowBtn" class="btn btn-primary btn-sm">
+                        <i class="bi bi-play-fill mr-1"></i>Run now
+                    </button>
+                    <button id="viewBrokenBtn" class="btn btn-outline btn-sm"
+                            title="See broken entries and their files">
+                        <i class="bi bi-bug mr-1"></i>View broken
+                        <span id="brokenCountBadge" class="badge badge-error badge-sm ml-1 hidden">0</span>
+                    </button>
+                    <button id="fixBrokenBtn" class="btn btn-error btn-outline btn-sm"
+                            title="Trigger Arr delete + re-search on currently broken entries">
+                        <i class="bi bi-bandaid mr-1"></i>Fix broken
+                    </button>
+                    <button id="stopRunBtn" class="btn btn-warning btn-sm" disabled>
+                        <i class="bi bi-stop-fill mr-1"></i>Stop
                     </button>
                 </div>
-            </form>
+            </div>
+
+            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mt-4" id="healthCountsGrid">
+                <!-- filled by JS -->
+            </div>
+
+            <div id="activeRunPanel" class="mt-4 hidden bg-base-200/60 rounded-lg p-4">
+                <div class="flex flex-col gap-3 mb-3">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div class="font-medium">
+                            <i class="bi bi-arrow-repeat animate-spin mr-1"></i>
+                            Sweep in progress
+                        </div>
+                        <span class="badge badge-ghost" id="activeRunStage">-</span>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div class="bg-base-100/70 rounded-lg px-3 py-2">
+                            <div class="text-[10px] uppercase tracking-wide opacity-60">Run ID</div>
+                            <div class="font-mono text-xs break-all mt-1" id="activeRunIdText">-</div>
+                        </div>
+                        <div class="bg-base-100/70 rounded-lg px-3 py-2">
+                            <div class="text-[10px] uppercase tracking-wide opacity-60">Started</div>
+                            <div class="text-xs mt-1" id="activeRunStarted">-</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 text-sm" id="activeRunStats">
+                    <!-- filled by JS -->
+                </div>
+            </div>
         </div>
     </div>
 
+    <!-- Targeted recheck (by Arr media id) -->
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-body">
+            <h3 class="card-title text-xl">
+                <i class="bi bi-bullseye mr-2 text-primary"></i>Recheck a specific media
+            </h3>
+            <p class="text-sm opacity-70 mt-1">
+                Targeted one-off check by Arr media id (Sonarr series id, Radarr movie id, tvdb / tmdb id).
+                Useful when something failed to play and you only want to re-verify that one show or movie.
+            </p>
+
+            <form id="recheckMediaForm" class="grid grid-cols-1 md:grid-cols-12 gap-3 mt-4 items-end">
+                <div class="form-control md:col-span-3">
+                    <label class="label py-1" for="recheckArr">
+                        <span class="label-text font-medium">Arr <span class="opacity-60 font-normal">(optional)</span></span>
+                    </label>
+                    <select class="select select-bordered" id="recheckArr">
+                        <option value="">Auto-detect</option>
+                    </select>
+                </div>
+                <div class="form-control md:col-span-5">
+                    <label class="label py-1" for="recheckMediaId">
+                        <span class="label-text font-medium">Media id</span>
+                    </label>
+                    <input type="text" class="input input-bordered" id="recheckMediaId"
+                           placeholder="e.g. 12345" required>
+                </div>
+                <div class="form-control md:col-span-2">
+                    <label class="label cursor-pointer justify-start gap-2 py-1">
+                        <input type="checkbox" class="checkbox checkbox-primary" id="recheckFix">
+                        <span class="label-text">Auto-repair</span>
+                    </label>
+                </div>
+                <div class="md:col-span-2">
+                    <button type="submit" class="btn btn-primary w-full" id="recheckMediaBtn">
+                        <i class="bi bi-search-heart mr-1"></i>Recheck
+                    </button>
+                </div>
+            </form>
+
+            <div id="recheckMediaResult" class="mt-4 hidden bg-base-200/60 rounded-lg p-4 text-sm"></div>
+        </div>
+    </div>
+
+    <!-- Run history -->
     <div class="card bg-base-100 shadow-xl">
         <div class="card-header">
-            <div
-                class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 p-6 border-b border-base-200">
-                <h2 class="card-title text-xl">
-                    <i class="bi bi-list-task mr-2"></i>Repair Jobs
-                </h2>
-                <div class="flex flex-wrap gap-2">
-                    <button id="deleteSelectedJobs" class="btn btn-error btn-sm" disabled>
-                        <i class="bi bi-trash mr-1"></i>Delete Selected
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 p-6 border-b border-base-200">
+                <h3 class="card-title text-xl">
+                    <i class="bi bi-clock-history mr-2"></i>Run history
+                </h3>
+                <div class="flex gap-2">
+                    <button id="clearHistoryBtn" class="btn btn-error btn-sm btn-outline">
+                        <i class="bi bi-trash mr-1"></i>Clear history
                     </button>
-                    <button id="refreshJobs" class="btn btn-outline btn-sm">
+                    <button id="refreshHistoryBtn" class="btn btn-outline btn-sm">
                         <i class="bi bi-arrow-clockwise mr-1"></i>Refresh
                     </button>
                 </div>
             </div>
         </div>
-
         <div class="card-body p-0">
             <div class="overflow-x-auto">
-                <table class="table table-hover" id="jobsTable">
+                <table class="table table-hover">
                     <thead class="bg-base-200">
-                        <tr>
-                            <th class="w-12">
-                                <label class="cursor-pointer">
-                                    <input type="checkbox" class="checkbox checkbox-sm checkbox-primary"
-                                        id="selectAllJobs">
-                                </label>
-                            </th>
-                            <th class="font-semibold">
-                                <i class="bi bi-hash mr-2"></i>Job ID
-                            </th>
-                            <th class="font-semibold">
-                                <i class="bi bi-collection mr-2"></i>Arr Instances
-                            </th>
-                            <th class="font-semibold">
-                                <i class="bi bi-calendar mr-2"></i>Started
-                            </th>
-                            <th class="font-semibold">
-                                <i class="bi bi-activity mr-2"></i>Status
-                            </th>
-                            <th class="font-semibold">
-                                <i class="bi bi-diagram-3 mr-2"></i>Stage
-                            </th>
-                            <th class="font-semibold">
-                                <i class="bi bi-arrow-repeat mr-2"></i>Type
-                            </th>
-                            <th class="font-semibold">
-                                <i class="bi bi-toggle-on mr-2"></i>Mode
-                            </th>
-                            <th class="font-semibold">
-                                <i class="bi bi-bar-chart mr-2"></i>Stats
-                            </th>
-                            <th class="font-semibold w-32">Actions</th>
-                        </tr>
+                    <tr>
+                        <th>Started</th>
+                        <th>Trigger</th>
+                        <th>Status</th>
+                        <th>Probed</th>
+                        <th>Broken</th>
+                        <th>Repaired</th>
+                        <th>Duration</th>
+                        <th>Error</th>
+                    </tr>
                     </thead>
-                    <tbody id="jobsTableBody">
-                    </tbody>
+                    <tbody id="runsTableBody"></tbody>
                 </table>
-            </div>
-
-            <div class="flex justify-center p-6 border-t border-base-200">
-                <div class="join" id="jobsPagination">
+                <div id="noRunsMessage" class="text-center py-12 hidden text-base-content/70">
+                    <i class="bi bi-clipboard-x text-3xl block mb-2"></i>
+                    No runs yet.
                 </div>
-            </div>
-
-            <div id="noJobsMessage" class="text-center py-16 hidden">
-                <div class="text-6xl text-base-content/30 mb-4">
-                    <i class="bi bi-clipboard-check"></i>
-                </div>
-                <h3 class="text-2xl font-bold mb-2">No Repair Jobs</h3>
-                <p class="text-base-content/70 mb-6">You haven't run any repair jobs yet. Start your first repair above!
-                </p>
             </div>
         </div>
     </div>
 </div>
 
-<dialog id="jobDetailsModal" class="modal">
-    <div class="modal-box max-w-6xl max-h-[90vh]">
+<!-- Broken entries modal -->
+<dialog id="brokenModal" class="modal">
+    <div class="modal-box max-w-6xl">
         <form method="dialog">
-            <button class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">✕</button>
+            <button class="btn btn-sm btn-circle btn-ghost absolute right-3 top-3" aria-label="Close">✕</button>
         </form>
-
-        <div class="flex justify-between items-start mb-6">
-            <h3 class="font-bold text-2xl">
-                <i class="bi bi-info-circle mr-2 text-primary"></i>Job Details
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4 pr-10">
+            <h3 class="font-bold text-lg flex items-center gap-2">
+                <i class="bi bi-bug text-error"></i>Broken entries
+                <span id="brokenModalCount" class="badge badge-error badge-sm">0</span>
             </h3>
+            <button id="refreshBrokenBtn" class="btn btn-outline btn-sm">
+                <i class="bi bi-arrow-clockwise mr-1"></i>Refresh
+            </button>
         </div>
-
-        <div class="space-y-6">
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div class="card bg-base-200">
-                    <div class="card-body">
-                        <h4 class="card-title text-lg mb-4">Job Information</h4>
-                        <div class="space-y-3">
-                            <div class="flex justify-between">
-                                <span class="font-medium">Job ID:</span>
-                                <span class="font-mono" id="modalJobId">-</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="font-medium">Status:</span>
-                                <span id="modalJobStatus">-</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="font-medium">Stage:</span>
-                                <span id="modalJobStage">-</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="font-medium">Started:</span>
-                                <span id="modalJobStarted">-</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="font-medium">Completed:</span>
-                                <span id="modalJobCompleted">-</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="card bg-base-200">
-                    <div class="card-body">
-                        <h4 class="card-title text-lg mb-4">Configuration</h4>
-                        <div class="space-y-3">
-                            <div class="flex justify-between">
-                                <span class="font-medium">Arr Services:</span>
-                                <span id="modalJobArrs">-</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="font-medium">Media IDs:</span>
-                                <span id="modalJobMediaIds">-</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="font-medium">Mode:</span>
-                                <span id="modalJobMode">-</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="font-medium">Auto Process:</span>
-                                <span id="modalJobAutoProcess">-</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="font-medium">Strategy:</span>
-                                <span id="modalJobStrategy">-</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="font-medium">Workers:</span>
-                                <span id="modalJobWorkers">-</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="font-medium">Schedule:</span>
-                                <span id="modalJobSchedule">-</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div id="errorContainer" class="alert alert-error hidden">
-                <i class="bi bi-exclamation-triangle"></i>
-                <div>
-                    <strong>Error:</strong>
-                    <span id="modalJobError">-</span>
-                </div>
-            </div>
-
-            <div class="card bg-base-200">
-                <div class="card-body">
-                    <h4 class="card-title text-lg mb-4">Run Stats</h4>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        <div class="stat bg-base-100 rounded-box p-3">
-                            <div class="stat-title text-xs">Discovered</div>
-                            <div class="stat-value text-lg" id="modalStatDiscovered">0</div>
-                        </div>
-                        <div class="stat bg-base-100 rounded-box p-3">
-                            <div class="stat-title text-xs">Probed</div>
-                            <div class="stat-value text-lg" id="modalStatProbed">0</div>
-                        </div>
-                        <div class="stat bg-base-100 rounded-box p-3">
-                            <div class="stat-title text-xs">Broken</div>
-                            <div class="stat-value text-lg text-error" id="modalStatBroken">0</div>
-                        </div>
-                        <div class="stat bg-base-100 rounded-box p-3">
-                            <div class="stat-title text-xs">Unknown</div>
-                            <div class="stat-value text-lg" id="modalStatUnknown">0</div>
-                        </div>
-                        <div class="stat bg-base-100 rounded-box p-3">
-                            <div class="stat-title text-xs">Planned</div>
-                            <div class="stat-value text-lg" id="modalStatPlanned">0</div>
-                        </div>
-                        <div class="stat bg-base-100 rounded-box p-3">
-                            <div class="stat-title text-xs">Executed</div>
-                            <div class="stat-value text-lg" id="modalStatExecuted">0</div>
-                        </div>
-                        <div class="stat bg-base-100 rounded-box p-3">
-                            <div class="stat-title text-xs">Fixed</div>
-                            <div class="stat-value text-lg text-success" id="modalStatFixed">0</div>
-                        </div>
-                        <div class="stat bg-base-100 rounded-box p-3">
-                            <div class="stat-title text-xs">Failed</div>
-                            <div class="stat-value text-lg text-warning" id="modalStatFailed">0</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card bg-base-200">
-                <div class="card-body">
-                    <h4 class="card-title text-lg mb-4">Actions</h4>
-                    <div class="overflow-x-auto border border-base-300 rounded-lg max-h-64">
-                        <table class="table table-sm table-hover">
-                            <thead class="sticky top-0 bg-base-300">
-                                <tr>
-                                    <th class="font-semibold">Type</th>
-                                    <th class="font-semibold">Protocol</th>
-                                    <th class="font-semibold">Entry</th>
-                                    <th class="font-semibold">Status</th>
-                                    <th class="font-semibold">Started</th>
-                                    <th class="font-semibold">Finished</th>
-                                    <th class="font-semibold">Error</th>
-                                </tr>
-                            </thead>
-                            <tbody id="actionItemsTableBody"></tbody>
-                        </table>
-                    </div>
-                    <div id="noActionsMessage" class="text-center py-6 hidden text-base-content/70">
-                        No planned actions for this run.
-                    </div>
-                </div>
-            </div>
-
-            <div class="card bg-base-200">
-                <div class="card-body">
-                    <div class="flex justify-between items-center mb-4">
-                        <h4 class="card-title text-lg">
-                            Broken Items
-                            <div class="badge badge-secondary" id="totalItemsCount">0</div>
-                        </h4>
-                    </div>
-
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-                        <div>
-                            <input type="text" class="input input-sm" id="itemSearchInput"
-                                placeholder="Search by path...">
-                        </div>
-                        <div>
-                            <select class="select select-sm" id="arrFilterSelect">
-                                <option value="">All Arrs</option>
-                            </select>
-                        </div>
-                        <div>
-                            <select class="select select-sm" id="pathFilterSelect">
-                                <option value="">All Types</option>
-                                <option value="movie">Movies</option>
-                                <option value="tv">TV Shows</option>
-                                <option value="other">Other</option>
-                            </select>
-                        </div>
-                        <div>
-                            <button class="btn btn-outline btn-sm w-full" id="clearFiltersBtn">
-                                <i class="bi bi-x-circle mr-1"></i>Clear
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="overflow-x-auto max-h-96 border border-base-300 rounded-lg">
-                        <table class="table table-sm table-hover">
-                            <thead class="sticky top-0 bg-base-300">
-                                <tr>
-                                    <th class="font-semibold">Arr</th>
-                                    <th class="font-semibold">Path</th>
-                                    <th class="font-semibold w-20">Type</th>
-                                    <th class="font-semibold w-24">Size</th>
-                                </tr>
-                            </thead>
-                            <tbody id="brokenItemsTableBody">
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div class="flex justify-center mt-4">
-                        <div class="join" id="itemsPagination">
-                        </div>
-                    </div>
-
-                    <div id="noBrokenItemsMessage" class="text-center py-8 hidden">
-                        <div class="text-4xl text-base-content/30 mb-2">
-                            <i class="bi bi-check-circle"></i>
-                        </div>
-                        <p class="text-base-content/70">No broken items found</p>
-                    </div>
-
-                    <div id="noFilteredItemsMessage" class="text-center py-8 hidden">
-                        <div class="text-4xl text-base-content/30 mb-2">
-                            <i class="bi bi-funnel"></i>
-                        </div>
-                        <p class="text-base-content/70">No items match the current filters</p>
-                    </div>
-                </div>
+        <div class="overflow-x-auto">
+            <table class="table table-hover">
+                <thead class="bg-base-200">
+                <tr>
+                    <th></th>
+                    <th>Entry</th>
+                    <th>Protocol</th>
+                    <th>Files</th>
+                    <th>Broken</th>
+                    <th>Reason</th>
+                    <th>Last checked</th>
+                    <th>Last fix</th>
+                    <th class="text-right">Actions</th>
+                </tr>
+                </thead>
+                <tbody id="brokenTableBody"></tbody>
+            </table>
+            <div id="noBrokenMessage" class="text-center py-12 hidden text-base-content/70">
+                <i class="bi bi-check2-circle text-3xl block mb-2 text-success"></i>
+                No broken entries.
             </div>
         </div>
-
-        <div class="modal-action">
-            <div class="flex-1">
-                <small class="text-base-content/60" id="modalFooterStats">-</small>
-            </div>
-            <div class="flex gap-2">
-                <button type="button" class="btn btn-primary btn-sm hidden" id="processJobBtn">
-                    <i class="bi bi-play-fill mr-1"></i>Process
-                </button>
-                <button type="button" class="btn btn-warning btn-sm hidden" id="stopJobBtn">
-                    <i class="bi bi-stop-fill mr-1"></i>Stop
-                </button>
-            </div>
+        <div id="brokenPaginationBar" class="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 mt-2 border-t border-base-200 hidden">
+            <div id="brokenPaginationInfo" class="text-xs opacity-70"></div>
+            <div id="brokenPaginationControls" class="join"></div>
         </div>
     </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
 </dialog>
+
 <script>
     document.addEventListener('DOMContentLoaded', () => {
         window.repairManager = new RepairManager();
-        window.RepairUtils = RepairUtils;
     });
 </script>
 {{ end }}

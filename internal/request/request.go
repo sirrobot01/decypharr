@@ -197,6 +197,8 @@ func New(options ...ClientOption) *Client {
 		option(client)
 	}
 
+	client.httpClient.Timeout = client.timeout
+
 	// Check if transport was set by WithTransport option
 	if client.httpClient.Transport == nil {
 		transport := &http.Transport{
@@ -298,5 +300,4 @@ func SetProxy(transport *http.Transport, proxyURL string) {
 	} else {
 		transport.Proxy = http.ProxyFromEnvironment
 	}
-	return
 }

@@ -348,7 +348,7 @@ class DecypharrUtils {
             }, 300);
 
             // Emit theme change event
-            window.dispatchEvent(new CustomEvent('themechange', { detail: { theme } }));
+            window.dispatchEvent(new CustomEvent('themechange', {detail: {theme}}));
         };
 
         // Load saved theme
@@ -443,7 +443,7 @@ class DecypharrUtils {
         const toggleDropdown = (e) => {
             e.preventDefault();
             e.stopPropagation();
-            
+
             if (isOpen) {
                 closeDropdown();
             } else {
@@ -506,7 +506,7 @@ class DecypharrUtils {
                 e.preventDefault();
                 const target = document.querySelector(link.getAttribute('href'));
                 if (target) {
-                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    target.scrollIntoView({behavior: 'smooth', block: 'start'});
                 }
             }
         });
@@ -566,9 +566,9 @@ class DecypharrUtils {
     // Show keyboard shortcuts modal
     showKeyboardShortcuts() {
         const shortcuts = [
-            { key: 'Esc', description: 'Close modals and dropdowns' },
-            { key: 'Ctrl + /', description: 'Show this help' },
-            { key: 'Ctrl + R', description: 'Refresh page' }
+            {key: 'Esc', description: 'Close modals and dropdowns'},
+            {key: 'Ctrl + /', description: 'Show this help'},
+            {key: 'Ctrl + R', description: 'Refresh page'}
         ];
 
         const modal = document.createElement('dialog');
@@ -615,10 +615,10 @@ class DecypharrUtils {
         if (!seconds || seconds === 0) return '0s';
 
         const units = [
-            { label: 'd', seconds: 86400 },
-            { label: 'h', seconds: 3600 },
-            { label: 'm', seconds: 60 },
-            { label: 's', seconds: 1 }
+            {label: 'd', seconds: 86400},
+            {label: 'h', seconds: 3600},
+            {label: 'm', seconds: 60},
+            {label: 's', seconds: 1}
         ];
 
         const parts = [];
@@ -653,7 +653,7 @@ class DecypharrUtils {
     // Throttle function
     throttle(func, limit) {
         let inThrottle;
-        return function(...args) {
+        return function (...args) {
             if (!inThrottle) {
                 func.apply(this, args);
                 inThrottle = true;

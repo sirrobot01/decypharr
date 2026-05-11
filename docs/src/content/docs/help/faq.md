@@ -7,17 +7,21 @@ description: Common questions about Decypharr.
 
 ### What is Decypharr?
 
-Decypharr is a media gateway that provides a unified interface for accessing Debrid providers (Real Debrid, All Debrid, etc.) and Usenet via Sonarr, Radarr, and other *Arr applications. It acts as a QBitTorrent/Sabnzbd-compatible download client.
+Decypharr is a media gateway that provides a unified interface for accessing Debrid providers (Real Debrid, All Debrid,
+etc.) and Usenet via Sonarr, Radarr, and other *Arr applications. It acts as a QBitTorrent/Sabnzbd-compatible download
+client.
 
 ### Is it free?
 
 Yes, Decypharr itself is free and open source. However, you need subscriptions to:
+
 - Debrid providers (Real Debrid, All Debrid, etc.)
 - Usenet providers (if using Usenet features)
 
 ### How is this different from just using Debrid directly?
 
 Decypharr adds:
+
 - Arr integration (Sonarr/Radarr compatibility)
 - File mounting (DFS, Rclone, WebDAV)
 - Automated repair for broken links
@@ -45,9 +49,11 @@ See [Configuration Reference](../guides/configuration/) for all options.
 
 ### How do I get my API token?
 
-After setup, go to **Settings** → **Auth** in the web UI. Your API token is displayed once after initial setup - save it immediately.
+After setup, go to **Settings** → **Auth** in the web UI. Your API token is displayed once after initial setup - save it
+immediately.
 
 To regenerate:
+
 ```bash
 curl -X POST -H "Authorization: Bearer OLD_TOKEN" \
   http://localhost:8282/api/refresh-token
@@ -119,12 +125,12 @@ If RD has <5 free slots, Decypharr uses All Debrid.
 
 ### Which mount type should I use?
 
-| Use Case | Recommended |
-|----------|-------------|
-| Streaming-focused | **DFS** |
-| Need write caching | **Rclone** |
+| Use Case                  | Recommended         |
+|---------------------------|---------------------|
+| Streaming-focused         | **DFS**             |
+| Need write caching        | **Rclone**          |
 | Already have Rclone setup | **External Rclone** |
-| API/WebDAV only | **None** |
+| API/WebDAV only           | **None**            |
 
 **DFS** is recommended for most users.
 On Windows, DFS mounting requires WinFsp to be installed.
@@ -166,7 +172,6 @@ Mount as network drive in Windows/macOS/Linux. See [WebDAV Guide](../guides/moun
 
 No! Decypharr connects directly to NNTP servers. Just add your Usenet provider(s) in config.
 
-
 ### Why is Usenet processing slow?
 
 Increase connection limits:
@@ -201,6 +206,7 @@ And per-provider:
 Ensure Arr and Decypharr see files at the **same path**.
 
 **Wrong** (Docker):
+
 ```yaml
 decypharr:
   volumes:
@@ -211,6 +217,7 @@ sonarr:
 ```
 
 **Correct**:
+
 ```yaml
 decypharr:
   volumes:
@@ -235,24 +242,32 @@ Yes! Add both download clients:
 
 Set different priorities in Arr.
 
-## Repair Worker
+## Health Checker
 
 ### When should I enable auto-repair?
 
-Use `auto_process: true` if:
-- You have stable providers
-- Want fully automated operation
-- Not concerned about resource usage
+Set `auto_repair: true` if:
 
-Use `auto_process: false` if:
-- Testing repair system
-- Want manual control
-- Concerned about API rate limits
+- You have stable providers.
+- You want fully automated operation.
+- You're comfortable with the sweep deleting broken Arr file records and triggering a search.
+
+Set `auto_repair: false` if:
+
+- You're testing the health checker on a new library.
+- You want to review brokens before letting the system act.
+- You're worried about Arr API rate limits.
+
+In both cases, single-entry **Recheck & fix** from the Browse UI remains available regardless of the global setting.
 
 ### What's the difference between repair strategies?
 
-- **per_file**: Check each file independently (faster for large torrents)
-- **per_torrent**: Verify all files in torrent (ensures complete integrity)
+- **`per_entry`**: probe stops at the first broken file in an entry. Faster on broken libraries; tells you which entries are intact.
+- **`per_file`**: probe every file. Use when you want a complete broken-file list per entry.
+
+### What's `recheck_interval`?
+
+It's how long an entry's last successful check stays "fresh." Healthy entries probed within this window are skipped on the next sweep, so a healthy library where nothing has changed does almost no work.
 
 ## Performance
 
@@ -322,6 +337,7 @@ rm /path/to/config.json  # Binary
 ### Where are the logs?
 
 **Docker**:
+
 ```bash
 docker logs decypharr
 docker logs -f decypharr  # Follow
@@ -330,6 +346,7 @@ docker logs -f decypharr  # Follow
 **Binary**: stdout (redirect to file if needed)
 
 Set log level:
+
 ```json
 {"log_level": "debug"}
 ```
@@ -339,6 +356,7 @@ Set log level:
 ### Moving from MKVToolNix/Stremio/etc?
 
 Decypharr can coexist:
+
 1. Keep existing setup running
 2. Add Decypharr as additional download client in Arrs
 3. Set higher priority for Decypharr

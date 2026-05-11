@@ -1,4 +1,4 @@
-// Package rar provides RAR5 encryption/decryption utilities.
+// Package crypto Package rar provides RAR5 encryption/decryption utilities.
 // Implements AES-256-CBC decryption with PBKDF2-HMAC-SHA256 key derivation
 // as specified in the RAR 5.0 archive format.
 package crypto
@@ -13,13 +13,13 @@ import (
 )
 
 const (
-	// AES block size
+	// BlockSize AES block size
 	BlockSize = 16
 
-	// Key sizes
+	// AESKeySize Key sizes
 	AESKeySize = 32 // AES-256
 
-	// RAR5 constants
+	// MaxPbkdf2Salt RAR5 constants
 	MaxPbkdf2Salt = 64
 	PwCheckSize   = 8
 	MaxKdfCount   = 24
@@ -186,7 +186,7 @@ func (d *DecryptReader) Read(p []byte) (int, error) {
 	if len(p) < BlockSize {
 		// Read one full block
 		l := len(d.buf)
-		n, err := io.ReadFull(d.r, d.block[l:])
+		_, err := io.ReadFull(d.r, d.block[l:])
 		if err != nil {
 			return 0, err
 		}
@@ -195,7 +195,7 @@ func (d *DecryptReader) Read(p []byte) (int, error) {
 			d.buf = nil
 		}
 		d.mode.CryptBlocks(d.block, d.block)
-		n = copy(p, d.block)
+		n := copy(p, d.block)
 		d.outbuf = d.block[n:]
 		d.block = make([]byte, BlockSize) // New block buffer
 		return n, nil

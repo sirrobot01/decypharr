@@ -16,7 +16,6 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/mount/dfs"
 	"github.com/sirrobot01/decypharr/pkg/mount/external"
 	"github.com/sirrobot01/decypharr/pkg/mount/rclone"
-	"github.com/sirrobot01/decypharr/pkg/repair"
 	"github.com/sirrobot01/decypharr/pkg/server"
 	"github.com/sirrobot01/decypharr/pkg/version"
 )
@@ -68,9 +67,6 @@ func Start(ctx context.Context) error {
 		// Initialize services
 		mountMgr := createMountManager(mgr, cfg)
 		mgr.SetMountManager(mountMgr)
-		repairMgr := repair.New(mgr)
-
-		mgr.SetRepairManager(repairMgr)
 		srv := server.New(mgr)
 
 		srv.SetRestartFunc(restartFunc)
