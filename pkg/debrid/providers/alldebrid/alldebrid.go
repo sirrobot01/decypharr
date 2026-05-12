@@ -1,9 +1,11 @@
 package alldebrid
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -152,7 +154,76 @@ func (ad *AllDebrid) IsAvailable(hashes []string) map[string]bool {
 	return result
 }
 
+func (ad *AllDebrid) doPostFile(endpoint string, fileData []byte, result interface{}) (*http.Response, error) {
+	u, err := url.Parse(ad.Host + endpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("files[]", "torrent.torrent")
+	if err != nil {
+		return nil, err
+	}
+	if _, err = part.Write(fileData); err != nil {
+		return nil, err
+	}
+	writer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, u.String(), &body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := ad.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if err := json.ConfigDefault.NewDecoder(resp.Body).Decode(result); err != nil {
+			return resp, err
+		}
+	}
+	return resp, nil
+}
+
 func (ad *AllDebrid) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
+	if torrent.Magnet.IsTorrent() {
+		return ad.addTorrentFile(torrent)
+	}
+	return ad.addMagnetLink(torrent)
+}
+
+func (ad *AllDebrid) addTorrentFile(torrent *types.Torrent) (*types.Torrent, error) {
+	var data UploadFileResponse
+
+	resp, err := ad.doPostFile("/magnet/upload/file", torrent.Magnet.File, &data)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("alldebrid API error: Status: %d", resp.StatusCode)
+	}
+
+	files := data.Data.Files
+	if len(files) == 0 {
+		return nil, fmt.Errorf("error adding torrent file: no files returned")
+	}
+	f := files[0]
+	if f.Error != nil {
+		return nil, fmt.Errorf("alldebrid file upload error: %s", f.Error.Message)
+	}
+	torrent.Id = strconv.Itoa(f.ID)
+	torrent.Added = time.Now()
+	return torrent, nil
+}
+
+func (ad *AllDebrid) addMagnetLink(torrent *types.Torrent) (*types.Torrent, error) {
 	var data UploadMagnetResponse
 
 	resp, err := ad.doRequest("/magnet/upload", map[string]string{"magnets[]": torrent.Magnet.Link}, &data)
@@ -169,10 +240,8 @@ func (ad *AllDebrid) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error
 		return nil, fmt.Errorf("error adding torrent. No magnets returned")
 	}
 	magnet := magnets[0]
-	torrentId := strconv.Itoa(magnet.ID)
-	torrent.Id = torrentId
+	torrent.Id = strconv.Itoa(magnet.ID)
 	torrent.Added = time.Now()
-
 	return torrent, nil
 }
 

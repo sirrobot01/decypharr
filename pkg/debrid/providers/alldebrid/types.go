@@ -72,6 +72,22 @@ type UploadMagnetResponse struct {
 	Error *errorResponse `json:"error"`
 }
 
+type UploadFileResponse struct {
+	Status string `json:"status"`
+	Data   struct {
+		Files []struct {
+			File  string         `json:"file"`
+			Name  string         `json:"name"`
+			Hash  string         `json:"hash"`
+			ID    int            `json:"id"`
+			Size  int64          `json:"size"`
+			Ready bool           `json:"ready"`
+			Error *errorResponse `json:"error"`
+		} `json:"files"`
+	} `json:"data"`
+	Error *errorResponse `json:"error"`
+}
+
 type DownloadLink struct {
 	Status string `json:"status"`
 	Data   struct {
