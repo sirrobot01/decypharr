@@ -305,7 +305,8 @@ func (dl *DebridLink) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("debridlink API error: Status: %d", resp.StatusCode)
+		bd, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("error adding torrent(status %d): %s", resp.StatusCode, string(bd))
 	}
 	if resp.ContentLength == 0 {
 		return nil, fmt.Errorf("empty response from debridlink API")

@@ -48,7 +48,11 @@ type Backend struct {
 func NewBackend(vfs *vfs.Manager, config *config.FuseConfig) (backend.Backend, error) {
 	now := utils.Now()
 	log := logger.New("hanwen-backend")
-	root := NewDir(vfs, "", LevelRoot, uint64(now.Unix()), config, log)
+	// One shared rate-limited logger for the whole mount. Files/Dirs reference
+	// it instead of allocating their own xsync map per inode — dedup keys are
+	// already unique per inode so a shared map gives identical behaviour.
+	rl := logger.NewRateLimitedLogger(logger.WithLogger(log))
+	root := NewDir(vfs, "", LevelRoot, uint64(now.Unix()), config, log, rl)
 	return &Backend{
 		config: config,
 		logger: log,

@@ -159,13 +159,6 @@ Streams use disk buffer for assembly. Ensure sufficient disk space.
 
 Arrs send NZB files to Decypharr via the Sabnzbd API endpoint:
 
-**In Sonarr/Radarr:**
-
-1. Add **Sabnzbd** download client
-2. Host: `http://decypharr:8282`
-3. API Key: Your Decypharr API token
-4. Category: `sonarr` / `radarr`
-
 See [Sabnzbd Integration](./sabnzbd/) for details.
 
 ## Troubleshooting

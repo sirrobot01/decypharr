@@ -9,6 +9,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/rs/zerolog"
+	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/pkg/manager"
 	"github.com/sirrobot01/decypharr/pkg/mount/dfs/config"
 	"github.com/sirrobot01/decypharr/pkg/mount/dfs/vfs"
@@ -25,12 +26,13 @@ const (
 // Dir implements a FUSE directory following
 type Dir struct {
 	fs.Inode
-	vfs     *vfs.Manager
-	level   DirLevel
-	name    string
-	config  *config.FuseConfig
-	logger  zerolog.Logger
-	modTime uint64
+	vfs      *vfs.Manager
+	level    DirLevel
+	name     string
+	config   *config.FuseConfig
+	logger   zerolog.Logger
+	rlLogger *logger.RateLimitedLogger
+	modTime  uint64
 }
 
 var _ = (fs.NodeLookuper)((*Dir)(nil))
@@ -40,14 +42,15 @@ var _ = (fs.NodeUnlinker)((*Dir)(nil))
 var _ = (fs.NodeRmdirer)((*Dir)(nil))
 
 // NewDir creates a new directory
-func NewDir(vfsManager *vfs.Manager, name string, level DirLevel, modTime uint64, config *config.FuseConfig, logger zerolog.Logger) *Dir {
+func NewDir(vfsManager *vfs.Manager, name string, level DirLevel, modTime uint64, config *config.FuseConfig, log zerolog.Logger, rl *logger.RateLimitedLogger) *Dir {
 	return &Dir{
-		vfs:     vfsManager,
-		name:    name,
-		level:   level,
-		config:  config,
-		logger:  logger.With().Str("dir", name).Logger(),
-		modTime: modTime,
+		vfs:      vfsManager,
+		name:     name,
+		level:    level,
+		config:   config,
+		logger:   log.With().Str("dir", name).Logger(),
+		rlLogger: rl,
+		modTime:  modTime,
 	}
 }
 
@@ -60,9 +63,9 @@ func (d *Dir) newNode(info *manager.FileInfo) fs.InodeEmbedder {
 
 	var node fs.InodeEmbedder
 	if info.IsDir() {
-		node = NewDir(d.vfs, info.Name(), d.level+1, uint64(info.ModTime().Unix()), d.config, d.logger)
+		node = NewDir(d.vfs, info.Name(), d.level+1, uint64(info.ModTime().Unix()), d.config, d.logger, d.rlLogger)
 	} else {
-		node = NewFile(d.vfs, d.config, info, d.logger)
+		node = NewFile(d.vfs, d.config, info, d.rlLogger)
 	}
 
 	// Cache the node for later
@@ -272,3 +275,5 @@ func (d *Dir) Rmdir(ctx context.Context, name string) syscall.Errno {
 
 	return 0
 }
+
+

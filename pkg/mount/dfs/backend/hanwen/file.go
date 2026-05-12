@@ -12,7 +12,6 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/pkg/manager"
 	"github.com/sirrobot01/decypharr/pkg/mount/dfs/config"
@@ -36,11 +35,10 @@ var (
 )
 
 // NewFile creates a new file
-func NewFile(vfsManager *vfs.Manager, config *config.FuseConfig, info *manager.FileInfo, log zerolog.Logger) *File {
-	rlLogger := logger.NewRateLimitedLogger(logger.WithLogger(log.With().Str("file", info.Name()).Logger()))
+func NewFile(vfsManager *vfs.Manager, config *config.FuseConfig, info *manager.FileInfo, rl *logger.RateLimitedLogger) *File {
 	return &File{
 		config:  config,
-		logger:  rlLogger.Rate(fmt.Sprintf("%s/%s", info.Parent(), info.Name())),
+		logger:  rl.Rate(fmt.Sprintf("%s/%s", info.Parent(), info.Name())),
 		info:    info,
 		vfs:     vfsManager,
 		content: info.Content(),

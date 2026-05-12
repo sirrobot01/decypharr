@@ -194,6 +194,7 @@ func (p *NZBParser) Process(ctx context.Context, nzb *storage.NZB, groups map[st
 	// Change file name if there's only one file
 	hasOneFile := len(files) == 1
 	skippedFiles := 0
+	var skippedErr error
 	// Calculate total Size
 	for _, file := range files {
 		if hasOneFile {
@@ -208,6 +209,7 @@ func (p *NZBParser) Process(ctx context.Context, nzb *storage.NZB, groups map[st
 		}
 		if err := cfg.IsFileAllowed(file.Name, file.Size); err != nil {
 			skippedFiles++
+			skippedErr = err
 			continue
 		}
 		nzb.TotalSize += file.Size
@@ -215,11 +217,11 @@ func (p *NZBParser) Process(ctx context.Context, nzb *storage.NZB, groups map[st
 		nzb.Files = append(nzb.Files, file)
 	}
 	if skippedFiles > 0 {
-		p.logger.Info().Int("skipped_files", skippedFiles).Str("nzb", nzb.Name).Msg("Some files were skipped due to size or extension restrictions")
+		p.logger.Info().Err(skippedErr).Int("skipped_files", skippedFiles).Str("nzb", nzb.Name).Msg("Some files were skipped due to size or extension restrictions")
 	}
 	if len(nzb.Files) == 0 {
 		if skippedFiles > 0 {
-			return nil, fmt.Errorf("all files were skipped due to size or extension restrictions")
+			return nil, fmt.Errorf("all files were skipped due to size or extension restrictions(error %v)", skippedErr)
 		}
 		return nil, fmt.Errorf("no valid files found in NZB after processing")
 	}

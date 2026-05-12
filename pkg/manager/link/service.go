@@ -28,6 +28,7 @@ var (
 // EntryRefresher is a function that refreshes an entry by infohash
 type EntryRefresher func(infohash string) (*storage.Entry, error)
 type EntryRepairer func(ctx context.Context, entry *storage.Entry) error
+type EntrySaver func(entry *storage.Entry) error
 
 // Service handles download link fetching and validation.
 // It uses the account-level cache for storing links and only tracks validation state.
@@ -37,6 +38,7 @@ type Service struct {
 	clients        *xsync.Map[string, debrid.Client]
 	entryRefresher EntryRefresher
 	repairer       EntryRepairer
+	entrySaver     EntrySaver
 	httpClient     *http.Client
 	retries        int
 	logger         zerolog.Logger
@@ -47,6 +49,7 @@ func New(
 	clients *xsync.Map[string, debrid.Client],
 	entryRefresher EntryRefresher,
 	entryReinsert EntryRepairer,
+	entrySaver EntrySaver,
 	httpClient *http.Client,
 	retries int,
 	logger zerolog.Logger,
@@ -56,6 +59,7 @@ func New(
 		clients:        clients,
 		entryRefresher: entryRefresher,
 		repairer:       entryReinsert,
+		entrySaver:     entrySaver,
 		httpClient:     httpClient,
 		retries:        retries,
 		logger:         logger,
@@ -68,7 +72,7 @@ func (s *Service) GetLink(ctx context.Context, entry *storage.Entry, filename st
 	// Use singleflight to deduplicate concurrent requests for the same file
 	key := entry.InfoHash + ":" + filename
 	v, err, _ := s.singleflight.Do(key, func() (interface{}, error) {
-		return s.fetchAndValidate(ctx, entry, filename)
+		return s.fetchAndValidate(ctx, entry, filename, 0)
 	})
 
 	if err != nil {
@@ -86,11 +90,17 @@ func (s *Service) getClient(provider string) (debrid.Client, error) {
 	return c, nil
 }
 
-// fetchAndValidate fetches a download link and validates it
-func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, filename string) (types.DownloadLink, error) {
-	link, err := s.fetchLink(ctx, entry, filename)
+// fetchAndValidate fetches a download link and validates it.
+// attempt tracks how many re-insertion cycles we've already paid for during
+// this GetLink call so we can bail out instead of looping forever when the
+// underlying file never resolves (see fetchLink/handleBadLink).
+func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, filename string, attempt int) (types.DownloadLink, error) {
+	if err := ctx.Err(); err != nil {
+		return emptyDownloadLink, err
+	}
+	link, err := s.fetchLink(ctx, entry, filename, attempt)
 	if err != nil {
-		return s.handleBadLink(ctx, err, entry, link)
+		return s.handleBadLink(ctx, err, entry, link, attempt)
 	}
 
 	// Is link already validated
@@ -103,7 +113,7 @@ func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, fi
 		if linkErr := GetLinkError(validationErr); linkErr != nil {
 			if linkErr.ShouldRefetch() {
 				// Invalidate and refetch
-				return s.invalidateAndRefetch(ctx, entry, link)
+				return s.invalidateAndRefetch(ctx, entry, link, attempt)
 			}
 		}
 		return emptyDownloadLink, validationErr
@@ -124,12 +134,13 @@ func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, fi
 						Str("reason", linkErr.Code).
 						Msg("Failed to disable account after link error")
 				} else {
-					// This will use the next available account and fetch a new link, so we need to refetch and revalidate
-					return s.fetchAndValidate(ctx, entry, filename)
+					// This will use the next available account and fetch a new link, so we need to refetch and revalidate.
+					// Account swap doesn't consume a re-insertion attempt.
+					return s.fetchAndValidate(ctx, entry, filename, attempt)
 				}
 			} else if linkErr.ShouldRefetch() {
 				// Invalidate and refetch
-				return s.invalidateAndRefetch(ctx, entry, link)
+				return s.invalidateAndRefetch(ctx, entry, link, attempt)
 			}
 		}
 	}
@@ -143,12 +154,14 @@ func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, fi
 	return emptyDownloadLink, validationErr
 }
 
-func (s *Service) handleBadLink(ctx context.Context, err error, entry *storage.Entry, dl types.DownloadLink) (types.DownloadLink, error) {
+func (s *Service) handleBadLink(ctx context.Context, err error, entry *storage.Entry, dl types.DownloadLink, attempt int) (types.DownloadLink, error) {
 	if errors.Is(err, customerror.HosterUnavailableError) {
-		// Is this a bad link, where we need to re-insert, but before we re-insert, let's check if we've passed the re-insertion threshold for this particular link
-		// We can try re-insertion, only if we've not passed the threshold for this link
 		if entry.Bad {
 			return emptyDownloadLink, fmt.Errorf("can't repair %s since it's been marked as bad", entry.GetFolder())
+		}
+		if attempt >= MaxReinsertionAttempt {
+			s.markEntryBad(entry, dl.Filename, attempt, "hoster_unavailable")
+			return emptyDownloadLink, fmt.Errorf("entry %s file %s still unresolvable after %d re-insertion attempts", entry.GetFolder(), dl.Filename, attempt)
 		}
 		if err := s.repairer(ctx, entry); err != nil {
 			return emptyDownloadLink, err
@@ -159,14 +172,36 @@ func (s *Service) handleBadLink(ctx context.Context, err error, entry *storage.E
 			return emptyDownloadLink, fmt.Errorf("entry %s(%s) still bad after repair, un-repairable", entry.GetFolder(), dl.Link)
 		}
 		// Bypass singleflight re-entry to avoid deadlock
-		return s.fetchAndValidate(ctx, entry, dl.Filename)
+		return s.fetchAndValidate(ctx, entry, dl.Filename, attempt+1)
 	}
 	// Just return the error
 	return dl, err
 }
 
+// markEntryBad sets entry.Bad and persists it so subsequent GetLink calls
+// for the same entry short-circuit instead of triggering another re-insertion
+// cycle. Logged once per call.
+func (s *Service) markEntryBad(entry *storage.Entry, filename string, attempt int, reason string) {
+	entry.Bad = true
+	if s.entrySaver != nil {
+		if err := s.entrySaver(entry); err != nil {
+			s.logger.Warn().
+				Err(err).
+				Str("infohash", entry.InfoHash).
+				Msg("Failed to persist Bad flag after exhausting re-insertion attempts")
+		}
+	}
+	s.logger.Warn().
+		Str("infohash", entry.InfoHash).
+		Str("name", entry.Name).
+		Str("filename", filename).
+		Int("attempts", attempt).
+		Str("reason", reason).
+		Msg("Giving up on entry after repeated failed re-insertions")
+}
+
 // fetchLink fetches a download link from the debrid provider (via account cache)
-func (s *Service) fetchLink(ctx context.Context, entry *storage.Entry, filename string) (types.DownloadLink, error) {
+func (s *Service) fetchLink(ctx context.Context, entry *storage.Entry, filename string, attempt int) (types.DownloadLink, error) {
 	file, err := entry.GetFile(filename)
 	if err != nil {
 		return emptyDownloadLink, NewPermanentError(
@@ -224,6 +259,10 @@ func (s *Service) fetchLink(ctx context.Context, entry *storage.Entry, filename 
 		if entry.Bad {
 			return emptyDownloadLink, fmt.Errorf("can't repair %s since it's been marked as bad", entry.GetFolder())
 		}
+		if attempt >= MaxReinsertionAttempt {
+			s.markEntryBad(entry, filename, attempt, "empty_link")
+			return emptyDownloadLink, fmt.Errorf("entry %s file %s still resolves to an empty link after %d re-insertion attempts", entry.GetFolder(), filename, attempt)
+		}
 		if err := s.repairer(ctx, entry); err != nil {
 			return emptyDownloadLink, err
 		}
@@ -233,7 +272,7 @@ func (s *Service) fetchLink(ctx context.Context, entry *storage.Entry, filename 
 			return emptyDownloadLink, fmt.Errorf("entry %s(%s) still bad after repair, un-repairable", entry.GetFolder(), downloadLink.Link)
 		}
 		// Bypass singleflight re-entry to avoid deadlock
-		return s.fetchAndValidate(ctx, entry, filename)
+		return s.fetchAndValidate(ctx, entry, filename, attempt+1)
 	}
 
 	return downloadLink, nil
@@ -373,7 +412,7 @@ func (s *Service) disableLinkAccount(link types.DownloadLink, linkErr *Error) er
 }
 
 // invalidateAndRefetch removes a link from both validation tracking and account cache
-func (s *Service) invalidateAndRefetch(ctx context.Context, entry *storage.Entry, link types.DownloadLink) (types.DownloadLink, error) {
+func (s *Service) invalidateAndRefetch(ctx context.Context, entry *storage.Entry, link types.DownloadLink, attempt int) (types.DownloadLink, error) {
 	// Remove from validation tracking
 	s.validated.Delete(link.DownloadLink)
 
@@ -389,7 +428,7 @@ func (s *Service) invalidateAndRefetch(ctx context.Context, entry *storage.Entry
 
 	_ = client.DeleteLink(link) // This might fail, doesnt matter
 
-	return s.fetchLink(ctx, entry, link.Filename)
+	return s.fetchLink(ctx, entry, link.Filename, attempt)
 }
 
 // Clear removes all validation tracking entries

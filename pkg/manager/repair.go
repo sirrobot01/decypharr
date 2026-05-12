@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -394,6 +395,11 @@ func (r *Repair) finalizeRun(run *storage.RepairRun, status storage.RepairRunSta
 			})
 		}
 	}
+
+	// Repair scans the full entry set and allocates aggressively (sonic JSON
+	// decode, appendLog.ReadAt buffers). Hand the freed heap back to the OS
+	// so RSS doesn't sit at the post-repair peak.
+	debug.FreeOSMemory()
 }
 
 func notificationEventFor(status storage.RepairRunStatus) config.NotificationEvent {
