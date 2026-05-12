@@ -464,25 +464,82 @@ func (r *Repair) repairBroken(ctx context.Context, run *storage.RepairRun, healt
 		return
 	}
 
+	succeeded := make(map[string]struct{}, len(byArr))
 	for arrName, files := range byArr {
+		if ctx != nil && ctx.Err() != nil {
+			return
+		}
 		a := r.manager.arr.Get(arrName)
 		if a == nil {
 			continue
 		}
+
+		// Look up the grab history per broken file. Files whose grab record
+		// exists get blocklisted via MarkHistoryFailed (which Sonarr/Radarr
+		// auto-re-searches when "Redownload Failed" is on — the default).
+		// Files with no grab record (history trimmed, manual import) fall back
+		// to an explicit SearchMissing.
+		//
+		// HistoryIDs are deduped per arr — a season-pack grab covers multiple
+		// broken files but only needs one history/failed POST.
+		historyIDs := make(map[int]struct{})
+		needSearch := make([]arr.ContentFile, 0)
+		for _, f := range files {
+			if ctx != nil && ctx.Err() != nil {
+				return
+			}
+			var mediaID int
+			switch a.Type {
+			case arr.Sonarr:
+				mediaID = f.EpisodeId
+			case arr.Radarr:
+				mediaID = f.Id
+			}
+			if mediaID == 0 {
+				needSearch = append(needSearch, f)
+				continue
+			}
+			id, _, herr := a.FindGrabHistoryID(mediaID)
+			if herr != nil || id == 0 {
+				needSearch = append(needSearch, f)
+				continue
+			}
+			historyIDs[id] = struct{}{}
+		}
+
+		// Clear the EpisodeFile/MovieFile rows first so the upcoming re-search
+		// isn't rejected by upgrade-only quality logic.
 		if err := a.DeleteFiles(ctx, files); err != nil {
 			r.logger.Warn().Err(err).Str("arr", arrName).Msg("Repair: DeleteFiles failed")
 			run.Stats.RepairFailed += len(files)
 			r.saveRun(run)
 			continue
 		}
-		if err := a.SearchMissing(ctx, files); err != nil {
-			r.logger.Warn().Err(err).Str("arr", arrName).Msg("Repair: SearchMissing failed")
-			run.Stats.RepairFailed += len(files)
-			r.saveRun(run)
-			continue
+
+		// Blocklist each unique grab. Errors here are non-fatal: a missing
+		// blocklist is bad but DeleteFiles already cleared the rows, so the
+		// fallback SearchMissing below still has a chance to recover.
+		for id := range historyIDs {
+			if ctx != nil && ctx.Err() != nil {
+				return
+			}
+			if err := a.MarkHistoryFailed(id); err != nil {
+				r.logger.Warn().Err(err).Str("arr", arrName).Int("history_id", id).Msg("Repair: MarkHistoryFailed failed")
+			}
 		}
+
+		// SearchMissing only for files without a grab record. With one,
+		// MarkHistoryFailed's auto-re-search covers the same ground without
+		// creating an extra command row.
+		if len(needSearch) > 0 {
+			if err := a.SearchMissing(ctx, needSearch); err != nil {
+				r.logger.Warn().Err(err).Str("arr", arrName).Msg("Repair: SearchMissing fallback failed")
+			}
+		}
+
 		run.Stats.Repaired += len(files)
 		r.saveRun(run)
+		succeeded[arrName] = struct{}{}
 	}
 
 	if len(affected) == 0 {
@@ -494,8 +551,44 @@ func (r *Repair) repairBroken(ctx context.Context, run *storage.RepairRun, healt
 		if h == nil {
 			continue
 		}
-		h.LastRepairAt = now
-		r.saveHealth(h)
+
+		// Decide whether the entry is fully broken and every broken file was
+		// successfully handled (Arr-deleted + re-searched). Partial-broken
+		// entries are left in place so their healthy files survive.
+		shouldDelete := h.BrokenCount > 0 && h.BrokenCount == h.FileCount
+		hashes := make(map[string]struct{})
+		if shouldDelete {
+			for _, bf := range h.BrokenFiles {
+				if bf.ArrName == "" || bf.ArrFileID == 0 {
+					shouldDelete = false
+					break
+				}
+				if _, ok := succeeded[bf.ArrName]; !ok {
+					shouldDelete = false
+					break
+				}
+				if bf.InfoHash != "" {
+					hashes[bf.InfoHash] = struct{}{}
+				}
+			}
+			if len(hashes) == 0 {
+				shouldDelete = false
+			}
+		}
+
+		if !shouldDelete {
+			h.LastRepairAt = now
+			r.saveHealth(h)
+			continue
+		}
+
+		for hash := range hashes {
+			if err := r.manager.DeleteEntry(hash, true); err != nil {
+				r.logger.Warn().Err(err).Str("entry", name).Str("infohash", hash).Msg("Repair: failed to delete fully-broken entry after re-search")
+				continue
+			}
+			r.logger.Info().Str("entry", name).Str("infohash", hash).Msg("Repair: deleted fully-broken entry after re-search")
+		}
 	}
 }
 

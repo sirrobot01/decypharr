@@ -155,8 +155,10 @@ func (a *Arr) searchSonarr(ctx context.Context, files []ContentFile) error {
 	}
 	g, gctx := errgroup.WithContext(ctx)
 
-	// Limit concurrent goroutines
-	g.SetLimit(10)
+	// Serialize command POSTs: each one writes to Sonarr's commands table, and
+	// SQLite's single writer lock means parallelism here just produces
+	// "database is locked" failures in CommandQueueManager.
+	g.SetLimit(1)
 	for id := range ids {
 		g.Go(func() error {
 			select {
@@ -282,23 +284,37 @@ func (a *Arr) DeleteFiles(ctx context.Context, files []ContentFile) error {
 }
 
 func (a *Arr) batchDeleteFiles(ctx context.Context, files []ContentFile) error {
-	ids := make([]int, 0)
-	for _, f := range files {
-		ids = append(ids, f.FileId)
-	}
 	defer func() {
 		for _, f := range files {
 			f.Delete()
 		}
 	}()
+
+	// Dedup FileIds: duplicates across BrokenFiles trip Sonarr's
+	// BasicRepository.Get strict count check ("Expected query to return N rows
+	// but returned M") and fail the whole batch.
+	seen := make(map[int]struct{}, len(files))
+	ids := make([]int, 0, len(files))
+	for _, f := range files {
+		if f.FileId == 0 {
+			continue
+		}
+		if _, dup := seen[f.FileId]; dup {
+			continue
+		}
+		seen[f.FileId] = struct{}{}
+		ids = append(ids, f.FileId)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
 	var payload interface{}
 	switch a.Type {
 	case Sonarr:
 		payload = struct {
 			EpisodeFileIds []int `json:"episodeFileIds"`
-		}{
-			EpisodeFileIds: ids,
-		}
+		}{EpisodeFileIds: ids}
 		_, err := a.RequestCtx(ctx, http.MethodDelete, "api/v3/episodefile/bulk", payload, nil)
 		if err != nil {
 			return err
@@ -306,9 +322,7 @@ func (a *Arr) batchDeleteFiles(ctx context.Context, files []ContentFile) error {
 	case Radarr:
 		payload = struct {
 			MovieFileIds []int `json:"movieFileIds"`
-		}{
-			MovieFileIds: ids,
-		}
+		}{MovieFileIds: ids}
 		_, err := a.RequestCtx(ctx, http.MethodDelete, "api/v3/moviefile/bulk", payload, nil)
 		if err != nil {
 			return err
