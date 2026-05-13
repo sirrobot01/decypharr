@@ -287,7 +287,7 @@ class ConfigManager {
         const fields = [
             'cache_dir', 'disk_cache_size', 'cache_expiry', 'cache_cleanup_interval',
             'chunk_size', 'read_ahead_size', 'daemon_timeout',
-            'uid', 'gid', 'umask', 'allow_other', 'default_permissions',
+            'uid', 'gid', 'umask'
         ];
 
         fields.forEach(field => {
@@ -1197,21 +1197,39 @@ class ConfigManager {
     }
 
     collectUsenetConfig() {
-        let providers = [];
-        for (let i = 0; i < this.usenetProviderCount; i++) {
+        const providers = [];
+
+        this.refs.usenetProviders.querySelectorAll('.usenet-provider').forEach((providerCard) => {
+            const index = providerCard.getAttribute('data-index');
+            const getField = (field) => providerCard.querySelector(`[name="usenet.providers[${index}].${field}"]`);
+
+            const hostInput = getField('host');
+            const portInput = getField('port');
+            const usernameInput = getField('username');
+            const passwordInput = getField('password');
+            const sslInput = getField('ssl');
+            const maxConnectionsInput = getField('max_connections');
+            const priorityInput = getField('priority');
+
+            if (!hostInput || !portInput || !usernameInput || !passwordInput || !sslInput || !maxConnectionsInput || !priorityInput) {
+                return;
+            }
+
             const provider = {
-                host: document.querySelector(`[name="usenet.providers[${i}].host"]`).value,
-                port: parseInt(document.querySelector(`[name="usenet.providers[${i}].port"]`).value) || 119,
-                username: document.querySelector(`[name="usenet.providers[${i}].username"]`).value,
-                password: document.querySelector(`[name="usenet.providers[${i}].password"]`).value,
-                ssl: document.querySelector(`[name="usenet.providers[${i}].ssl"]`).checked,
-                max_connections: parseInt(document.querySelector(`[name="usenet.providers[${i}].max_connections"]`).value) || 100,
-                priority: parseInt(document.querySelector(`[name="usenet.providers[${i}].priority"]`).value) || 0
+                host: hostInput.value,
+                port: parseInt(portInput.value) || 119,
+                username: usernameInput.value,
+                password: passwordInput.value,
+                ssl: sslInput.checked,
+                max_connections: parseInt(maxConnectionsInput.value) || 100,
+                priority: parseInt(priorityInput.value) || 0
             };
+
             if (provider.host && provider.username && provider.password) {
                 providers.push(provider);
             }
-        }
+        });
+
         return {
             providers: providers,
             max_connections: parseInt(document.querySelector('[name="usenet.max_connections"]')?.value) || 10,
@@ -1227,39 +1245,64 @@ class ConfigManager {
     collectDebridConfigs() {
         const debrids = [];
 
-        for (let i = 0; i < this.debridCount; i++) {
+        this.refs.debridConfigs.querySelectorAll('.debrid-config').forEach((debridCard) => {
+            const index = debridCard.getAttribute('data-index');
+            const getField = (field) => debridCard.querySelector(`[name="debrid[${index}].${field}"]`);
+
+            const nameInput = getField('name');
+            const providerInput = getField('provider');
+            const apiKeyInput = getField('api_key');
+            const rateLimitInput = getField('rate_limit');
+            const repairRateLimitInput = getField('repair_rate_limit');
+            const downloadRateLimitInput = getField('download_rate_limit');
+            const minimumFreeSlotInput = getField('minimum_free_slot');
+            const proxyInput = getField('proxy');
+            const downloadUncachedInput = getField('download_uncached');
+            const unpackRarInput = getField('unpack_rar');
+            const addSamplesInput = getField('add_samples');
+            const userAgentInput = getField('user_agent');
+            const downloadKeysTextarea = getField('download_api_keys');
+            const torrentsRefreshIntervalInput = getField('torrents_refresh_interval');
+            const downloadLinksRefreshIntervalInput = getField('download_links_refresh_interval');
+            const autoExpireLinksAfterInput = getField('auto_expire_links_after');
+
+            if (!nameInput || !providerInput || !apiKeyInput || !rateLimitInput || !repairRateLimitInput || !downloadRateLimitInput ||
+                !minimumFreeSlotInput || !proxyInput || !downloadUncachedInput || !unpackRarInput || !addSamplesInput ||
+                !userAgentInput || !torrentsRefreshIntervalInput || !downloadLinksRefreshIntervalInput || !autoExpireLinksAfterInput) {
+                return;
+            }
 
             const debrid = {
-                name: document.querySelector(`[name="debrid[${i}].name"]`).value,
-                provider: document.querySelector(`[name="debrid[${i}].provider"]`).value,
-                api_key: document.querySelector(`[name="debrid[${i}].api_key"]`).value,
-                rate_limit: document.querySelector(`[name="debrid[${i}].rate_limit"]`).value,
-                repair_rate_limit: document.querySelector(`[name="debrid[${i}].repair_rate_limit"]`).value,
-                download_rate_limit: document.querySelector(`[name="debrid[${i}].download_rate_limit"]`).value,
-                minimum_free_slot: parseInt(document.querySelector(`[name="debrid[${i}].minimum_free_slot"]`).value) || 0,
-                proxy: document.querySelector(`[name="debrid[${i}].proxy"]`).value,
-                download_uncached: document.querySelector(`[name="debrid[${i}].download_uncached"]`).checked,
-                unpack_rar: document.querySelector(`[name="debrid[${i}].unpack_rar"]`).checked,
-                add_samples: document.querySelector(`[name="debrid[${i}].add_samples"]`).checked,
-                user_agent: document.querySelector(`[name="debrid[${i}].user_agent"]`).value
+                name: nameInput.value,
+                provider: providerInput.value,
+                api_key: apiKeyInput.value,
+                rate_limit: rateLimitInput.value,
+                repair_rate_limit: repairRateLimitInput.value,
+                download_rate_limit: downloadRateLimitInput.value,
+                minimum_free_slot: parseInt(minimumFreeSlotInput.value) || 0,
+                proxy: proxyInput.value,
+                download_uncached: downloadUncachedInput.checked,
+                unpack_rar: unpackRarInput.checked,
+                add_samples: addSamplesInput.checked,
+                user_agent: userAgentInput.value
             };
 
             // Handle download API keys
-            const downloadKeysTextarea = document.querySelector(`[name="debrid[${i}].download_api_keys"]`);
             if (downloadKeysTextarea && downloadKeysTextarea.value.trim()) {
                 debrid.download_api_keys = downloadKeysTextarea.value
                     .split('\n')
                     .map(key => key.trim())
                     .filter(key => key.length > 0);
             }
-            debrid.torrents_refresh_interval = document.querySelector(`[name="debrid[${i}].torrents_refresh_interval"]`).value;
-            debrid.download_links_refresh_interval = document.querySelector(`[name="debrid[${i}].download_links_refresh_interval"]`).value;
-            debrid.auto_expire_links_after = document.querySelector(`[name="debrid[${i}].auto_expire_links_after"]`).value;
+
+            debrid.torrents_refresh_interval = torrentsRefreshIntervalInput.value;
+            debrid.download_links_refresh_interval = downloadLinksRefreshIntervalInput.value;
+            debrid.auto_expire_links_after = autoExpireLinksAfterInput.value;
 
             if (debrid.name && debrid.api_key && debrid.provider) {
                 debrids.push(debrid);
             }
-        }
+        });
 
         return debrids;
     }
@@ -1267,25 +1310,38 @@ class ConfigManager {
     collectArrConfigs() {
         const arrs = [];
 
-        for (let i = 0; i < this.arrCount; i++) {
-            const nameEl = document.querySelector(`[name="arr[${i}].name"]`);
-            if (!nameEl || !nameEl.closest('.arr-config')) continue;
+        this.refs.arrConfigs.querySelectorAll('.arr-config').forEach((arrCard) => {
+            const index = arrCard.getAttribute('data-index');
+            const getField = (field) => arrCard.querySelector(`[name="arr[${index}].${field}"]`);
+
+            const nameInput = getField('name');
+            const hostInput = getField('host');
+            const tokenInput = getField('token');
+            const cleanupInput = getField('cleanup');
+            const skipRepairInput = getField('skip_repair');
+            const downloadUncachedInput = getField('download_uncached');
+            const selectedDebridInput = getField('selected_debrid');
+            const sourceInput = getField('source');
+
+            if (!nameInput || !hostInput || !tokenInput || !cleanupInput || !skipRepairInput || !downloadUncachedInput || !selectedDebridInput || !sourceInput) {
+                return;
+            }
 
             const arr = {
-                name: nameEl.value,
-                host: document.querySelector(`[name="arr[${i}].host"]`).value,
-                token: document.querySelector(`[name="arr[${i}].token"]`).value,
-                cleanup: document.querySelector(`[name="arr[${i}].cleanup"]`).checked,
-                skip_repair: document.querySelector(`[name="arr[${i}].skip_repair"]`).checked,
-                download_uncached: document.querySelector(`[name="arr[${i}].download_uncached"]`).checked,
-                selected_debrid: document.querySelector(`[name="arr[${i}].selected_debrid"]`).value,
-                source: document.querySelector(`[name="arr[${i}].source"]`).value
+                name: nameInput.value,
+                host: hostInput.value,
+                token: tokenInput.value,
+                cleanup: cleanupInput.checked,
+                skip_repair: skipRepairInput.checked,
+                download_uncached: downloadUncachedInput.checked,
+                selected_debrid: selectedDebridInput.value,
+                source: sourceInput.value
             };
 
             if (arr.name && arr.host) {
                 arrs.push(arr);
             }
-        }
+        });
 
         return arrs;
     }
@@ -1381,8 +1437,6 @@ class ConfigManager {
             uid: getElementValue('uid', 0),
             gid: getElementValue('gid', 0),
             umask: getElementValue('umask'),
-            allow_other: getElementValue('allow_other', false),
-            default_permissions: getElementValue('default_permissions', false),
         };
     }
 

@@ -60,7 +60,14 @@ type Downloaders struct {
 	errorCount int
 	lastErr    error
 	closed     bool
-	wg         sync.WaitGroup
+	// stopping is true while StopAll() is tearing down the current session.
+	// It blocks the idle-restart path from spinning up a fresh kicker before
+	// the previous one has fully exited and the new ctx is installed.
+	stopping bool
+	// idle is true when all downloaders have stopped. Guarded by mu so that
+	// the restart decision in Download() and the teardown in StopAll() are
+	// serialized with kicker lifecycle changes.
+	idle bool
 
 	// streamID is the active stream registration ID for tracking
 	streamID string
@@ -70,8 +77,7 @@ type Downloaders struct {
 
 	// Idle timeout tracking
 	lastActivity atomic.Int64  // Unix nano timestamp of last download activity
-	idle         atomic.Bool   // True when all downloaders stopped due to idle
-	kickerDone   chan struct{} // Signals kicker goroutine has exited
+	kickerDone   chan struct{} // Signals kicker goroutine has exited; a fresh channel per session
 
 	// Circuit breaker - blocks all requests when max errors reached
 	circuitOpen   atomic.Bool  // True when circuit is "open" (blocking all requests)
@@ -241,16 +247,18 @@ func (dls *Downloaders) Download(ctx context.Context, r ranges.Range) error {
 	// Update activity timestamp for idle detection
 	dls.touchActivity()
 
-	// Lazy restart: if we went idle, restart the kicker goroutine
-	if dls.idle.Load() {
-		dls.idle.Store(false)
-		dls.ensureKickerRunning()
-	}
-
 	dls.mu.Lock()
 	if dls.closed {
 		dls.mu.Unlock()
 		return errors.New("downloaders closed")
+	}
+
+	// Lazy restart: if we went idle, restart the kicker goroutine. Skipped
+	// while stopping so we don't race a new kicker against StopAll()'s wait
+	// on the old kickerDone channel.
+	if dls.idle && !dls.stopping {
+		dls.idle = false
+		dls.ensureKickerRunningLocked()
 	}
 
 	// Fast path: already have it
@@ -573,6 +581,7 @@ func (dls *Downloaders) Close(inErr error) error {
 	for _, dl := range dlsCopy {
 		dl.stop()
 	}
+	oldKickerDone := dls.kickerDone
 	dls.mu.Unlock()
 
 	// Cancel first so any blocked stream operation can exit promptly.
@@ -583,7 +592,10 @@ func (dls *Downloaders) Close(inErr error) error {
 		dl.wg.Wait()
 	}
 
-	dls.wg.Wait()
+	// Wait for the kicker goroutine via its per-session sentinel.
+	if oldKickerDone != nil {
+		<-oldKickerDone
+	}
 
 	// Close remaining waiters
 	dls.mu.Lock()
@@ -693,7 +705,7 @@ func (dls *Downloaders) checkIdleTimeout() bool {
 	}
 	dls.dls = nil
 	dls.untrackStreamLocked()
-	dls.idle.Store(true)
+	dls.idle = true
 
 	// Reset error budget so the next session starts fresh.
 	// Errors from the previous session must not carry into a resumed session —
@@ -710,10 +722,13 @@ func (dls *Downloaders) checkIdleTimeout() bool {
 // for potential reuse. This is called when all file handles are closed.
 func (dls *Downloaders) StopAll() {
 	dls.mu.Lock()
-	if dls.closed {
+	if dls.closed || dls.stopping {
+		// Another StopAll() is already tearing this session down, or we are
+		// already closed. Either way there is nothing left for us to do.
 		dls.mu.Unlock()
 		return
 	}
+	dls.stopping = true
 	dls.untrackStreamLocked()
 
 	// Copy slice before unlocking to avoid race during Wait
@@ -729,8 +744,9 @@ func (dls *Downloaders) StopAll() {
 		dl.stop()
 	}
 	dls.dls = nil
-	dls.idle.Store(true)
+	dls.idle = true
 	oldCancel := dls.cancel
+	oldKickerDone := dls.kickerDone
 	dls.mu.Unlock()
 
 	// Cancel active context so in-flight Stream calls can be interrupted.
@@ -745,7 +761,12 @@ func (dls *Downloaders) StopAll() {
 	for _, dl := range dlsCopy {
 		dl.wg.Wait()
 	}
-	dls.wg.Wait()
+	// Wait for the kicker goroutine to exit using its per-session sentinel.
+	// Each startKicker() allocates a fresh channel, so this never observes a
+	// channel that a future kicker has reused.
+	if oldKickerDone != nil {
+		<-oldKickerDone
+	}
 
 	dls.mu.Lock()
 	if !dls.closed {
@@ -756,14 +777,18 @@ func (dls *Downloaders) StopAll() {
 		dls.lastErr = nil
 		dls.resetCircuitLocked()
 	}
+	dls.stopping = false
 	dls.mu.Unlock()
 }
 
-// ensureKickerRunning restarts the kicker goroutine if it has stopped
-func (dls *Downloaders) ensureKickerRunning() {
-	dls.mu.Lock()
-	defer dls.mu.Unlock()
-
+// ensureKickerRunningLocked restarts the kicker goroutine if it has stopped.
+// Caller must hold dls.mu. Refuses to start a new kicker while the session
+// is closed or being torn down — that would race against StopAll()/Close()
+// waiting on the previous kicker's exit sentinel.
+func (dls *Downloaders) ensureKickerRunningLocked() {
+	if dls.closed || dls.stopping {
+		return
+	}
 	// Check if kicker has exited (non-blocking check)
 	select {
 	case <-dls.kickerDone:
@@ -786,11 +811,10 @@ func (dls *Downloaders) currentKickerInterval() time.Duration {
 // kickWaiters() calls from cacheWriter.Write(); this ticker is only a fallback.
 func (dls *Downloaders) startKicker() {
 	ctx := dls.ctx
-	dls.kickerDone = make(chan struct{})
-	dls.wg.Add(1)
+	done := make(chan struct{})
+	dls.kickerDone = done
 	go func() {
-		defer dls.wg.Done()
-		defer close(dls.kickerDone)
+		defer close(done)
 
 		interval := dls.currentKickerInterval()
 		ticker := time.NewTicker(interval)

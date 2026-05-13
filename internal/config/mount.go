@@ -65,8 +65,6 @@ type DFS struct {
 	UID                uint32 `json:"uid,omitempty"`                 // User ID for mounted files
 	GID                uint32 `json:"gid,omitempty"`                 // Group ID for mounted files
 	Umask              string `json:"umask,omitempty"`               // File permissions mask
-	AllowOther         bool   `json:"allow_other,omitempty"`         // Allow other users to access mount
-	DefaultPermissions bool   `json:"default_permissions,omitempty"` // Enable permission checking
 }
 
 type ExternalRclone struct {
@@ -119,9 +117,6 @@ func (c *Config) applyMountEnvVars() {
 	}
 	if val := getEnv("MOUNT__DFS__UMASK"); val != "" {
 		c.Mount.DFS.Umask = val
-	}
-	if val := getEnv("MOUNT__DFS__ALLOW_OTHER"); val != "" {
-		c.Mount.DFS.AllowOther = parseBool(val)
 	}
 	// Rclone settings
 	if val := getEnv("RCLONE__RC_PORT"); val != "" {

@@ -177,8 +177,6 @@ Mount configuration determines how files are exposed on the filesystem.
       "uid": 1000,
       "gid": 1000,
       "umask": "022",
-      "allow_other": true,
-      "default_permissions": true
     }
   }
 }

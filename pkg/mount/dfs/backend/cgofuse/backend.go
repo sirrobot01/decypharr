@@ -75,25 +75,17 @@ func (b *Backend) Mount(ctx context.Context) error {
 		options = append(options, "-o", "volname=DFS")
 		options = append(options, "--FileSystemName=DFS")
 		// Allow other users to access
-		if b.config.AllowOther {
-			options = append(options, "-o", "uid=-1,gid=-1")
-		}
+		options = append(options, "-o", "uid=-1,gid=-1")
 	case "darwin":
 		// macFUSE options
 		options = append(options, "-o", "volname=dfs")
 		options = append(options, "-o", "noapplexattr")
 		options = append(options, "-o", "noappledouble")
-		if b.config.AllowOther {
-			options = append(options, "-o", "allow_other")
-		}
+		options = append(options, "-o", "allow_other")
 	default:
 		// Linux FUSE options
-		if b.config.AllowOther {
-			options = append(options, "-o", "allow_other")
-		}
-		if b.config.DefaultPermissions {
-			options = append(options, "-o", "default_permissions")
-		}
+		options = append(options, "-o", "allow_other")
+		options = append(options, "-o", "default_permissions")
 	}
 
 	// Start mount in background

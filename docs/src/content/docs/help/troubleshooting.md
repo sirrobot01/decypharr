@@ -117,8 +117,7 @@ Set correct UID/GID:
   "mount": {
     "dfs": {
       "uid": 1001,
-      "gid": 1001,
-      "allow_other": true
+      "gid": 1001
     }
   }
 }

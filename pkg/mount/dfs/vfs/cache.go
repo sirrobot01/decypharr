@@ -36,7 +36,18 @@ const (
 
 	// speedSampleInterval is how often the background goroutine updates downloadSpeed.
 	speedSampleInterval = 1 * time.Second
+
+	// fadviseQueueSize bounds the backlog of page-cache eviction hints. fadvise
+	// is advisory, so when the queue fills we drop the hint rather than block
+	// the writer — the kernel will reclaim under memory pressure regardless.
+	fadviseQueueSize = 32
 )
+
+// fadviseRange describes a region whose page-cache pages should be evicted.
+type fadviseRange struct {
+	offset int64
+	length int64
+}
 
 // Cache manages sparse cache files for streaming
 type Cache struct {
@@ -363,6 +374,7 @@ func (c *Cache) newItem(key, entryName, filename string, fileSize int64) (*Cache
 	// Create downloaders coordinator
 	item.downloaders = NewDownloaders(c.ctx, c.manager, item, c.config)
 	item.startMetaWriter()
+	item.startFadviseWorker()
 	item.markMetadataDirty()
 
 	return item, nil
@@ -565,6 +577,12 @@ type CacheItem struct {
 	metaStopCh  chan struct{}
 	metaWG      sync.WaitGroup
 
+	// fadviseCh queues FADV_DONTNEED hints for the background worker so the
+	// hot streaming write path doesn't block on posix_fadvise's writeback wait.
+	fadviseCh     chan fadviseRange
+	fadviseStopCh chan struct{}
+	fadviseWG     sync.WaitGroup
+
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -600,6 +618,70 @@ func (item *CacheItem) metaWriterLoop() {
 			item.flushMetadata(true)
 			return
 		}
+	}
+}
+
+// startFadviseWorker launches the background goroutine that drains queued
+// fadvise hints. Mirrors startMetaWriter so the lifecycle is symmetric.
+func (item *CacheItem) startFadviseWorker() {
+	item.fadviseCh = make(chan fadviseRange, fadviseQueueSize)
+	item.fadviseStopCh = make(chan struct{})
+	item.fadviseWG.Add(1)
+	go item.fadviseWorkerLoop()
+}
+
+// stopFadviseWorker signals the worker to drain and exit, then waits for it.
+// Must be called after all writers (downloaders) have stopped so the drain
+// observes a stable backlog.
+func (item *CacheItem) stopFadviseWorker() {
+	if item.fadviseStopCh == nil {
+		return
+	}
+	close(item.fadviseStopCh)
+	item.fadviseWG.Wait()
+	item.fadviseStopCh = nil
+	item.fadviseCh = nil
+}
+
+func (item *CacheItem) fadviseWorkerLoop() {
+	defer item.fadviseWG.Done()
+	for {
+		select {
+		case r := <-item.fadviseCh:
+			item.applyFadvise(r)
+		case <-item.fadviseStopCh:
+			// Drain anything still queued so we don't lose hints on shutdown.
+			for {
+				select {
+				case r := <-item.fadviseCh:
+					item.applyFadvise(r)
+				default:
+					return
+				}
+			}
+		}
+	}
+}
+
+func (item *CacheItem) applyFadvise(r fadviseRange) {
+	item.fileMu.RLock()
+	if item.file != nil {
+		dropFileCache(item.file, r.offset, r.length)
+	}
+	item.fileMu.RUnlock()
+}
+
+// queueFadvise hands a range to the background fadvise worker. Non-blocking:
+// if the queue is full the hint is dropped — fadvise is advisory and the
+// kernel reclaims pages under memory pressure regardless.
+func (item *CacheItem) queueFadvise(offset, length int64) {
+	ch := item.fadviseCh
+	if ch == nil || length <= 0 {
+		return
+	}
+	select {
+	case ch <- fadviseRange{offset: offset, length: length}:
+	default:
 	}
 }
 
@@ -790,11 +872,15 @@ func (item *CacheItem) WriteAtNoOverwrite(p []byte, off int64) (n, skipped int, 
 	}
 	item.fileMu.RUnlock()
 
-	// Advise the kernel to evict written pages from the page cache. The data is
-	// already durable on disk (sparse file), so keeping it in RAM wastes memory
-	// that would otherwise buffer upcoming reads or OS readahead.
+	// Advise the kernel to evict written pages from the page cache, but do it
+	// off the hot path. posix_fadvise(FADV_DONTNEED) blocks on writeback for
+	// dirty pages, and the bytes we just wrote are dirty by definition — doing
+	// this synchronously stalls every streaming write while flushing the just-
+	// written 256KB to disk. The worker drains hints in the background; the
+	// data is already durable on disk (sparse file) so a brief delay before
+	// eviction is fine.
 	if skipped < n {
-		dropFileCache(f, off, int64(len(p)))
+		item.queueFadvise(off, int64(len(p)))
 	}
 
 	// Mark range as present
@@ -841,6 +927,10 @@ func (item *CacheItem) Close() error {
 				item.closeErr = err
 			}
 		}
+
+		// Stop the fadvise worker after downloaders have finished writing so
+		// the drain captures every queued hint. Must precede file.Close().
+		item.stopFadviseWorker()
 
 		item.stopMetaWriter()
 		item.flushMetadata(true)

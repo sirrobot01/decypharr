@@ -32,8 +32,6 @@ type FuseConfig struct {
 	UID                uint32
 	GID                uint32
 	Umask              uint32
-	AllowOther         bool
-	DefaultPermissions bool
 }
 
 // DefaultFuseConfig returns a streaming-optimized default configuration
@@ -52,8 +50,6 @@ func DefaultFuseConfig() *FuseConfig {
 		UID:                1000,
 		GID:                1000,
 		Umask:              0022,
-		AllowOther:         true,
-		DefaultPermissions: true,
 	}
 }
 
@@ -114,8 +110,6 @@ func ParseFuseConfig() *FuseConfig {
 	// Otherwise keep the default (4) from DefaultFuseConfig()
 	fuseConfig.UID = cfg.UID
 	fuseConfig.GID = cfg.GID
-	fuseConfig.AllowOther = cfg.AllowOther
-	fuseConfig.DefaultPermissions = cfg.DefaultPermissions
 
 	if cfg.Umask != "" {
 		umask, err := parseUmask(cfg.Umask)

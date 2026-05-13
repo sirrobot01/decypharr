@@ -83,14 +83,11 @@ func (b *Backend) Mount(ctx context.Context) error {
 		DisableXAttrs:        true,
 		IgnoreSecurityLabels: true,
 		MaxWrite:             1024 * 1024,
-		AllowOther:           b.config.AllowOther,
 	}
 
 	var opt []string
 
-	if b.config.DefaultPermissions {
-		opt = append(opt, "default_permissions")
-	}
+	opt = append(opt, "default_permissions")
 
 	if runtime.GOOS == "darwin" {
 		opt = append(opt, "volname=decypharr")

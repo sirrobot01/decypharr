@@ -33,8 +33,7 @@ In `config.json`:
       "cache_expiry": "24h",
       "daemon_timeout": "30m",
       "uid": 1000,
-      "gid": 1000,
-      "allow_other": true
+      "gid": 1000
     }
   }
 }
@@ -74,8 +73,7 @@ id plex
   "dfs": {
     "uid": 1001,
     "gid": 1001,
-    "umask": "022",
-    "allow_other": true
+    "umask": "022"
   }
 }
 ```

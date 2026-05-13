@@ -69,6 +69,11 @@ func NewManager(manager *manager.Manager) *Manager {
 	configDir := filepath.Join(config.GetMainPath(), "rclone")
 	_logger := logger.New("rclone")
 
+	if mainCfg.DisableWebDav {
+		_logger.Info().Msg("WebDAV support is disabled by configuration, can't use rclone with WebDAV features")
+		return nil
+	}
+
 	// Ensure config directory exists
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		_logger.Error().Err(err).Msg("Failed to create rclone config directory")

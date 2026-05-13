@@ -2,6 +2,7 @@ package external
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
@@ -11,9 +12,10 @@ import (
 )
 
 type Manager struct {
-	manager *manager.Manager
-	client  *rclone.Client
-	logger  zerolog.Logger
+	manager       *manager.Manager
+	client        *rclone.Client
+	logger        zerolog.Logger
+	webdavEnabled bool
 }
 
 // NewManager creates a new external rclone manager
@@ -28,14 +30,18 @@ func NewManager(manager *manager.Manager) *Manager {
 		_logger,
 	)
 	m := &Manager{
-		manager: manager,
-		logger:  _logger,
-		client:  rcloneClient,
+		manager:       manager,
+		logger:        _logger,
+		client:        rcloneClient,
+		webdavEnabled: !cfg.DisableWebDav,
 	}
 	return m
 }
 
 func (m *Manager) Start(ctx context.Context) error {
+	if !m.webdavEnabled {
+		return fmt.Errorf("webdav is not enabled")
+	}
 	return nil
 }
 
