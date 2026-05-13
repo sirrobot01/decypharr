@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -343,6 +344,11 @@ func (c *Cache) newItem(key, entryName, filename string, fileSize int64) (*Cache
 		return nil, fmt.Errorf("failed to open cache file: %w", err)
 	}
 
+	if err := markSparseFile(fd); err != nil {
+		// just log the error and continue
+		c.logger.Error().Err(err).Str("key", key).Msg("failed to mark cache file as sparse")
+	}
+
 	if err := fd.Truncate(fileSize); err != nil {
 		fd.Close()
 		return nil, fmt.Errorf("failed to truncate cache file: %w", err)
@@ -398,9 +404,7 @@ func (c *Cache) evictLoop() {
 	}
 }
 
-func (c *Cache) cleanupItems() {
-	now := utils.Now()
-
+func (c *Cache) cleanupItems(now time.Time, forceZeroOpen bool) int {
 	var evicted []string
 	c.items.Range(func(key string, item *CacheItem) bool {
 		if item.opens.Load() > 0 {
@@ -411,7 +415,7 @@ func (c *Cache) cleanupItems() {
 		lastAccess := item.info.ATime
 		item.metaMu.RUnlock()
 
-		if now.Sub(lastAccess) > itemIdleTimeout {
+		if forceZeroOpen || now.Sub(lastAccess) > itemIdleTimeout {
 			evicted = append(evicted, key)
 		}
 		return true
@@ -424,16 +428,28 @@ func (c *Cache) cleanupItems() {
 			c.itemCount.Add(-1)
 		}
 	}
+
+	return len(evicted)
 }
 
 // evict removes old and excess cache items
 func (c *Cache) evict() {
 	now := utils.Now()
 
-	c.cleanupItems()
+	c.cleanupItems(now, false)
+
+	candidates, totalSize := c.scanDiskCandidates()
+
+	// WinFsp clients tend to speculatively open files. If we're already over
+	// budget, close zero-open cache items immediately so they become evictable
+	// on the same pass instead of waiting for the idle timeout.
+	if runtime.GOOS == "windows" && c.threshold > 0 && totalSize > c.threshold {
+		if c.cleanupItems(now, true) > 0 {
+			candidates, totalSize = c.scanDiskCandidates()
+		}
+	}
 
 	oldSize := c.totalSize.Load()
-	candidates, totalSize := c.scanDiskCandidates()
 
 	// If cache expiry is disabled and we're under threshold, skip disk scan.
 	if c.config.CacheExpiry <= 0 && (c.threshold <= 0 || totalSize <= c.threshold) {

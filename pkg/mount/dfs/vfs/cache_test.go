@@ -106,3 +106,46 @@ func TestEvictCandidates_RemovesOnlyTargetPair(t *testing.T) {
 		t.Fatalf("entry directory should remain, stat err=%v", err)
 	}
 }
+
+func TestCleanupItems_ForceZeroOpenClosesRecentItems(t *testing.T) {
+	cacheDir := t.TempDir()
+	entryDir := filepath.Join(cacheDir, "entry")
+	if err := os.MkdirAll(entryDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	dataPath := filepath.Join(entryDir, "video.mkv")
+	file, err := os.OpenFile(dataPath, os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := newTestCache(cacheDir)
+	item := &CacheItem{
+		cache:    c,
+		key:      "entry/video.mkv",
+		file:     file,
+		metaPath: dataPath + ".json",
+		info: ItemInfo{
+			ATime: time.Now(),
+		},
+	}
+	c.items.Store(item.key, item)
+	c.itemCount.Store(1)
+
+	if removed := c.cleanupItems(time.Now(), true); removed != 1 {
+		t.Fatalf("expected 1 recent zero-open item to be closed, got %d", removed)
+	}
+	if _, ok := c.items.Load(item.key); ok {
+		t.Fatal("expected item to be removed from cache map")
+	}
+	if got := c.itemCount.Load(); got != 0 {
+		t.Fatalf("expected item count 0 after forced cleanup, got %d", got)
+	}
+
+	item.fileMu.RLock()
+	defer item.fileMu.RUnlock()
+	if item.file != nil {
+		t.Fatal("expected cache file to be closed after forced cleanup")
+	}
+}
