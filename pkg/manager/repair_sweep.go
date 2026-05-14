@@ -768,7 +768,7 @@ func (r *Repair) collectBrokenHealths(names []string, requireArrFile bool) (*xsy
 
 	healths := xsync.NewMap[string, *storage.EntryHealth]()
 	_ = r.manager.storage.ForEachEntryHealth(func(h *storage.EntryHealth) error {
-		if h == nil || h.Status != storage.HealthBroken || len(h.BrokenFiles) == 0 {
+		if h == nil || h.Status != storage.HealthBroken {
 			return nil
 		}
 		if len(wanted) > 0 {
@@ -777,6 +777,9 @@ func (r *Repair) collectBrokenHealths(names []string, requireArrFile bool) (*xsy
 			}
 		}
 		if requireArrFile {
+			if len(h.BrokenFiles) == 0 {
+				return nil
+			}
 			hasArrFile := false
 			for _, bf := range h.BrokenFiles {
 				if bf.ArrName != "" && bf.ArrFileID != 0 {
@@ -792,6 +795,34 @@ func (r *Repair) collectBrokenHealths(names []string, requireArrFile bool) (*xsy
 		return nil
 	})
 	return healths, len(wanted)
+}
+
+func (r *Repair) markBrokenHealthCleared(h *storage.EntryHealth, at time.Time) {
+	if h == nil {
+		return
+	}
+	if _, err := r.manager.storage.GetEntryItem(h.EntryName); err != nil {
+		_ = r.manager.storage.DeleteEntryHealth(h.EntryName)
+		return
+	}
+	h.Status = storage.HealthUnknown
+	h.BrokenFiles = nil
+	h.FailureReason = ""
+	h.LastRepairAt = at
+	h.Dirty = false
+	h.DirtyReason = ""
+	h.NextCheckDueAt = time.Time{}
+	r.saveHealth(h)
+}
+
+func isAlreadyClearedFileError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "file does not exist") ||
+		strings.Contains(msg, "file is deleted")
 }
 
 // FixBroken triggers the Arr delete + re-search pass on currently-broken
@@ -1000,6 +1031,12 @@ func (r *Repair) clearBroken(ctx context.Context, run *storage.RepairRun, health
 		if h == nil {
 			return true
 		}
+		if len(h.BrokenFiles) == 0 {
+			r.markBrokenHealthCleared(h, now)
+			run.Stats.Cleared++
+			r.saveRun(run)
+			return true
+		}
 
 		remaining := make([]storage.BrokenFile, 0, len(h.BrokenFiles))
 		for _, bf := range h.BrokenFiles {
@@ -1011,6 +1048,11 @@ func (r *Repair) clearBroken(ctx context.Context, run *storage.RepairRun, health
 			}
 
 			if err := r.manager.RemoveTorrentFile(bf.EntryName, bf.FileName); err != nil {
+				if isAlreadyClearedFileError(err) {
+					run.Stats.Cleared++
+					r.saveRun(run)
+					continue
+				}
 				r.logger.Warn().Err(err).Str("entry", bf.EntryName).Str("file", bf.FileName).Msg("ClearBroken: failed to remove broken file from mount")
 				run.Stats.RepairFailed++
 				remaining = append(remaining, bf)
@@ -1023,16 +1065,7 @@ func (r *Repair) clearBroken(ctx context.Context, run *storage.RepairRun, health
 		h.LastRepairAt = now
 		h.BrokenFiles = remaining
 		if len(remaining) == 0 {
-			if _, err := r.manager.storage.GetEntryItem(name); err != nil {
-				_ = r.manager.storage.DeleteEntryHealth(name)
-				return true
-			}
-			h.Status = storage.HealthUnknown
-			h.FailureReason = ""
-			h.Dirty = false
-			h.DirtyReason = ""
-			h.NextCheckDueAt = time.Time{}
-			r.saveHealth(h)
+			r.markBrokenHealthCleared(h, now)
 			return true
 		}
 
