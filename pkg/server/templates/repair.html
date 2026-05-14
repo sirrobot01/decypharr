@@ -27,12 +27,8 @@
                     </p>
                 </div>
                 <div class="flex flex-wrap gap-2">
-                    <label class="label cursor-pointer gap-2 px-2 py-0">
-                        <input type="checkbox" class="checkbox checkbox-primary checkbox-sm" id="ignoreLastCheckedRun">
-                        <span class="label-text text-xs">Ignore last checked</span>
-                    </label>
                     <button id="runNowBtn" class="btn btn-primary btn-sm">
-                        <i class="bi bi-play-fill mr-1"></i>Run now
+                        <i class="bi bi-play-fill mr-1"></i>Run
                     </button>
                     <button id="viewBrokenBtn" class="btn btn-outline btn-sm"
                             title="See broken entries and their files">
@@ -43,9 +39,9 @@
                             title="Trigger Arr delete + re-search on currently broken entries">
                         <i class="bi bi-bandaid mr-1"></i>Fix broken
                     </button>
-                    <button id="clearBrokenBtn" class="btn btn-warning btn-outline btn-sm"
-                            title="Clear broken files without re-searching">
-                        <i class="bi bi-trash mr-1"></i>Clear broken
+                    <button id="clearStateBtn" class="btn btn-warning btn-outline btn-sm"
+                            title="Clear persisted repair state locally">
+                        <i class="bi bi-eraser mr-1"></i>Clear State
                     </button>
                     <button id="stopRunBtn" class="btn btn-warning btn-sm" disabled>
                         <i class="bi bi-stop-fill mr-1"></i>Stop
@@ -171,6 +167,87 @@
         </div>
     </div>
 </div>
+
+<!-- Run options modal -->
+<dialog id="runRepairModal" class="modal">
+    <div class="modal-box max-w-md">
+        <form method="dialog">
+            <button class="btn btn-sm btn-circle btn-ghost absolute right-3 top-3" aria-label="Close">✕</button>
+        </form>
+        <h3 class="font-bold text-lg flex items-center gap-2 mb-4">
+            <i class="bi bi-play-fill text-primary"></i>Run repair
+        </h3>
+        <form id="runRepairForm" class="space-y-3">
+            <label class="label cursor-pointer justify-between gap-4 rounded-lg border border-base-300 px-3 py-2">
+                <span class="label-text">Ignore last checked at</span>
+                <input type="checkbox" class="toggle toggle-primary" id="runIgnoreLastChecked">
+            </label>
+            <label class="label cursor-pointer justify-between gap-4 rounded-lg border border-base-300 px-3 py-2">
+                <span class="label-text">Auto-repair</span>
+                <input type="checkbox" class="toggle toggle-primary" id="runAutoRepair">
+            </label>
+            <div class="modal-action">
+                <button type="button" class="btn btn-ghost" onclick="document.getElementById('runRepairModal').close()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="runRepairSubmitBtn">
+                    <i class="bi bi-play-fill mr-1"></i>Run
+                </button>
+            </div>
+        </form>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
+
+<!-- Clear state modal -->
+<dialog id="clearStateModal" class="modal">
+    <div class="modal-box max-w-lg">
+        <form method="dialog">
+            <button class="btn btn-sm btn-circle btn-ghost absolute right-3 top-3" aria-label="Close">✕</button>
+        </form>
+        <h3 class="font-bold text-lg flex items-center gap-2 mb-4">
+            <i class="bi bi-eraser text-warning"></i>Clear State
+        </h3>
+        <form id="clearStateForm" class="space-y-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2" id="clearStateOptions">
+                <label class="label cursor-pointer justify-between gap-3 rounded-lg border border-base-300 px-3 py-2">
+                    <span class="label-text">Repairing <span class="badge badge-sm ml-1" data-clear-state-count="repairing">0</span></span>
+                    <input type="checkbox" class="checkbox checkbox-primary" name="repair_state" value="repairing">
+                </label>
+                <label class="label cursor-pointer justify-between gap-3 rounded-lg border border-base-300 px-3 py-2">
+                    <span class="label-text">Broken <span class="badge badge-sm ml-1" data-clear-state-count="broken">0</span></span>
+                    <input type="checkbox" class="checkbox checkbox-primary" name="repair_state" value="broken">
+                </label>
+                <label class="label cursor-pointer justify-between gap-3 rounded-lg border border-base-300 px-3 py-2">
+                    <span class="label-text">Healthy <span class="badge badge-sm ml-1" data-clear-state-count="healthy">0</span></span>
+                    <input type="checkbox" class="checkbox checkbox-primary" name="repair_state" value="healthy">
+                </label>
+                <label class="label cursor-pointer justify-between gap-3 rounded-lg border border-base-300 px-3 py-2">
+                    <span class="label-text">Unknown <span class="badge badge-sm ml-1" data-clear-state-count="unknown">0</span></span>
+                    <input type="checkbox" class="checkbox checkbox-primary" name="repair_state" value="unknown">
+                </label>
+                <label class="label cursor-pointer justify-between gap-3 rounded-lg border border-base-300 px-3 py-2">
+                    <span class="label-text">Stale <span class="badge badge-sm ml-1" data-clear-state-count="stale">0</span></span>
+                    <input type="checkbox" class="checkbox checkbox-primary" name="repair_state" value="stale">
+                </label>
+                <label class="label cursor-pointer justify-between gap-3 rounded-lg border border-base-300 px-3 py-2">
+                    <span class="label-text">Unsupported <span class="badge badge-sm ml-1" data-clear-state-count="unsupported">0</span></span>
+                    <input type="checkbox" class="checkbox checkbox-primary" name="repair_state" value="unsupported">
+                </label>
+            </div>
+            <div id="clearStateError" class="text-error text-sm hidden"></div>
+            <div class="modal-action">
+                <button type="button" class="btn btn-ghost" onclick="document.getElementById('clearStateModal').close()">Cancel</button>
+                <button type="submit" class="btn btn-warning" id="clearStateSubmitBtn">
+                    <i class="bi bi-eraser mr-1"></i>Clear
+                </button>
+            </div>
+        </form>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
 
 <!-- Broken entries modal -->
 <dialog id="brokenModal" class="modal">

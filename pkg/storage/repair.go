@@ -327,6 +327,43 @@ func (s *Storage) DeleteEntryHealth(entryName string) error {
 	return s.repairState.Delete(entryName)
 }
 
+// ClearEntryHealthByStatuses deletes persisted repair health records whose
+// status matches one of the supplied statuses. It only clears repair state;
+// it does not touch entries, files, Arrs, or debrid placements.
+func (s *Storage) ClearEntryHealthByStatuses(statuses []HealthStatus) (int, error) {
+	wanted := make(map[HealthStatus]struct{}, len(statuses))
+	for _, status := range statuses {
+		if status != "" {
+			wanted[status] = struct{}{}
+		}
+	}
+	if len(wanted) == 0 {
+		return 0, nil
+	}
+
+	names := make([]string, 0)
+	if err := s.ForEachEntryHealth(func(state *EntryHealth) error {
+		if state == nil {
+			return nil
+		}
+		if _, ok := wanted[state.Status]; ok {
+			names = append(names, state.EntryName)
+		}
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+
+	cleared := 0
+	for _, name := range names {
+		if err := s.DeleteEntryHealth(name); err != nil {
+			return cleared, err
+		}
+		cleared++
+	}
+	return cleared, nil
+}
+
 // MarkEntryDirty flags an entry's health as out-of-date so the next sweep will
 // re-probe it. Called from the storage layer whenever the underlying file set
 // of an entry mutates.

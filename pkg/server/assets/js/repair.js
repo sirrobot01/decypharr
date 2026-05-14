@@ -9,20 +9,30 @@ class RepairManager {
         this.statusTimer = null;
         this.activeRunId = null;
         this.brokenState = {items: [], page: 1, pageSize: 25};
+        this.repairConfig = {};
+        this.latestStatus = {};
         this.bind();
         this.loadAll();
     }
 
     bind() {
         const $ = (id) => document.getElementById(id);
-        $('runNowBtn')?.addEventListener('click', () => this.runNow());
+        $('runNowBtn')?.addEventListener('click', () => this.openRunModal());
         $('stopRunBtn')?.addEventListener('click', () => this.stopRun());
         $('fixBrokenBtn')?.addEventListener('click', () => this.fixBroken());
-        $('clearBrokenBtn')?.addEventListener('click', () => this.clearBroken());
+        $('clearStateBtn')?.addEventListener('click', () => this.openClearStateModal());
         $('viewBrokenBtn')?.addEventListener('click', () => this.openBrokenModal());
         $('refreshHistoryBtn')?.addEventListener('click', () => this.loadHistory());
         $('refreshBrokenBtn')?.addEventListener('click', () => this.loadBroken());
         $('clearHistoryBtn')?.addEventListener('click', () => this.clearHistory());
+        $('runRepairForm')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.runNow();
+        });
+        $('clearStateForm')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.clearState();
+        });
         $('recheckMediaForm')?.addEventListener('submit', (e) => {
             e.preventDefault();
             this.recheckMedia();
@@ -30,7 +40,45 @@ class RepairManager {
     }
 
     async loadAll() {
-        await Promise.all([this.loadStatus(), this.loadHistory(), this.loadArrs()]);
+        await Promise.all([this.loadRepairConfig(), this.loadStatus(), this.loadHistory(), this.loadArrs()]);
+    }
+
+    async loadRepairConfig() {
+        try {
+            this.repairConfig = await this.fetchJSON(`${this.api}/repair/config`) || {};
+        } catch (e) {
+            console.error('Failed to load repair config', e);
+            this.repairConfig = {};
+        }
+    }
+
+    openRunModal() {
+        const modal = document.getElementById('runRepairModal');
+        if (!modal) return;
+        const ignore = document.getElementById('runIgnoreLastChecked');
+        const autoRepair = document.getElementById('runAutoRepair');
+        if (ignore) ignore.checked = false;
+        if (autoRepair) autoRepair.checked = !!this.repairConfig.auto_repair;
+        if (typeof modal.showModal === 'function') {
+            modal.showModal();
+        } else {
+            modal.setAttribute('open', '');
+        }
+    }
+
+    openClearStateModal() {
+        const modal = document.getElementById('clearStateModal');
+        if (!modal) return;
+        document.getElementById('clearStateError')?.classList.add('hidden');
+        document.querySelectorAll('input[name="repair_state"]').forEach((input) => {
+            input.checked = false;
+        });
+        this.updateClearStateCounts(this.latestStatus.health_counts || {});
+        if (typeof modal.showModal === 'function') {
+            modal.showModal();
+        } else {
+            modal.setAttribute('open', '');
+        }
     }
 
     openBrokenModal() {
@@ -165,21 +213,30 @@ class RepairManager {
     }
 
     async runNow() {
+        const btn = document.getElementById('runRepairSubmitBtn');
+        if (btn) btn.disabled = true;
         try {
-            const ignoreLastChecked = !!document.getElementById('ignoreLastCheckedRun')?.checked;
+            const ignoreLastChecked = !!document.getElementById('runIgnoreLastChecked')?.checked;
+            const autoRepair = !!document.getElementById('runAutoRepair')?.checked;
             const res = await fetch(`${this.api}/repair/run`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ignore_last_checked: ignoreLastChecked}),
+                body: JSON.stringify({
+                    ignore_last_checked: ignoreLastChecked,
+                    auto_repair: autoRepair,
+                }),
             });
             if (!res.ok) {
                 const txt = await res.text();
                 throw new Error(txt || `HTTP ${res.status}`);
             }
+            document.getElementById('runRepairModal')?.close?.();
             this.toast(ignoreLastChecked ? 'Sweep started, including freshly checked entries' : 'Sweep started', 'success');
             await this.loadStatus();
         } catch (e) {
             this.toast(`Run failed: ${e.message}`, 'error');
+        } finally {
+            if (btn) btn.disabled = false;
         }
     }
 
@@ -203,22 +260,43 @@ class RepairManager {
         }
     }
 
-    async clearBroken() {
-        if (!confirm('Clear every currently broken file without re-searching for replacements?')) return;
-        const btn = document.getElementById('clearBrokenBtn');
+    async clearState() {
+        const selected = [...document.querySelectorAll('input[name="repair_state"]:checked')]
+            .map((input) => input.value);
+        const error = document.getElementById('clearStateError');
+        if (!selected.length) {
+            if (error) {
+                error.textContent = 'Select at least one state.';
+                error.classList.remove('hidden');
+            }
+            return;
+        }
+
+        const btn = document.getElementById('clearStateSubmitBtn');
         if (btn) btn.disabled = true;
         try {
-            const res = await fetch(`${this.api}/repair/clear`, {
+            const res = await fetch(`${this.api}/repair/clear-state`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({}),
+                body: JSON.stringify({statuses: selected}),
             });
             const text = await res.text();
-            if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
-            this.toast('Clear-broken started', 'success');
-            window.location.reload();
+            let data = null;
+            try {
+                data = text ? JSON.parse(text) : null;
+            } catch { /* leave null */
+            }
+            if (!res.ok) throw new Error((data && (data.error || data.message)) || text || `HTTP ${res.status}`);
+            document.getElementById('clearStateModal')?.close?.();
+            this.toast(`Cleared ${data?.cleared ?? 0} repair state entr${data?.cleared === 1 ? 'y' : 'ies'}`, 'success');
+            await Promise.all([this.loadStatus(), this.loadBroken()]);
         } catch (e) {
             this.toast(`Clear failed: ${e.message}`, 'error');
+            if (error) {
+                error.textContent = e.message;
+                error.classList.remove('hidden');
+            }
+        } finally {
             if (btn) btn.disabled = false;
         }
     }
@@ -278,6 +356,7 @@ class RepairManager {
     }
 
     renderStatus(status) {
+        this.latestStatus = status || {};
         const line = document.getElementById('repairStatusLine');
         const stop = document.getElementById('stopRunBtn');
         const run = document.getElementById('runNowBtn');
@@ -295,10 +374,11 @@ class RepairManager {
         this.updateBrokenCount(brokenCount);
         const fix = document.getElementById('fixBrokenBtn');
         if (fix) fix.disabled = !!status.active_run || brokenCount === 0;
-        const clear = document.getElementById('clearBrokenBtn');
-        if (clear) clear.disabled = !!status.active_run || brokenCount === 0;
+        const clear = document.getElementById('clearStateBtn');
+        if (clear) clear.disabled = !!status.active_run;
         const view = document.getElementById('viewBrokenBtn');
         if (view) view.disabled = brokenCount === 0;
+        this.updateClearStateCounts(status.health_counts || {});
 
         if (status.active_run) {
             stop.disabled = false;
@@ -334,6 +414,13 @@ class RepairManager {
             `;
             grid.appendChild(card);
         }
+    }
+
+    updateClearStateCounts(counts) {
+        document.querySelectorAll('[data-clear-state-count]').forEach((el) => {
+            const status = el.getAttribute('data-clear-state-count');
+            el.textContent = counts?.[status] || 0;
+        });
     }
 
     renderRunStats(container, stats) {
@@ -456,9 +543,6 @@ class RepairManager {
                     <button class="btn btn-xs btn-error btn-outline" data-action="fix" data-name="${this.escapeAttr(h.entry_name)}" aria-label="Fix ${this.escape(h.entry_name)}">
                         <i class="bi bi-bandaid"></i>
                     </button>
-                    <button class="btn btn-xs btn-warning btn-outline" data-action="clear" data-name="${this.escapeAttr(h.entry_name)}" aria-label="Clear ${this.escape(h.entry_name)}">
-                        <i class="bi bi-trash"></i>
-                    </button>
                 </td>
             `;
             tbody.appendChild(tr);
@@ -488,10 +572,6 @@ class RepairManager {
             tr.querySelector('[data-action="fix"]')?.addEventListener('click', (ev) => {
                 ev.stopPropagation();
                 this.fixOne(h.entry_name);
-            });
-            tr.querySelector('[data-action="clear"]')?.addEventListener('click', (ev) => {
-                ev.stopPropagation();
-                this.clearOne(h.entry_name);
             });
         }
         this.renderBrokenPagination();
@@ -600,22 +680,6 @@ class RepairManager {
             window.location.reload();
         } catch (e) {
             this.toast(`Fix failed: ${e.message}`, 'error');
-        }
-    }
-
-    async clearOne(name) {
-        if (!confirm(`Clear broken files for "${name}" without re-searching?`)) return;
-        try {
-            const res = await fetch(`${this.api}/repair/clear`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({names: [name]}),
-            });
-            if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
-            this.toast(`Clear started for ${name}`, 'success');
-            window.location.reload();
-        } catch (e) {
-            this.toast(`Clear failed: ${e.message}`, 'error');
         }
     }
 

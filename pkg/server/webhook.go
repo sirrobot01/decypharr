@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	json "github.com/bytedance/sonic"
+	"github.com/sirrobot01/decypharr/pkg/manager"
 )
 
 // handleTautulli handles webhooks from Tautulli. When the payload includes a
@@ -46,7 +47,7 @@ func (s *Server) handleTautulli(w http.ResponseWriter, r *http.Request) {
 	mediaID := strings.TrimSpace(cmp.Or(payload.MediaID, payload.TmdbID, payload.TvdbID))
 	if mediaID == "" {
 		// No targeting → fall back to a full sweep.
-		if _, err := svc.RunNow(false); err != nil {
+		if _, err := svc.RunNow(manager.RepairRunOptions{}); err != nil {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}

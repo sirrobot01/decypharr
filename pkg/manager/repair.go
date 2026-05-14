@@ -34,6 +34,18 @@ type RepairStatus struct {
 	HealthCounts map[storage.HealthStatus]int `json:"health_counts"`
 }
 
+// RepairRunOptions are one-off options for a manually-started repair run.
+// Nil fields inherit the persisted repair config.
+type RepairRunOptions struct {
+	IgnoreLastChecked bool
+	AutoRepair        *bool
+}
+
+type ClearRepairStateResult struct {
+	Statuses []storage.HealthStatus `json:"statuses"`
+	Cleared  int                    `json:"cleared"`
+}
+
 const (
 	repairSchedulerTag    = "repair-sweep"
 	repairDefaultWorkers  = 5
@@ -119,7 +131,7 @@ func (r *Repair) Start(ctx context.Context) error {
 	r.scheduler.RemoveByTags(repairSchedulerTag)
 	if _, err := r.scheduler.NewJob(jd,
 		gocron.NewTask(func() {
-			if _, err := r.runSweep(storage.RepairTriggerScheduled, false); err != nil {
+			if _, err := r.runSweep(storage.RepairTriggerScheduled, RepairRunOptions{}); err != nil {
 				r.logger.Warn().Err(err).Msg("Scheduled repair sweep skipped")
 			}
 		}),
@@ -169,8 +181,31 @@ func (r *Repair) ApplyConfig() error {
 }
 
 // RunNow triggers a manual sweep. Returns the new run ID.
-func (r *Repair) RunNow(ignoreLastChecked bool) (string, error) {
-	return r.runSweep(storage.RepairTriggerManual, ignoreLastChecked)
+func (r *Repair) RunNow(opts RepairRunOptions) (string, error) {
+	return r.runSweep(storage.RepairTriggerManual, opts)
+}
+
+// ClearStates clears persisted repair-health state for selected statuses. It
+// does not touch files, Arrs, debrid placements, or run history.
+func (r *Repair) ClearStates(statuses []storage.HealthStatus) (ClearRepairStateResult, error) {
+	result := ClearRepairStateResult{Statuses: statuses}
+	if len(statuses) == 0 {
+		return result, errors.New("at least one status is required")
+	}
+
+	r.mu.Lock()
+	activeID := r.activeRunID
+	r.mu.Unlock()
+	if activeID != "" {
+		return result, fmt.Errorf("repair already running (run %s)", activeID)
+	}
+
+	cleared, err := r.manager.storage.ClearEntryHealthByStatuses(statuses)
+	if err != nil {
+		return result, err
+	}
+	result.Cleared = cleared
+	return result, nil
 }
 
 // StopRun cancels the currently-active sweep, if any. The run record is also
@@ -308,7 +343,7 @@ func (r *Repair) reconcileOrphans() {
 
 // runSweep is the entry-point shared by RunNow and the scheduled callback. It
 // guards against concurrent runs, persists the run record, then dispatches.
-func (r *Repair) runSweep(trigger storage.RepairRunTrigger, ignoreLastChecked bool) (string, error) {
+func (r *Repair) runSweep(trigger storage.RepairRunTrigger, opts RepairRunOptions) (string, error) {
 	cfg := r.cfg()
 	if !cfg.Enabled && trigger == storage.RepairTriggerScheduled {
 		return "", errors.New("repair disabled")
@@ -322,9 +357,16 @@ func (r *Repair) runSweep(trigger storage.RepairRunTrigger, ignoreLastChecked bo
 	}
 
 	runCtx, cancel := context.WithCancel(r.parentCtx)
-	source := string(cfg.Source)
-	if ignoreLastChecked {
-		source += ":ignore-last-checked"
+	sourceParts := []string{string(cfg.Source)}
+	if opts.IgnoreLastChecked {
+		sourceParts = append(sourceParts, "ignore-last-checked")
+	}
+	if opts.AutoRepair != nil {
+		if *opts.AutoRepair {
+			sourceParts = append(sourceParts, "auto-repair")
+		} else {
+			sourceParts = append(sourceParts, "no-auto-repair")
+		}
 	}
 	run := &storage.RepairRun{
 		ID:        uuid.NewString(),
@@ -332,7 +374,7 @@ func (r *Repair) runSweep(trigger storage.RepairRunTrigger, ignoreLastChecked bo
 		Status:    storage.RepairRunRunning,
 		Stage:     storage.RepairStageSelecting,
 		StartedAt: time.Now(),
-		Source:    source,
+		Source:    strings.Join(sourceParts, ":"),
 	}
 	r.activeRunID = run.ID
 	r.cancelRun = cancel
@@ -359,7 +401,7 @@ func (r *Repair) runSweep(trigger storage.RepairRunTrigger, ignoreLastChecked bo
 			r.mu.Unlock()
 			cancel()
 		}()
-		r.executeSweep(runCtx, run, ignoreLastChecked)
+		r.executeSweep(runCtx, run, opts)
 	}()
 
 	r.logger.Info().Str("run_id", run.ID).Str("trigger", string(trigger)).Msg("Repair sweep started")

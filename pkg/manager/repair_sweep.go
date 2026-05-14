@@ -73,7 +73,7 @@ type fileResult struct {
 }
 
 // executeSweep is the body of a sweep: enumerate, filter due, probe, repair.
-func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, ignoreLastChecked bool) {
+func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, opts RepairRunOptions) {
 	cfg := r.cfg()
 	log := r.logger.With().Str("run_id", run.ID).Logger()
 
@@ -93,7 +93,7 @@ func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, ignor
 		return
 	}
 
-	due, skipped := r.filterDueCandidates(candidates, ignoreLastChecked)
+	due, skipped := r.filterDueCandidates(candidates, opts.IgnoreLastChecked)
 	run.Stats.Candidates = len(due)
 	run.Stats.SkippedFresh = skipped
 	run.Stage = storage.RepairStageProbing
@@ -117,7 +117,11 @@ func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, ignor
 		return
 	}
 
-	if cfg.AutoRepair {
+	autoRepair := cfg.AutoRepair
+	if opts.AutoRepair != nil {
+		autoRepair = *opts.AutoRepair
+	}
+	if autoRepair {
 		run.Stage = storage.RepairStageRepairing
 		r.saveRun(run)
 		r.repairBroken(ctx, run, healths)

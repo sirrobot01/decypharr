@@ -547,8 +547,9 @@ func (s *Server) handleRepairStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRunRepair(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		IgnoreLastChecked bool `json:"ignore_last_checked,omitempty"`
-		Force             bool `json:"force,omitempty"`
+		IgnoreLastChecked bool  `json:"ignore_last_checked,omitempty"`
+		Force             bool  `json:"force,omitempty"`
+		AutoRepair        *bool `json:"auto_repair,omitempty"`
 	}
 	if r.Body != nil && r.ContentLength != 0 {
 		if err := json.ConfigDefault.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
@@ -565,13 +566,25 @@ func (s *Server) handleRunRepair(w http.ResponseWriter, r *http.Request) {
 	case "1", "true", "yes", "on":
 		ignoreLastChecked = true
 	}
+	autoRepair := req.AutoRepair
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("auto_repair"))) {
+	case "1", "true", "yes", "on":
+		v := true
+		autoRepair = &v
+	case "0", "false", "no", "off":
+		v := false
+		autoRepair = &v
+	}
 
 	svc := s.manager.Repair()
 	if svc == nil {
 		http.Error(w, "Repair service not available", http.StatusServiceUnavailable)
 		return
 	}
-	id, err := svc.RunNow(ignoreLastChecked)
+	id, err := svc.RunNow(manager.RepairRunOptions{
+		IgnoreLastChecked: ignoreLastChecked,
+		AutoRepair:        autoRepair,
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -772,6 +785,65 @@ func (s *Server) handleClearBroken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	utils.JSONResponse(w, run, http.StatusOK)
+}
+
+func (s *Server) handleClearRepairState(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Statuses []string `json:"statuses"`
+	}
+	if err := json.ConfigDefault.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	statuses := make([]storage.HealthStatus, 0, len(req.Statuses))
+	for _, raw := range req.Statuses {
+		status, ok := parseRepairHealthStatus(raw)
+		if !ok {
+			http.Error(w, "Invalid repair health status: "+raw, http.StatusBadRequest)
+			return
+		}
+		statuses = append(statuses, status)
+	}
+	if len(statuses) == 0 {
+		http.Error(w, "At least one status is required", http.StatusBadRequest)
+		return
+	}
+
+	svc := s.manager.Repair()
+	if svc == nil {
+		http.Error(w, "Repair service not available", http.StatusServiceUnavailable)
+		return
+	}
+	result, err := svc.ClearStates(statuses)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "already running") {
+			status = http.StatusConflict
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	utils.JSONResponse(w, result, http.StatusOK)
+}
+
+func parseRepairHealthStatus(raw string) (storage.HealthStatus, bool) {
+	switch storage.HealthStatus(strings.ToLower(strings.TrimSpace(raw))) {
+	case storage.HealthHealthy:
+		return storage.HealthHealthy, true
+	case storage.HealthBroken:
+		return storage.HealthBroken, true
+	case storage.HealthRepairing:
+		return storage.HealthRepairing, true
+	case storage.HealthStale:
+		return storage.HealthStale, true
+	case storage.HealthUnknown:
+		return storage.HealthUnknown, true
+	case storage.HealthUnsupported:
+		return storage.HealthUnsupported, true
+	default:
+		return "", false
+	}
 }
 
 func (s *Server) handleRefreshAPIToken(w http.ResponseWriter, _ *http.Request) {
