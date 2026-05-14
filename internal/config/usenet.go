@@ -12,6 +12,7 @@ type UsenetProvider struct {
 	Port           int    `json:"port,omitempty"` // Port of the usenet server
 	Username       string `json:"username,omitempty"`
 	Password       string `json:"password,omitempty"`
+	Backbone       string `json:"backbone,omitempty"`        // Shared article backbone identifier used for failover decisions
 	MaxConnections int    `json:"max_connections,omitempty"` // Max connections for this provider (default: 10)
 	SSL            bool   `json:"ssl,omitempty"`             // Use SSL/TLS for the connection
 	Priority       int    `json:"priority,omitempty"`        // Priority for this provider (lower = higher priority)
@@ -164,6 +165,9 @@ func (c *Config) applyUsenetEnvVars() {
 			}
 			if password := getEnv(prefix + "PASSWORD"); password != "" {
 				c.Usenet.Providers[i].Password = password
+			}
+			if backbone := getEnv(prefix + "BACKBONE"); backbone != "" {
+				c.Usenet.Providers[i].Backbone = backbone
 			}
 			if maxConnections := getEnv(prefix + "MAX_CONNECTIONS"); maxConnections != "" {
 				if v, err := strconv.Atoi(maxConnections); err == nil {

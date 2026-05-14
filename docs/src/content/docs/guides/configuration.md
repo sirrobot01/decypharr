@@ -97,6 +97,7 @@ Array of Debrid services:
         "port": 563,
         "username": "user",
         "password": "pass",
+        "backbone": "Omicron",
         "ssl": true,
         "max_connections": 20,
         "priority": 1
@@ -134,6 +135,7 @@ Array of Debrid services:
 | `port`            | int    | NNTP port                          | `119` (563 for SSL) |
 | `username`        | string | NNTP username                      | **Required**        |
 | `password`        | string | NNTP password                      | **Required**        |
+| `backbone`        | string | Optional shared article backbone for article-not-found failover | `""` |
 | `ssl`             | bool   | Use SSL/TLS                        | `false`             |
 | `max_connections` | int    | Max connections to this server     | `20`                |
 | `priority`        | int    | Provider priority (lower = higher) | Index + 1           |
@@ -325,6 +327,7 @@ DEBRIDS__0__API_KEY=your_key
 USENET__MAX_CONNECTIONS=20
 USENET__PROVIDERS__0__HOST=news.provider.com
 USENET__PROVIDERS__0__PORT=563
+USENET__PROVIDERS__0__BACKBONE=Omicron
 
 # Mount - DFS
 MOUNT__DFS__CACHE_DIR=/cache

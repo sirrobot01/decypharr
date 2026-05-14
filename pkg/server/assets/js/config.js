@@ -1207,11 +1207,12 @@ class ConfigManager {
             const portInput = getField('port');
             const usernameInput = getField('username');
             const passwordInput = getField('password');
+            const backboneInput = getField('backbone');
             const sslInput = getField('ssl');
             const maxConnectionsInput = getField('max_connections');
             const priorityInput = getField('priority');
 
-            if (!hostInput || !portInput || !usernameInput || !passwordInput || !sslInput || !maxConnectionsInput || !priorityInput) {
+            if (!hostInput || !portInput || !usernameInput || !passwordInput || !backboneInput || !sslInput || !maxConnectionsInput || !priorityInput) {
                 return;
             }
 
@@ -1220,6 +1221,7 @@ class ConfigManager {
                 port: parseInt(portInput.value) || 119,
                 username: usernameInput.value,
                 password: passwordInput.value,
+                backbone: backboneInput.value.trim(),
                 ssl: sslInput.checked,
                 max_connections: parseInt(maxConnectionsInput.value) || 100,
                 priority: parseInt(priorityInput.value) || 0
@@ -1764,6 +1766,16 @@ class ConfigManager {
                                min="1" max="65535"
                                value="119">
                         <span class="text-sm opacity-70">NNTP port (563 for SSL, 119 for plain)</span>
+                    </div>
+                    <div>
+                        <label class="label" for="usenet_provider_${index}_backbone">
+                            <span class="font-medium">Backbone</span>
+                        </label>
+                        <input type="text" class="input w-full"
+                               name="usenet.providers[${index}].backbone"
+                               id="usenet_provider_${index}_backbone"
+                               placeholder="Omicron">
+                        <span class="text-sm opacity-70">Optional shared article backbone for smarter 430 failover</span>
                     </div>
 
                     <div>

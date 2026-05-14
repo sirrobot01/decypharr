@@ -273,14 +273,14 @@ func isIdleExpired(lastUsed time.Time, now time.Time) bool {
 // Uses avast/retry-go for retry handling.
 func (c *Client) ExecuteWithFailover(ctx context.Context, fn func(conn *Connection) error) error {
 	var lastErr error
-	excludedProviders := make(map[string]bool)
+	var exclusions providerExclusions
 
 	for providerAttempts := 0; providerAttempts < len(c.providers); providerAttempts++ {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 
-		conn, connProvider, err := c.getAnyAvailableConnection(ctx, excludedProviders)
+		conn, connProvider, err := c.getAnyAvailableConnection(ctx, exclusions)
 		if err != nil {
 			lastErr = err
 			continue
@@ -308,7 +308,7 @@ func (c *Client) ExecuteWithFailover(ctx context.Context, fn func(conn *Connecti
 						currentConn = nil
 						c.release(releasedConn)
 						// Get a fresh connection for retry
-						newConn, newProvider, connErr := c.getAnyAvailableConnection(ctx, map[string]bool{})
+						newConn, newProvider, connErr := c.getAnyAvailableConnection(ctx, providerExclusions{})
 						if connErr != nil {
 							return retry.Unrecoverable(connErr)
 						}
@@ -368,17 +368,17 @@ func (c *Client) ExecuteWithFailover(ctx context.Context, fn func(conn *Connecti
 		// Check if we should exclude this provider
 		var nntpErr *Error
 		if errors.As(err, &nntpErr) {
-			if nntpErr.Type == ErrorTypeArticleNotFound ||
-				nntpErr.Type == ErrorTypeConnection ||
-				nntpErr.Type == ErrorTypeTimeout ||
-				nntpErr.Type == ErrorTypeServerBusy {
-				excludedProviders[connProvider.Host] = true
-			} else {
+			switch nntpErr.Type {
+			case ErrorTypeArticleNotFound:
+				excludeForArticleNotFound(&exclusions, connProvider)
+			case ErrorTypeConnection, ErrorTypeTimeout, ErrorTypeServerBusy:
+				exclusions.excludeHost(connProvider.Host)
+			default:
 				// Non-retriable error, return immediately
 				return err
 			}
 		} else if customerror.IsPanicError(err) {
-			excludedProviders[connProvider.Host] = true
+			exclusions.excludeHost(connProvider.Host)
 		} else {
 			// Unknown error type - return immediately
 			return err
@@ -440,11 +440,11 @@ func (c *Client) safeExecute(conn *Connection, fn func(conn *Connection) error) 
 // getAnyAvailableConnection gets a connection from ANY provider that isn't excluded.
 // Phase 1: Non-blocking scan of all eligible providers (fast path)
 // Phase 2: If all busy, race goroutines to get first available slot
-func (c *Client) getAnyAvailableConnection(ctx context.Context, excludedProviders map[string]bool) (*Connection, config.UsenetProvider, error) {
+func (c *Client) getAnyAvailableConnection(ctx context.Context, exclusions providerExclusions) (*Connection, config.UsenetProvider, error) {
 	// Build list of eligible providers
 	var eligible []config.UsenetProvider
 	for _, p := range c.providers {
-		if !excludedProviders[p.Host] {
+		if !exclusions.excludes(p) {
 			eligible = append(eligible, p)
 		}
 	}
@@ -876,6 +876,60 @@ type batchStatState struct {
 	sawNotFound bool
 	sawOtherErr bool
 	lastErr     error
+	exclusions  providerExclusions
+}
+
+type providerExclusions struct {
+	hosts     map[string]struct{}
+	backbones map[string]struct{}
+}
+
+func (e *providerExclusions) excludeHost(host string) {
+	if host == "" {
+		return
+	}
+	if e.hosts == nil {
+		e.hosts = make(map[string]struct{})
+	}
+	e.hosts[host] = struct{}{}
+}
+
+func (e *providerExclusions) excludeBackbone(backbone string) {
+	backbone = normalizeBackbone(backbone)
+	if backbone == "" {
+		return
+	}
+	if e.backbones == nil {
+		e.backbones = make(map[string]struct{})
+	}
+	e.backbones[backbone] = struct{}{}
+}
+
+func (e providerExclusions) excludes(provider config.UsenetProvider) bool {
+	if _, ok := e.hosts[provider.Host]; ok {
+		return true
+	}
+	backbone := normalizeBackbone(provider.Backbone)
+	if backbone == "" {
+		return false
+	}
+	_, ok := e.backbones[backbone]
+	return ok
+}
+
+func normalizeBackbone(backbone string) string {
+	return strings.ToLower(strings.TrimSpace(backbone))
+}
+
+func excludeForArticleNotFound(exclusions *providerExclusions, provider config.UsenetProvider) {
+	if exclusions == nil {
+		return
+	}
+	if backbone := normalizeBackbone(provider.Backbone); backbone != "" {
+		exclusions.excludeBackbone(backbone)
+		return
+	}
+	exclusions.excludeHost(provider.Host)
 }
 
 // BatchStat checks the availability of many message IDs using NNTP STAT,
@@ -1029,14 +1083,22 @@ func (c *Client) batchStatAcrossProviders(ctx context.Context, messageIDs []stri
 			return results, ctx.Err()
 		}
 
-		chunkIDs := make([]string, len(unresolved))
-		for i, idx := range unresolved {
-			chunkIDs[i] = messageIDs[idx]
+		queryIdxs := make([]int, 0, len(unresolved))
+		chunkIDs := make([]string, 0, len(unresolved))
+		for _, idx := range unresolved {
+			if states[idx].exclusions.excludes(provider) {
+				continue
+			}
+			queryIdxs = append(queryIdxs, idx)
+			chunkIDs = append(chunkIDs, messageIDs[idx])
+		}
+		if len(queryIdxs) == 0 {
+			continue
 		}
 
 		providerResults, err := c.batchStatOnProvider(ctx, provider, chunkIDs)
 		if err != nil && len(providerResults) == 0 {
-			for _, idx := range unresolved {
+			for _, idx := range queryIdxs {
 				states[idx].sawOtherErr = true
 				states[idx].lastErr = err
 			}
@@ -1044,8 +1106,14 @@ func (c *Client) batchStatAcrossProviders(ctx context.Context, messageIDs []stri
 		}
 
 		nextUnresolved := make([]int, 0, len(unresolved))
-		for i, idx := range unresolved {
-			if i >= len(providerResults) {
+		queryPos := 0
+		for _, idx := range unresolved {
+			if states[idx].exclusions.excludes(provider) {
+				nextUnresolved = append(nextUnresolved, idx)
+				continue
+			}
+
+			if queryPos >= len(providerResults) {
 				states[idx].sawOtherErr = true
 				if err != nil {
 					states[idx].lastErr = err
@@ -1056,7 +1124,8 @@ func (c *Client) batchStatAcrossProviders(ctx context.Context, messageIDs []stri
 				continue
 			}
 
-			res := providerResults[i]
+			res := providerResults[queryPos]
+			queryPos++
 			if res.Available {
 				results[idx] = res
 				continue
@@ -1065,6 +1134,7 @@ func (c *Client) batchStatAcrossProviders(ctx context.Context, messageIDs []stri
 			var nntpErr *Error
 			if res.Error != nil && errors.As(res.Error, &nntpErr) && nntpErr.Type == ErrorTypeArticleNotFound {
 				states[idx].sawNotFound = true
+				excludeForArticleNotFound(&states[idx].exclusions, provider)
 			} else {
 				states[idx].sawOtherErr = true
 				if res.Error != nil {

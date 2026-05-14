@@ -26,6 +26,7 @@ Decypharr connects directly to NNTP servers to:
         "port": 563,
         "username": "your_username",
         "password": "your_password",
+        "backbone": "Omicron",
         "ssl": true,
         "max_connections": 20,
         "priority": 1
@@ -48,6 +49,7 @@ Decypharr can use multiple providers with priority and failover:
         "port": 563,
         "username": "user1",
         "password": "pass1",
+        "backbone": "UsenetExpress",
         "ssl": true,
         "max_connections": 20,
         "priority": 1
@@ -57,6 +59,7 @@ Decypharr can use multiple providers with priority and failover:
         "port": 563,
         "username": "user2",
         "password": "pass2",
+        "backbone": "Omicron",
         "ssl": true,
         "max_connections": 10,
         "priority": 2
@@ -67,6 +70,8 @@ Decypharr can use multiple providers with priority and failover:
 ```
 
 Lower `priority` = higher preference.
+
+`backbone` is optional. Set it when two providers share the same article spool so Decypharr can skip same-backbone providers after `423/430 article not found` responses.
 
 ## Performance Tuning
 
