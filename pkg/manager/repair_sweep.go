@@ -906,9 +906,8 @@ func (r *Repair) FixBroken(ctx context.Context, names []string) (*storage.Repair
 	return run, nil
 }
 
-// ClearBroken removes currently-broken files from the local mount state and,
-// when Arr metadata is available, clears the corresponding Sonarr/Radarr file
-// rows. It deliberately does not mark history failed or trigger any re-search.
+// ClearBroken removes currently-broken files from the local mount state. It
+// deliberately does not call Arrs, mark history failed, or trigger re-search.
 func (r *Repair) ClearBroken(ctx context.Context, names []string) (*storage.RepairRun, error) {
 	if ctx == nil {
 		ctx = r.parentCtx
@@ -981,48 +980,6 @@ func (r *Repair) ClearBroken(ctx context.Context, names []string) (*storage.Repa
 }
 
 func (r *Repair) clearBroken(ctx context.Context, run *storage.RepairRun, healths *xsync.Map[string, *storage.EntryHealth]) {
-	byArr := make(map[string][]arr.ContentFile)
-	healths.Range(func(_ string, h *storage.EntryHealth) bool {
-		if h == nil {
-			return true
-		}
-		for _, bf := range h.BrokenFiles {
-			if bf.ArrName == "" || bf.ArrFileID == 0 {
-				continue
-			}
-			byArr[bf.ArrName] = append(byArr[bf.ArrName], arr.ContentFile{
-				Id:        bf.MediaID,
-				EpisodeId: bf.EpisodeID,
-				FileId:    bf.ArrFileID,
-				Name:      bf.FileName,
-				Path:      bf.SourcePath,
-				Size:      bf.Size,
-				IsBroken:  true,
-			})
-		}
-		return true
-	})
-
-	arrCleared := make(map[string]struct{}, len(byArr))
-	for arrName, files := range byArr {
-		if ctx != nil && ctx.Err() != nil {
-			return
-		}
-		a := r.manager.arr.Get(arrName)
-		if a == nil {
-			run.Stats.RepairFailed += len(files)
-			r.saveRun(run)
-			continue
-		}
-		if err := a.DeleteFiles(ctx, files); err != nil {
-			r.logger.Warn().Err(err).Str("arr", arrName).Msg("ClearBroken: DeleteFiles failed")
-			run.Stats.RepairFailed += len(files)
-			r.saveRun(run)
-			continue
-		}
-		arrCleared[arrName] = struct{}{}
-	}
-
 	now := time.Now()
 	healths.Range(func(name string, h *storage.EntryHealth) bool {
 		if ctx != nil && ctx.Err() != nil {
@@ -1040,13 +997,6 @@ func (r *Repair) clearBroken(ctx context.Context, run *storage.RepairRun, health
 
 		remaining := make([]storage.BrokenFile, 0, len(h.BrokenFiles))
 		for _, bf := range h.BrokenFiles {
-			if bf.ArrName != "" && bf.ArrFileID != 0 {
-				if _, ok := arrCleared[bf.ArrName]; !ok {
-					remaining = append(remaining, bf)
-					continue
-				}
-			}
-
 			if err := r.manager.RemoveTorrentFile(bf.EntryName, bf.FileName); err != nil {
 				if isAlreadyClearedFileError(err) {
 					run.Stats.Cleared++
