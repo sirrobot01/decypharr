@@ -546,12 +546,32 @@ func (s *Server) handleRepairStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRunRepair(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IgnoreLastChecked bool `json:"ignore_last_checked,omitempty"`
+		Force             bool `json:"force,omitempty"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := json.ConfigDefault.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	ignoreLastChecked := req.IgnoreLastChecked || req.Force
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("ignore_last_checked"))) {
+	case "1", "true", "yes", "on":
+		ignoreLastChecked = true
+	}
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("force"))) {
+	case "1", "true", "yes", "on":
+		ignoreLastChecked = true
+	}
+
 	svc := s.manager.Repair()
 	if svc == nil {
 		http.Error(w, "Repair service not available", http.StatusServiceUnavailable)
 		return
 	}
-	id, err := svc.RunNow()
+	id, err := svc.RunNow(ignoreLastChecked)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -713,6 +733,36 @@ func (s *Server) handleFixBroken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	run, err := svc.FixBroken(s.manager.Context(), req.Names)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "already running") {
+			status = http.StatusConflict
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	utils.JSONResponse(w, run, http.StatusOK)
+}
+
+// handleClearBroken clears currently broken files without asking the Arr to
+// re-search for replacements. Body: {"names": ["...", ...]}. Empty/missing
+// names ⇒ clear every broken entry in storage.
+func (s *Server) handleClearBroken(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Names []string `json:"names,omitempty"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := json.ConfigDefault.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	svc := s.manager.Repair()
+	if svc == nil {
+		http.Error(w, "Repair service not available", http.StatusServiceUnavailable)
+		return
+	}
+	run, err := svc.ClearBroken(s.manager.Context(), req.Names)
 	if err != nil {
 		status := http.StatusBadRequest
 		if strings.Contains(err.Error(), "already running") {

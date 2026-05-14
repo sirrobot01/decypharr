@@ -51,6 +51,7 @@ type RepairRunStats struct {
 	Broken       int `json:"broken"`
 	Unknown      int `json:"unknown"`
 	Repaired     int `json:"repaired"`
+	Cleared      int `json:"cleared,omitempty"`
 	RepairFailed int `json:"repair_failed"`
 }
 
@@ -81,7 +82,6 @@ func NormalizeRepairStrategy(strategy RepairStrategy) RepairStrategy {
 		return RepairStrategyPerEntry
 	}
 }
-
 
 func (s *Storage) SaveRepairRun(run *RepairRun) error {
 	if run == nil || run.ID == "" {
@@ -176,7 +176,6 @@ func (s *Storage) ClearRepairRuns() error {
 	}
 	return nil
 }
-
 
 // HealthStatus is the rolled-up state of an entry as seen by the repair system.
 type HealthStatus string
@@ -403,4 +402,3 @@ func EntryItemRepairFingerprint(item *EntryItem) string {
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
-

@@ -18,6 +18,7 @@ class RepairManager {
         $('runNowBtn')?.addEventListener('click', () => this.runNow());
         $('stopRunBtn')?.addEventListener('click', () => this.stopRun());
         $('fixBrokenBtn')?.addEventListener('click', () => this.fixBroken());
+        $('clearBrokenBtn')?.addEventListener('click', () => this.clearBroken());
         $('viewBrokenBtn')?.addEventListener('click', () => this.openBrokenModal());
         $('refreshHistoryBtn')?.addEventListener('click', () => this.loadHistory());
         $('refreshBrokenBtn')?.addEventListener('click', () => this.loadBroken());
@@ -165,12 +166,17 @@ class RepairManager {
 
     async runNow() {
         try {
-            const res = await fetch(`${this.api}/repair/run`, {method: 'POST'});
+            const ignoreLastChecked = !!document.getElementById('ignoreLastCheckedRun')?.checked;
+            const res = await fetch(`${this.api}/repair/run`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ignore_last_checked: ignoreLastChecked}),
+            });
             if (!res.ok) {
                 const txt = await res.text();
                 throw new Error(txt || `HTTP ${res.status}`);
             }
-            this.toast('Sweep started', 'success');
+            this.toast(ignoreLastChecked ? 'Sweep started, including freshly checked entries' : 'Sweep started', 'success');
             await this.loadStatus();
         } catch (e) {
             this.toast(`Run failed: ${e.message}`, 'error');
@@ -193,6 +199,26 @@ class RepairManager {
             window.location.reload();
         } catch (e) {
             this.toast(`Fix failed: ${e.message}`, 'error');
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    async clearBroken() {
+        if (!confirm('Clear every currently broken file without re-searching for replacements?')) return;
+        const btn = document.getElementById('clearBrokenBtn');
+        if (btn) btn.disabled = true;
+        try {
+            const res = await fetch(`${this.api}/repair/clear`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({}),
+            });
+            const text = await res.text();
+            if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
+            this.toast('Clear-broken started', 'success');
+            window.location.reload();
+        } catch (e) {
+            this.toast(`Clear failed: ${e.message}`, 'error');
             if (btn) btn.disabled = false;
         }
     }
@@ -269,6 +295,8 @@ class RepairManager {
         this.updateBrokenCount(brokenCount);
         const fix = document.getElementById('fixBrokenBtn');
         if (fix) fix.disabled = !!status.active_run || brokenCount === 0;
+        const clear = document.getElementById('clearBrokenBtn');
+        if (clear) clear.disabled = !!status.active_run || brokenCount === 0;
         const view = document.getElementById('viewBrokenBtn');
         if (view) view.disabled = brokenCount === 0;
 
@@ -317,6 +345,7 @@ class RepairManager {
             ['healthy', 'Healthy'],
             ['broken', 'Broken'],
             ['repaired', 'Repaired'],
+            ['cleared', 'Cleared'],
             ['repair_failed', 'Repair fail'],
         ];
         container.innerHTML = '';
@@ -427,6 +456,9 @@ class RepairManager {
                     <button class="btn btn-xs btn-error btn-outline" data-action="fix" data-name="${this.escapeAttr(h.entry_name)}" aria-label="Fix ${this.escape(h.entry_name)}">
                         <i class="bi bi-bandaid"></i>
                     </button>
+                    <button class="btn btn-xs btn-warning btn-outline" data-action="clear" data-name="${this.escapeAttr(h.entry_name)}" aria-label="Clear ${this.escape(h.entry_name)}">
+                        <i class="bi bi-trash"></i>
+                    </button>
                 </td>
             `;
             tbody.appendChild(tr);
@@ -456,6 +488,10 @@ class RepairManager {
             tr.querySelector('[data-action="fix"]')?.addEventListener('click', (ev) => {
                 ev.stopPropagation();
                 this.fixOne(h.entry_name);
+            });
+            tr.querySelector('[data-action="clear"]')?.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                this.clearOne(h.entry_name);
             });
         }
         this.renderBrokenPagination();
@@ -567,6 +603,22 @@ class RepairManager {
         }
     }
 
+    async clearOne(name) {
+        if (!confirm(`Clear broken files for "${name}" without re-searching?`)) return;
+        try {
+            const res = await fetch(`${this.api}/repair/clear`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({names: [name]}),
+            });
+            if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+            this.toast(`Clear started for ${name}`, 'success');
+            window.location.reload();
+        } catch (e) {
+            this.toast(`Clear failed: ${e.message}`, 'error');
+        }
+    }
+
     slug(s) {
         return String(s || '').replace(/[^a-zA-Z0-9_-]+/g, '_');
     }
@@ -605,6 +657,7 @@ class RepairManager {
                 <td>${run.stats?.probed ?? 0}</td>
                 <td class="${run.stats?.broken ? 'text-error font-medium' : ''}">${run.stats?.broken ?? 0}</td>
                 <td class="${run.stats?.repaired ? 'text-success font-medium' : ''}">${run.stats?.repaired ?? 0}</td>
+                <td class="${run.stats?.cleared ? 'text-warning font-medium' : ''}">${run.stats?.cleared ?? 0}</td>
                 <td>${duration}</td>
                 <td class="text-xs text-error">${run.error || ''}</td>
             `;

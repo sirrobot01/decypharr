@@ -27,6 +27,10 @@
                     </p>
                 </div>
                 <div class="flex flex-wrap gap-2">
+                    <label class="label cursor-pointer gap-2 px-2 py-0">
+                        <input type="checkbox" class="checkbox checkbox-primary checkbox-sm" id="ignoreLastCheckedRun">
+                        <span class="label-text text-xs">Ignore last checked</span>
+                    </label>
                     <button id="runNowBtn" class="btn btn-primary btn-sm">
                         <i class="bi bi-play-fill mr-1"></i>Run now
                     </button>
@@ -38,6 +42,10 @@
                     <button id="fixBrokenBtn" class="btn btn-error btn-outline btn-sm"
                             title="Trigger Arr delete + re-search on currently broken entries">
                         <i class="bi bi-bandaid mr-1"></i>Fix broken
+                    </button>
+                    <button id="clearBrokenBtn" class="btn btn-warning btn-outline btn-sm"
+                            title="Clear broken files without re-searching">
+                        <i class="bi bi-trash mr-1"></i>Clear broken
                     </button>
                     <button id="stopRunBtn" class="btn btn-warning btn-sm" disabled>
                         <i class="bi bi-stop-fill mr-1"></i>Stop
@@ -69,7 +77,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 text-sm" id="activeRunStats">
+                <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 text-sm" id="activeRunStats">
                     <!-- filled by JS -->
                 </div>
             </div>
@@ -148,6 +156,7 @@
                         <th>Probed</th>
                         <th>Broken</th>
                         <th>Repaired</th>
+                        <th>Cleared</th>
                         <th>Duration</th>
                         <th>Error</th>
                     </tr>

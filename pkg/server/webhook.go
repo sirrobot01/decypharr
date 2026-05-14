@@ -46,7 +46,7 @@ func (s *Server) handleTautulli(w http.ResponseWriter, r *http.Request) {
 	mediaID := strings.TrimSpace(cmp.Or(payload.MediaID, payload.TmdbID, payload.TvdbID))
 	if mediaID == "" {
 		// No targeting → fall back to a full sweep.
-		if _, err := svc.RunNow(); err != nil {
+		if _, err := svc.RunNow(false); err != nil {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}

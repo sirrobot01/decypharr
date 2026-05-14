@@ -119,7 +119,7 @@ func (r *Repair) Start(ctx context.Context) error {
 	r.scheduler.RemoveByTags(repairSchedulerTag)
 	if _, err := r.scheduler.NewJob(jd,
 		gocron.NewTask(func() {
-			if _, err := r.runSweep(storage.RepairTriggerScheduled); err != nil {
+			if _, err := r.runSweep(storage.RepairTriggerScheduled, false); err != nil {
 				r.logger.Warn().Err(err).Msg("Scheduled repair sweep skipped")
 			}
 		}),
@@ -169,8 +169,8 @@ func (r *Repair) ApplyConfig() error {
 }
 
 // RunNow triggers a manual sweep. Returns the new run ID.
-func (r *Repair) RunNow() (string, error) {
-	return r.runSweep(storage.RepairTriggerManual)
+func (r *Repair) RunNow(ignoreLastChecked bool) (string, error) {
+	return r.runSweep(storage.RepairTriggerManual, ignoreLastChecked)
 }
 
 // StopRun cancels the currently-active sweep, if any. The run record is also
@@ -308,7 +308,7 @@ func (r *Repair) reconcileOrphans() {
 
 // runSweep is the entry-point shared by RunNow and the scheduled callback. It
 // guards against concurrent runs, persists the run record, then dispatches.
-func (r *Repair) runSweep(trigger storage.RepairRunTrigger) (string, error) {
+func (r *Repair) runSweep(trigger storage.RepairRunTrigger, ignoreLastChecked bool) (string, error) {
 	cfg := r.cfg()
 	if !cfg.Enabled && trigger == storage.RepairTriggerScheduled {
 		return "", errors.New("repair disabled")
@@ -322,13 +322,17 @@ func (r *Repair) runSweep(trigger storage.RepairRunTrigger) (string, error) {
 	}
 
 	runCtx, cancel := context.WithCancel(r.parentCtx)
+	source := string(cfg.Source)
+	if ignoreLastChecked {
+		source += ":ignore-last-checked"
+	}
 	run := &storage.RepairRun{
 		ID:        uuid.NewString(),
 		Trigger:   trigger,
 		Status:    storage.RepairRunRunning,
 		Stage:     storage.RepairStageSelecting,
 		StartedAt: time.Now(),
-		Source:    string(cfg.Source),
+		Source:    source,
 	}
 	r.activeRunID = run.ID
 	r.cancelRun = cancel
@@ -355,7 +359,7 @@ func (r *Repair) runSweep(trigger storage.RepairRunTrigger) (string, error) {
 			r.mu.Unlock()
 			cancel()
 		}()
-		r.executeSweep(runCtx, run)
+		r.executeSweep(runCtx, run, ignoreLastChecked)
 	}()
 
 	r.logger.Info().Str("run_id", run.ID).Str("trigger", string(trigger)).Msg("Repair sweep started")

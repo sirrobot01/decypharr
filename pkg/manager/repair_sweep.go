@@ -73,7 +73,7 @@ type fileResult struct {
 }
 
 // executeSweep is the body of a sweep: enumerate, filter due, probe, repair.
-func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun) {
+func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, ignoreLastChecked bool) {
 	cfg := r.cfg()
 	log := r.logger.With().Str("run_id", run.ID).Logger()
 
@@ -93,7 +93,7 @@ func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun) {
 		return
 	}
 
-	due, skipped := r.filterDueCandidates(candidates)
+	due, skipped := r.filterDueCandidates(candidates, ignoreLastChecked)
 	run.Stats.Candidates = len(due)
 	run.Stats.SkippedFresh = skipped
 	run.Stage = storage.RepairStageProbing
@@ -737,7 +737,10 @@ func (r *Repair) eligibleArrs(filter []string) []*arr.Arr {
 	return out
 }
 
-func (r *Repair) filterDueCandidates(in map[string]*candidate) (map[string]*candidate, int) {
+func (r *Repair) filterDueCandidates(in map[string]*candidate, ignoreLastChecked bool) (map[string]*candidate, int) {
+	if ignoreLastChecked {
+		return in, 0
+	}
 	recheck := r.recheckInterval()
 	now := time.Now()
 	out := make(map[string]*candidate, len(in))
@@ -755,6 +758,42 @@ func (r *Repair) filterDueCandidates(in map[string]*candidate) (map[string]*cand
 
 // === Manual rechecks (webhooks + API) ===
 
+func (r *Repair) collectBrokenHealths(names []string, requireArrFile bool) (*xsync.Map[string, *storage.EntryHealth], int) {
+	wanted := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		if n = strings.TrimSpace(n); n != "" {
+			wanted[n] = struct{}{}
+		}
+	}
+
+	healths := xsync.NewMap[string, *storage.EntryHealth]()
+	_ = r.manager.storage.ForEachEntryHealth(func(h *storage.EntryHealth) error {
+		if h == nil || h.Status != storage.HealthBroken || len(h.BrokenFiles) == 0 {
+			return nil
+		}
+		if len(wanted) > 0 {
+			if _, ok := wanted[h.EntryName]; !ok {
+				return nil
+			}
+		}
+		if requireArrFile {
+			hasArrFile := false
+			for _, bf := range h.BrokenFiles {
+				if bf.ArrName != "" && bf.ArrFileID != 0 {
+					hasArrFile = true
+					break
+				}
+			}
+			if !hasArrFile {
+				return nil
+			}
+		}
+		healths.Store(h.EntryName, h)
+		return nil
+	})
+	return healths, len(wanted)
+}
+
 // FixBroken triggers the Arr delete + re-search pass on currently-broken
 // entries without reprobing. When names is empty, every entry with
 // Status=broken in storage is fixed. Returns the new RepairRun record
@@ -768,38 +807,9 @@ func (r *Repair) FixBroken(ctx context.Context, names []string) (*storage.Repair
 		ctx = r.parentCtx
 	}
 
-	wanted := make(map[string]struct{}, len(names))
-	for _, n := range names {
-		if n = strings.TrimSpace(n); n != "" {
-			wanted[n] = struct{}{}
-		}
-	}
-
-	healths := xsync.NewMap[string, *storage.EntryHealth]()
-	_ = r.manager.storage.ForEachEntryHealth(func(h *storage.EntryHealth) error {
-		if h == nil || h.Status != storage.HealthBroken {
-			return nil
-		}
-		if len(wanted) > 0 {
-			if _, ok := wanted[h.EntryName]; !ok {
-				return nil
-			}
-		}
-		// Skip entries with no Arr-known broken files — there's nothing the
-		// fix pass can do for them.
-		hasArrFile := false
-		for _, bf := range h.BrokenFiles {
-			if bf.ArrName != "" && bf.ArrFileID != 0 {
-				hasArrFile = true
-				break
-			}
-		}
-		if !hasArrFile {
-			return nil
-		}
-		healths.Store(h.EntryName, h)
-		return nil
-	})
+	// Skip entries with no Arr-known broken files — there's nothing the fix
+	// pass can delete and re-search for them.
+	healths, wantedCount := r.collectBrokenHealths(names, true)
 	if healths.Size() == 0 {
 		return nil, errors.New("no fixable broken entries")
 	}
@@ -812,8 +822,8 @@ func (r *Repair) FixBroken(ctx context.Context, names []string) (*storage.Repair
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	source := "fix-broken:all"
-	if len(wanted) > 0 {
-		source = fmt.Sprintf("fix-broken:%d", len(wanted))
+	if wantedCount > 0 {
+		source = fmt.Sprintf("fix-broken:%d", wantedCount)
 	}
 	run := &storage.RepairRun{
 		ID:        uuid.NewString(),
@@ -863,6 +873,174 @@ func (r *Repair) FixBroken(ctx context.Context, names []string) (*storage.Repair
 			Msg("FixBroken: completed")
 	}()
 	return run, nil
+}
+
+// ClearBroken removes currently-broken files from the local mount state and,
+// when Arr metadata is available, clears the corresponding Sonarr/Radarr file
+// rows. It deliberately does not mark history failed or trigger any re-search.
+func (r *Repair) ClearBroken(ctx context.Context, names []string) (*storage.RepairRun, error) {
+	if ctx == nil {
+		ctx = r.parentCtx
+	}
+
+	healths, wantedCount := r.collectBrokenHealths(names, false)
+	if healths.Size() == 0 {
+		return nil, errors.New("no broken files to clear")
+	}
+
+	r.mu.Lock()
+	if r.activeRunID != "" {
+		id := r.activeRunID
+		r.mu.Unlock()
+		return nil, fmt.Errorf("repair already running (run %s)", id)
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	source := "clear-broken:all"
+	if wantedCount > 0 {
+		source = fmt.Sprintf("clear-broken:%d", wantedCount)
+	}
+	run := &storage.RepairRun{
+		ID:        uuid.NewString(),
+		Trigger:   storage.RepairTriggerManual,
+		Status:    storage.RepairRunRunning,
+		Stage:     storage.RepairStageRepairing,
+		StartedAt: time.Now(),
+		Source:    source,
+	}
+	run.Stats.Candidates = healths.Size()
+	r.activeRunID = run.ID
+	r.cancelRun = cancel
+	r.mu.Unlock()
+
+	if err := r.manager.storage.SaveRepairRun(run); err != nil {
+		r.mu.Lock()
+		r.activeRunID = ""
+		r.cancelRun = nil
+		r.mu.Unlock()
+		cancel()
+		return nil, fmt.Errorf("failed to persist repair run: %w", err)
+	}
+
+	r.runWG.Add(1)
+	go func() {
+		defer r.runWG.Done()
+		defer func() {
+			r.mu.Lock()
+			if r.activeRunID == run.ID {
+				r.activeRunID = ""
+				r.cancelRun = nil
+			}
+			r.mu.Unlock()
+			cancel()
+		}()
+		r.clearBroken(runCtx, run, healths)
+		if runCtx.Err() != nil {
+			r.finalizeRun(run, storage.RepairRunCancelled, "", "context cancelled during clear")
+			return
+		}
+		r.finalizeRun(run, storage.RepairRunCompleted, "", "")
+		r.logger.Info().
+			Str("run_id", run.ID).
+			Int("candidates", run.Stats.Candidates).
+			Int("cleared", run.Stats.Cleared).
+			Int("clear_failed", run.Stats.RepairFailed).
+			Msg("ClearBroken: completed")
+	}()
+	return run, nil
+}
+
+func (r *Repair) clearBroken(ctx context.Context, run *storage.RepairRun, healths *xsync.Map[string, *storage.EntryHealth]) {
+	byArr := make(map[string][]arr.ContentFile)
+	healths.Range(func(_ string, h *storage.EntryHealth) bool {
+		if h == nil {
+			return true
+		}
+		for _, bf := range h.BrokenFiles {
+			if bf.ArrName == "" || bf.ArrFileID == 0 {
+				continue
+			}
+			byArr[bf.ArrName] = append(byArr[bf.ArrName], arr.ContentFile{
+				Id:        bf.MediaID,
+				EpisodeId: bf.EpisodeID,
+				FileId:    bf.ArrFileID,
+				Name:      bf.FileName,
+				Path:      bf.SourcePath,
+				Size:      bf.Size,
+				IsBroken:  true,
+			})
+		}
+		return true
+	})
+
+	arrCleared := make(map[string]struct{}, len(byArr))
+	for arrName, files := range byArr {
+		if ctx != nil && ctx.Err() != nil {
+			return
+		}
+		a := r.manager.arr.Get(arrName)
+		if a == nil {
+			run.Stats.RepairFailed += len(files)
+			r.saveRun(run)
+			continue
+		}
+		if err := a.DeleteFiles(ctx, files); err != nil {
+			r.logger.Warn().Err(err).Str("arr", arrName).Msg("ClearBroken: DeleteFiles failed")
+			run.Stats.RepairFailed += len(files)
+			r.saveRun(run)
+			continue
+		}
+		arrCleared[arrName] = struct{}{}
+	}
+
+	now := time.Now()
+	healths.Range(func(name string, h *storage.EntryHealth) bool {
+		if ctx != nil && ctx.Err() != nil {
+			return false
+		}
+		if h == nil {
+			return true
+		}
+
+		remaining := make([]storage.BrokenFile, 0, len(h.BrokenFiles))
+		for _, bf := range h.BrokenFiles {
+			if bf.ArrName != "" && bf.ArrFileID != 0 {
+				if _, ok := arrCleared[bf.ArrName]; !ok {
+					remaining = append(remaining, bf)
+					continue
+				}
+			}
+
+			if err := r.manager.RemoveTorrentFile(bf.EntryName, bf.FileName); err != nil {
+				r.logger.Warn().Err(err).Str("entry", bf.EntryName).Str("file", bf.FileName).Msg("ClearBroken: failed to remove broken file from mount")
+				run.Stats.RepairFailed++
+				remaining = append(remaining, bf)
+				continue
+			}
+			run.Stats.Cleared++
+			r.saveRun(run)
+		}
+
+		h.LastRepairAt = now
+		h.BrokenFiles = remaining
+		if len(remaining) == 0 {
+			if _, err := r.manager.storage.GetEntryItem(name); err != nil {
+				_ = r.manager.storage.DeleteEntryHealth(name)
+				return true
+			}
+			h.Status = storage.HealthUnknown
+			h.FailureReason = ""
+			h.Dirty = false
+			h.DirtyReason = ""
+			h.NextCheckDueAt = time.Time{}
+			r.saveHealth(h)
+			return true
+		}
+
+		h.Status = storage.HealthBroken
+		h.FailureReason = topReason(remaining)
+		r.saveHealth(h)
+		return true
+	})
 }
 
 // RecheckEntry kicks off a recheck for a single entry and returns
