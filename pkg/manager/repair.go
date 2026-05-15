@@ -39,6 +39,8 @@ type RepairStatus struct {
 type RepairRunOptions struct {
 	IgnoreLastChecked bool
 	AutoRepair        *bool
+	UnrestrictLink    bool
+	ProtocolScope     string
 }
 
 type ClearRepairStateResult struct {
@@ -83,6 +85,42 @@ func NewRepair(m *Manager) *Repair {
 }
 
 func (r *Repair) cfg() config.RepairConfig { return config.Get().Repair }
+
+func normalizeRepairProtocolScope(scope string) string {
+	switch strings.ToLower(strings.TrimSpace(scope)) {
+	case "all", "both":
+		return "all"
+	case string(config.ProtocolTorrent):
+		return string(config.ProtocolTorrent)
+	case string(config.ProtocolNZB):
+		return string(config.ProtocolNZB)
+	default:
+		return ""
+	}
+}
+
+func (r *Repair) effectiveProtocolScope(opts RepairRunOptions) string {
+	if scope := normalizeRepairProtocolScope(opts.ProtocolScope); scope != "" {
+		return scope
+	}
+	if r.cfg().SkipNZBRepair {
+		return string(config.ProtocolTorrent)
+	}
+	return "all"
+}
+
+func repairProtocolMatches(scope string, protocol config.Protocol) bool {
+	switch normalizeRepairProtocolScope(scope) {
+	case "", "all":
+		return true
+	case string(config.ProtocolTorrent):
+		return protocol == config.ProtocolTorrent
+	case string(config.ProtocolNZB):
+		return protocol == config.ProtocolNZB
+	default:
+		return true
+	}
+}
 
 func (r *Repair) workers() int {
 	if w := r.cfg().Workers; w > 0 {
@@ -367,6 +405,12 @@ func (r *Repair) runSweep(trigger storage.RepairRunTrigger, opts RepairRunOption
 		} else {
 			sourceParts = append(sourceParts, "no-auto-repair")
 		}
+	}
+	if opts.UnrestrictLink {
+		sourceParts = append(sourceParts, "unrestrict-link")
+	}
+	if scope := normalizeRepairProtocolScope(opts.ProtocolScope); scope != "" {
+		sourceParts = append(sourceParts, "protocol-"+scope)
 	}
 	run := &storage.RepairRun{
 		ID:        uuid.NewString(),

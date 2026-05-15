@@ -33,8 +33,6 @@ type Usenet struct {
 	MaxConcurrentNZB int `json:"max_concurrent_nzb,omitempty"` // Maximum NZBs to process in parallel (default: 2)
 
 	DiskBufferPath string `json:"disk_buffer_path,omitempty"` // Path for disk buffer storage (empty = main_path/usenet/streams)
-
-	SkipRepair bool `json:"skip_repair,omitempty"` // Skip repairing nzb/usenet files
 }
 
 func (u Usenet) IsZero() bool {
@@ -139,10 +137,6 @@ func (c *Config) applyUsenetEnvVars() {
 		if v, err := strconv.Atoi(maxConcurrentNZB); err == nil {
 			c.Usenet.MaxConcurrentNZB = v
 		}
-	}
-
-	if skipRepair := getEnv("USENET__SKIP_REPAIR"); skipRepair != "" {
-		c.Usenet.SkipRepair = parseBool(skipRepair)
 	}
 
 	// Usenet providers array

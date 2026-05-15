@@ -113,11 +113,20 @@ Active run summary, last completed run, and counts of entries by status.
 
 ### POST /api/repair/run
 
-Trigger a sweep now.
+Trigger a sweep now. Optional JSON body fields:
+
+| Field                 | Type    | Description                                                        |
+|-----------------------|---------|--------------------------------------------------------------------|
+| `ignore_last_checked` | boolean | Probe entries even when their last health check is still fresh.    |
+| `auto_repair`         | boolean | Override the configured auto-repair setting for this run.          |
+| `unrestrict_link`     | boolean | For torrent entries, probe by generating an unrestricted link instead of calling the provider check endpoint. |
+| `protocol`            | string  | `all`, `torrent`, or `nzb`. Selects which protocols this run probes. |
 
 ```bash
 curl -X POST \
   -H "Authorization: Bearer TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"protocol":"all","unrestrict_link":true}' \
   http://localhost:8282/api/repair/run
 ```
 
@@ -165,17 +174,17 @@ Per-entry health, including the broken-file list.
 
 ### POST /api/repair/health/{name}/check
 
-Force-recheck a single entry. Add `?fix=true` to also repair.
+Force-recheck a single entry.
 
 ```bash
 curl -X POST \
   -H "Authorization: Bearer TOKEN" \
-  'http://localhost:8282/api/repair/health/My.Show.S01/check?fix=true'
+  'http://localhost:8282/api/repair/health/My.Show.S01/check'
 ```
 
 ### POST /api/repair/recheck/media
 
-Recheck a single Arr media item.
+Recheck a single Arr media item. Set `fix` to `true` to repair through Arr after checking.
 
 ```bash
 curl -X POST \

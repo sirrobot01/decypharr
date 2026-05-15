@@ -257,7 +257,7 @@ Set `auto_repair: false` if:
 - You want to review brokens before letting the system act.
 - You're worried about Arr API rate limits.
 
-In both cases, single-entry **Recheck & fix** from the Browse UI remains available regardless of the global setting.
+In both cases, single-entry **Recheck health** from the Browse UI remains available regardless of the global setting. Fixes should be triggered through the Arr integration.
 
 ### What's the difference between repair strategies?
 

@@ -170,23 +170,73 @@
 
 <!-- Run options modal -->
 <dialog id="runRepairModal" class="modal">
-    <div class="modal-box max-w-md">
+    <div class="modal-box max-w-2xl p-0">
         <form method="dialog">
             <button class="btn btn-sm btn-circle btn-ghost absolute right-3 top-3" aria-label="Close">✕</button>
         </form>
-        <h3 class="font-bold text-lg flex items-center gap-2 mb-4">
-            <i class="bi bi-play-fill text-primary"></i>Run repair
-        </h3>
-        <form id="runRepairForm" class="space-y-3">
-            <label class="label cursor-pointer justify-between gap-4 rounded-lg border border-base-300 px-3 py-2">
-                <span class="label-text">Ignore last checked at</span>
-                <input type="checkbox" class="toggle toggle-primary" id="runIgnoreLastChecked">
-            </label>
-            <label class="label cursor-pointer justify-between gap-4 rounded-lg border border-base-300 px-3 py-2">
-                <span class="label-text">Auto-repair</span>
-                <input type="checkbox" class="toggle toggle-primary" id="runAutoRepair">
-            </label>
-            <div class="modal-action">
+        <div class="px-6 py-5 border-b border-base-200">
+            <h3 class="font-bold text-lg flex items-center gap-2 pr-10">
+                <i class="bi bi-play-fill text-primary"></i>Run repair
+            </h3>
+            <p class="text-sm opacity-70 mt-1">Choose how this one-off sweep should probe and act on entries.</p>
+        </div>
+        <form id="runRepairForm">
+            <div class="divide-y divide-base-200">
+                <label class="flex cursor-pointer items-start justify-between gap-4 px-6 py-4 hover:bg-base-200/60">
+                    <span class="flex gap-3">
+                        <i class="bi bi-calendar-x text-lg text-primary mt-0.5"></i>
+                        <span>
+                            <span class="block font-medium">Ignore last checked</span>
+                            <span class="block text-sm opacity-70">Probe every selected candidate, including entries checked recently.</span>
+                        </span>
+                    </span>
+                    <input type="checkbox" class="toggle toggle-primary mt-1" id="runIgnoreLastChecked">
+                </label>
+                <div class="px-6 py-4">
+                    <div class="flex gap-3 mb-3">
+                        <i class="bi bi-filter-circle text-lg text-primary mt-0.5"></i>
+                        <div>
+                            <div class="font-medium">Protocol</div>
+                            <div class="text-sm opacity-70">Choose which entries this run should check.</div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <label class="label cursor-pointer justify-start gap-3 rounded-lg border border-base-300 px-3 py-2">
+                            <input type="radio" class="radio radio-primary radio-sm" name="runProtocol" value="all" id="runProtocolAll">
+                            <span class="label-text">Torrent and NZB</span>
+                        </label>
+                        <label class="label cursor-pointer justify-start gap-3 rounded-lg border border-base-300 px-3 py-2">
+                            <input type="radio" class="radio radio-primary radio-sm" name="runProtocol" value="torrent" id="runProtocolTorrent">
+                            <span class="label-text">Torrent</span>
+                        </label>
+                        <label class="label cursor-pointer justify-start gap-3 rounded-lg border border-base-300 px-3 py-2">
+                            <input type="radio" class="radio radio-primary radio-sm" name="runProtocol" value="nzb" id="runProtocolNZB">
+                            <span class="label-text">NZB</span>
+                        </label>
+                    </div>
+                </div>
+                <label class="flex cursor-pointer items-start justify-between gap-4 px-6 py-4 hover:bg-base-200/60">
+                    <span class="flex gap-3">
+                        <i class="bi bi-link-45deg text-lg text-primary mt-0.5"></i>
+                        <span>
+                            <span class="block font-medium">Unrestrict link</span>
+                            <span class="block text-sm opacity-70">Use provider download-link generation for torrent probes instead of the provider check endpoint.</span>
+                        </span>
+                    </span>
+                    <input type="checkbox" class="toggle toggle-primary mt-1" id="runUnrestrictLink">
+                </label>
+                <label class="flex cursor-pointer items-start justify-between gap-4 px-6 py-4 hover:bg-base-200/60">
+                    <span class="flex gap-3">
+                        <i class="bi bi-bandaid text-lg text-error mt-0.5"></i>
+                        <span>
+                            <span class="block font-medium">Auto-repair</span>
+                            <span class="block text-sm opacity-70">Send broken Arr-known files through delete and search after probing.</span>
+                        </span>
+                    </span>
+                    <input type="checkbox" class="toggle toggle-primary mt-1" id="runAutoRepair">
+                </label>
+            </div>
+            <div class="modal-action px-6 py-4 mt-0 bg-base-200/40">
                 <button type="button" class="btn btn-ghost" onclick="document.getElementById('runRepairModal').close()">Cancel</button>
                 <button type="submit" class="btn btn-primary" id="runRepairSubmitBtn">
                     <i class="bi bi-play-fill mr-1"></i>Run

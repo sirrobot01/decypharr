@@ -19,6 +19,8 @@ import (
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/customerror"
 	"github.com/sirrobot01/decypharr/pkg/arr"
+	debrid "github.com/sirrobot01/decypharr/pkg/debrid/common"
+	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
@@ -94,15 +96,17 @@ func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, opts 
 	}
 
 	due, skipped := r.filterDueCandidates(candidates, opts.IgnoreLastChecked)
+	protocolScope := r.effectiveProtocolScope(opts)
+	due = r.filterCandidatesByProtocol(due, protocolScope)
 	run.Stats.Candidates = len(due)
 	run.Stats.SkippedFresh = skipped
 	run.Stage = storage.RepairStageProbing
 	r.saveRun(run)
-	log.Info().Int("due", len(due)).Int("skipped_fresh", skipped).Msg("Sweep: probing")
+	log.Info().Int("due", len(due)).Int("skipped_fresh", skipped).Str("protocol", protocolScope).Msg("Sweep: probing")
 
 	heal := newHealCache()
 
-	healths, err := r.probeCandidates(ctx, run, due, heal)
+	healths, err := r.probeCandidates(ctx, run, due, heal, opts)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			r.finalizeRun(run, storage.RepairRunCancelled, "", "context cancelled during probing")
@@ -144,7 +148,7 @@ func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, opts 
 // probeCandidates fans out across candidates with cfg.Repair.Workers
 // concurrency. Each entry then probes its own files internally with at most
 // repairFilesPerEntry concurrency, so total file probes in flight = workers × 2.
-func (r *Repair) probeCandidates(ctx context.Context, run *storage.RepairRun, candidates map[string]*candidate, heal *healCache) (*xsync.Map[string, *storage.EntryHealth], error) {
+func (r *Repair) probeCandidates(ctx context.Context, run *storage.RepairRun, candidates map[string]*candidate, heal *healCache, opts RepairRunOptions) (*xsync.Map[string, *storage.EntryHealth], error) {
 	// Concurrent map keeps each worker's Store lock-free. run.Stats is still
 	// guarded by runMu since RepairRunStats has plain int fields.
 	out := xsync.NewMap[string, *storage.EntryHealth](xsync.WithPresize(len(candidates)))
@@ -158,7 +162,7 @@ func (r *Repair) probeCandidates(ctx context.Context, run *storage.RepairRun, ca
 			if gctx.Err() != nil {
 				return gctx.Err()
 			}
-			h := r.probeEntry(gctx, run.ID, c, heal)
+			h := r.probeEntry(gctx, run.ID, c, heal, opts)
 			out.Store(name, h)
 
 			runMu.Lock()
@@ -181,7 +185,7 @@ func (r *Repair) probeCandidates(ctx context.Context, run *storage.RepairRun, ca
 
 // probeEntry probes one entry: marks it repairing, probes its files (≤2 in
 // parallel), runs auto-heal on broken torrents, then persists final health.
-func (r *Repair) probeEntry(ctx context.Context, runID string, c *candidate, heal *healCache) *storage.EntryHealth {
+func (r *Repair) probeEntry(ctx context.Context, runID string, c *candidate, heal *healCache, opts RepairRunOptions) *storage.EntryHealth {
 	s := r.manager.storage
 	h, _ := s.GetEntryHealth(c.item.Name)
 	if h == nil {
@@ -197,7 +201,7 @@ func (r *Repair) probeEntry(ctx context.Context, runID string, c *candidate, hea
 	r.saveHealth(h)
 
 	names := orderedFilenames(c.item)
-	results := r.probeFiles(ctx, c.item, names)
+	results := r.probeFiles(ctx, c.item, names, opts)
 	r.autoHealResults(ctx, results, heal)
 
 	broken := r.brokenFiles(c, results)
@@ -232,7 +236,7 @@ func (r *Repair) probeEntry(ctx context.Context, runID string, c *candidate, hea
 
 // probeFiles fans per-file probes inside a single entry, capped at
 // repairFilesPerEntry concurrent workers.
-func (r *Repair) probeFiles(ctx context.Context, item *storage.EntryItem, names []string) []fileResult {
+func (r *Repair) probeFiles(ctx context.Context, item *storage.EntryItem, names []string, opts RepairRunOptions) []fileResult {
 	results := make([]fileResult, len(names))
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(repairFilesPerEntry)
@@ -242,7 +246,7 @@ func (r *Repair) probeFiles(ctx context.Context, item *storage.EntryItem, names 
 				results[i] = fileResult{name: name, reason: "context_cancelled"}
 				return nil
 			}
-			results[i] = r.probeFile(gctx, item, name)
+			results[i] = r.probeFile(gctx, item, name, opts)
 			return nil
 		})
 	}
@@ -250,9 +254,10 @@ func (r *Repair) probeFiles(ctx context.Context, item *storage.EntryItem, names 
 	return results
 }
 
-// probeFile checks one file. NZB → usenet.CheckFile; torrent →
-// debrid client.CheckFile.
-func (r *Repair) probeFile(ctx context.Context, item *storage.EntryItem, name string) fileResult {
+// probeFile checks one file. NZB probes use usenet.CheckFile. Torrent probes
+// use the provider CheckFile endpoint unless this run requests unrestrict-link
+// probing.
+func (r *Repair) probeFile(ctx context.Context, item *storage.EntryItem, name string, opts RepairRunOptions) fileResult {
 	file := item.Files[name]
 	res := fileResult{name: name}
 
@@ -268,18 +273,18 @@ func (r *Repair) probeFile(ctx context.Context, item *storage.EntryItem, name st
 		return res
 	}
 	res.protocol = entry.Protocol
+	if !repairProtocolMatches(r.effectiveProtocolScope(opts), entry.Protocol) {
+		res.reason = "protocol_skipped"
+		return res
+	}
 
 	if entry.IsNZB() {
 		return r.probeNZBFile(ctx, entry, name, res)
 	}
-	return r.probeTorrentFile(ctx, entry, file, name, res)
+	return r.probeTorrentFile(ctx, entry, file, name, res, opts)
 }
 
 func (r *Repair) probeNZBFile(ctx context.Context, entry *storage.Entry, name string, res fileResult) fileResult {
-	if config.Get().Usenet.SkipRepair {
-		res.reason = "usenet_repair_disabled"
-		return res
-	}
 	if r.manager.usenet == nil {
 		res.reason = "usenet_client_not_configured"
 		return res
@@ -298,11 +303,14 @@ func (r *Repair) probeNZBFile(ctx context.Context, entry *storage.Entry, name st
 	return res
 }
 
-func (r *Repair) probeTorrentFile(ctx context.Context, entry *storage.Entry, file *storage.File, name string, res fileResult) fileResult {
+func (r *Repair) probeTorrentFile(ctx context.Context, entry *storage.Entry, file *storage.File, name string, res fileResult, opts RepairRunOptions) fileResult {
 	client := r.manager.ProviderClient(entry.ActiveProvider)
 	if client == nil {
 		res.reason = "provider_client_not_found"
 		return res
+	}
+	if opts.UnrestrictLink {
+		return r.probeTorrentFileByUnrestrict(entry, file, name, res, client)
 	}
 	if !client.SupportsCheck() {
 		res.reason = "provider_check_unsupported"
@@ -325,6 +333,50 @@ func (r *Repair) probeTorrentFile(ctx context.Context, entry *storage.Entry, fil
 	} else {
 		res.reason = "provider_probe_error"
 	}
+	return res
+}
+
+func (r *Repair) probeTorrentFileByUnrestrict(entry *storage.Entry, file *storage.File, name string, res fileResult, client debrid.Client) fileResult {
+	placement := entry.GetActiveProvider()
+	if placement == nil {
+		res.reason = "placement_not_found"
+		return res
+	}
+	placementFile := placement.Files[name]
+	if placementFile == nil {
+		res.reason = "placement_file_not_found"
+		return res
+	}
+	if placementFile.Link == "" && placementFile.Id == "" {
+		res.broken = true
+		res.reason = "missing_provider_link"
+		return res
+	}
+
+	debridFile := &debridTypes.File{
+		Id:        placementFile.Id,
+		Link:      placementFile.Link,
+		Path:      placementFile.Path,
+		Name:      file.Name,
+		Size:      file.Size,
+		ByteRange: file.ByteRange,
+		Deleted:   file.Deleted,
+	}
+	downloadLink, err := client.GetDownloadLink(placement.ID, debridFile)
+	if err == nil && !downloadLink.Empty() {
+		res.healthy = true
+		return res
+	}
+	if err == nil || errors.Is(err, debridTypes.EmptyDownloadLinkError) || errors.Is(err, customerror.HosterUnavailableError) {
+		res.broken = true
+		if errors.Is(err, customerror.HosterUnavailableError) {
+			res.reason = "hoster_unavailable"
+		} else {
+			res.reason = "empty_download_link"
+		}
+		return res
+	}
+	res.reason = "unrestrict_link_error"
 	return res
 }
 
@@ -603,6 +655,56 @@ func (r *Repair) enumerateCandidates(ctx context.Context, cfg config.RepairConfi
 		return r.enumerateManagedCandidates(ctx)
 	}
 	return r.enumerateArrCandidates(ctx, cfg)
+}
+
+func (r *Repair) filterCandidatesByProtocol(in map[string]*candidate, scope string) map[string]*candidate {
+	if repairProtocolMatches(scope, config.ProtocolAll) {
+		return in
+	}
+	out := make(map[string]*candidate, len(in))
+	for name, c := range in {
+		filtered := r.filterCandidateByProtocol(c, scope)
+		if filtered != nil {
+			out[name] = filtered
+		}
+	}
+	return out
+}
+
+func (r *Repair) filterCandidateByProtocol(c *candidate, scope string) *candidate {
+	if c == nil || c.item == nil {
+		return nil
+	}
+	files := make(map[string]*storage.File, len(c.item.Files))
+	for name, file := range c.item.Files {
+		if file == nil || file.Deleted || file.InfoHash == "" {
+			continue
+		}
+		entry, err := r.manager.GetEntry(file.InfoHash)
+		if err != nil || entry == nil {
+			continue
+		}
+		if repairProtocolMatches(scope, entry.Protocol) {
+			files[name] = file
+		}
+	}
+	if len(files) == 0 {
+		return nil
+	}
+
+	item := *c.item
+	item.Files = files
+	filtered := *c
+	filtered.item = &item
+	if c.contentMap != nil {
+		filtered.contentMap = make(map[string]arr.ContentFile, len(c.contentMap))
+		for name, content := range c.contentMap {
+			if _, ok := files[name]; ok {
+				filtered.contentMap[name] = content
+			}
+		}
+	}
+	return &filtered
 }
 
 func (r *Repair) enumerateManagedCandidates(ctx context.Context) (map[string]*candidate, error) {
@@ -1061,7 +1163,7 @@ func (r *Repair) RecheckEntry(ctx context.Context, entryName string, fix bool) (
 			r.attachArrContext(ctx, c)
 		}
 		heal := newHealCache()
-		final := r.probeEntry(ctx, runID, c, heal)
+		final := r.probeEntry(ctx, runID, c, heal, RepairRunOptions{})
 		if !fix || final.Status != storage.HealthBroken {
 			return
 		}
@@ -1185,7 +1287,7 @@ func (r *Repair) executeRecheckMedia(ctx context.Context, run *storage.RepairRun
 	r.saveRun(run)
 
 	heal := newHealCache()
-	healths, err := r.probeCandidates(ctx, run, candidates, heal)
+	healths, err := r.probeCandidates(ctx, run, candidates, heal, RepairRunOptions{})
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			r.finalizeRun(run, storage.RepairRunCancelled, "", "context cancelled during probing")

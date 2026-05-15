@@ -57,8 +57,14 @@ class RepairManager {
         if (!modal) return;
         const ignore = document.getElementById('runIgnoreLastChecked');
         const autoRepair = document.getElementById('runAutoRepair');
+        const unrestrictLink = document.getElementById('runUnrestrictLink');
         if (ignore) ignore.checked = false;
         if (autoRepair) autoRepair.checked = !!this.repairConfig.auto_repair;
+        if (unrestrictLink) unrestrictLink.checked = false;
+        const defaultProtocol = this.repairConfig.skip_nzb_repair ? 'torrent' : 'all';
+        const protocol = document.querySelector(`input[name="runProtocol"][value="${defaultProtocol}"]`)
+            || document.getElementById('runProtocolAll');
+        if (protocol) protocol.checked = true;
         if (typeof modal.showModal === 'function') {
             modal.showModal();
         } else {
@@ -218,12 +224,16 @@ class RepairManager {
         try {
             const ignoreLastChecked = !!document.getElementById('runIgnoreLastChecked')?.checked;
             const autoRepair = !!document.getElementById('runAutoRepair')?.checked;
+            const unrestrictLink = !!document.getElementById('runUnrestrictLink')?.checked;
+            const protocol = document.querySelector('input[name="runProtocol"]:checked')?.value || 'all';
             const res = await fetch(`${this.api}/repair/run`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     ignore_last_checked: ignoreLastChecked,
                     auto_repair: autoRepair,
+                    unrestrict_link: unrestrictLink,
+                    protocol,
                 }),
             });
             if (!res.ok) {

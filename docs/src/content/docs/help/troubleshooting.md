@@ -228,7 +228,7 @@ Increase timeout:
 
 1. Enable repair:
    ```json
-   {"usenet": {"skip_repair": false}}
+   {"repair": {"skip_nzb_repair": false}}
    ```
 2. Check provider retention (old content may be incomplete)
 3. Try different provider
@@ -460,7 +460,7 @@ Lengthen `recheck_interval` so brief outages don't flap entries through `broken`
 }
 ```
 
-Brokens then sit in the Browse UI with their reason; you can fire **Recheck & fix** on individual entries.
+Brokens then sit in the Browse UI with their reason; you can fire **Recheck health** on individual entries. Fixes should be triggered through the Arr integration.
 
 ### Repair not detecting issues
 
@@ -484,7 +484,7 @@ Brokens then sit in the Browse UI with their reason; you can fire **Recheck & fi
 4. **Force-recheck a specific entry:**
    ```bash
    curl -X POST -H "Authorization: Bearer TOKEN" \
-     'http://localhost:8282/api/repair/health/My.Show.S01/check?fix=true'
+     'http://localhost:8282/api/repair/health/My.Show.S01/check'
    ```
 
 ## Debugging

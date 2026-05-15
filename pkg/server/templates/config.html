@@ -448,17 +448,6 @@
                                                        placeholder="/cache">
                                                 <span class="text-sm opacity-70">Path for disk buffering during streaming</span>
                                             </div>
-                                            <div>
-                                                <label class="label cursor-pointer justify-start gap-3">
-                                                    <input type="checkbox" class="checkbox checkbox-primary"
-                                                           name="usenet.skip_repair" id="usenet.skip_repair">
-                                                    <div>
-                                                        <span class="label-text font-medium">Skip NZB Repair</span>
-                                                        <div class="label-text-alt">Skip NZBs when repairing entries
-                                                        </div>
-                                                    </div>
-                                                </label>
-                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -1367,11 +1356,16 @@
                             </div>
                         </div>
 
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <label class="label cursor-pointer justify-start gap-3">
                                 <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
                                        id="repair.auto_repair" name="repair.auto_repair">
                                 <span class="label-text font-medium">Auto-repair when broken</span>
+                            </label>
+                            <label class="label cursor-pointer justify-start gap-3">
+                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
+                                       id="repair.skip_nzb_repair" name="repair.skip_nzb_repair">
+                                <span class="label-text font-medium">Skip NZB repair</span>
                             </label>
                             <label class="label cursor-pointer justify-start gap-3">
                                 <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"

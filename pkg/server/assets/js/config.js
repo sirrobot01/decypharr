@@ -129,6 +129,7 @@ class ConfigManager {
         if ($('repair.nntp_connection_percent')) $('repair.nntp_connection_percent').value = repair.nntp_connection_percent || 20;
         if ($('repair.strategy')) $('repair.strategy').value = repair.strategy || 'per_entry';
         if ($('repair.auto_repair')) $('repair.auto_repair').checked = !!repair.auto_repair;
+        if ($('repair.skip_nzb_repair')) $('repair.skip_nzb_repair').checked = !!repair.skip_nzb_repair;
         if ($('repair.notify_on_complete')) $('repair.notify_on_complete').checked = !!repair.notify_on_complete;
     }
 
@@ -147,6 +148,7 @@ class ConfigManager {
             nntp_connection_percent: parseInt($('repair.nntp_connection_percent')?.value, 10) || 0,
             strategy: $('repair.strategy')?.value || 'per_entry',
             auto_repair: $('repair.auto_repair')?.checked || false,
+            skip_nzb_repair: $('repair.skip_nzb_repair')?.checked || false,
             notify_on_complete: $('repair.notify_on_complete')?.checked || false,
             arrs,
         };
@@ -1239,8 +1241,7 @@ class ConfigManager {
             processing_timeout: document.querySelector('[name="usenet.processing_timeout"]')?.value || "5m",
             availability_sample_percent: parseInt(document.querySelector('[name="usenet.availability_sample_percent"]')?.value) || 10,
             max_concurrent_nzb: parseInt(document.querySelector('[name="usenet.max_concurrent_nzb"]')?.value) || 2,
-            disk_buffer_path: document.querySelector('[name="usenet.disk_buffer_path"]')?.value || "",
-            skip_repair: document.querySelector('[name="usenet.skip_repair"]').checked
+            disk_buffer_path: document.querySelector('[name="usenet.disk_buffer_path"]')?.value || ""
         };
     }
 
@@ -1666,8 +1667,7 @@ class ConfigManager {
             'processing_timeout': usenet.processing_timeout,
             'availability_sample_percent': usenet.availability_sample_percent,
             'max_concurrent_nzb': usenet.max_concurrent_nzb,
-            'disk_buffer_path': usenet.disk_buffer_path,
-            'skip_repair': usenet.skip_repair
+            'disk_buffer_path': usenet.disk_buffer_path
         };
 
         Object.entries(streamFields).forEach(([id, value]) => {
