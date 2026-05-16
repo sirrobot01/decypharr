@@ -158,7 +158,7 @@
                                     <span>Max Connections</span>
                                 </label>
                                 <input type="number" class="input input-bordered w-full" id="usenet-max-connections"
-                                       name="max_connections" placeholder="30" min="1">
+                                       name="max_connections" placeholder="30" min="1" max="100">
                                 <label class="label">
                                     <span class="label-text-alt">Total connections to provider</span>
                                 </label>
@@ -174,6 +174,13 @@
                                     <span class="label-text-alt">Higher = faster streaming</span>
                                 </label>
                             </div>
+                        </div>
+                        <div class="flex gap-4">
+                            <label class="flex items-center gap-2 cursor-pointer" for="usenet-ssl">
+                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm" id="usenet-ssl"
+                                       name="ssl">
+                                <span class="text-sm">Use SSL</span>
+                            </label>
                         </div>
                     </div>
                 </form>

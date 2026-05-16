@@ -97,6 +97,7 @@ type SetupCompleteRequest struct {
 		Password          string `json:"password,omitempty"`
 		MaxConnections    int    `json:"max_connections,omitempty"`
 		ReaderConnections int    `json:"reader_connections,omitempty"`
+		SSL               bool   `json:"ssl,omitempty"`
 		Skip              bool   `json:"skip_usenet,omitempty"`
 	} `json:"usenet"`
 	Download struct {
@@ -213,6 +214,7 @@ func (s *Server) setupCompleteHandler(w http.ResponseWriter, r *http.Request) {
 			Username:       req.Usenet.Username,
 			Password:       req.Usenet.Password,
 			MaxConnections: providerMax,
+			SSL:            req.Usenet.SSL,
 			Priority:       1,
 		}}
 		cfg.Usenet.MaxConnections = readerConnections

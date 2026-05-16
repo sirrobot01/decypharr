@@ -74,6 +74,7 @@ class SetupWizard {
             document.getElementById('usenet-password').value = usenet.password || '';
             document.getElementById('usenet-max-connections').value = usenet.max_connections || '';
             document.getElementById('usenet-max-connections-per-reader').value = usenet.reader_connections || '';
+            document.getElementById('usenet-ssl').checked = !!usenet.ssl;
         }
 
         // Populate download folder
@@ -240,9 +241,10 @@ class SetupWizard {
         const password = document.getElementById('usenet-password').value.trim();
         const maxConnections = document.getElementById('usenet-max-connections').value.trim();
         const maxConnectionsPerReader = document.getElementById('usenet-max-connections-per-reader').value.trim();
+        const useSSL = document.getElementById('usenet-ssl').checked;
 
         // If any field is filled, validate all required fields
-        if (host || port || username || password) {
+        if (host || port || username || password || useSSL) {
             if (!host) {
                 this.showError('Usenet server host is required');
                 return;
@@ -270,8 +272,8 @@ class SetupWizard {
             // Validate max connections if provided
             if (maxConnections) {
                 const maxConns = parseInt(maxConnections);
-                if (isNaN(maxConns) || maxConns < 1 || maxConns > 50) {
-                    this.showError('Max connections must be between 1 and 50');
+                if (isNaN(maxConns) || maxConns < 1 || maxConns > 100) {
+                    this.showError('Max connections must be between 1 and 100');
                     return;
                 }
             }
@@ -291,6 +293,7 @@ class SetupWizard {
                 password: password,
                 max_connections: maxConnections ? parseInt(maxConnections) : 30,
                 reader_connections: maxConnectionsPerReader ? parseInt(maxConnectionsPerReader) : 15,
+                ssl: useSSL,
                 skip_usenet: false,
             };
         } else {
@@ -425,6 +428,7 @@ class SetupWizard {
                 <p><strong>Username:</strong> ${this.setupState.step3.username}</p>
                 <p><strong>Max Connections:</strong> ${this.setupState.step3.max_connections}</p>
                 <p><strong>Connections Per Stream:</strong> ${this.setupState.step3.reader_connections}</p>
+                <p><strong>Use SSL:</strong> ${this.setupState.step3.ssl ? 'Yes' : 'No'}</p>
             `;
         } else {
             usenetOverview.textContent = 'Not configured';
