@@ -3,6 +3,7 @@ package manager
 import (
 	"cmp"
 	"errors"
+	"slices"
 
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/utils"
@@ -77,15 +78,35 @@ func (m *Manager) createClient(dc config.Debrid) (debrid.Client, error) {
 
 // FilterDebrid returns clients that match the filter function
 func (m *Manager) FilterDebrid(filter func(debrid.Client) bool) []debrid.Client {
-	var filtered []debrid.Client
+	type prioritizedClient struct {
+		name   string
+		client debrid.Client
+	}
+
+	var filtered []prioritizedClient
 
 	m.clients.Range(func(key string, client debrid.Client) bool {
 		if client != nil && filter(client) {
-			filtered = append(filtered, client)
+			filtered = append(filtered, prioritizedClient{
+				name:   key,
+				client: client,
+			})
 		}
 		return true
 	})
-	return filtered
+
+	slices.SortFunc(filtered, func(a, b prioritizedClient) int {
+		if priority := cmp.Compare(a.client.Config().Priority, b.client.Config().Priority); priority != 0 {
+			return priority
+		}
+		return cmp.Compare(a.name, b.name)
+	})
+
+	clients := make([]debrid.Client, 0, len(filtered))
+	for _, item := range filtered {
+		clients = append(clients, item.client)
+	}
+	return clients
 }
 
 func (m *Manager) GetIngests() ([]types.IngestData, error) {

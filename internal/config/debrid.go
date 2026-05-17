@@ -18,6 +18,7 @@ type Debrid struct {
 	Proxy                        string   `json:"proxy,omitempty"`
 	UnpackRar                    bool     `json:"unpack_rar,omitempty"`
 	MinimumFreeSlot              int      `json:"minimum_free_slot,omitempty"` // Minimum active pots to use this debrid
+	Priority                     int      `json:"priority,omitempty"`          // Lower values are tried first
 	Limit                        int      `json:"limit,omitempty"`             // Maximum number of total torrents
 	TorrentsRefreshInterval      string   `json:"torrents_refresh_interval,omitempty"`
 	DownloadLinksRefreshInterval string   `json:"download_links_refresh_interval,omitempty"`
