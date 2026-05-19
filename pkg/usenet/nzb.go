@@ -43,6 +43,7 @@ func GetFileVolumes(nf *storage.NZBFile) []*types.Volume {
 	return []*types.Volume{
 		{
 			Name:          nf.Name,
+			LocalPath:     nf.LocalPath,
 			Size:          size,
 			Segments:      nf.Segments,
 			IsEncrypted:   nf.IsEncrypted,

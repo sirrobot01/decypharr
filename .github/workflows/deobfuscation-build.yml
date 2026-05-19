@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/usenet-deobfuscation
+      - feat/usenet-squashed
 
 permissions:
   contents: read

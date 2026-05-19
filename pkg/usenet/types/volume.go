@@ -5,6 +5,7 @@ import "github.com/sirrobot01/decypharr/pkg/storage"
 type Volume struct {
 	Index         int
 	Name          string
+	LocalPath     string
 	Size          int64
 	Segments      []storage.NZBSegment
 	IsEncrypted   bool   // True if data is encrypted

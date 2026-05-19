@@ -1,0 +1,10 @@
+2026-05-20 10:12:58 | INFO  | [manager] Adding new NZB to usenet category=sonarr4k name="The Grand Tour (2016) S01E05 (2160p AMZN WEB-DL H265 HDR10+ DDP 5.1 English - HONE).nzb"
+2026-05-20 10:12:58 | DEBUG | [usenet] NZB file groups created component=parser groups=1
+2026-05-20 10:12:59 | INFO  | [usenet] Successfully parsed NZB file groups=1 name="The Grand Tour (2016) S01E05 (2160p AMZN WEB-DL H265 HDR10+ DDP 5.1 English - HONE)" nzb_id=7c02ce1e-41fb-4a26-8e6d-b3a6d4a51750
+2026-05-20 10:12:59 | DEBUG | [manager] NZB added to processing queue name="The Grand Tour (2016) S01E05 (2160p AMZN WEB-DL H265 HDR10+ DDP 5.1 English - HONE)" queued=1
+2026-05-20 10:12:59 | DEBUG | [manager] Processing NZB job name="The Grand Tour (2016) S01E05 (2160p AMZN WEB-DL H265 HDR10+ DDP 5.1 English - HONE)" queued=0 worker_id=1
+2026-05-20 10:12:59 | INFO  | [usenet] Processing archive files in NZB name="The Grand Tour (2016) S01E05 (2160p AMZN WEB-DL H265 HDR10+ DDP 5.1 English - HONE)" nzb_id=7c02ce1e-41fb-4a26-8e6d-b3a6d4a51750
+2026-05-20 10:12:59 | DEBUG | [usenet] Processing PAR2 group for deobfuscation component=parser group=TIesaj2er6vz6c3xW segments=1
+2026-05-20 10:13:00 | DEBUG | [usenet] Downloading PAR2 file for deobfuscation component=parser group=TIesaj2er6vz6c3xW
+2026-05-20 10:13:00 | INFO  | [usenet] PAR2 FileDesc entries loaded for deobfuscation component=parser entries=14
+2026-05-20 10:13:00 | ERROR | [manager] Error processing NZB error="failed to process nzb: failed to process NZB archives: no valid files found in NZB" name="The Grand Tour (2016) S01E05 (2160p AMZN WEB-DL H265 HDR10+ DDP 5.1 English - HONE)" worker_id=1

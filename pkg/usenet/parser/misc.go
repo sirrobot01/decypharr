@@ -44,7 +44,61 @@ func getRARVolumeOrder(filename string) int {
 		}
 	}
 
+	// .001, .002 etc (sometimes used by RAR, often by 7z)
+	if regexp.MustCompile(`^\.\d+$`).MatchString(ext) {
+		numStr := ext[1:]
+		if num, err := strconv.Atoi(numStr); err == nil {
+			return num
+		}
+	}
+
 	// Unknown pattern, put at end
+	return 999999
+}
+
+func get7zVolumeOrder(filename string) int {
+	lower := strings.ToLower(filename)
+	ext := filepath.Ext(lower)
+
+	// .001, .002 etc
+	if regexp.MustCompile(`^\.\d+$`).MatchString(ext) {
+		numStr := ext[1:]
+		if num, err := strconv.Atoi(numStr); err == nil {
+			return num
+		}
+	}
+
+	if ext == ".7z" {
+		return 0
+	}
+
+	return 999999
+}
+
+func getZIPVolumeOrder(filename string) int {
+	lower := strings.ToLower(filename)
+	ext := filepath.Ext(lower)
+
+	if ext == ".zip" {
+		return 0
+	}
+
+	// .z01, .z02 etc
+	if len(ext) == 4 && ext[0:2] == ".z" {
+		numStr := ext[2:]
+		if num, err := strconv.Atoi(numStr); err == nil {
+			return num
+		}
+	}
+
+	// .001, .002 etc
+	if regexp.MustCompile(`^\.\d+$`).MatchString(ext) {
+		numStr := ext[1:]
+		if num, err := strconv.Atoi(numStr); err == nil {
+			return num
+		}
+	}
+
 	return 999999
 }
 
@@ -100,6 +154,49 @@ func determineExtension(group *FileGroup) string {
 	return ""
 }
 
+func resolveFilePartMeta(index int, file nzbparser.NzbFile, group *FileGroup) filePartMeta {
+	meta := filePartMeta{}
+
+	if group != nil {
+		fallback := group.getMetadata()
+		meta.segmentSize = fallback.segmentSize
+		meta.fileSize = fallback.fileSize
+		if index == len(group.Files)-1 && fallback.lastFileSize > 0 {
+			meta.fileSize = fallback.lastFileSize
+		}
+
+		if group.fileMeta != nil {
+			if specific, ok := group.fileMeta[fileMetaKey(file)]; ok {
+				if specific.segmentSize > 0 {
+					meta.segmentSize = specific.segmentSize
+				}
+				if specific.fileSize > 0 {
+					meta.fileSize = specific.fileSize
+				}
+				meta.partNumber = specific.partNumber
+				meta.partBegin = specific.partBegin
+			}
+		}
+	}
+
+	if meta.segmentSize <= 0 && len(file.Segments) > 0 {
+		reportedBytes := int64(file.Segments[0].Bytes)
+		if reportedBytes <= 0 {
+			reportedBytes = 750000
+		}
+		meta.segmentSize = int64(float64(reportedBytes) * 0.97)
+		if meta.segmentSize <= 0 {
+			meta.segmentSize = reportedBytes
+		}
+	}
+
+	if meta.fileSize <= 0 && meta.segmentSize > 0 {
+		meta.fileSize = meta.segmentSize * int64(len(file.Segments))
+	}
+
+	return meta
+}
+
 func getNZBSegments(index int, file nzbparser.NzbFile, group *FileGroup) (int64, []storage.NZBSegment) {
 	if len(file.Segments) == 0 {
 		return 0, nil
@@ -121,38 +218,30 @@ func getNZBSegments(index int, file nzbparser.NzbFile, group *FileGroup) (int64,
 	nzbSegments := make([]storage.NZBSegment, maxSegNum)
 
 	currentOffset := int64(0)
-	metadata := group.getMetadata()
-
+	metadata := resolveFilePartMeta(index, file, group)
 	fileSize := metadata.fileSize
-	if index == len(group.Files)-1 {
-		fileSize = metadata.lastFileSize
-	}
+	segmentSize := metadata.segmentSize
 
 	for idx, segment := range file.Segments {
-		segSize := metadata.segmentSize
+		segSize := segmentSize
 		if idx == len(file.Segments)-1 {
-			// Last segment may be smaller
-			// Last segment calculation
-			// Check if the file size metadata assumes a different file (e.g. mixed groups)
-			// Expected total size if all segments were full
-			fullSegsSize := metadata.segmentSize * int64(len(file.Segments)-1) // size of all previous segments
-
-			// If fileSize is inconsistent with the number of segments (too small or too large),
-			// fallback to estimation for this last segment.
-			// Threshold: if difference > 1.5 segments
+			// Last segment may be smaller.
+			fullSegsSize := segmentSize * int64(len(file.Segments)-1)
 			isSizeMismatch := false
-			expectedTotal := fullSegsSize + metadata.segmentSize // rough estimate
+			expectedTotal := fullSegsSize + segmentSize
 			diff := fileSize - expectedTotal
 			if diff < 0 {
 				diff = -diff
 			}
-			if diff > (metadata.segmentSize*3)/2 {
+			if diff > (segmentSize*3)/2 {
 				isSizeMismatch = true
 			}
 
 			if isSizeMismatch {
-				// Fallback: estimate from encoded bytes
 				segSize = int64(float64(segment.Bytes) * 0.97)
+				if segSize <= 0 {
+					segSize = int64(segment.Bytes)
+				}
 			} else {
 				segSize = fileSize - fullSegsSize
 			}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 
@@ -84,6 +85,14 @@ func (f *FS) Open(name string) (fs.File, error) {
 
 	if !found {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+	}
+
+	if vol.LocalPath != "" {
+		localFile, err := os.Open(vol.LocalPath)
+		if err != nil {
+			return nil, &fs.PathError{Op: "open", Path: vol.LocalPath, Err: err}
+		}
+		return localFile, nil
 	}
 
 	info := volumeInfo{
@@ -177,7 +186,20 @@ func (f *FS) CreateReaderAt() (io.ReaderAt, int64, func(), error) {
 // This is an optimization for the common streaming case where there's only one volume.
 // Returns PrefetchableReaderAt so callers can trigger prefetch before starting reads.
 func (f *FS) CreateReaderAtForVolume(vol *types.Volume) (PrefetchableReaderAt, int64, func(), error) {
-	if vol == nil || len(vol.Segments) == 0 {
+	if vol == nil {
+		return nil, 0, nil, fmt.Errorf("no volume provided")
+	}
+	if vol.LocalPath != "" {
+		file, err := os.Open(vol.LocalPath)
+		if err != nil {
+			return nil, 0, nil, fmt.Errorf("open local volume %s: %w", vol.LocalPath, err)
+		}
+		cleanup := func() {
+			_ = file.Close()
+		}
+		return &localPrefetchReader{File: file}, vol.Size, cleanup, nil
+	}
+	if len(vol.Segments) == 0 {
 		return nil, 0, nil, fmt.Errorf("no segments in volume")
 	}
 
@@ -239,6 +261,14 @@ func (f *FS) createNewReaderForVolume(vol *types.Volume) (PrefetchableReaderAt, 
 		_ = streamReader.Close()
 	}
 	return streamReader, vol.Size, cleanup, nil
+}
+
+type localPrefetchReader struct {
+	*os.File
+}
+
+func (r *localPrefetchReader) Prefetch(ctx context.Context, off, length int64) {
+	// Local repaired files do not need prefetching.
 }
 
 func closeArchiveClosers(closers []io.Closer) {

@@ -38,7 +38,12 @@ func NewSevenZParser(manager *nntp.Client, maxConcurrent int, logger zerolog.Log
 
 func (p *SevenZParser) Process(ctx context.Context, group *FileGroup, password string) ([]*storage.NZBFile, error) {
 	sort.Slice(group.Files, func(i, j int) bool {
-		return group.Files[i].Filename < group.Files[j].Filename
+		oi := get7zVolumeOrder(group.Files[i].Filename)
+		oj := get7zVolumeOrder(group.Files[j].Filename)
+		if oi != oj {
+			return oi < oj
+		}
+		return group.Files[i].Number < group.Files[j].Number
 	})
 
 	volumes := buildArchiveVolumeDescriptors(group)
