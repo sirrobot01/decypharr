@@ -53,6 +53,7 @@ type NZBFile struct {
 	StartOffset   int64        `json:"start_offset" msgpack:"start_offset"`
 	Segments      []NZBSegment `json:"segments" msgpack:"segments"`
 	Groups        []string     `json:"groups" msgpack:"groups"`
+	Number        int          `json:"number,omitempty" msgpack:"number,omitempty"` // Original sequence number from NZB
 	FileType      NZBFileType  `json:"archive_type,omitempty" msgpack:"archive_type,omitempty"` // Type of the file (media, rar, 7z, zip, par2, ignore, unknown)
 	Password      string       `json:"password,omitempty" msgpack:"password,omitempty"`
 	IsDeleted     bool         `json:"is_deleted" msgpack:"is_deleted"`

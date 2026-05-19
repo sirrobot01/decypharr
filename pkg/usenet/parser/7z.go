@@ -134,6 +134,7 @@ func (p *SevenZParser) Process(ctx context.Context, group *FileGroup, password s
 			Groups:       getGroupsList(group.Groups),
 			Segments:     segments,
 			Password:     password,
+			Number:       group.Files[0].Number,
 			FileType:     storage.NZBFileTypeSevenZip,
 		})
 	}
@@ -310,6 +311,7 @@ func (p *SevenZParser) processRARFilesFromPositions(
 			Segments:     fileSegments,
 			Groups:       getGroupsList(group.Groups),
 			Password:     password,
+			Number:       group.Files[0].Number,
 			FileType:     storage.NZBFileTypeRar,
 		})
 	}

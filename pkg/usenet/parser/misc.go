@@ -291,6 +291,7 @@ func buildExtractedArchiveFiles(
 			Segments:     segments,
 			Password:     password,
 			FileType:     fileType,
+			Number:       group.Files[0].Number,
 			Size:         info.FileSize,
 			IsStored:     info.IsStored,
 		})

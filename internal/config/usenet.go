@@ -35,6 +35,8 @@ type Usenet struct {
 	DiskBufferPath string `json:"disk_buffer_path,omitempty"` // Path for disk buffer storage (empty = main_path/usenet/streams)
 
 	SkipRepair bool `json:"skip_repair,omitempty"` // Skip repairing nzb/usenet files
+
+	Deobfuscate bool `json:"deobfuscate,omitempty"` // Try to rename obfuscated files
 }
 
 func (u Usenet) IsZero() bool {
@@ -143,6 +145,10 @@ func (c *Config) applyUsenetEnvVars() {
 
 	if skipRepair := getEnv("USENET__SKIP_REPAIR"); skipRepair != "" {
 		c.Usenet.SkipRepair = parseBool(skipRepair)
+	}
+
+	if deobfuscate := getEnv("USENET__DEOBFUSCATE"); deobfuscate != "" {
+		c.Usenet.Deobfuscate = parseBool(deobfuscate)
 	}
 
 	// Usenet providers array

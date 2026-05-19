@@ -1240,7 +1240,8 @@ class ConfigManager {
             availability_sample_percent: parseInt(document.querySelector('[name="usenet.availability_sample_percent"]')?.value) || 10,
             max_concurrent_nzb: parseInt(document.querySelector('[name="usenet.max_concurrent_nzb"]')?.value) || 2,
             disk_buffer_path: document.querySelector('[name="usenet.disk_buffer_path"]')?.value || "",
-            skip_repair: document.querySelector('[name="usenet.skip_repair"]').checked
+            skip_repair: document.querySelector('[name="usenet.skip_repair"]').checked,
+            deobfuscate: document.querySelector('[name="usenet.deobfuscate"]').checked
         };
     }
 
@@ -1667,13 +1668,18 @@ class ConfigManager {
             'availability_sample_percent': usenet.availability_sample_percent,
             'max_concurrent_nzb': usenet.max_concurrent_nzb,
             'disk_buffer_path': usenet.disk_buffer_path,
-            'skip_repair': usenet.skip_repair
+            'skip_repair': usenet.skip_repair,
+            'deobfuscate': usenet.deobfuscate
         };
 
         Object.entries(streamFields).forEach(([id, value]) => {
             const input = document.getElementsByName(`usenet.${id}`)[0];
             if (input && value !== undefined) {
-                input.value = value;
+                if (input.type === 'checkbox') {
+                    input.checked = value;
+                } else {
+                    input.value = value;
+                }
             }
         });
     }

@@ -191,13 +191,46 @@ func (p *NZBParser) Process(ctx context.Context, nzb *storage.NZB, groups map[st
 
 	cfg := config.Get()
 
-	// Change file name if there's only one file
+	// Handle deobfuscation renaming for media files (and their subtitles)
+	if cfg.Usenet.Deobfuscate {
+		// Collect all media files
+		var mediaFiles []*storage.NZBFile
+		for i := range files {
+			if files[i].FileType == storage.NZBFileTypeMedia {
+				mediaFiles = append(mediaFiles, &files[i])
+			}
+		}
+
+		// Sort media files by original NZB Number to ensure sequence is maintained
+		sort.Slice(mediaFiles, func(i, j int) bool {
+			return mediaFiles[i].Number < mediaFiles[j].Number
+		})
+
+		if len(mediaFiles) == 1 {
+			// Single media file: rename to NZB name
+			fileExt := filepath.Ext(mediaFiles[0].Name)
+			nzbExt := filepath.Ext(nzb.Name)
+			if fileExt != "" && !strings.EqualFold(nzbExt, fileExt) {
+				mediaFiles[0].Name = nzb.Name + fileExt
+			} else {
+				mediaFiles[0].Name = nzb.Name
+			}
+		} else if len(mediaFiles) > 1 {
+			// Multiple media files (Season Pack): rename with sequence index
+			for i, mf := range mediaFiles {
+				fileExt := filepath.Ext(mf.Name)
+				mf.Name = fmt.Sprintf("%s - %02d%s", nzb.Name, i+1, fileExt)
+			}
+		}
+	}
+
+	// Change file name if there's only one file and Deobfuscate is false (backward compatibility)
 	hasOneFile := len(files) == 1
 	skippedFiles := 0
 	var skippedErr error
 	// Calculate total Size
 	for _, file := range files {
-		if hasOneFile {
+		if !cfg.Usenet.Deobfuscate && hasOneFile {
 			// Only append extension if NZB name doesn't already have the same extension
 			fileExt := filepath.Ext(file.Name)
 			nzbExt := filepath.Ext(nzb.Name)
@@ -783,6 +816,7 @@ func (p *NZBParser) processMediaFile(group *FileGroup, password string) *storage
 		Segments: []storage.NZBSegment{},
 		Password: password,
 		FileType: group.Type,
+		Number:   group.Files[0].Number,
 	}
 
 	currentOffset := int64(0)
