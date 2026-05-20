@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/puzpuzpuz/xsync/v4"
@@ -21,6 +22,8 @@ import (
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/retry"
 	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sourcegraph/conc/pool"
+	"golang.org/x/sys/unix"
 )
 
 // ProviderPool manages connections for a single provider using a LIFO stack
@@ -49,6 +52,13 @@ type Client struct {
 	// streaming. Sized at construction from cfg.Repair.NNTPConnectionPercent;
 	// nil when repair has no NNTP budget.
 	repairBank *RepairBank
+
+	// TCP socket buffer sizes (bytes) applied to every new connection. 0 means
+	// "leave OS autotuning untouched". Sized from cfg.Usenet.Socket*Buffer.
+	// At high RTT the receive buffer is the single-connection throughput cap
+	// (≈ buffer ÷ RTT), so it must cover the bandwidth-delay product.
+	sockReadBuf  int
+	sockWriteBuf int
 }
 
 // SpeedTestResult holds the result of a provider speed test
@@ -175,6 +185,8 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		retries:          cfg.Retries,
 		logger:           logger.New("nntp-client"),
 		speedTestResults: xsync.NewMap[string, SpeedTestResult](),
+		sockReadBuf:      parseSockBuf(cfg.Usenet.SocketReadBuffer),
+		sockWriteBuf:     parseSockBuf(cfg.Usenet.SocketWriteBuffer),
 	}
 	cm.repairBank = cm.newRepairBank(cfg.Repair.NNTPConnectionPercent)
 
@@ -305,24 +317,24 @@ func (c *Client) ExecuteWithFailover(ctx context.Context, fn func(conn *Connecti
 						// Retriable error - release the potentially dead connection.
 						// Nil currentConn first to prevent double slot-release if new connection acquisition fails.
 						releasedConn := currentConn
+						failedProvider := currentProvider
 						currentConn = nil
 						c.release(releasedConn)
-						// Get a fresh connection for retry
-						newConn, newProvider, connErr := c.getAnyAvailableConnection(ctx, providerExclusions{})
+
+						// Get a fresh connection for retry. Prefer a different
+						// provider after a connection/timeout/server-busy error;
+						// otherwise one slow provider can consume the whole DFS
+						// no-progress window before failover gets a chance. If
+						// there is no alternative provider, fall back to retrying
+						// the same one.
+						retryExclusions := providerExclusions{}
+						retryExclusions.excludeHost(failedProvider.Host)
+						newConn, newProvider, connErr := c.getAnyAvailableConnection(ctx, retryExclusions)
+						if connErr != nil {
+							newConn, newProvider, connErr = c.getAnyAvailableConnection(ctx, providerExclusions{})
+						}
 						if connErr != nil {
 							return retry.Unrecoverable(connErr)
-						}
-						// Prefer same provider for retry if possible.
-						// If we landed on a different provider, try to swap for the original.
-						// On failure, keep the connection we already have (best-effort).
-						if newConn.address != connProvider.Host {
-							if preferredConn, _, preferredErr := c.getConnectionFromProvider(ctx, connProvider); preferredErr == nil {
-								// Return the mismatched connection to its own pool, not connProvider's.
-								c.returnOrReleaseConn(newConn, newProvider)
-								newConn = preferredConn
-								newProvider = connProvider
-							}
-							// else: fall back to the connection from whichever provider had capacity
 						}
 						currentConn = newConn
 						currentProvider = newProvider
@@ -639,6 +651,59 @@ func (c *Client) getOrCreateFromPool(ctx context.Context, pp *ProviderPool, prov
 	return conn, nil
 }
 
+// parseSockBuf converts a size string ("4MB") to a byte count for SO_RCVBUF/
+// SO_SNDBUF. Empty/"0"/invalid/negative → 0, meaning "leave OS autotuning
+// untouched". Clamped to a sane ceiling so a typo can't request gigabytes.
+func parseSockBuf(s string) int {
+	n, err := config.ParseSize(s)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	const maxSockBuf = 256 << 20 // 256MB
+	if n > maxSockBuf {
+		n = maxSockBuf
+	}
+	return int(n)
+}
+
+// socketControl returns a Dialer.Control hook that sets SO_RCVBUF/SO_SNDBUF on
+// the socket *before* connect, so the SYN advertises a window scale large
+// enough for the configured buffer — the part that actually matters at high
+// RTT. Returns nil (no hook, zero overhead) when both sizes are 0. The OS
+// still caps the effective size (Linux net.core.rmem_max/wmem_max, macOS
+// kern.ipc.maxsockbuf); those sysctls must be raised to realise large windows.
+func (c *Client) socketControl() func(network, address string, rc syscall.RawConn) error {
+	rb, wb := c.sockReadBuf, c.sockWriteBuf
+	if rb <= 0 && wb <= 0 {
+		return nil
+	}
+	return func(_, _ string, rc syscall.RawConn) error {
+		return rc.Control(func(fd uintptr) {
+			if rb > 0 {
+				_ = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_RCVBUF, rb)
+			}
+			if wb > 0 {
+				_ = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_SNDBUF, wb)
+			}
+		})
+	}
+}
+
+// tuneTCP applies TCP_NODELAY and (re)applies the configured socket buffers
+// on the established connection. The pre-connect Control hook does the work
+// that matters for window scaling; this reinforces the sizes post-dial and
+// covers the TLS-wrapped path. Sizes of 0 are skipped so OS autotuning is
+// preserved when the operator opted into it.
+func (c *Client) tuneTCP(tcpConn *net.TCPConn) {
+	_ = tcpConn.SetNoDelay(true)
+	if c.sockReadBuf > 0 {
+		_ = tcpConn.SetReadBuffer(c.sockReadBuf)
+	}
+	if c.sockWriteBuf > 0 {
+		_ = tcpConn.SetWriteBuffer(c.sockWriteBuf)
+	}
+}
+
 // createConnection creates a new NNTP connection to a provider
 func (c *Client) createConnection(ctx context.Context, provider config.UsenetProvider) (*Connection, error) {
 	address := fmt.Sprintf("%s:%d", provider.Host, provider.Port)
@@ -649,6 +714,7 @@ func (c *Client) createConnection(ctx context.Context, provider config.UsenetPro
 	dialer := &net.Dialer{
 		Timeout:   timeouts.DialTimeout,
 		KeepAlive: timeouts.KeepAlive,
+		Control:   c.socketControl(),
 	}
 
 	// TLS if enabled
@@ -673,18 +739,14 @@ func (c *Client) createConnection(ctx context.Context, provider config.UsenetPro
 		return nil, NewConnectionError(fmt.Errorf("dial %s: %w", address, err))
 	}
 
-	// Optimize TCP socket
+	// Optimize TCP socket (buffer sizing already applied pre-connect via
+	// Dialer.Control; this reinforces it and covers the TLS-wrapped conn).
 	if tcpConn, ok := netConn.(*net.TCPConn); ok {
-		_ = tcpConn.SetNoDelay(true)
-		_ = tcpConn.SetReadBuffer(1024 * 1024)
-		_ = tcpConn.SetWriteBuffer(256 * 1024)
+		c.tuneTCP(tcpConn)
 	}
-	// For TLS, get underlying conn
 	if tlsConn, ok := netConn.(*tls.Conn); ok {
 		if tcpConn, ok := tlsConn.NetConn().(*net.TCPConn); ok {
-			_ = tcpConn.SetNoDelay(true)
-			_ = tcpConn.SetReadBuffer(1024 * 1024)
-			_ = tcpConn.SetWriteBuffer(256 * 1024)
+			c.tuneTCP(tcpConn)
 		}
 	}
 
@@ -865,13 +927,6 @@ func (c *Client) Stat(ctx context.Context, messageID string) (int, string, error
 	return num, id, err
 }
 
-// chunkResult holds the results from a single chunk of PipelinedStat
-type chunkResult struct {
-	startIdx int          // Index into original messageIDs slice
-	results  []StatResult // Per-segment results for this chunk
-	connErr  error        // Connection-level error (if any)
-}
-
 type batchStatState struct {
 	sawNotFound bool
 	sawOtherErr bool
@@ -932,13 +987,12 @@ func excludeForArticleNotFound(exclusions *providerExclusions, provider config.U
 	exclusions.excludeHost(provider.Host)
 }
 
-// BatchStat checks the availability of many message IDs using NNTP STAT,
-// pipelined across multiple connections. Each worker holds one repair-bank
-// token for its lifetime, so the total number of concurrent NNTP connections
-// used by all in-flight BatchStat calls never exceeds the bank's capacity.
-// When the client has no bank configured, a small default worker count is
-// used. Does NOT fail-fast: every chunk is processed so the caller sees
-// complete per-segment visibility.
+// BatchStat checks the availability of many message IDs using NNTP STAT. Each
+// worker holds one repair-bank token for its lifetime, so the total number of
+// concurrent NNTP connections used by all in-flight BatchStat calls never
+// exceeds the bank's capacity. When the client has no bank configured, a small
+// default worker count is used. Does NOT fail-fast: every chunk is processed so
+// the caller sees complete per-segment visibility.
 func (c *Client) BatchStat(ctx context.Context, messageIDs []string) (*BatchStatResult, error) {
 	if c.closed.Load() {
 		return nil, errors.New("nntp client is closed")
@@ -947,9 +1001,16 @@ func (c *Client) BatchStat(ctx context.Context, messageIDs []string) (*BatchStat
 		return &BatchStatResult{}, nil
 	}
 
-	// Pipeline depth per STAT round-trip. Balances RTT amortization against
-	// memory, cancellation latency, and connection-drop blast radius.
-	const pipelineBatchSize = 50
+	// Early-bailout: cancelled the moment a segment is found definitively
+	// missing (not-found across all providers), so the remaining sample's
+	// workers stop at their per-chunk ctx.Err() checks instead of completing
+	// the full STAT sweep. defer cancel() also covers the normal return path.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Batch size per worker. Keeps cancellation latency and connection-drop
+	// blast radius bounded while still amortizing worker scheduling.
+	const statBatchSize = 50
 	// Worker count when no bank is configured (no repair budget). Keeps
 	// non-repair callers cheap.
 	const defaultWorkers = 2
@@ -958,9 +1019,9 @@ func (c *Client) BatchStat(ctx context.Context, messageIDs []string) (*BatchStat
 		startIdx   int
 		messageIDs []string
 	}
-	chunks := make([]chunk, 0, (len(messageIDs)+pipelineBatchSize-1)/pipelineBatchSize)
-	for i := 0; i < len(messageIDs); i += pipelineBatchSize {
-		end := min(i+pipelineBatchSize, len(messageIDs))
+	chunks := make([]chunk, 0, (len(messageIDs)+statBatchSize-1)/statBatchSize)
+	for i := 0; i < len(messageIDs); i += statBatchSize {
+		end := min(i+statBatchSize, len(messageIDs))
 		chunks = append(chunks, chunk{startIdx: i, messageIDs: messageIDs[i:end]})
 	}
 
@@ -973,75 +1034,70 @@ func (c *Client) BatchStat(ctx context.Context, messageIDs []string) (*BatchStat
 		workers = 1
 	}
 
-	chunksCh := make(chan chunk, len(chunks))
-	for _, ch := range chunks {
-		chunksCh <- ch
-	}
-	close(chunksCh)
-
-	resultsChan := make(chan chunkResult, len(chunks))
-	var wg sync.WaitGroup
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			// Hold one bank token for this worker's lifetime. With many
-			// in-flight callers, late workers block here until a token frees
-			// up — capping total concurrent connections at bank.Capacity().
-			release, err := c.repairBank.acquire(ctx)
-			if err != nil {
-				for ch := range chunksCh {
-					resultsChan <- chunkResult{startIdx: ch.startIdx, connErr: err}
-				}
-				return
-			}
-			defer release()
-
-			for ch := range chunksCh {
-				if ctx.Err() != nil {
-					resultsChan <- chunkResult{startIdx: ch.startIdx, connErr: ctx.Err()}
-					continue
-				}
-				chunkResults, err := c.batchStatAcrossProviders(ctx, ch.messageIDs)
-				resultsChan <- chunkResult{
-					startIdx: ch.startIdx,
-					results:  chunkResults,
-					connErr:  err,
-				}
-			}
-		}()
-	}
-
-	go func() {
-		wg.Wait()
-		close(resultsChan)
-	}()
-
 	allResults := make([]StatResult, len(messageIDs))
 	for i, msgID := range messageIDs {
 		allResults[i].MessageID = msgID
 	}
 
-	for cr := range resultsChan {
-		if cr.connErr != nil {
-			// Mark every message in this chunk as errored.
-			endIdx := cr.startIdx + pipelineBatchSize
-			if endIdx > len(messageIDs) {
-				endIdx = len(messageIDs)
-			}
-			for i := cr.startIdx; i < endIdx; i++ {
-				allResults[i].Available = false
-				allResults[i].Error = cr.connErr
-			}
-			continue
-		}
-		for i, res := range cr.results {
-			idx := cr.startIdx + i
-			if idx < len(allResults) {
-				allResults[idx] = res
-			}
+	// One task per chunk, at most `workers` running concurrently. Tasks write
+	// disjoint index ranges of allResults, so no results channel or per-write
+	// locking is needed — the only shared state is the one-shot early-bailout
+	// cancel.
+	//
+	// The bank token is acquired per chunk-task rather than held for a
+	// worker's whole lifetime: with WithMaxGoroutines(workers) and workers ==
+	// bank.Capacity() the max concurrent connection cap is unchanged, but the
+	// token is released between chunks so concurrent BatchStat/repair callers
+	// interleave fairly instead of one caller hogging the bank until it's done.
+	markChunkErr := func(startIdx, n int, e error) {
+		for i := startIdx; i < startIdx+n; i++ {
+			allResults[i].Available = false
+			allResults[i].Error = e
 		}
 	}
+	var bailOnce sync.Once
+	p := pool.New().WithMaxGoroutines(workers)
+	for _, ch := range chunks {
+		ch := ch
+		p.Go(func() {
+			release, err := c.repairBank.acquire(ctx) // nil-safe; blocks on the bank
+			if err != nil {
+				markChunkErr(ch.startIdx, len(ch.messageIDs), err)
+				return
+			}
+			defer release()
+
+			if err := ctx.Err(); err != nil {
+				// Early-bailout already fired (or caller cancelled): skip STATs.
+				markChunkErr(ch.startIdx, len(ch.messageIDs), err)
+				return
+			}
+
+			results, connErr := c.batchStatAcrossProviders(ctx, ch.messageIDs)
+			if connErr != nil {
+				// Mirrors the previous behaviour: a chunk-level connection
+				// error fails the whole chunk (partial results discarded).
+				markChunkErr(ch.startIdx, len(ch.messageIDs), connErr)
+				return
+			}
+			for i := range results {
+				allResults[ch.startIdx+i] = results[i]
+			}
+
+			// Bail out the rest of the sample as soon as one segment is
+			// definitively missing — not-found on every provider, so the
+			// terminal classification carries an ArticleNotFound error.
+			// Per-segment provider failover has already completed inside this
+			// chunk before we get here, so this never short-circuits failover.
+			for _, r := range results {
+				if !r.Available && IsArticleNotFoundError(r.Error) {
+					bailOnce.Do(cancel)
+					break
+				}
+			}
+		})
+	}
+	p.Wait()
 
 	result := &BatchStatResult{
 		Results:    allResults,
@@ -1176,10 +1232,39 @@ func (c *Client) batchStatOnProvider(ctx context.Context, provider config.Usenet
 		return nil, err
 	}
 
-	results, statErr := conn.PipelinedStat(messageIDs)
-	if statErr != nil {
+	results := make([]StatResult, len(messageIDs))
+	for i, msgID := range messageIDs {
+		results[i].MessageID = msgID
+		if ctx.Err() != nil {
+			results[i].Available = false
+			results[i].Error = ctx.Err()
+			c.release(conn)
+			return results, ctx.Err()
+		}
+
+		_, _, statErr := conn.Stat(msgID)
+		if statErr == nil {
+			results[i].Available = true
+			continue
+		}
+
+		results[i].Available = false
+		results[i].Error = statErr
+
+		var nntpErr *Error
+		if errors.As(statErr, &nntpErr) && nntpErr.Type != ErrorTypeConnection && nntpErr.Type != ErrorTypeTimeout {
+			continue
+		}
+
+		connErr := NewConnectionError(fmt.Errorf("failed to STAT %s at %d/%d: %w", msgID, i+1, len(messageIDs), statErr))
+		results[i].Error = connErr
+		for j := i + 1; j < len(messageIDs); j++ {
+			results[j].MessageID = messageIDs[j]
+			results[j].Available = false
+			results[j].Error = connErr
+		}
 		c.release(conn)
-		return results, statErr
+		return results, connErr
 	}
 
 	c.returnOrReleaseConn(conn, providerCfg)

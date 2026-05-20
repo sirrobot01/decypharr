@@ -120,11 +120,24 @@ func (p *ZIPParser) Process(ctx context.Context, group *FileGroup, password stri
 			continue
 		}
 
-		// Calculate actual data offset (LocalHeaderOffset points to header, not data)
+		// LocalHeaderOffset points at the local file header, NOT the payload.
+		// The payload starts after a 30-byte fixed header + filename + the
+		// LOCAL extra field, whose length frequently differs from the central
+		// directory's. Read the local header to get the exact data offset;
+		// without this the stream is shifted by the header length (garbage
+		// prefix + truncated tail) and the file won't play.
+		dataOffset, err := p.calculateZIPDataOffset(ctx, volumes, file)
+		if err != nil {
+			// Best effort: assume no local extra field (common for archives
+			// that only store extra data in the central directory).
+			dataOffset = file.LocalHeaderOffset + 30 + int64(len(file.Name))
+		}
+
 		extracted = append(extracted, &storage.ExtractedFileInfo{
 			FileName:     name,
 			InternalPath: internal,
 			FileSize:     file.UncompressedSize,
+			DataOffset:   dataOffset,
 			IsStored:     file.IsStored,
 		})
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/customerror"
+	"github.com/sirrobot01/decypharr/internal/nntp"
 	"github.com/sirrobot01/decypharr/pkg/manager"
 	fuseconfig "github.com/sirrobot01/decypharr/pkg/mount/dfs/config"
 	"github.com/sirrobot01/decypharr/pkg/mount/dfs/vfs/ranges"
@@ -25,16 +26,27 @@ const (
 	maxErrorCount = 10
 	// downloaderWindow is how close a read must be to reuse a downloader
 	downloaderWindow = 4 * 1024 * 1024 // 4MB
+	// probeChunkSize is the (small) initial chunk a priority downloader uses.
+	// Latency-sensitive probe reads (ffprobe seeking to the moov atom near EOF)
+	// must return a few bytes fast and release the NNTP connection quickly,
+	// instead of being bundled behind a multi-MB read-ahead chunk.
+	probeChunkSize = 1 * 1024 * 1024 // 1MB
 	// kickerInterval is how often the safety-net ticker checks waiters and idle timeout
 	kickerInterval = 5 * time.Second
 	// activeWaiterKickerInterval is the faster fallback cadence while readers are blocked.
 	activeWaiterKickerInterval = 1 * time.Second
 	// idleTimeout is how long before stopping all downloaders due to inactivity
 	idleTimeout = 30 * time.Second
-	// circuitCooldownDuration is how long to block requests after max errors reached
-	circuitCooldownDuration = 20 * time.Minute
-	// noProgressTimeout is the max time a stream attempt may run without any bytes written.
-	noProgressTimeout = 45 * time.Second
+	// circuitCooldownDuration is how long to block requests after max errors
+	// reached. Kept short: a probe-heavy workload (Sonarr/Radarr library
+	// scans) issues many short-lived reads, so a long lockout turns a brief
+	// provider hiccup into minutes of "unable to detect if file is a sample".
+	circuitCooldownDuration = 2 * time.Minute
+	// noProgressTimeout is the max time a stream attempt may run without any
+	// bytes written. Keep this above the NNTP per-segment idle timeout so a
+	// slow/stalled usenet provider can be classified and retried before DFS
+	// cancels the attempt.
+	noProgressTimeout = 90 * time.Second
 	// noProgressCheckInterval is how often stall detection checks for forward progress.
 	noProgressCheckInterval = 1 * time.Second
 	// maxChunkSizeMultiplier caps adaptive chunk growth at this multiple of baseChunkSize.
@@ -109,6 +121,10 @@ func (dls *Downloaders) untrackStreamLocked() {
 type waiter struct {
 	r       ranges.Range
 	errChan chan<- error
+	// priority marks a latency-sensitive read (e.g. ffprobe's near-EOF moov
+	// seek). Priority waiters spawn a dedicated small-chunk downloader with no
+	// read-ahead extension so they don't queue behind bulk prefetch.
+	priority bool
 }
 
 // downloader represents a single download goroutine
@@ -129,6 +145,9 @@ type downloader struct {
 
 	baseChunkSize    int64
 	currentChunkSize int64
+	// priority downloaders keep a small fixed chunk size (no adaptive growth)
+	// so each Stream call is short and yields its connection quickly.
+	priority bool
 
 	wg sync.WaitGroup
 
@@ -233,6 +252,14 @@ func NewDownloaders(ctx context.Context, mgr *manager.Manager, item *CacheItem, 
 
 // Download blocks until the range r is on disk, or until ctx is canceled.
 func (dls *Downloaders) Download(ctx context.Context, r ranges.Range) error {
+	return dls.DownloadWithPriority(ctx, r, false)
+}
+
+// DownloadWithPriority is Download with an optional priority hint. Priority
+// reads (small/random/near-EOF, e.g. ffprobe) get a dedicated small-chunk
+// downloader with no read-ahead extension so they are not starved behind bulk
+// sequential prefetch under high connection load.
+func (dls *Downloaders) DownloadWithPriority(ctx context.Context, r ranges.Range, priority bool) error {
 	// Circuit breaker: reject immediately if circuit is open
 	if dls.isCircuitOpen() {
 		lastErr := dls.getLastErr()
@@ -263,7 +290,7 @@ func (dls *Downloaders) Download(ctx context.Context, r ranges.Range) error {
 
 	// Fast path: already have it
 	if dls.item.HasRange(r) {
-		if err := dls.ensureDownloaderLocked(r); err != nil {
+		if err := dls.ensureDownloaderLocked(r, priority); err != nil {
 			dls.mu.Unlock()
 			return err
 		}
@@ -272,11 +299,11 @@ func (dls *Downloaders) Download(ctx context.Context, r ranges.Range) error {
 	}
 	// Create waiter channel
 	errChan := make(chan error, 1)
-	dls.waiters = append(dls.waiters, waiter{r: r, errChan: errChan})
+	dls.waiters = append(dls.waiters, waiter{r: r, errChan: errChan, priority: priority})
 	dls.waiterCount.Add(1)
 
 	// Ensure downloader running
-	if err := dls.ensureDownloaderLocked(r); err != nil {
+	if err := dls.ensureDownloaderLocked(r, priority); err != nil {
 		// Remove our waiter on error
 		dls.removeWaiterLocked(errChan)
 		dls.mu.Unlock()
@@ -297,6 +324,54 @@ func (dls *Downloaders) Download(ctx context.Context, r ranges.Range) error {
 		dls.mu.Unlock()
 		return ctx.Err()
 	}
+}
+
+const (
+	// downloadRetryAttempts bounds how many times a read re-attempts a
+	// transient download failure before surfacing EIO to FUSE. ffprobe treats
+	// one EIO as fatal ("unable to detect if file is a sample"), so a single
+	// connection-starvation blip under load must not fail it — but we must not
+	// block it long either, since ffprobe has its own I/O timeout.
+	downloadRetryAttempts = 3
+	downloadRetryBackoff  = 150 * time.Millisecond
+
+	// probeTailZone: a read whose end lands in the final zone of the file is
+	// treated as a latency-sensitive probe (ffprobe seeking to the MP4 moov
+	// atom / MKV cues near EOF). For sequential playback this only matters at
+	// the very end, where read-ahead is clipped anyway — negligible cost.
+	probeTailZone = 64 * 1024 * 1024
+)
+
+// isProbeRead reports whether a read looks like a media-probe access pattern
+// (near-EOF), which should be prioritized over bulk sequential prefetch.
+func isProbeRead(off, length, fileSize int64) bool {
+	if fileSize <= 0 || length <= 0 {
+		return false
+	}
+	return off+length >= fileSize-probeTailZone
+}
+
+// DownloadWithRetry blocks until r is available, re-attempting transient
+// failures a few times with short backoff so a momentary connection shortage
+// under high load does not surface as a hard read error to ffprobe. It fails
+// fast (no retry) on cancellation, an open circuit breaker, or a non-transient
+// error — retrying those would only spin.
+func (dls *Downloaders) DownloadWithRetry(ctx context.Context, r ranges.Range, priority bool) error {
+	var err error
+	for attempt := 0; attempt < downloadRetryAttempts; attempt++ {
+		if err = dls.DownloadWithPriority(ctx, r, priority); err == nil {
+			return nil
+		}
+		if ctx.Err() != nil || dls.isCircuitOpen() || !customerror.IsRetriableError(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(downloadRetryBackoff * time.Duration(attempt+1)):
+		}
+	}
+	return err
 }
 
 // removeWaiterLocked removes a waiter by its channel (call with lock held).
@@ -323,9 +398,15 @@ func (dls *Downloaders) getLastErr() error {
 // It extends the requested range by readAheadSize before clipping to missing
 // data, so the downloader's target always stays ahead of the read position.
 // The downloader idle timeout naturally limits waste on probes/seeks.
-func (dls *Downloaders) ensureDownloaderLocked(r ranges.Range) error {
-	// Extend by read-ahead then clip to actual missing bytes.
-	r = dls.extendAndFindMissingRangeLocked(r)
+func (dls *Downloaders) ensureDownloaderLocked(r ranges.Range, priority bool) error {
+	// Priority reads fetch only the missing bytes they actually need (no
+	// read-ahead extension) so they complete and release the connection fast.
+	// Bulk reads extend by read-ahead then clip to actual missing bytes.
+	if priority {
+		r = dls.item.FindMissing(r)
+	} else {
+		r = dls.extendAndFindMissingRangeLocked(r)
+	}
 
 	// If the requested range + read-ahead is already present, we just need
 	// to kick an existing downloader to prevent idle timeout. No new download needed.
@@ -354,7 +435,7 @@ func (dls *Downloaders) ensureDownloaderLocked(r ranges.Range) error {
 	}
 
 	// Start new downloader
-	return dls.newDownloaderLocked(r, targetEnd)
+	return dls.newDownloaderLocked(r, targetEnd, priority)
 }
 
 // extendAndFindMissingRangeLocked expands a request by read-ahead and returns
@@ -403,10 +484,15 @@ func (dls *Downloaders) kickExistingDownloaderLocked(pos int64) {
 }
 
 // newDownloaderLocked creates and starts a new downloader
-func (dls *Downloaders) newDownloaderLocked(r ranges.Range, targetEnd int64) error {
+func (dls *Downloaders) newDownloaderLocked(r ranges.Range, targetEnd int64, priority bool) error {
 	baseChunk := dls.chunkSize
 	if baseChunk <= 0 {
 		baseChunk = 4 * 1024 * 1024
+	}
+	// Priority downloaders use a small fixed chunk so the latency-sensitive
+	// bytes return quickly and the NNTP connection is freed for other reads.
+	if priority && baseChunk > probeChunkSize {
+		baseChunk = probeChunkSize
 	}
 
 	// Each downloader gets its own context derived from the Downloaders context.
@@ -425,6 +511,7 @@ func (dls *Downloaders) newDownloaderLocked(r ranges.Range, targetEnd int64) err
 		maxOffset:        targetEnd,
 		baseChunkSize:    baseChunk,
 		currentChunkSize: baseChunk,
+		priority:         priority,
 	}
 
 	dls.dls = append(dls.dls, dl)
@@ -485,7 +572,13 @@ func (dls *Downloaders) countErrors(n int64, err error) {
 		if !customerror.IsSilentError(err) {
 			dls.item.logger.Debug().Err(err).Int("count", dls.errorCount).Msg("download error")
 		}
-		if !customerror.IsRetriableError(err) {
+		// Only a genuinely permanent provider failure (article missing, auth,
+		// payment/permission) fast-trips the breaker — retrying those 10× is
+		// pointless. Transient/ambiguous errors (timeout, stall, "stream
+		// produced no data", "exhausted retries") only increment, so the
+		// breaker requires SUSTAINED failure. This is what stops one bad
+		// moment under load from locking a file out of every ffprobe.
+		if nntp.IsArticleNotFoundError(err) || customerror.IsPermanentError(err) {
 			dls.errorCount = maxErrorCount
 		}
 		// Trip circuit breaker when max errors reached
@@ -551,14 +644,19 @@ func (dls *Downloaders) kickWaiters() {
 
 	dls.removeClosed()
 	for _, w := range remaining {
-		missing := dls.extendAndFindMissingRangeLocked(w.r)
+		var missing ranges.Range
+		if w.priority {
+			missing = dls.item.FindMissing(w.r)
+		} else {
+			missing = dls.extendAndFindMissingRangeLocked(w.r)
+		}
 		if missing.IsEmpty() {
 			continue
 		}
 		if dls.findDownloaderForPosLocked(missing.Pos) != nil {
 			continue
 		}
-		_ = dls.ensureDownloaderLocked(w.r)
+		_ = dls.ensureDownloaderLocked(w.r, w.priority)
 		break
 	}
 }
@@ -1074,9 +1172,20 @@ func (dl *downloader) streamChunk(start, end int64) (int64, error) {
 		return writer.written, err
 	}
 
-	// Ensure we made progress (either written data or skipped existing data)
-	// If offset hasn't moved, we're in an infinite loop
+	// Ensure we made progress (either written data or skipped existing data).
+	// If offset hasn't moved, re-check whether a concurrent downloader filled
+	// this range while we were streaming. Under high load (ffprobe + import
+	// scan + prefetch all touching the same file) overlapping downloaders are
+	// common; the range being present now is a benign race, NOT a failure —
+	// treating it as one used to trip the circuit breaker and lock the file
+	// out for minutes.
 	if writer.offset == missingRange.Pos {
+		if dl.dls.item.FindMissing(requestedRange).Size <= 0 {
+			dl.mu.Lock()
+			dl.offset = end
+			dl.mu.Unlock()
+			return writer.written, nil
+		}
 		return writer.written, errors.New("stream produced no data")
 	}
 
@@ -1116,6 +1225,13 @@ func (dl *downloader) adjustChunkSize(chunkLen, written int64, success bool) {
 
 	// If no data needed to be written (all cached), don't change chunk size
 	if chunkLen <= 0 {
+		return
+	}
+
+	// Priority downloaders stay small on purpose — never ramp them up, or a
+	// probe stream would start hogging a connection like a bulk download.
+	if dl.priority {
+		dl.currentChunkSize = dl.baseChunkSize
 		return
 	}
 

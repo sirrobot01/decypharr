@@ -35,7 +35,7 @@ func releaseDecryptionBuffer(buf []byte) {
 //
 // Key features:
 //   - Pin/Unpin pattern prevents the "chunk does not exist" race condition
-//   - Tiered caching: memory → disk → re-download
+//   - Disk caching with transparent re-download
 //   - Request deduplication for concurrent reads of the same segment
 //   - Background prefetching for smooth sequential reads
 //   - AES-CBC decryption support for encrypted archives
@@ -142,6 +142,16 @@ func NewStreamingReaderWithEncryption(
 //
 // THE CRITICAL PATH: Uses Pin/Unpin to prevent the race condition.
 func (sr *StreamingReader) ReadAt(p []byte, off int64) (int, error) {
+	return sr.ReadAtContext(context.Background(), p, off)
+}
+
+// ReadAtContext implements context-aware random reads. The context is carried
+// into segment waits and NNTP fetches so DFS/FUSE read timeouts can cancel the
+// underlying work instead of waiting for the reader lifetime to end.
+func (sr *StreamingReader) ReadAtContext(ctx context.Context, p []byte, off int64) (int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if sr.closed.Load() {
 		return 0, io.ErrClosedPipe
 	}
@@ -153,17 +163,20 @@ func (sr *StreamingReader) ReadAt(p []byte, off int64) (int, error) {
 	if off >= sr.totalSize {
 		return 0, io.EOF
 	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 
 	sr.stats.Reads.Add(1)
 
 	if sr.encryption.Enabled {
-		return sr.readAtEncrypted(p, off)
+		return sr.readAtEncrypted(ctx, p, off)
 	}
-	return sr.readAtPlain(p, off)
+	return sr.readAtPlain(ctx, p, off)
 }
 
 // readAtPlain handles non-encrypted reads.
-func (sr *StreamingReader) readAtPlain(p []byte, off int64) (int, error) {
+func (sr *StreamingReader) readAtPlain(ctx context.Context, p []byte, off int64) (int, error) {
 	// Clamp to file bounds
 	readLen := int64(len(p))
 	eofAfter := false
@@ -186,13 +199,13 @@ func (sr *StreamingReader) readAtPlain(p []byte, off int64) (int, error) {
 	}
 
 	// Ensure all required segments are available (may block for downloads)
-	if err := sr.fetcher.EnsureSegments(sr.ctx, startSeg, endSeg); err != nil {
+	if err := sr.fetcher.EnsureSegments(ctx, startSeg, endSeg); err != nil {
 		sr.stats.ReadErrors.Add(1)
 		return 0, err
 	}
 
 	// Read data from cache
-	n, err := sr.readFromCache(p[:readLen], off, startSeg, endSeg)
+	n, err := sr.readFromCache(ctx, p[:readLen], off, startSeg, endSeg)
 	if err != nil {
 		sr.stats.ReadErrors.Add(1)
 		return n, err
@@ -213,12 +226,12 @@ func (sr *StreamingReader) readAtPlain(p []byte, off int64) (int, error) {
 // Previously the code read entire segments (~750 KB) even for 4 KB reads,
 // which filled the kernel page cache with mostly-unused data and caused
 // progressive performance degradation on large files.
-func (sr *StreamingReader) readFromCache(p []byte, off int64, startSeg, endSeg int) (int, error) {
+func (sr *StreamingReader) readFromCache(ctx context.Context, p []byte, off int64, startSeg, endSeg int) (int, error) {
 	totalRead := 0
 
 	for segIdx := startSeg; segIdx <= endSeg; segIdx++ {
 		// Wait for segment to be ready
-		if err := sr.cache.WaitForSegment(sr.ctx, segIdx); err != nil {
+		if err := sr.cache.WaitForSegment(ctx, segIdx); err != nil {
 			return totalRead, err
 		}
 
@@ -243,7 +256,7 @@ func (sr *StreamingReader) readFromCache(p []byte, off int64, startSeg, endSeg i
 		if !ok {
 			// Segment was evicted between WaitForSegment and the read. Re-fetch.
 			sr.logger.Warn().Int("segment", segIdx).Msg("segment data missing after wait, re-fetching")
-			if err := sr.fetcher.Fetch(sr.ctx, segIdx); err != nil {
+			if err := sr.fetcher.Fetch(ctx, segIdx); err != nil {
 				return totalRead, fmt.Errorf("re-fetch segment %d: %w", segIdx, err)
 			}
 			n, ok = sr.cache.ReadRangeInto(segIdx, segDataOffset, copyLen, p[outOffset:outOffset+copyLen])
@@ -259,7 +272,7 @@ func (sr *StreamingReader) readFromCache(p []byte, off int64, startSeg, endSeg i
 }
 
 // readAtEncrypted handles AES-CBC encrypted reads.
-func (sr *StreamingReader) readAtEncrypted(p []byte, off int64) (int, error) {
+func (sr *StreamingReader) readAtEncrypted(ctx context.Context, p []byte, off int64) (int, error) {
 	// AES-CBC requires block-aligned reads
 	alignedStart := (off / crypto.BlockSize) * crypto.BlockSize
 
@@ -280,7 +293,7 @@ func (sr *StreamingReader) readAtEncrypted(p []byte, off int64) (int, error) {
 	defer releaseDecryptionBuffer(buf)
 
 	// Read aligned data
-	n, err := sr.readAtPlain(buf, alignedStart)
+	n, err := sr.readAtPlain(ctx, buf, alignedStart)
 	if n > 0 && len(sr.encryption.Key) > 0 {
 		// Handle partial last block
 		decryptedLen := int64(n)
@@ -295,7 +308,7 @@ func (sr *StreamingReader) readAtEncrypted(p []byte, off int64) (int, error) {
 		}
 
 		// Decrypt
-		if decryptErr := sr.decryptInPlace(buf[:decryptedLen], alignedStart); decryptErr != nil {
+		if decryptErr := sr.decryptInPlace(ctx, buf[:decryptedLen], alignedStart); decryptErr != nil {
 			return 0, fmt.Errorf("decrypt: %w", decryptErr)
 		}
 	}
@@ -325,7 +338,7 @@ func (sr *StreamingReader) readAtEncrypted(p []byte, off int64) (int, error) {
 }
 
 // decryptInPlace decrypts data using AES-256-CBC.
-func (sr *StreamingReader) decryptInPlace(data []byte, offset int64) error {
+func (sr *StreamingReader) decryptInPlace(ctx context.Context, data []byte, offset int64) error {
 	if len(data) == 0 {
 		return nil
 	}
@@ -334,7 +347,7 @@ func (sr *StreamingReader) decryptInPlace(data []byte, offset int64) error {
 		return nil // Not block-aligned, can't decrypt
 	}
 
-	iv, err := sr.computeIVForOffset(offset)
+	iv, err := sr.computeIVForOffset(ctx, offset)
 	if err != nil {
 		return err
 	}
@@ -343,7 +356,7 @@ func (sr *StreamingReader) decryptInPlace(data []byte, offset int64) error {
 }
 
 // computeIVForOffset computes the IV for decrypting at a given offset.
-func (sr *StreamingReader) computeIVForOffset(offset int64) ([]byte, error) {
+func (sr *StreamingReader) computeIVForOffset(ctx context.Context, offset int64) ([]byte, error) {
 	blockOffset := (offset / crypto.BlockSize) * crypto.BlockSize
 
 	if blockOffset == 0 {
@@ -358,7 +371,7 @@ func (sr *StreamingReader) computeIVForOffset(offset int64) ([]byte, error) {
 	iv := make([]byte, crypto.BlockSize)
 
 	// Read previous block (raw, not decrypted)
-	n, err := sr.readAtPlain(iv, prevBlockOffset)
+	n, err := sr.readAtPlain(ctx, iv, prevBlockOffset)
 	if err != nil && err != io.EOF {
 		return nil, fmt.Errorf("read IV block at %d: %w", prevBlockOffset, err)
 	}
@@ -372,6 +385,9 @@ func (sr *StreamingReader) computeIVForOffset(offset int64) ([]byte, error) {
 // Prefetch triggers segment downloads for the given byte range without blocking.
 func (sr *StreamingReader) Prefetch(ctx context.Context, off, length int64) {
 	if sr.closed.Load() {
+		return
+	}
+	if ctx != nil && ctx.Err() != nil {
 		return
 	}
 	if off >= sr.totalSize {

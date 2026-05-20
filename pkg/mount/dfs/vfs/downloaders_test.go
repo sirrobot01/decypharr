@@ -60,7 +60,7 @@ func TestEnsureDownloaderLocked_ExtendsMissByReadAhead(t *testing.T) {
 	}
 
 	req := ranges.Range{Pos: reqPos, Size: reqSize}
-	if err := dls.ensureDownloaderLocked(req); err != nil {
+	if err := dls.ensureDownloaderLocked(req, false); err != nil {
 		t.Fatalf("ensureDownloaderLocked returned error: %v", err)
 	}
 
@@ -101,7 +101,7 @@ func TestEnsureDownloaderLocked_CachedRequestPrefetchesGap(t *testing.T) {
 	}
 
 	req := ranges.Range{Pos: reqPos, Size: reqSize}
-	if err := dls.ensureDownloaderLocked(req); err != nil {
+	if err := dls.ensureDownloaderLocked(req, false); err != nil {
 		t.Fatalf("ensureDownloaderLocked returned error: %v", err)
 	}
 
@@ -142,7 +142,7 @@ func TestEnsureDownloaderLocked_CachedWindowFullDoesNotExtend(t *testing.T) {
 	}
 
 	req := ranges.Range{Pos: reqPos, Size: reqSize}
-	if err := dls.ensureDownloaderLocked(req); err != nil {
+	if err := dls.ensureDownloaderLocked(req, false); err != nil {
 		t.Fatalf("ensureDownloaderLocked returned error: %v", err)
 	}
 

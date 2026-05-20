@@ -21,6 +21,8 @@ import (
 // This allows callers to trigger segment downloads before starting reads.
 type PrefetchableReaderAt interface {
 	io.ReaderAt
+	// ReadAtContext reads with caller cancellation.
+	ReadAtContext(ctx context.Context, p []byte, off int64) (int, error)
 	// Prefetch triggers segment downloads for the given byte range without blocking.
 	Prefetch(ct context.Context, off, length int64)
 }
@@ -201,7 +203,7 @@ func (f *FS) createNewReaderForVolume(vol *types.Volume) (PrefetchableReaderAt, 
 	// Configure the new reader
 	readerConfig := reader.DefaultConfig()
 	readerConfig.MaxConnections = f.maxConcurrent
-	readerConfig.PrefetchAhead = 8 // prefetch ahead count
+	readerConfig.PrefetchAhead = reader.PrefetchAheadSegments(f.prefetchSize, segments)
 	readerConfig.DiskPath = cfg.Usenet.DiskBufferPath
 
 	// Create the new streaming reader

@@ -11,6 +11,7 @@ import (
 	"net/textproto"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -21,6 +22,60 @@ import (
 
 // Note: Timeout values are defined in TimeoutConfig (client.go)
 // Use timeouts.timeouts.StreamBodyTimeout for read deadlines
+
+// bodyCopyBufPool provides reusable 128KB buffers for idle-deadline body
+// copies, keeping the streaming hot path allocation-free.
+var bodyCopyBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 128*1024)
+		return &b
+	},
+}
+
+// copyBodyWithIdleDeadline copies src→dst, resetting the connection read
+// deadline before every read so the timeout behaves as an *idle* deadline
+// rather than an absolute cap on the whole transfer. A slow-but-progressing
+// segment is no longer killed mid-stream; only a genuine stall (no bytes for
+// `idle`) trips the deadline.
+func (c *Connection) copyBodyWithIdleDeadline(dst io.Writer, src io.Reader, idle time.Duration) (int64, error) {
+	if idle <= 0 {
+		idle = 60 * time.Second
+	}
+	bufPtr := bodyCopyBufPool.Get().(*[]byte)
+	buf := *bufPtr
+	defer bodyCopyBufPool.Put(bufPtr)
+
+	var total int64
+	for {
+		_ = c.conn.SetReadDeadline(utils.Now().Add(idle))
+		nr, er := src.Read(buf)
+		if nr > 0 {
+			nw, ew := dst.Write(buf[:nr])
+			total += int64(nw)
+			if ew != nil {
+				return total, ew
+			}
+			if nw != nr {
+				return total, io.ErrShortWrite
+			}
+		}
+		if er != nil {
+			if er == io.EOF {
+				return total, nil
+			}
+			return total, er
+		}
+	}
+}
+
+func (c *Connection) readResponseWithDeadline(timeout time.Duration) (*Response, error) {
+	if timeout <= 0 {
+		timeout = timeouts.StreamBodyTimeout
+	}
+	_ = c.conn.SetReadDeadline(utils.Now().Add(timeout))
+	defer func() { _ = c.conn.SetReadDeadline(time.Time{}) }()
+	return c.readResponse()
+}
 
 // Connection represents an NNTP connection
 type Connection struct {
@@ -130,6 +185,9 @@ func (c *Connection) ping() error {
 
 // sendCommand sends a command to the NNTP server
 func (c *Connection) sendCommand(command string) error {
+	_ = c.conn.SetWriteDeadline(utils.Now().Add(timeouts.HandshakeTimeout))
+	defer func() { _ = c.conn.SetWriteDeadline(time.Time{}) }()
+
 	_, err := fmt.Fprintf(c.writer, "%s\r\n", command)
 	if err != nil {
 		return err
@@ -208,7 +266,7 @@ func (c *Connection) GetHeader(messageID string, maxSnippet int) (*YencMetadata,
 		return nil, NewConnectionError(fmt.Errorf("failed to send BODY command: %w", err))
 	}
 
-	resp, err := c.readResponse()
+	resp, err := c.readResponseWithDeadline(timeouts.StreamBodyTimeout)
 	if err != nil {
 		return nil, NewConnectionError(fmt.Errorf("failed to read body response: %w", err))
 	}
@@ -229,7 +287,7 @@ func (c *Connection) GetHeader(messageID string, maxSnippet int) (*YencMetadata,
 	n, err := io.ReadFull(dec, snippet)
 	if err != nil && err != io.EOF && !errors.Is(err, io.ErrUnexpectedEOF) {
 		_ = c.conn.Close()
-		return nil, fmt.Errorf("failed to read snippet: %w", err)
+		return nil, classifyTransferError("failed to read snippet", err)
 	}
 	// Truncate snippet to actual read size
 	snippet = snippet[:n]
@@ -273,7 +331,7 @@ func (c *Connection) GetHeaderPrefix(messageID string, maxSnippet int) (*YencMet
 		return nil, NewConnectionError(fmt.Errorf("failed to send BODY command: %w", err))
 	}
 
-	resp, err := c.readResponse()
+	resp, err := c.readResponseWithDeadline(timeouts.StreamBodyTimeout)
 	if err != nil {
 		return nil, NewConnectionError(fmt.Errorf("failed to read body response: %w", err))
 	}
@@ -294,14 +352,14 @@ func (c *Connection) GetHeaderPrefix(messageID string, maxSnippet int) (*YencMet
 		n, readErr := io.ReadFull(dec, snippet)
 		if readErr != nil && readErr != io.EOF && !errors.Is(readErr, io.ErrUnexpectedEOF) {
 			_ = c.conn.Close()
-			return nil, fmt.Errorf("failed to read snippet: %w", readErr)
+			return nil, classifyTransferError("failed to read snippet", readErr)
 		}
 		snippet = snippet[:n]
 	}
 
-	if _, err := io.Copy(io.Discard, dec); err != nil {
+	if _, err := c.copyBodyWithIdleDeadline(io.Discard, dec, timeouts.StreamBodyTimeout); err != nil {
 		_ = c.conn.Close()
-		return nil, fmt.Errorf("failed to drain article body: %w", err)
+		return nil, classifyTransferError("failed to drain article body", err)
 	}
 
 	return metadataFromDecoder(dec, snippet), nil
@@ -314,7 +372,7 @@ func (c *Connection) GetBody(messageID string) ([]byte, error) {
 		return nil, NewConnectionError(fmt.Errorf("failed to send BODY command: %w", err))
 	}
 
-	resp, err := c.readResponse()
+	resp, err := c.readResponseWithDeadline(timeouts.StreamBodyTimeout)
 	if err != nil {
 		return nil, NewConnectionError(fmt.Errorf("failed to read body response: %w", err))
 	}
@@ -327,7 +385,11 @@ func (c *Connection) GetBody(messageID string) ([]byte, error) {
 	_ = c.conn.SetReadDeadline(utils.Now().Add(timeouts.StreamBodyTimeout))
 	defer func() { _ = c.conn.SetReadDeadline(time.Time{}) }()
 
-	return c.readDotBytes()
+	body, err := c.readDotBytes()
+	if err != nil {
+		return nil, classifyTransferError("failed to read body", err)
+	}
+	return body, nil
 }
 
 // GetDecodedBody retrieves and decodes article body using streaming yEnc decode.
@@ -346,7 +408,7 @@ func (c *Connection) GetDecodedBodyWithMetadata(messageID string) ([]byte, *Yenc
 		return nil, nil, NewConnectionError(fmt.Errorf("failed to send BODY command: %w", err))
 	}
 
-	resp, err := c.readResponse()
+	resp, err := c.readResponseWithDeadline(timeouts.StreamBodyTimeout)
 	if err != nil {
 		return nil, nil, NewConnectionError(fmt.Errorf("failed to read body response: %w", err))
 	}
@@ -355,8 +417,8 @@ func (c *Connection) GetDecodedBodyWithMetadata(messageID string) ([]byte, *Yenc
 		return nil, nil, classifyNNTPError(resp.Code, resp.Message)
 	}
 
-	// Set read deadline to prevent hanging on stalled servers
-	_ = c.conn.SetReadDeadline(utils.Now().Add(timeouts.StreamBodyTimeout))
+	// Idle (not absolute) read deadline: reset on every read so a slow but
+	// progressing transfer survives — only a real stall trips it.
 	defer func() { _ = c.conn.SetReadDeadline(time.Time{}) }()
 
 	dec := nntpyenc.AcquireDecoder(c.reader)
@@ -365,10 +427,10 @@ func (c *Connection) GetDecodedBodyWithMetadata(messageID string) ([]byte, *Yenc
 
 	// Pre-allocate output buffer for decoded data (~700KB typical)
 	output := bytes.NewBuffer(make([]byte, 0, 750*1024))
-	_, err = io.Copy(output, dec)
+	_, err = c.copyBodyWithIdleDeadline(output, dec, timeouts.StreamBodyTimeout)
 
 	if err != nil {
-		return nil, nil, fmt.Errorf("streaming yenc decode failed: %w", err)
+		return nil, nil, classifyTransferError("streaming yenc decode failed", err)
 	}
 	decoded := output.Bytes()
 
@@ -381,7 +443,7 @@ func (c *Connection) StreamBody(messageID string, w io.Writer) (int64, error) {
 		return 0, NewConnectionError(fmt.Errorf("failed to send BODY command: %w", err))
 	}
 
-	resp, err := c.readResponse()
+	resp, err := c.readResponseWithDeadline(timeouts.StreamBodyTimeout)
 	if err != nil {
 		return 0, NewConnectionError(fmt.Errorf("failed to read body response: %w", err))
 	}
@@ -390,16 +452,16 @@ func (c *Connection) StreamBody(messageID string, w io.Writer) (int64, error) {
 		return 0, classifyNNTPError(resp.Code, resp.Message)
 	}
 
-	// Set read deadline to prevent hanging if server stops sending
-	_ = c.conn.SetReadDeadline(utils.Now().Add(timeouts.StreamBodyTimeout))
+	// Idle (not absolute) read deadline: reset on every read so a slow but
+	// progressing transfer survives — only a real stall trips it.
 	defer func() { _ = c.conn.SetReadDeadline(time.Time{}) }() // Clear deadline
 
 	dec := nntpyenc.AcquireDecoder(c.reader)
 	// Always release decoder back to pool, even on panic
 	defer nntpyenc.ReleaseDecoder(dec)
-	n, err := io.Copy(w, dec)
+	n, err := c.copyBodyWithIdleDeadline(w, dec, timeouts.StreamBodyTimeout)
 	if err != nil {
-		return n, fmt.Errorf("streaming yenc decode failed: %w", err)
+		return n, classifyTransferError("streaming yenc decode failed", err)
 	}
 	return n, nil
 }
@@ -540,7 +602,7 @@ func (c *Connection) Stat(messageID string) (articleNumber int, echoedID string,
 		return 0, "", NewConnectionError(fmt.Errorf("failed to send STAT: %w", err))
 	}
 
-	resp, err := c.readResponse()
+	resp, err := c.readResponseWithDeadline(timeouts.StreamBodyTimeout)
 	if err != nil {
 		return 0, "", NewConnectionError(fmt.Errorf("failed to read STAT response: %w", err))
 	}
@@ -560,53 +622,6 @@ func (c *Connection) Stat(messageID string) (articleNumber int, echoedID string,
 	echoedID = fields[1]
 
 	return articleNumber, echoedID, nil
-}
-
-// PipelinedStat sends multiple STAT commands in a pipeline and reads all responses.
-// This is much more efficient than individual Stat calls as it reduces round-trip latency.
-// Returns per-segment results so caller can identify exactly which segments are missing.
-// On connection/protocol error, returns immediately as the connection state is invalid.
-func (c *Connection) PipelinedStat(messageIDs []string) ([]StatResult, error) {
-	if len(messageIDs) == 0 {
-		return nil, nil
-	}
-
-	results := make([]StatResult, len(messageIDs))
-
-	// Phase 1: Send all STAT commands without waiting for responses
-	for _, msgID := range messageIDs {
-		formatted := FormatMessageID(msgID)
-		if err := c.sendCommand(fmt.Sprintf("STAT %s", formatted)); err != nil {
-			return nil, NewConnectionError(fmt.Errorf("failed to send STAT for %s: %w", msgID, err))
-		}
-	}
-
-	// Phase 2: Read all responses, collecting per-segment results
-	for i, msgID := range messageIDs {
-		results[i].MessageID = msgID
-
-		resp, err := c.readResponse()
-		if err != nil {
-			// Network/Protocol error: Stop immediately as connection state is likely lost/invalid.
-			// Mark remaining as errors
-			for j := i; j < len(messageIDs); j++ {
-				results[j].MessageID = messageIDs[j]
-				results[j].Available = false
-				results[j].Error = NewConnectionError(fmt.Errorf("connection lost at segment %d/%d", i+1, len(messageIDs)))
-			}
-			return results, NewConnectionError(fmt.Errorf("failed to read STAT response %d/%d for %s: %w", i+1, len(messageIDs), msgID, err))
-		}
-
-		if resp.Code == 223 {
-			results[i].Available = true
-		} else {
-			// Article not found or other error - record but continue draining
-			results[i].Available = false
-			results[i].Error = classifyNNTPError(resp.Code, fmt.Sprintf("segment %s: %s", msgID, resp.Message))
-		}
-	}
-
-	return results, nil
 }
 
 // SelectGroup selects a newsgroup and returns group information
