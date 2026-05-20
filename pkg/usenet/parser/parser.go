@@ -221,10 +221,18 @@ func (p *NZBParser) Process(ctx context.Context, nzb *storage.NZB, groups map[st
 				mediaFiles[0].Name = nzb.Name
 			}
 		} else if len(mediaFiles) > 1 {
-			// Multiple media files (Season Pack): rename with sequence index
-			for i, mf := range mediaFiles {
-				fileExt := filepath.Ext(mf.Name)
-				mf.Name = fmt.Sprintf("%s - %02d%s", nzb.Name, i+1, fileExt)
+			// Check if PAR2 deobfuscation already produced unique episode names
+			// (e.g. S05E01.mkv, S05E02.mkv). If all names are the same, fall back
+			// to sequential numbering using the NZB name.
+			unique := make(map[string]struct{}, len(mediaFiles))
+			for _, mf := range mediaFiles {
+				unique[mf.Name] = struct{}{}
+			}
+			if len(unique) == 1 {
+				for i, mf := range mediaFiles {
+					fileExt := filepath.Ext(mf.Name)
+					mf.Name = fmt.Sprintf("%s - %02d%s", nzb.Name, i+1, fileExt)
+				}
 			}
 		}
 	}
