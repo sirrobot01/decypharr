@@ -279,30 +279,29 @@ func isIdleExpired(lastUsed time.Time, now time.Time) bool {
 	return now.Sub(lastUsed) > timeouts.IdleTimeout
 }
 
-// ExecuteWithFailover executes an operation with automatic provider failover and retry logic.
-// Uses exclusion-based connection acquisition: gets ANY available connection,
-// and on retryable errors, retries with exponential backoff before excluding the provider.
-// Uses avast/retry-go for retry handling.
+// ExecuteWithFailover executes an operation with automatic provider failover.
+// Tries providers in priority order (highest first). For each provider, attempts
+// to acquire a connection and execute the operation with exponential backoff retries.
+// Only falls through to a lower priority provider if the current one is genuinely unreachable.
 func (c *Client) ExecuteWithFailover(ctx context.Context, fn func(conn *Connection) error) error {
 	var lastErr error
-	var exclusions providerExclusions
 
-	for providerAttempts := 0; providerAttempts < len(c.providers); providerAttempts++ {
+	for _, provider := range c.providers {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 
-		conn, connProvider, err := c.getAnyAvailableConnection(ctx, exclusions)
+		conn, _, err := c.getConnectionFromProvider(ctx, provider)
 		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			// Error occurs if provider is genuinely unreachable, so skip it 
 			lastErr = err
 			continue
 		}
 
-		// Use retry-go for retry logic with exponential backoff.
-		// currentProvider tracks which pool currentConn actually belongs to so
-		// returnOrReleaseConn always releases the right semaphore slot.
 		var currentConn = conn
-		var currentProvider = connProvider
 		err = retry.Do(
 			func() error {
 				execErr := c.safeExecute(currentConn, fn)
@@ -315,29 +314,17 @@ func (c *Client) ExecuteWithFailover(ctx context.Context, fn func(conn *Connecti
 					switch nntpErr.Type {
 					case ErrorTypeConnection, ErrorTypeTimeout, ErrorTypeServerBusy:
 						// Retriable error - release the potentially dead connection.
-						// Nil currentConn first to prevent double slot-release if new connection acquisition fails.
 						releasedConn := currentConn
 						failedProvider := currentProvider
 						currentConn = nil
 						c.release(releasedConn)
 
-						// Get a fresh connection for retry. Prefer a different
-						// provider after a connection/timeout/server-busy error;
-						// otherwise one slow provider can consume the whole DFS
-						// no-progress window before failover gets a chance. If
-						// there is no alternative provider, fall back to retrying
-						// the same one.
-						retryExclusions := providerExclusions{}
-						retryExclusions.excludeHost(failedProvider.Host)
-						newConn, newProvider, connErr := c.getAnyAvailableConnection(ctx, retryExclusions)
-						if connErr != nil {
-							newConn, newProvider, connErr = c.getAnyAvailableConnection(ctx, providerExclusions{})
-						}
+						// Get a fresh connection for retry
+						newConn, _, connErr := c.getConnectionFromProvider(ctx, provider)
 						if connErr != nil {
 							return retry.Unrecoverable(connErr)
 						}
 						currentConn = newConn
-						currentProvider = newProvider
 						return execErr // Retriable
 
 					case ErrorTypeArticleNotFound:
@@ -350,7 +337,6 @@ func (c *Client) ExecuteWithFailover(ctx context.Context, fn func(conn *Connecti
 					}
 				} else if customerror.IsPanicError(execErr) {
 					// Panic error - release connection.
-					// Nil currentConn first to prevent double slot-release after retry loop.
 					releasedConn := currentConn
 					currentConn = nil
 					c.release(releasedConn)
@@ -369,30 +355,32 @@ func (c *Client) ExecuteWithFailover(ctx context.Context, fn func(conn *Connecti
 
 		// Success
 		if err == nil {
-			c.returnOrReleaseConn(currentConn, currentProvider)
+			c.returnOrReleaseConn(currentConn, provider)
 			return nil
 		}
 
 		// Handle failure
-		c.returnOrReleaseConn(currentConn, currentProvider)
+		c.returnOrReleaseConn(currentConn, provider)
 		lastErr = err
 
-		// Check if we should exclude this provider
+		// Decide whether to try the next provider or bail immediately
 		var nntpErr *Error
 		if errors.As(err, &nntpErr) {
 			switch nntpErr.Type {
 			case ErrorTypeArticleNotFound:
-				excludeForArticleNotFound(&exclusions, connProvider)
+				// Article doesn't exist on this provider - try next
+				continue
 			case ErrorTypeConnection, ErrorTypeTimeout, ErrorTypeServerBusy:
-				exclusions.excludeHost(connProvider.Host)
+				// All retries exhausted for this provider - try next
+				continue
 			default:
-				// Non-retriable error, return immediately
+				// Non-retriable protocol error - no point trying other providers
 				return err
 			}
 		} else if customerror.IsPanicError(err) {
-			exclusions.excludeHost(connProvider.Host)
+			// Panic in the operation itself - try next provider
+			continue
 		} else {
-			// Unknown error type - return immediately
 			return err
 		}
 	}
@@ -415,24 +403,30 @@ func (c *Client) returnOrReleaseConn(conn *Connection, provider config.UsenetPro
 	}
 }
 
-// getConnectionFromProvider tries to get a connection from a specific provider
+// getConnectionFromProvider blocks until a slot is available, then tries to
+// get or create a connection. Returns an error if the provider is unreachable
+// or misconfigured — in which case the caller should skip to the next provider.
 func (c *Client) getConnectionFromProvider(ctx context.Context, provider config.UsenetProvider) (*Connection, config.UsenetProvider, error) {
 	pp, ok := c.pools[provider.Host]
 	if !ok {
 		return nil, provider, fmt.Errorf("provider pool not found: %s", provider.Host)
 	}
 
+	// Block until a slot is available or context is cancelled.
+	// We intentionally do NOT fall through to the next provider here —
+	// a busy pool just means we wait.
 	select {
 	case pp.slots <- struct{}{}:
-		conn, err := c.getOrCreateFromPool(ctx, pp, provider)
-		if err != nil {
-			<-pp.slots
-			return nil, provider, err
-		}
-		return conn, provider, nil
 	case <-ctx.Done():
 		return nil, provider, ctx.Err()
 	}
+
+	conn, err := c.getOrCreateFromPool(ctx, pp, provider)
+	if err != nil {
+		<-pp.slots
+		return nil, provider, err
+	}
+	return conn, provider, nil
 }
 
 // safeExecute wraps fn execution with panic recovery
@@ -447,45 +441,6 @@ func (c *Client) safeExecute(conn *Connection, fn func(conn *Connection) error) 
 		}
 	}()
 	return fn(conn)
-}
-
-// getAnyAvailableConnection gets a connection from ANY provider that isn't excluded.
-// Phase 1: Non-blocking scan of all eligible providers (fast path)
-// Phase 2: If all busy, race goroutines to get first available slot
-func (c *Client) getAnyAvailableConnection(ctx context.Context, exclusions providerExclusions) (*Connection, config.UsenetProvider, error) {
-	// Build list of eligible providers
-	var eligible []config.UsenetProvider
-	for _, p := range c.providers {
-		if !exclusions.excludes(p) {
-			eligible = append(eligible, p)
-		}
-	}
-
-	if len(eligible) == 0 {
-		return nil, config.UsenetProvider{}, errors.New("no eligible providers available")
-	}
-
-	// Phase 1: Non-blocking scan - try to get a free slot from any provider
-	for _, provider := range eligible {
-		pp := c.pools[provider.Host]
-
-		select {
-		case pp.slots <- struct{}{}:
-			// Got a slot - try to get or create connection
-			conn, err := c.getOrCreateFromPool(ctx, pp, provider)
-			if err != nil {
-				<-pp.slots // Release slot on error
-				continue   // Try next provider
-			}
-			return conn, provider, nil
-		default:
-			// Pool at capacity, try next provider
-			continue
-		}
-	}
-
-	// Phase 2: All providers busy - race for first available
-	return c.raceForConnection(ctx, eligible)
 }
 
 // raceForConnection spawns goroutines that race to acquire a connection slot.
