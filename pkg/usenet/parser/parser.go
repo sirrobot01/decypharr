@@ -177,6 +177,31 @@ func (p *NZBParser) Parse(ctx context.Context, filename string, content []byte) 
 	return nzb, fileGroups, nil
 }
 
+// looksObfuscated checks if media files still have obfuscated hash-based names
+// (e.g. abc.xyz.06535e0171b4a3.mkv) where all files share the same prefix and
+// only differ by a hex hash suffix. This indicates PAR2 deobfuscation didn't
+// produce meaningful episode names.
+func looksObfuscated(files []*storage.NZBFile) bool {
+	if len(files) < 2 {
+		return false
+	}
+	hexSuffix := regexp.MustCompile(`^(.+)\.([a-f0-9]{8,})$`)
+	var commonPrefix string
+	for _, f := range files {
+		base := strings.TrimSuffix(f.Name, filepath.Ext(f.Name))
+		m := hexSuffix.FindStringSubmatch(base)
+		if m == nil {
+			return false
+		}
+		if commonPrefix == "" {
+			commonPrefix = m[1]
+		} else if m[1] != commonPrefix {
+			return false
+		}
+	}
+	return commonPrefix != ""
+}
+
 func (p *NZBParser) Process(ctx context.Context, nzb *storage.NZB, groups map[string]*FileGroup) (result *storage.NZB, err error) {
 	// Recover from panics to prevent crashes
 	defer func() {
@@ -222,13 +247,14 @@ func (p *NZBParser) Process(ctx context.Context, nzb *storage.NZB, groups map[st
 			}
 		} else if len(mediaFiles) > 1 {
 			// Check if PAR2 deobfuscation already produced unique episode names
-			// (e.g. S05E01.mkv, S05E02.mkv). If all names are the same, fall back
-			// to sequential numbering using the NZB name.
+			// (e.g. S05E01.mkv, S05E02.mkv). If names are all the same, or all
+			// share a common obfuscated pattern (prefix.hex.mkv), fall back to
+			// sequential numbering using the NZB name.
 			unique := make(map[string]struct{}, len(mediaFiles))
 			for _, mf := range mediaFiles {
 				unique[mf.Name] = struct{}{}
 			}
-			if len(unique) == 1 {
+			if len(unique) == 1 || looksObfuscated(mediaFiles) {
 				for i, mf := range mediaFiles {
 					fileExt := filepath.Ext(mf.Name)
 					mf.Name = fmt.Sprintf("%s - %02d%s", nzb.Name, i+1, fileExt)
