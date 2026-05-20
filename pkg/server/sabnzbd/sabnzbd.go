@@ -56,8 +56,7 @@ func (s *SABnzbd) SetConfig(cfg *config.Config) {
 			ConfigLock:             "0",
 			Autobrowser:            "1",
 			CheckNewRel:            "1",
-			DeobfuscateFinalFilenames: boolToString(cfg.Usenet.Deobfuscate),
-			SeasonPackRenaming:        boolToString(cfg.Usenet.SeasonPackRenaming),
+			SeasonPackRenaming: boolToString(cfg.Usenet.SeasonPackRenaming),
 		},
 		Categories: s.getCategories(),
 	}

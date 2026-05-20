@@ -238,9 +238,8 @@ func (p *NZBParser) Process(ctx context.Context, nzb *storage.NZB, groups map[st
 	cfg := config.Get()
 
 	// Handle deobfuscation renaming for media files (and their subtitles)
-	if cfg.Usenet.Deobfuscate {
-		// Collect all media files
-		var mediaFiles []*storage.NZBFile
+	// Collect all media files
+	var mediaFiles []*storage.NZBFile
 		for i := range files {
 			if files[i].FileType == storage.NZBFileTypeMedia {
 				mediaFiles = append(mediaFiles, &files[i])
@@ -286,24 +285,11 @@ func (p *NZBParser) Process(ctx context.Context, nzb *storage.NZB, groups map[st
 				}
 			}
 		}
-	}
 
-	// Change file name if there's only one file and Deobfuscate is false (backward compatibility)
-	hasOneFile := len(files) == 1
 	skippedFiles := 0
 	var skippedErr error
 	// Calculate total Size
 	for _, file := range files {
-		if !cfg.Usenet.Deobfuscate && hasOneFile {
-			// Only append extension if NZB name doesn't already have the same extension
-			fileExt := filepath.Ext(file.Name)
-			nzbExt := filepath.Ext(nzb.Name)
-			if fileExt != "" && !strings.EqualFold(nzbExt, fileExt) {
-				file.Name = nzb.Name + fileExt
-			} else {
-				file.Name = nzb.Name
-			}
-		}
 		if err := cfg.IsFileAllowed(file.Name, file.Size); err != nil {
 			skippedFiles++
 			skippedErr = err

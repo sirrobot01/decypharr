@@ -81,8 +81,7 @@ type MiscConfig struct {
 	ActionOnDuplicate         string   `json:"action_on_duplicate"`
 	BackupForDuplicates       string   `json:"backup_for_duplicates"`
 	CleanupList               []string `json:"cleanup_list"`
-	DeobfuscateFinalFilenames string   `json:"deobfuscate_final_filenames"`
-	SeasonPackRenaming       string   `json:"season_pack_renaming"`
+	SeasonPackRenaming string `json:"season_pack_renaming"`
 
 	// Scripts and Processing
 	PreScript             string `json:"pre_script"`
