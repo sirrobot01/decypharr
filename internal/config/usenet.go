@@ -36,7 +36,7 @@ type Usenet struct {
 
 	SkipRepair bool `json:"skip_repair,omitempty"` // Skip repairing nzb/usenet files
 
-	SeasonPackRenaming bool `json:"season_pack_renaming,omitempty"` // Rename obfuscated season packs to S{season}E{nn} for Sonarr auto-import
+	DeobfuscateMode string `json:"deobfuscate_mode,omitempty"` // Renaming mode: "" = off, "index" = sequential index, "season_ep" = S{season}E{nn}
 }
 
 func (u Usenet) IsZero() bool {
@@ -147,8 +147,8 @@ func (c *Config) applyUsenetEnvVars() {
 		c.Usenet.SkipRepair = parseBool(skipRepair)
 	}
 
-	if seasonPackRenaming := getEnv("USENET__SEASON_PACK_RENAMING"); seasonPackRenaming != "" {
-		c.Usenet.SeasonPackRenaming = parseBool(seasonPackRenaming)
+	if deobfuscateMode := getEnv("USENET__DEOBFUSCATE_MODE"); deobfuscateMode != "" {
+		c.Usenet.DeobfuscateMode = deobfuscateMode
 	}
 
 	// Usenet providers array

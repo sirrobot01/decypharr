@@ -460,14 +460,15 @@
                                                 </label>
                                             </div>
                                             <div>
-                                                <label class="label cursor-pointer justify-start gap-3">
-                                                    <input type="checkbox" class="checkbox checkbox-primary"
-                                                           name="usenet.season_pack_renaming" id="usenet.season_pack_renaming">
-                                                    <div>
-                                                        <span class="label-text font-medium">Season Pack Renaming</span>
-                                                        <div class="label-text-alt">Rename obfuscated season packs to S{season}E{nn} for Sonarr auto-import</div>
-                                                    </div>
+                                                <label class="label" for="usenet.deobfuscate_mode">
+                                                    <span class="font-medium">Deobfuscate Mode</span>
                                                 </label>
+                                                <select class="select w-full" name="usenet.deobfuscate_mode"
+                                                        id="usenet.deobfuscate_mode">
+                                                    <option value="">Nothing</option>
+                                                    <option value="index">Deobfuscate - file index</option>
+                                                    <option value="season_ep">Deobfuscate and auto assign season and ep number</option>
+                                                </select>
                                             </div>
                                         </div>
                                     </div>
