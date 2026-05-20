@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Tensai75/nzbparser"
@@ -30,6 +31,9 @@ var (
 	metadataOnly = 0
 	// seasonRegex matches season indicators like S06, S01, or Season 6 in release names.
 	seasonRegex = regexp.MustCompile(`(?i)[.\s]S(\d{1,2})[.\s]|Season\s(\d{1,2})`)
+	// obfuscatedHexSuffix matches obfuscated filenames like abc.xyz.06535e0171b4a3.mkv
+	// where the base name ends with a hex hash of 8+ characters.
+	obfuscatedHexSuffix = regexp.MustCompile(`^(.+)\.([a-f0-9]{8,})$`)
 )
 
 // NZBParser provides a simplified, robust NZB parser
@@ -201,11 +205,10 @@ func looksObfuscated(files []*storage.NZBFile) bool {
 	if len(files) < 2 {
 		return false
 	}
-	hexSuffix := regexp.MustCompile(`^(.+)\.([a-f0-9]{8,})$`)
 	var commonPrefix string
 	for _, f := range files {
 		base := strings.TrimSuffix(f.Name, filepath.Ext(f.Name))
-		m := hexSuffix.FindStringSubmatch(base)
+		m := obfuscatedHexSuffix.FindStringSubmatch(base)
 		if m == nil {
 			return false
 		}
@@ -216,6 +219,55 @@ func looksObfuscated(files []*storage.NZBFile) bool {
 		}
 	}
 	return commonPrefix != ""
+}
+
+// renameMediaFiles renames media files based on the configured deobfuscation mode.
+// Single files are renamed to the NZB name. Multiple files with identical or
+// obfuscated names are renamed using the configured strategy.
+func renameMediaFiles(files []storage.NZBFile, mode config.DeobfuscateMode, nzbName string) {
+	var mediaFiles []*storage.NZBFile
+	for i := range files {
+		if files[i].FileType == storage.NZBFileTypeMedia {
+			mediaFiles = append(mediaFiles, &files[i])
+		}
+	}
+
+	sort.Slice(mediaFiles, func(i, j int) bool {
+		return mediaFiles[i].Number < mediaFiles[j].Number
+	})
+
+	if len(mediaFiles) == 1 {
+		fileExt := filepath.Ext(mediaFiles[0].Name)
+		nzbExt := filepath.Ext(nzbName)
+		if fileExt != "" && !strings.EqualFold(nzbExt, fileExt) {
+			mediaFiles[0].Name = nzbName + fileExt
+		} else {
+			mediaFiles[0].Name = nzbName
+		}
+		return
+	}
+
+	unique := make(map[string]struct{}, len(mediaFiles))
+	for _, mf := range mediaFiles {
+		unique[mf.Name] = struct{}{}
+	}
+	if len(unique) != 1 && !looksObfuscated(mediaFiles) {
+		return
+	}
+
+	for i, mf := range mediaFiles {
+		fileExt := filepath.Ext(mf.Name)
+		if mode == config.DeobfuscateModeSeasonEp {
+			if season := extractSeason(nzbName); season != "" {
+				seasonNum, _ := strconv.Atoi(season)
+				mf.Name = fmt.Sprintf("S%02dE%02d%s", seasonNum, i+1, fileExt)
+			} else {
+				mf.Name = fmt.Sprintf("%s - %02d%s", nzbName, i+1, fileExt)
+			}
+		} else {
+			mf.Name = fmt.Sprintf("%s - %02d%s", nzbName, i+1, fileExt)
+		}
+	}
 }
 
 func (p *NZBParser) Process(ctx context.Context, nzb *storage.NZB, groups map[string]*FileGroup) (result *storage.NZB, err error) {
@@ -237,50 +289,9 @@ func (p *NZBParser) Process(ctx context.Context, nzb *storage.NZB, groups map[st
 
 	cfg := config.Get()
 
-	// Handle deobfuscation renaming for media files (and their subtitles)
-	mode := cfg.Usenet.DeobfuscateMode
-	if mode != "" {
-		var mediaFiles []*storage.NZBFile
-		for i := range files {
-			if files[i].FileType == storage.NZBFileTypeMedia {
-				mediaFiles = append(mediaFiles, &files[i])
-			}
-		}
-
-		// Sort media files by original NZB Number to ensure sequence is maintained
-		sort.Slice(mediaFiles, func(i, j int) bool {
-			return mediaFiles[i].Number < mediaFiles[j].Number
-		})
-
-		if len(mediaFiles) == 1 {
-			fileExt := filepath.Ext(mediaFiles[0].Name)
-			nzbExt := filepath.Ext(nzb.Name)
-			if fileExt != "" && !strings.EqualFold(nzbExt, fileExt) {
-				mediaFiles[0].Name = nzb.Name + fileExt
-			} else {
-				mediaFiles[0].Name = nzb.Name
-			}
-		} else if len(mediaFiles) > 1 {
-			unique := make(map[string]struct{}, len(mediaFiles))
-			for _, mf := range mediaFiles {
-				unique[mf.Name] = struct{}{}
-			}
-			if len(unique) == 1 || looksObfuscated(mediaFiles) {
-				for i, mf := range mediaFiles {
-					fileExt := filepath.Ext(mf.Name)
-					if mode == "season_ep" {
-						season := extractSeason(nzb.Name)
-						if season != "" {
-							mf.Name = fmt.Sprintf("S%02sE%02d%s", season, i+1, fileExt)
-						} else {
-							mf.Name = fmt.Sprintf("%s - %02d%s", nzb.Name, i+1, fileExt)
-						}
-					} else {
-						mf.Name = fmt.Sprintf("%s - %02d%s", nzb.Name, i+1, fileExt)
-					}
-				}
-			}
-		}
+	// Handle deobfuscation renaming for media files
+	if cfg.Usenet.DeobfuscateMode.IsValid() && cfg.Usenet.DeobfuscateMode != config.DeobfuscateModeOff {
+		renameMediaFiles(files, cfg.Usenet.DeobfuscateMode, nzb.Name)
 	}
 
 	skippedFiles := 0
