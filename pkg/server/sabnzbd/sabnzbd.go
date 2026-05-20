@@ -46,16 +46,18 @@ func New(manager *manager.Manager) *SABnzbd {
 func (s *SABnzbd) SetConfig(cfg *config.Config) {
 	sabnzbdConfig := &Config{
 		Misc: MiscConfig{
-			CompleteDir:   s.downloadFolder,
-			DownloadDir:   s.downloadFolder,
-			AdminDir:      s.downloadFolder,
-			WebPort:       cfg.Port,
-			Language:      "en",
-			RefreshRate:   "1",
-			QueueComplete: "0",
-			ConfigLock:    "0",
-			Autobrowser:   "1",
-			CheckNewRel:   "1",
+			CompleteDir:            s.downloadFolder,
+			DownloadDir:            s.downloadFolder,
+			AdminDir:               s.downloadFolder,
+			WebPort:                cfg.Port,
+			Language:               "en",
+			RefreshRate:            "1",
+			QueueComplete:          "0",
+			ConfigLock:             "0",
+			Autobrowser:            "1",
+			CheckNewRel:            "1",
+			DeobfuscateFinalFilenames: boolToString(cfg.Usenet.Deobfuscate),
+			SeasonPackRenaming:        boolToString(cfg.Usenet.SeasonPackRenaming),
 		},
 		Categories: s.getCategories(),
 	}
@@ -117,4 +119,11 @@ func (s *SABnzbd) getCategories() []Category {
 }
 
 func (s *SABnzbd) Reset() {
+}
+
+func boolToString(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
 }

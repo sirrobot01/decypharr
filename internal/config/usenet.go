@@ -36,7 +36,8 @@ type Usenet struct {
 
 	SkipRepair bool `json:"skip_repair,omitempty"` // Skip repairing nzb/usenet files
 
-	Deobfuscate bool `json:"deobfuscate,omitempty"` // Try to rename obfuscated files
+	Deobfuscate        bool `json:"deobfuscate,omitempty"`          // Try to rename obfuscated files
+	SeasonPackRenaming bool `json:"season_pack_renaming,omitempty"` // Rename obfuscated season packs to S{season}E{nn} for Sonarr auto-import
 }
 
 func (u Usenet) IsZero() bool {
@@ -149,6 +150,10 @@ func (c *Config) applyUsenetEnvVars() {
 
 	if deobfuscate := getEnv("USENET__DEOBFUSCATE"); deobfuscate != "" {
 		c.Usenet.Deobfuscate = parseBool(deobfuscate)
+	}
+
+	if seasonPackRenaming := getEnv("USENET__SEASON_PACK_RENAMING"); seasonPackRenaming != "" {
+		c.Usenet.SeasonPackRenaming = parseBool(seasonPackRenaming)
 	}
 
 	// Usenet providers array

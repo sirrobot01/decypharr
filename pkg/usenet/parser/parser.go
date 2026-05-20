@@ -265,17 +265,21 @@ func (p *NZBParser) Process(ctx context.Context, nzb *storage.NZB, groups map[st
 			// Check if PAR2 deobfuscation already produced unique episode names
 			// (e.g. S05E01.mkv, S05E02.mkv). If names are all the same, or all
 			// share a common obfuscated pattern (prefix.hex.mkv), fall back to
-			// episode-aware naming.
+			// the configured fallback strategy.
 			unique := make(map[string]struct{}, len(mediaFiles))
 			for _, mf := range mediaFiles {
 				unique[mf.Name] = struct{}{}
 			}
 			if len(unique) == 1 || looksObfuscated(mediaFiles) {
-				season := extractSeason(nzb.Name)
 				for i, mf := range mediaFiles {
 					fileExt := filepath.Ext(mf.Name)
-					if season != "" {
-						mf.Name = fmt.Sprintf("S%02sE%02d%s", season, i+1, fileExt)
+					if cfg.Usenet.SeasonPackRenaming {
+						season := extractSeason(nzb.Name)
+						if season != "" {
+							mf.Name = fmt.Sprintf("S%02sE%02d%s", season, i+1, fileExt)
+						} else {
+							mf.Name = fmt.Sprintf("%s - %02d%s", nzb.Name, i+1, fileExt)
+						}
 					} else {
 						mf.Name = fmt.Sprintf("%s - %02d%s", nzb.Name, i+1, fileExt)
 					}
