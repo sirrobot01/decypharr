@@ -28,6 +28,8 @@ var (
 	// metadataOnly requests the yEnc header (name/size/offsets) without any
 	// decoded payload — the connection is drained and returned to the pool.
 	metadataOnly = 0
+	// seasonRegex matches season indicators like S06, S01, or Season 6 in release names.
+	seasonRegex = regexp.MustCompile(`(?i)[.\s]S(\d{1,2})[.\s]|Season\s(\d{1,2})`)
 )
 
 // NZBParser provides a simplified, robust NZB parser
@@ -177,6 +179,20 @@ func (p *NZBParser) Parse(ctx context.Context, filename string, content []byte) 
 	return nzb, fileGroups, nil
 }
 
+// extractSeason attempts to extract a season number from an NZB title.
+// It matches patterns like S06, S01, or Season 6, Season 01.
+// Returns the season digits (e.g. "06") or empty string if not found.
+func extractSeason(name string) string {
+	m := seasonRegex.FindStringSubmatch(name)
+	if m != nil {
+		if m[1] != "" {
+			return m[1]
+		}
+		return m[2]
+	}
+	return ""
+}
+
 // looksObfuscated checks if media files still have obfuscated hash-based names
 // (e.g. abc.xyz.06535e0171b4a3.mkv) where all files share the same prefix and
 // only differ by a hex hash suffix. This indicates PAR2 deobfuscation didn't
@@ -249,15 +265,20 @@ func (p *NZBParser) Process(ctx context.Context, nzb *storage.NZB, groups map[st
 			// Check if PAR2 deobfuscation already produced unique episode names
 			// (e.g. S05E01.mkv, S05E02.mkv). If names are all the same, or all
 			// share a common obfuscated pattern (prefix.hex.mkv), fall back to
-			// sequential numbering using the NZB name.
+			// episode-aware naming.
 			unique := make(map[string]struct{}, len(mediaFiles))
 			for _, mf := range mediaFiles {
 				unique[mf.Name] = struct{}{}
 			}
 			if len(unique) == 1 || looksObfuscated(mediaFiles) {
+				season := extractSeason(nzb.Name)
 				for i, mf := range mediaFiles {
 					fileExt := filepath.Ext(mf.Name)
-					mf.Name = fmt.Sprintf("%s - %02d%s", nzb.Name, i+1, fileExt)
+					if season != "" {
+						mf.Name = fmt.Sprintf("S%02sE%02d%s", season, i+1, fileExt)
+					} else {
+						mf.Name = fmt.Sprintf("%s - %02d%s", nzb.Name, i+1, fileExt)
+					}
 				}
 			}
 		}
