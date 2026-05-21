@@ -160,8 +160,8 @@ func (tb *Torbox) doPostForm(endpoint string, formData map[string]string, result
 	return resp, nil
 }
 
-// doDelete performs a DELETE request
-func (tb *Torbox) doDelete(endpoint string, payload interface{}) (*http.Response, error) {
+// doPostJSON performs a POST request with a JSON payload
+func (tb *Torbox) doPostJSON(endpoint string, payload interface{}, result interface{}) (*http.Response, error) {
 	var body io.Reader
 	if payload != nil {
 		data, err := json.Marshal(payload)
@@ -171,7 +171,7 @@ func (tb *Torbox) doDelete(endpoint string, payload interface{}) (*http.Response
 		body = bytes.NewReader(data)
 	}
 
-	req, err := http.NewRequest(http.MethodDelete, tb.Host+endpoint, body)
+	req, err := http.NewRequest(http.MethodPost, tb.Host+endpoint, body)
 	if err != nil {
 		return nil, err
 	}
@@ -182,6 +182,12 @@ func (tb *Torbox) doDelete(endpoint string, payload interface{}) (*http.Response
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
+		if err := json.ConfigDefault.NewDecoder(resp.Body).Decode(result); err != nil {
+			return resp, err
+		}
+	}
 
 	return resp, nil
 }
@@ -459,9 +465,18 @@ func (tb *Torbox) CheckStatus(torrent *types.Torrent) (*types.Torrent, error) {
 }
 
 func (tb *Torbox) DeleteTorrent(torrentId string) error {
-	payload := map[string]string{"torrent_id": torrentId, "action": "Delete"}
+	id, err := strconv.Atoi(torrentId)
+	if err != nil {
+		return fmt.Errorf("invalid torrent id: %s", torrentId)
+	}
 
-	resp, err := tb.doDelete(fmt.Sprintf("/api/torrents/controltorrent/%s", torrentId), payload)
+	payload := map[string]interface{}{
+		"torrent_id": id,
+		"operation":  "delete",
+		"all":        false,
+	}
+
+	resp, err := tb.doPostJSON("/api/torrents/controltorrent", payload, nil)
 	if err != nil {
 		return err
 	}
