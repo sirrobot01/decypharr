@@ -483,9 +483,22 @@ func (tb *Torbox) fetchDownloadLink(account *account.Account, id string, file *t
 	query.Set("token", account.Token)
 	query.Set("torrent_id", id)
 	query.Set("file_id", file.Id)
-	query.Set("redirect", "true")
 
 	downloadURL := fmt.Sprintf("%s/api/torrents/requestdl?%s", tb.Host, query.Encode())
+
+	req, err := http.NewRequest(http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return types.DownloadLink{}, err
+	}
+	resp, err := account.Client().Do(req)
+	if err != nil {
+		return types.DownloadLink{}, err
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Data string `json:"data"`
+	}
+	json.ConfigDefault.NewDecoder(resp.Body).Decode(&result)
 
 	now := time.Now()
 
@@ -495,7 +508,7 @@ func (tb *Torbox) fetchDownloadLink(account *account.Account, id string, file *t
 		Size:         file.Size,
 		Token:        tb.APIKey,
 		Link:         file.Link,
-		DownloadLink: downloadURL,
+		DownloadLink: result.Data,
 		Debrid:       tb.config.Name,
 		Id:           file.Id,
 		Generated:    now,
