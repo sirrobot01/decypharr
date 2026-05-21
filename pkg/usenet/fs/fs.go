@@ -22,6 +22,8 @@ import (
 // This allows callers to trigger segment downloads before starting reads.
 type PrefetchableReaderAt interface {
 	io.ReaderAt
+	// ReadAtContext reads with caller cancellation.
+	ReadAtContext(ctx context.Context, p []byte, off int64) (int, error)
 	// Prefetch triggers segment downloads for the given byte range without blocking.
 	Prefetch(ct context.Context, off, length int64)
 }
@@ -265,6 +267,20 @@ func (f *FS) createNewReaderForVolume(vol *types.Volume) (PrefetchableReaderAt, 
 
 type localPrefetchReader struct {
 	*os.File
+}
+
+func (r *localPrefetchReader) ReadAtContext(ctx context.Context, p []byte, off int64) (int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	nr, err := r.File.ReadAt(p, off)
+	if ctxErr := ctx.Err(); ctxErr != nil && nr == 0 {
+		return 0, ctxErr
+	}
+	return nr, err
 }
 
 func (r *localPrefetchReader) Prefetch(ctx context.Context, off, length int64) {
