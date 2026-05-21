@@ -221,10 +221,65 @@ func looksObfuscated(files []*storage.NZBFile) bool {
 	return commonPrefix != ""
 }
 
-// renameMediaFiles renames media files based on the configured deobfuscation mode.
-// Single files are renamed to the NZB name. Multiple files with identical or
-// obfuscated names are renamed using the configured strategy.
-func renameMediaFiles(files []storage.NZBFile, mode config.DeobfuscateMode, nzbName string) {
+func looksObfuscatedName(name string) bool {
+	base := strings.TrimSuffix(name, filepath.Ext(name))
+	if base == "" {
+		return true
+	}
+	if obfuscatedHexSuffix.MatchString(base) {
+		return true
+	}
+	if strings.ContainsAny(base, ".-_ []()") {
+		return false
+	}
+
+	hasLetter := false
+	hasDigit := false
+	for _, r := range base {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
+			hasLetter = true
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		default:
+			return false
+		}
+	}
+
+	return len(base) >= 12 && hasLetter && hasDigit
+}
+
+func shouldKeepDetectedMediaNames(mediaFiles []*storage.NZBFile) bool {
+	if len(mediaFiles) == 0 {
+		return true
+	}
+
+	unique := make(map[string]struct{}, len(mediaFiles))
+	for _, mf := range mediaFiles {
+		if looksObfuscatedName(mf.Name) {
+			return false
+		}
+		unique[mf.Name] = struct{}{}
+	}
+
+	return len(unique) == len(mediaFiles)
+}
+
+func logMediaNameDecision(logger zerolog.Logger, action, reason, oldName, newName string) {
+	event := logger.Debug().
+		Str("action", action).
+		Str("reason", reason).
+		Str("old_name", oldName)
+	if newName != "" {
+		event = event.Str("new_name", newName)
+	}
+	event.Msg("Media filename decision")
+}
+
+// renameMediaFiles applies configured fallback naming only when a meaningful
+// filename could not already be discovered from yEnc headers, PAR2 entries, or
+// the NZB itself.
+func renameMediaFiles(files []storage.NZBFile, mode config.DeobfuscateMode, nzbName string, logger zerolog.Logger) {
 	var mediaFiles []*storage.NZBFile
 	for i := range files {
 		if files[i].FileType == storage.NZBFileTypeMedia {
@@ -237,6 +292,11 @@ func renameMediaFiles(files []storage.NZBFile, mode config.DeobfuscateMode, nzbN
 	})
 
 	if len(mediaFiles) == 1 {
+		if !looksObfuscatedName(mediaFiles[0].Name) {
+			logMediaNameDecision(logger, "kept_discovered", "single_meaningful_name", mediaFiles[0].Name, mediaFiles[0].Name)
+			return
+		}
+		oldName := mediaFiles[0].Name
 		fileExt := filepath.Ext(mediaFiles[0].Name)
 		nzbExt := filepath.Ext(nzbName)
 		if fileExt != "" && !strings.EqualFold(nzbExt, fileExt) {
@@ -244,18 +304,31 @@ func renameMediaFiles(files []storage.NZBFile, mode config.DeobfuscateMode, nzbN
 		} else {
 			mediaFiles[0].Name = nzbName
 		}
+		logMediaNameDecision(logger, "fallback_renamed", "single_obfuscated_name", oldName, mediaFiles[0].Name)
 		return
 	}
 
-	unique := make(map[string]struct{}, len(mediaFiles))
-	for _, mf := range mediaFiles {
-		unique[mf.Name] = struct{}{}
-	}
-	if len(unique) != 1 && !looksObfuscated(mediaFiles) {
+	if shouldKeepDetectedMediaNames(mediaFiles) {
+		for _, mf := range mediaFiles {
+			logMediaNameDecision(logger, "kept_discovered", "multi_unique_meaningful_names", mf.Name, mf.Name)
+		}
 		return
+	}
+	if len(mediaFiles) > 1 && !looksObfuscated(mediaFiles) {
+		unique := make(map[string]struct{}, len(mediaFiles))
+		for _, mf := range mediaFiles {
+			unique[mf.Name] = struct{}{}
+		}
+		if len(unique) == len(mediaFiles) {
+			for _, mf := range mediaFiles {
+				logMediaNameDecision(logger, "kept_discovered", "multi_unique_non_obfuscated_names", mf.Name, mf.Name)
+			}
+			return
+		}
 	}
 
 	for i, mf := range mediaFiles {
+		oldName := mf.Name
 		fileExt := filepath.Ext(mf.Name)
 		if mode == config.DeobfuscateModeSeasonEp {
 			if season := extractSeason(nzbName); season != "" {
@@ -267,7 +340,13 @@ func renameMediaFiles(files []storage.NZBFile, mode config.DeobfuscateMode, nzbN
 		} else {
 			mf.Name = fmt.Sprintf("%s - %02d%s", nzbName, i+1, fileExt)
 		}
+		logMediaNameDecision(logger, "fallback_renamed", "configured_mode", oldName, mf.Name)
 	}
+}
+
+func (p *NZBParser) isDeobfuscationEnabled() bool {
+	cfg := config.Get()
+	return cfg.Usenet.DeobfuscateMode.IsValid() && cfg.Usenet.DeobfuscateMode != config.DeobfuscateModeOff
 }
 
 func (p *NZBParser) Process(ctx context.Context, nzb *storage.NZB, groups map[string]*FileGroup) (result *storage.NZB, err error) {
@@ -290,8 +369,8 @@ func (p *NZBParser) Process(ctx context.Context, nzb *storage.NZB, groups map[st
 	cfg := config.Get()
 
 	// Handle deobfuscation renaming for media files
-	if cfg.Usenet.DeobfuscateMode.IsValid() && cfg.Usenet.DeobfuscateMode != config.DeobfuscateModeOff {
-		renameMediaFiles(files, cfg.Usenet.DeobfuscateMode, nzb.Name)
+	if p.isDeobfuscationEnabled() {
+		renameMediaFiles(files, cfg.Usenet.DeobfuscateMode, nzb.Name, p.logger)
 	}
 
 	skippedFiles := 0

@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/Tensai75/nzbparser"
+	"github.com/rs/zerolog"
+	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
@@ -101,6 +103,61 @@ func TestGroupProcessedFilesSeparatesPar2FromPayload(t *testing.T) {
 	}
 	if _, ok := groups["par2::TIesaj2er6vz6c3xW.vol001+02.par2"]; !ok {
 		t.Fatalf("expected second par2 group to stay separate")
+	}
+}
+
+func TestRenameMediaFilesKeepsDiscoveredSingleFilename(t *testing.T) {
+	files := []storage.NZBFile{{
+		Name:     "From.S04E01.The.Arrival.2160p.AMZN.WEB-DL.DDP5.1.H.265-playWEB.mkv",
+		FileType: storage.NZBFileTypeMedia,
+		Number:   1,
+	}}
+
+	renameMediaFiles(files, config.DeobfuscateModeIndex, "From.S04E01.The.Arrival.2160p.AMZN.WEB-DL.DDP5.1.H.265-playWEB", zerolog.Nop())
+
+	if files[0].Name != "From.S04E01.The.Arrival.2160p.AMZN.WEB-DL.DDP5.1.H.265-playWEB.mkv" {
+		t.Fatalf("expected discovered filename to be preserved, got %q", files[0].Name)
+	}
+}
+
+func TestRenameMediaFilesFallbackForObfuscatedSingleFilename(t *testing.T) {
+	files := []storage.NZBFile{{
+		Name:     "206693r5v9t78w3Y94Y9O3G2G4533713.mkv",
+		FileType: storage.NZBFileTypeMedia,
+		Number:   1,
+	}}
+
+	renameMediaFiles(files, config.DeobfuscateModeIndex, "The.Matrix.Revolutions.2003.UHD.BluRay.2160p.TrueHD.Atmos.7.1.DV.HEVC.REMUX-FraMeSToR-AsRequested", zerolog.Nop())
+
+	want := "The.Matrix.Revolutions.2003.UHD.BluRay.2160p.TrueHD.Atmos.7.1.DV.HEVC.REMUX-FraMeSToR-AsRequested.mkv"
+	if files[0].Name != want {
+		t.Fatalf("expected fallback filename %q, got %q", want, files[0].Name)
+	}
+}
+
+func TestRenameMediaFilesKeepsUniqueDetectedEpisodeNames(t *testing.T) {
+	files := []storage.NZBFile{
+		{Name: "Silicon.Valley.S06E01.1080p.WEBRip.x265-NOGRP.mkv", FileType: storage.NZBFileTypeMedia, Number: 1},
+		{Name: "Silicon.Valley.S06E02.1080p.WEBRip.x265-NOGRP.mkv", FileType: storage.NZBFileTypeMedia, Number: 2},
+	}
+
+	renameMediaFiles(files, config.DeobfuscateModeSeasonEp, "Silicon.Valley.S06.1080p.WEBRip.x265-NOGRP", zerolog.Nop())
+
+	if files[0].Name != "Silicon.Valley.S06E01.1080p.WEBRip.x265-NOGRP.mkv" || files[1].Name != "Silicon.Valley.S06E02.1080p.WEBRip.x265-NOGRP.mkv" {
+		t.Fatalf("expected discovered episode filenames to be preserved, got %q and %q", files[0].Name, files[1].Name)
+	}
+}
+
+func TestRenameMediaFilesFallbackForDuplicateEpisodeNames(t *testing.T) {
+	files := []storage.NZBFile{
+		{Name: "sample.mkv", FileType: storage.NZBFileTypeMedia, Number: 1},
+		{Name: "sample.mkv", FileType: storage.NZBFileTypeMedia, Number: 2},
+	}
+
+	renameMediaFiles(files, config.DeobfuscateModeSeasonEp, "Show.Name.S04.1080p.WEBRip", zerolog.Nop())
+
+	if files[0].Name != "S04E01.mkv" || files[1].Name != "S04E02.mkv" {
+		t.Fatalf("expected season/episode fallback names, got %q and %q", files[0].Name, files[1].Name)
 	}
 }
 
