@@ -315,7 +315,6 @@ func (c *Client) ExecuteWithFailover(ctx context.Context, fn func(conn *Connecti
 					case ErrorTypeConnection, ErrorTypeTimeout, ErrorTypeServerBusy:
 						// Retriable error - release the potentially dead connection.
 						releasedConn := currentConn
-						failedProvider := currentProvider
 						currentConn = nil
 						c.release(releasedConn)
 
