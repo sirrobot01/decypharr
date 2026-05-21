@@ -26,6 +26,7 @@ import (
 
 const (
 	bufferSize = 256 * 1024 // 256KB buffer for streaming
+	preImportSamplePercent = 10
 )
 
 var streamBufferPool = sync.Pool{
@@ -118,8 +119,64 @@ type noPrefetchReader struct {
 	io.ReaderAt
 }
 
+func (n *noPrefetchReader) ReadAtContext(ctx context.Context, p []byte, off int64) (int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	nr, err := n.ReaderAt.ReadAt(p, off)
+	if ctxErr := ctx.Err(); ctxErr != nil && nr == 0 {
+		return 0, ctxErr
+	}
+	return nr, err
+}
+
 func (n *noPrefetchReader) Prefetch(ctx context.Context, off, length int64) {
 	// No-op for multi-volume readers
+}
+
+type contextSectionReader struct {
+	ctx   context.Context
+	r     fs.PrefetchableReaderAt
+	base  int64
+	limit int64
+	off   int64
+}
+
+func newContextSectionReader(ctx context.Context, r fs.PrefetchableReaderAt, off, length int64) *contextSectionReader {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return &contextSectionReader{
+		ctx:   ctx,
+		r:     r,
+		base:  off,
+		limit: length,
+	}
+}
+
+func (r *contextSectionReader) Read(p []byte) (int, error) {
+	if r.off >= r.limit {
+		return 0, io.EOF
+	}
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	remaining := r.limit - r.off
+	if int64(len(p)) > remaining {
+		p = p[:int(remaining)]
+	}
+	n, err := r.r.ReadAtContext(r.ctx, p, r.base+r.off)
+	r.off += int64(n)
+	if err == io.EOF && r.off < r.limit {
+		return n, io.ErrUnexpectedEOF
+	}
+	if err == nil && r.off >= r.limit {
+		return n, io.EOF
+	}
+	return n, err
 }
 
 type Usenet struct {
@@ -203,12 +260,9 @@ func New() (*Usenet, error) {
 }
 
 func (u *Usenet) initStreamsDir(streamsDir string) {
-	// Remove entire directory (if exists) and recreate fresh
 	if err := os.RemoveAll(streamsDir); err != nil && !os.IsNotExist(err) {
 		return
 	}
-
-	// Create fresh directory
 	if err := os.MkdirAll(streamsDir, 0755); err != nil {
 		return
 	}
@@ -289,8 +343,11 @@ func (u *Usenet) releaseFS(key string) {
 
 // cleanupIdleFS removes sessions with refCount=0 that haven't been used recently
 func (u *Usenet) cleanupIdleFS() {
-	const idleThreshold = int64(10) // 10 seconds idle
-	ticker := time.NewTicker(time.Duration(idleThreshold) * time.Second)
+	// Keep a warm reader through short pauses, then tear it down. Usenet segment
+	// buffering is only for active latency hiding; stale buffers should disappear
+	// quickly instead of behaving like a VFS cache.
+	const idleThreshold = int64(120) // 2 minutes idle
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -373,6 +430,18 @@ func (u *Usenet) Process(ctx context.Context, nzb *storage.NZB, groups map[strin
 		return nzb, fmt.Errorf("failed to process NZB archives: %w", err)
 	}
 
+	// Post-parse availability gate: probe a sample of each content file's
+	// segments before declaring the NZB complete. Segments can go missing
+	// between the original parse and now; without this gate they slip through
+	// to Sonarr/Radarr and only surface later as failed ffprobes. Connection
+	// errors are non-fatal here (CheckFileAvailability returns nil for those),
+	// so a provider hiccup won't wrongly fail an import — only a definitively
+	// missing segment (gone on every provider) fails the NZB.
+	if err := u.checkNZBAvailability(ctx, updatedNZB); err != nil {
+		_ = u.markAsFailed(updatedNZB, err)
+		return updatedNZB, fmt.Errorf("availability check failed: %w", err)
+	}
+
 	// Mark as completed
 	if err := u.markAsCompleted(updatedNZB); err != nil {
 		return updatedNZB, fmt.Errorf("failed to mark NZB as completed: %w", err)
@@ -386,6 +455,40 @@ func (u *Usenet) Process(ctx context.Context, nzb *storage.NZB, groups map[strin
 	return updatedNZB, nil
 }
 
+// checkAvailability samples each content file's segments (via the same
+// repair-bank-gated BatchStat path as CheckFile) and returns an error if any
+// file is definitively unavailable — i.e. a sampled segment is missing on
+// every provider. Recovery/noise files (par2, ignore), deleted files, and
+// segment-less entries are skipped so the gate fails only on genuinely missing
+// playable content. Connection-only failures are treated as non-fatal by
+// CheckFileAvailability, so they do not fail the NZB. It returns on the first
+// definitively-missing file (fail fast).
+func (u *Usenet) checkNZBAvailability(ctx context.Context, nzb *storage.NZB) error {
+	for i := range nzb.Files {
+		file := &nzb.Files[i]
+		if file.IsDeleted || len(file.Segments) == 0 {
+			continue
+		}
+		switch file.FileType {
+		case storage.NZBFileTypePar2, storage.NZBFileTypeIgnore:
+			continue
+		}
+		if ctx.Err() != nil {
+			// Cancelled/timed out: not a content failure — don't fail the NZB.
+			return nil
+		}
+		if err := u.CheckFileAvailability(ctx, file, preImportSamplePercent); err != nil {
+			u.logger.Warn().
+				Err(err).
+				Str("nzb_id", nzb.ID).
+				Str("file", file.Name).
+				Msg("Post-parse availability check failed; marking NZB unavailable")
+			return fmt.Errorf("file %q unavailable: %w", file.Name, err)
+		}
+	}
+	return nil
+}
+
 // CheckFile probes the availability of a single NZB file. Connection use is
 // gated by the NNTP client's repair bank so concurrent probes don't starve
 // streaming traffic.
@@ -397,29 +500,21 @@ func (u *Usenet) CheckFile(ctx context.Context, nzoID, filename string) error {
 	if len(file.Segments) == 0 {
 		return fmt.Errorf("file has no Segments: %s", filename)
 	}
-	err = u.checkFileAvailability(ctx, file)
+
+	cfg := config.Get()
+	samplePercent := cfg.Usenet.AvailabilitySamplePercent
+	err = u.CheckFileAvailability(ctx, file, samplePercent)
 	file.Segments = nil
 	return err
 }
 
-func (u *Usenet) checkFileAvailability(ctx context.Context, file *storage.NZBFile) error {
-	cfg := config.Get()
-	samplePercent := cfg.Usenet.AvailabilitySamplePercent
-
+func (u *Usenet) CheckFileAvailability(ctx context.Context, file *storage.NZBFile, samplePercent int) error {
 	// Sample segments based on configured percentage
 	messageIDs := u.sampleSegments(file.Segments, samplePercent)
 
-	u.logger.Debug().
-		Str("nzb_id", file.NzbID).
-		Str("file", file.Name).
-		Int("total_segments", len(file.Segments)).
-		Int("sampled_segments", len(messageIDs)).
-		Int("sample_percent", samplePercent).
-		Msg("Checking NZB File availability")
-
-	// Pipelined batch STAT. The NNTP client gates each worker through its
-	// internal repair bank so concurrent availability checks don't starve
-	// streaming connections.
+	// Batch STAT checks. The NNTP client gates each worker through its internal
+	// repair bank so concurrent availability checks don't starve streaming
+	// connections.
 	result, err := u.nntp.BatchStat(ctx, messageIDs)
 	if err != nil {
 		// Connection/system error - log and continue (don't fail availability check)
@@ -643,11 +738,19 @@ func (u *Usenet) Stream(ctx context.Context, nzoID, filename string, start, end 
 	default:
 	}
 
-	// Trigger prefetch for the entire range BEFORE starting the copy loop
-	// This queues all needed segments for download immediately
-	readerAt.Prefetch(ctx, rangeStart, length)
+	// Prefetch only a bounded read-ahead window from the requested start,
+	// NOT the entire range. Queuing a whole multi-GB file would flood the
+	// fixed-depth prefetch channel with head segments and starve reads that
+	// land elsewhere (e.g. ffprobe seeking to the moov atom at EOF). The
+	// per-read sliding window in readAtPlain advances this as playback
+	// progresses; PreCache separately warms the head and tail.
+	prefetchLen := length
+	if u.prefetchSize > 0 && prefetchLen > u.prefetchSize {
+		prefetchLen = u.prefetchSize
+	}
+	readerAt.Prefetch(ctx, rangeStart, prefetchLen)
 
-	section := io.NewSectionReader(readerAt, rangeStart, length)
+	section := newContextSectionReader(ctx, readerAt, rangeStart, length)
 	buf := acquireStreamBuffer()
 	defer releaseStreamBuffer(buf)
 

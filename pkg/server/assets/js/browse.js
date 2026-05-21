@@ -312,10 +312,10 @@ class FileBrowser {
         return `<span class="badge ${cls} badge-sm" title="${this.escapeAttr(tooltip)}">${this.escapeHtml(state.status || 'unknown')}</span>`;
     }
 
-    async recheckEntry(name, fix) {
+    async recheckEntry(name) {
         try {
             window.createToast?.(`Rechecking ${name}…`, 'info');
-            const url = `${window.urlBase}api/repair/health/${encodeURIComponent(name)}/check${fix ? '?fix=true' : ''}`;
+            const url = `${window.urlBase}api/repair/health/${encodeURIComponent(name)}/check`;
             const res = await fetch(url, {method: 'POST'});
             if (!res.ok) {
                 const txt = await res.text();
@@ -416,11 +416,8 @@ class FileBrowser {
                                         <i class="bi bi-download"></i> Download
                                     </a></li>
                                 ` : ''}
-                                <li><a onclick="window.fileBrowser.recheckEntry('${this.escapeJs(entry.name)}', false)">
+                                <li><a onclick="window.fileBrowser.recheckEntry('${this.escapeJs(entry.name)}')">
                                     <i class="bi bi-search-heart"></i> Recheck health
-                                </a></li>
-                                <li><a onclick="window.fileBrowser.recheckEntry('${this.escapeJs(entry.name)}', true)">
-                                    <i class="bi bi-wrench-adjustable"></i> Recheck &amp; fix
                                 </a></li>
                                 ${entry.can_delete ? `
                                     <li><a onclick="window.fileBrowser.deleteTorrent('${this.escapeJs(entry.info_hash)}', '${this.escapeJs(entry.name)}')" class="text-error">
@@ -763,7 +760,7 @@ class FileBrowser {
             return;
         }
         for (const entry of selected) {
-            if (entry?.name) await this.recheckEntry(entry.name, false);
+            if (entry?.name) await this.recheckEntry(entry.name);
         }
     }
 }

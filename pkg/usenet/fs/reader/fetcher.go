@@ -2,6 +2,7 @@ package reader
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -74,11 +75,16 @@ func NewSegmentFetcher(
 		cancel:     cancel,
 	}
 
-	// Start prefetch workers
-	numPrefetchWorkers := maxConns
-	for i := 0; i < numPrefetchWorkers; i++ {
-		sf.prefetchWg.Add(1)
-		go sf.prefetchWorker(i)
+	// Start fewer prefetch workers than foreground connection slots. Seeky
+	// callers such as ffprobe can jump to the tail while head read-ahead is
+	// still running; reserving at least one slot prevents background prefetch
+	// from starving the blocking read that the caller is waiting on.
+	numPrefetchWorkers := maxConns - 1
+	if numPrefetchWorkers > 0 {
+		for i := 0; i < numPrefetchWorkers; i++ {
+			sf.prefetchWg.Add(1)
+			go sf.prefetchWorker(i)
+		}
 	}
 
 	return sf
@@ -90,7 +96,7 @@ func (sf *SegmentFetcher) Fetch(ctx context.Context, segIdx int) error {
 	// Fast path: already cached
 	state := sf.cache.GetState(segIdx)
 	switch state {
-	case StateInMemory, StateOnDisk:
+	case StateOnDisk:
 		return nil
 	case StateFailed:
 		return sf.cache.GetError(segIdx)
@@ -141,7 +147,7 @@ func (sf *SegmentFetcher) doFetch(ctx context.Context, segIdx int) error {
 		// Someone else is fetching or it's already cached
 		state := sf.cache.GetState(segIdx)
 		switch state {
-		case StateInMemory, StateOnDisk:
+		case StateOnDisk:
 			return nil
 		case StateFailed:
 			return sf.cache.GetError(segIdx)
@@ -176,37 +182,53 @@ func (sf *SegmentFetcher) doFetch(ctx context.Context, segIdx int) error {
 	// a single call is sufficient.  An outer retry loop would multiply the
 	// total attempts by retries×providers, leading to very long failure times.
 	err := sf.client.ExecuteWithFailover(downloadCtx, func(conn *nntp.Connection) error {
-		// Get the disk stream writer from cache
+		stopCancel := context.AfterFunc(downloadCtx, func() {
+			_ = conn.Close()
+		})
+		defer stopCancel()
+
+		// Get the segment writer for the disk cache.
 		writer := sf.cache.StreamWriter(segIdx)
 		if writer == nil {
 			return ErrCacheClosed
 		}
 
-		// Stream body directly to disk
+		// Stream the decoded body into the chosen tier.
 		n, err := conn.StreamBody(messageID, writer)
 		if err != nil {
+			writer.Discard()
+			if ctxErr := downloadCtx.Err(); ctxErr != nil {
+				return ctxErr
+			}
 			return err
+		}
+		if ctxErr := downloadCtx.Err(); ctxErr != nil {
+			writer.Discard()
+			return ctxErr
 		}
 
 		// Treat zero-byte articles as missing — the article exists on the
 		// server but its body is empty/corrupted after yEnc decoding.
 		if n == 0 {
+			writer.Discard()
 			return &nntp.Error{
 				Type:    nntp.ErrorTypeArticleNotFound,
 				Message: "article produced no data after decoding",
 			}
 		}
 
-		// Finalize the write (updates cache state)
-		if dw, ok := writer.(*diskStreamWriter); ok {
-			dw.Finalize()
-		}
+		// Commit (updates cache state to StateOnDisk).
+		writer.Finalize()
 
 		return nil
 	})
 
 	if err != nil {
 		sf.stats.DownloadErrors.Add(1)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			sf.cache.ResetState(segIdx)
+			return err
+		}
 		sf.cache.MarkFailed(segIdx, err)
 		return err
 	}
@@ -219,7 +241,7 @@ func (sf *SegmentFetcher) doFetch(ctx context.Context, segIdx int) error {
 func (sf *SegmentFetcher) QueuePrefetch(segIdx int) {
 	// Check if already cached
 	state := sf.cache.GetState(segIdx)
-	if state == StateInMemory || state == StateOnDisk || state == StateFetching {
+	if state == StateOnDisk || state == StateFetching {
 		return
 	}
 
@@ -247,42 +269,98 @@ func (sf *SegmentFetcher) prefetchWorker(id int) {
 		select {
 		case <-sf.ctx.Done():
 			return
-		case segIdx := <-sf.prefetchCh:
-			// Check if still needed
-			state := sf.cache.GetState(segIdx)
-			if state == StateInMemory || state == StateOnDisk {
-				sf.stats.PrefetchHits.Add(1)
-				continue
+		case segIdx, ok := <-sf.prefetchCh:
+			if !ok {
+				return
 			}
-
-			// Fetch with a timeout
-			fetchCtx, cancel := context.WithTimeout(sf.ctx, sf.config.DownloadTimeout)
-			err := sf.Fetch(fetchCtx, segIdx)
-			cancel()
-
-			if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
-				sf.logger.Debug().
-					Err(err).
-					Int("segment", segIdx).
-					Msg("prefetch failed")
-			}
+			sf.prefetchOne(segIdx)
 		}
 	}
 }
 
-// EnsureSegments fetches all segments in the range, returning when all are available.
+// prefetchOne uses the deduplicated, failover-aware single-segment fetch path.
+func (sf *SegmentFetcher) prefetchOne(segIdx int) {
+	state := sf.cache.GetState(segIdx)
+	if state == StateOnDisk {
+		sf.stats.PrefetchHits.Add(1)
+		return
+	}
+
+	fetchCtx, cancel := context.WithTimeout(sf.ctx, sf.config.DownloadTimeout)
+	err := sf.Fetch(fetchCtx, segIdx)
+	cancel()
+
+	if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
+		sf.logger.Debug().Err(err).Int("segment", segIdx).Msg("prefetch failed")
+	}
+}
+
+// EnsureSegments fetches all segments in the range, returning when all are
+// available. Segments are fetched in order; in steady-state playback the
+// background prefetch workers have already downloaded them, so this loop
+// usually just confirms cache presence. fetchWithRetry keeps a single
+// transient segment failure from tearing down the whole stream.
 func (sf *SegmentFetcher) EnsureSegments(ctx context.Context, startSeg, endSeg int) error {
-	// First, queue all missing segments
 	for i := startSeg; i <= endSeg; i++ {
 		state := sf.cache.GetState(i)
-		if state != StateInMemory && state != StateOnDisk {
-			// Need to fetch or wait
-			if err := sf.Fetch(ctx, i); err != nil {
+		if state != StateOnDisk {
+			if err := sf.fetchWithRetry(ctx, i); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// fetchWithRetry fetches a single segment, retrying transient failures so a
+// momentary provider hiccup or stall does not tear down the whole stream.
+// Permanent failures (article-not-found) and cancellations return immediately.
+func (sf *SegmentFetcher) fetchWithRetry(ctx context.Context, segIdx int) error {
+	maxAttempts := sf.config.MaxRetries
+	if maxAttempts < 1 {
+		maxAttempts = 3
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			// Clear the failed state so the segment can be re-fetched, then
+			// back off briefly before retrying.
+			sf.cache.ResetState(segIdx)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-sf.ctx.Done():
+				return sf.ctx.Err()
+			case <-time.After(sf.retryBackoff(attempt)):
+			}
+		}
+
+		err := sf.Fetch(ctx, segIdx)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+
+		// Don't retry permanent errors or cancellations.
+		if nntp.IsArticleNotFoundError(err) || ctx.Err() != nil || sf.ctx.Err() != nil {
+			return err
+		}
+	}
+	return lastErr
+}
+
+// retryBackoff returns the delay before the given (1-indexed) retry attempt.
+func (sf *SegmentFetcher) retryBackoff(attempt int) time.Duration {
+	base := sf.config.RetryDelay
+	if base <= 0 {
+		base = time.Second
+	}
+	d := base << (attempt - 1)
+	if maxDelay := 5 * time.Second; d > maxDelay {
+		d = maxDelay
+	}
+	return d
 }
 
 // Close stops all workers and waits for them to finish.

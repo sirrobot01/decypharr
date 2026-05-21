@@ -4,7 +4,7 @@
 //
 // Architecture:
 //   - StreamingReader: Top-level reader with encryption support
-//   - SegmentCache: Tiered storage (memory → disk) with pin/unpin for safe eviction
+//   - SegmentCache: Disk storage with pin/unpin for safe eviction
 //   - SegmentFetcher: NNTP downloads with deduplication and retry
 package reader
 
@@ -59,10 +59,7 @@ const (
 	// StateEmpty indicates the segment has no cached data.
 	StateEmpty SegmentState = iota
 
-	// StateInMemory indicates the segment data is in the memory pool.
-	StateInMemory
-
-	// StateOnDisk indicates the segment data is on disk (evicted from memory).
+	// StateOnDisk indicates the segment data is on disk.
 	StateOnDisk
 
 	// StateFetching indicates the segment is currently being downloaded.
@@ -76,8 +73,6 @@ func (s SegmentState) String() string {
 	switch s {
 	case StateEmpty:
 		return "Empty"
-	case StateInMemory:
-		return "InMemory"
 	case StateOnDisk:
 		return "OnDisk"
 	case StateFetching:
@@ -123,6 +118,34 @@ func DefaultConfig() Config {
 		MaxRetries:      3,
 		RetryDelay:      time.Second,
 	}
+}
+
+// PrefetchAheadSegments converts a byte-based read-ahead size (from
+// config.Usenet.ReadAhead) into a segment count for the given segments.
+// This is what makes the configured read-ahead actually take effect — the
+// window was previously hardcoded to 8 segments (~6MB) regardless of config,
+// which was far too shallow to absorb provider jitter during playback.
+func PrefetchAheadSegments(readAheadBytes int64, segments []SegmentMeta) int {
+	const (
+		fallbackSegBytes = 750 * 1024 // typical usenet segment
+		minAhead         = 16
+		maxAhead         = 256 // matches the prefetch channel depth
+	)
+	if readAheadBytes <= 0 {
+		return DefaultConfig().PrefetchAhead
+	}
+	segBytes := int64(fallbackSegBytes)
+	if len(segments) > 0 && segments[0].Bytes > 0 {
+		segBytes = segments[0].Bytes
+	}
+	ahead := int(readAheadBytes / segBytes)
+	if ahead < minAhead {
+		ahead = minAhead
+	}
+	if ahead > maxAhead {
+		ahead = maxAhead
+	}
+	return ahead
 }
 
 // Option is a functional option for configuring StreamingReader.
@@ -222,6 +245,9 @@ type PrefetchableReaderAt interface {
 	// ReadAt reads len(p) bytes from the reader starting at offset off.
 	// Blocks until the data is available or an error occurs.
 	ReadAt(p []byte, off int64) (n int, err error)
+
+	// ReadAtContext reads with caller cancellation.
+	ReadAtContext(ctx context.Context, p []byte, off int64) (n int, err error)
 
 	// Prefetch triggers segment downloads for the given byte range without blocking.
 	// This is a hint to the reader to start downloading segments that will be needed soon.

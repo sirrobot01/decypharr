@@ -127,6 +127,7 @@ func (f *Fixer) FixTorrent(ctx context.Context, entry *storage.Entry, skipCurren
 		f.manager.logger.Trace().
 			Str("debrid", debridName).
 			Str("infohash", entry.InfoHash).
+			Str("name", entry.Name).
 			Int("attempt", totalAttempts+1).
 			Msg("Attempting re-insertion")
 

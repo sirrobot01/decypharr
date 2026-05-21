@@ -168,7 +168,7 @@ func (vf *File) getOrCreateStreamingReader() *reader.StreamingReader {
 		cfg := config.Get()
 		readerConfig := reader.DefaultConfig()
 		readerConfig.MaxConnections = vf.maxConcurrent
-		readerConfig.PrefetchAhead = 8
+		readerConfig.PrefetchAhead = reader.PrefetchAheadSegments(vf.prefetchSize, segments)
 		readerConfig.DiskPath = cfg.Usenet.DiskBufferPath
 
 		var r *reader.StreamingReader
@@ -266,7 +266,7 @@ func (vf *File) newReaderForRange(start, end int64) (io.ReadCloser, error) {
 	cfg := config.Get()
 	readerConfig := reader.DefaultConfig()
 	readerConfig.MaxConnections = vf.maxConcurrent
-	readerConfig.PrefetchAhead = 8
+	readerConfig.PrefetchAhead = reader.PrefetchAheadSegments(vf.prefetchSize, segments)
 	readerConfig.DiskPath = cfg.Usenet.DiskBufferPath
 
 	var r *reader.StreamingReader

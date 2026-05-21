@@ -547,9 +547,11 @@ func (s *Server) handleRepairStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRunRepair(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		IgnoreLastChecked bool  `json:"ignore_last_checked,omitempty"`
-		Force             bool  `json:"force,omitempty"`
-		AutoRepair        *bool `json:"auto_repair,omitempty"`
+		IgnoreLastChecked bool   `json:"ignore_last_checked,omitempty"`
+		Force             bool   `json:"force,omitempty"`
+		AutoRepair        *bool  `json:"auto_repair,omitempty"`
+		UnrestrictLink    bool   `json:"unrestrict_link,omitempty"`
+		Protocol          string `json:"protocol,omitempty"`
 	}
 	if r.Body != nil && r.ContentLength != 0 {
 		if err := json.ConfigDefault.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
@@ -575,6 +577,26 @@ func (s *Server) handleRunRepair(w http.ResponseWriter, r *http.Request) {
 		v := false
 		autoRepair = &v
 	}
+	unrestrictLink := req.UnrestrictLink
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("unrestrict_link"))) {
+	case "1", "true", "yes", "on":
+		unrestrictLink = true
+	case "0", "false", "no", "off":
+		unrestrictLink = false
+	}
+	protocolScope := strings.ToLower(strings.TrimSpace(req.Protocol))
+	if queryProtocol := strings.TrimSpace(r.URL.Query().Get("protocol")); queryProtocol != "" {
+		protocolScope = strings.ToLower(queryProtocol)
+	}
+	switch protocolScope {
+	case "", "all", "both", "torrent", "nzb":
+		if protocolScope == "both" {
+			protocolScope = "all"
+		}
+	default:
+		http.Error(w, "Invalid protocol; expected all, torrent, or nzb", http.StatusBadRequest)
+		return
+	}
 
 	svc := s.manager.Repair()
 	if svc == nil {
@@ -584,6 +606,8 @@ func (s *Server) handleRunRepair(w http.ResponseWriter, r *http.Request) {
 	id, err := svc.RunNow(manager.RepairRunOptions{
 		IgnoreLastChecked: ignoreLastChecked,
 		AutoRepair:        autoRepair,
+		UnrestrictLink:    unrestrictLink,
+		ProtocolScope:     protocolScope,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)

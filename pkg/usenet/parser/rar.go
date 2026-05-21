@@ -795,7 +795,9 @@ func (p *RARParser) parseRAR4Headers(data []byte, volumeIndex int, volumeName st
 	var files []*RARFileEntry
 	currentOffset := int64(7)
 
-	for r.Len() < 7 {
+	// 7 = minimum RAR4 block size (CRC2 + Type1 + Flags2 + HeadSize2).
+	// Continue while at least one minimal header may remain.
+	for r.Len() >= 7 {
 		header, err := p.readRAR4Header(r)
 		if err != nil {
 			if err == io.EOF {

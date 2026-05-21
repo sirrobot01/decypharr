@@ -129,6 +129,7 @@ class ConfigManager {
         if ($('repair.nntp_connection_percent')) $('repair.nntp_connection_percent').value = repair.nntp_connection_percent || 20;
         if ($('repair.strategy')) $('repair.strategy').value = repair.strategy || 'per_entry';
         if ($('repair.auto_repair')) $('repair.auto_repair').checked = !!repair.auto_repair;
+        if ($('repair.skip_nzb_repair')) $('repair.skip_nzb_repair').checked = !!repair.skip_nzb_repair;
         if ($('repair.notify_on_complete')) $('repair.notify_on_complete').checked = !!repair.notify_on_complete;
     }
 
@@ -147,6 +148,7 @@ class ConfigManager {
             nntp_connection_percent: parseInt($('repair.nntp_connection_percent')?.value, 10) || 0,
             strategy: $('repair.strategy')?.value || 'per_entry',
             auto_repair: $('repair.auto_repair')?.checked || false,
+            skip_nzb_repair: $('repair.skip_nzb_repair')?.checked || false,
             notify_on_complete: $('repair.notify_on_complete')?.checked || false,
             arrs,
         };

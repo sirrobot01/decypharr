@@ -1,8 +1,14 @@
 package nntp
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"os"
+	"strings"
+	"syscall"
 )
 
 // Error types for NNTP operations
@@ -136,6 +142,49 @@ func NewYencDecodeError(err error) *Error {
 		Message: "yEnc decode failed",
 		Err:     err,
 	}
+}
+
+func classifyTransferError(message string, err error) *Error {
+	wrapped := fmt.Errorf("%s: %w", message, err)
+	switch {
+	case isTimeoutLike(err):
+		return NewTimeoutError(wrapped)
+	case isConnectionLike(err):
+		return NewConnectionError(wrapped)
+	default:
+		return NewYencDecodeError(wrapped)
+	}
+}
+
+func isTimeoutLike(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+func isConnectionLike(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, io.ErrClosedPipe) ||
+		errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ECONNABORTED) ||
+		errors.Is(err, syscall.EPIPE) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "use of closed network connection") ||
+		strings.Contains(msg, "unexpected eof")
 }
 
 // classifyNNTPError classifies an NNTP response code into an error type

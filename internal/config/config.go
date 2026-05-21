@@ -117,13 +117,14 @@ type RepairConfig struct {
 	RecheckInterval       string       `json:"recheck_interval,omitempty"`
 	Arrs                  []string     `json:"arrs,omitempty"`
 	AutoRepair            bool         `json:"auto_repair,omitempty"`
+	SkipNZBRepair         bool         `json:"skip_nzb_repair,omitempty"`
 	NotifyOnComplete      bool         `json:"notify_on_complete,omitempty"`
 }
 
 func (r RepairConfig) IsZero() bool {
 	return !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
 		r.NNTPConnectionPercent == 0 && r.Strategy == "" && r.RecheckInterval == "" && len(r.Arrs) == 0 &&
-		!r.AutoRepair && !r.NotifyOnComplete
+		!r.AutoRepair && !r.SkipNZBRepair && !r.NotifyOnComplete
 }
 
 type Config struct {

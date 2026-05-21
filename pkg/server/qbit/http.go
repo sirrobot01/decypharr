@@ -147,7 +147,7 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 		if files := r.MultipartForm.File["torrents"]; len(files) > 0 {
 			for _, fileHeader := range files {
 				if err := q.addTorrent(ctx, fileHeader, _arr, debridName, action, cfg.Notifications.CallbackURL, rmTrackerUrls, cfg.SkipMultiSeason); err != nil {
-					q.logger.Debug().Err(err).Msgf("Error adding torrent")
+					q.logger.Debug().Err(err).Str("torrent", fileHeader.Filename).Msgf("Error adding torrent")
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
 				}

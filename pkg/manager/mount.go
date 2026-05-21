@@ -2,7 +2,8 @@ package manager
 
 import (
 	"context"
-	"os/exec"
+	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -11,9 +12,15 @@ import (
 )
 
 const (
-	MaxFFprobeWorkers   = 10
+	MaxCacheWarmWorkers = 10
 	MaxNZBPreCacheFiles = 5
-	FFprobeTimeout      = 60 * time.Second
+	CacheWarmTimeout    = 60 * time.Second
+
+	// Container metadata lives at the head (streamable MP4 moov, EBML header)
+	// or the tail (non-streamable MP4 moov, MKV cues/seek index), so warming
+	// head+tail covers what a downstream ffprobe/import scan will seek to.
+	cacheWarmHeadSize = 2 * 1024 * 1024 // 2MB
+	cacheWarmTailSize = 2 * 1024 * 1024 // 2MB
 )
 
 type MountManager interface {
@@ -52,47 +59,98 @@ func (m *Manager) RefreshMount() error {
 	return nil
 }
 
-// RunFFprobe runs ffprobe on the given file paths to warm up caches and trigger imports.
-// Uses: ffprobe -v quiet -print_format json -show_format -show_streams <file>
-func (m *Manager) RunFFprobe(filePaths []string) error {
+// WarmFileCache reads the head and tail of each media file through the mount
+// to warm the VFS disk cache, so a subsequent media probe or import scan over
+// the mount is fast. This replaces spawning ffprobe: the read pattern is
+// deterministic, needs no external binary, and warms the exact bytes a
+// downstream probe seeks to (see cacheWarmHeadSize/cacheWarmTailSize).
+func (m *Manager) WarmFileCache(filePaths []string) error {
 	if len(filePaths) == 0 {
 		return nil
 	}
 
-	// Check if ffprobe is available
-	_, err := exec.LookPath("ffprobe")
-	if err != nil {
-		return err
-	}
-
 	// Use a worker pool to limit concurrency and avoid overwhelming the system
-	p := pool.New().WithMaxGoroutines(min(len(filePaths), MaxFFprobeWorkers))
+	p := pool.New().WithMaxGoroutines(min(len(filePaths), MaxCacheWarmWorkers))
 
 	for _, fp := range filePaths {
 		if !utils.IsMediaFile(fp) {
 			continue
 		}
 		p.Go(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), FFprobeTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), CacheWarmTimeout)
 			defer cancel()
-			cmd := exec.CommandContext(ctx, "ffprobe",
-				"-v", "quiet",
-				"-print_format", "json",
-				"-show_format",
-				"-show_streams",
-				fp,
-			)
-			if err := cmd.Run(); err != nil {
+			if err := m.warmOneFile(ctx, fp); err != nil {
 				// Log error but continue
 				m.logger.Warn().
 					Err(err).
 					Str("file", fp).
-					Msg("ffprobe failed")
+					Msg("cache warm failed")
 			}
 		})
 	}
 
 	p.Wait()
+	return nil
+}
+
+// warmOneFile reads the head and (for large enough files) the tail of path,
+// going through the mount so the FUSE/VFS cache is populated.
+func (m *Manager) warmOneFile(ctx context.Context, path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	size := fi.Size()
+	if size == 0 {
+		return nil
+	}
+
+	head := int64(cacheWarmHeadSize)
+	if head > size {
+		head = size
+	}
+	if err := drainRange(ctx, f, 0, head); err != nil {
+		return err
+	}
+
+	// Only warm the tail when it doesn't overlap the head we just read.
+	if size > int64(cacheWarmHeadSize)+int64(cacheWarmTailSize) {
+		if err := drainRange(ctx, f, size-int64(cacheWarmTailSize), int64(cacheWarmTailSize)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// drainRange reads length bytes starting at off, in chunks, discarding the
+// data and checking ctx between chunks so a stalled mount can't pin a worker
+// past CacheWarmTimeout.
+func drainRange(ctx context.Context, r io.ReaderAt, off, length int64) error {
+	const chunk = 1 << 20 // 1MB
+	buf := make([]byte, chunk)
+	for read := int64(0); read < length; {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		n := length - read
+		if n > chunk {
+			n = chunk
+		}
+		got, err := r.ReadAt(buf[:n], off+read)
+		read += int64(got)
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+	}
 	return nil
 }
 

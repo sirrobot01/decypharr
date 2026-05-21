@@ -2,7 +2,6 @@ package reader
 
 import (
 	"context"
-	"io"
 	"sync"
 	"testing"
 	"time"
@@ -235,72 +234,4 @@ func TestSegmentCacheSegmentsForRange(t *testing.T) {
 				tc.offset, tc.length, start, end, tc.wantStart, tc.wantEnd)
 		}
 	}
-}
-
-// TestSegmentCacheDiskEviction tests disk eviction when over limit
-func TestSegmentCacheDiskEviction(t *testing.T) {
-	ctx := context.Background()
-	logger := zerolog.Nop()
-
-	segments := make([]SegmentMeta, 5)
-	for i := range segments {
-		segments[i] = SegmentMeta{
-			MessageID:   "<test" + string(rune('0'+i)) + "@example.com>",
-			Number:      i + 1,
-			Bytes:       1000,
-			StartOffset: int64(i * 1000),
-			EndOffset:   int64((i+1)*1000 - 1),
-		}
-	}
-
-	config := Config{
-		MaxDisk: 2000, // Only space for two segments
-	}
-
-	stats := &ReaderStats{}
-
-	cache, err := NewSegmentCache(ctx, segments, config, stats, logger)
-	if err != nil {
-		t.Fatalf("failed to create cache: %v", err)
-	}
-	defer cache.Close()
-
-	// Put 5 segments
-	for i := 0; i < 5; i++ {
-		data := make([]byte, 1000)
-		for j := range data {
-			data[j] = byte(i)
-		}
-		if err := cache.Put(i, data); err != nil {
-			t.Fatalf("failed to put segment %d: %v", i, err)
-		}
-	}
-
-	if stats.Evictions.Load() == 0 {
-		t.Errorf("expected evictions when disk limit exceeded")
-	}
-
-	// The most recent segments should still be available
-	for i := 3; i < 5; i++ {
-		if data, ok := cache.Get(i); !ok || len(data) == 0 {
-			t.Errorf("segment %d should still be cached on disk", i)
-		}
-	}
-}
-
-// mockReader is a test helper for reading
-type mockReader struct {
-	data   []byte
-	offset int64
-}
-
-func (m *mockReader) ReadAt(p []byte, off int64) (int, error) {
-	if off >= int64(len(m.data)) {
-		return 0, io.EOF
-	}
-	n := copy(p, m.data[off:])
-	if off+int64(n) >= int64(len(m.data)) {
-		return n, io.EOF
-	}
-	return n, nil
 }

@@ -299,6 +299,13 @@ func (sc *SegmentCache) Put(segIdx int, data []byte) error {
 	// Determine offset in the sparse file
 	offset := sc.segOffsets[segIdx]
 
+	// Backpressure: if already over budget, reclaim space synchronously before
+	// adding more so a fast download burst can't overshoot maxDisk into an
+	// ENOSPC before the async evictor catches up.
+	if sc.curDisk.Load() > sc.maxDisk {
+		sc.drainOverBudget()
+	}
+
 	// Write to disk — pwrite at non-overlapping offsets is safe to call concurrently.
 	_, err := sc.diskFile.WriteAt(data, offset)
 
@@ -319,14 +326,29 @@ func (sc *SegmentCache) Put(segIdx int, data []byte) error {
 	return nil
 }
 
-// StreamWriter returns an io.Writer that writes directly to disk for the segment.
-func (sc *SegmentCache) StreamWriter(segIdx int) io.Writer {
+// segmentWriter is the contract doFetch uses to stream a segment body into the
+// disk tier. Exactly one of Finalize/Discard is called per writer: Finalize on
+// a successful download (commit), Discard on failure/abort.
+type segmentWriter interface {
+	Write(p []byte) (int, error)
+	Finalize()
+	Discard()
+}
+
+// StreamWriter returns a disk-backed segmentWriter for the segment.
+func (sc *SegmentCache) StreamWriter(segIdx int) segmentWriter {
 	if segIdx < 0 || segIdx >= sc.segCount {
 		return nil
 	}
 
 	seg := sc.segments[segIdx]
 	offset := sc.segOffsets[segIdx]
+
+	// Backpressure: drain before streaming a new segment in so a download
+	// burst can't overshoot maxDisk into ENOSPC while the async evictor lags.
+	if sc.curDisk.Load() > sc.maxDisk {
+		sc.drainOverBudget()
+	}
 
 	return &diskStreamWriter{
 		file:      sc.diskFile,
@@ -392,6 +414,10 @@ func (w *diskStreamWriter) Write(p []byte) (int, error) {
 	w.written += int64(n)
 	return consumed + len(p), nil
 }
+
+// Discard is a no-op for the disk writer: a failed/partial sparse write is
+// simply overwritten on the next attempt, so there is nothing to release.
+func (w *diskStreamWriter) Discard() {}
 
 // Finalize marks the segment as written and updates cache state.
 func (w *diskStreamWriter) Finalize() {
@@ -575,7 +601,7 @@ func (sc *SegmentCache) WaitForSegment(ctx context.Context, segIdx int) error {
 	// Fast path: check state without locking
 	state := SegmentState(sc.states[segIdx].Load())
 	switch state {
-	case StateInMemory, StateOnDisk:
+	case StateOnDisk:
 		return nil
 	case StateFailed:
 		if err := sc.GetError(segIdx); err != nil {
@@ -616,7 +642,7 @@ func (sc *SegmentCache) WaitForSegment(ctx context.Context, segIdx int) error {
 	for {
 		state = SegmentState(sc.states[segIdx].Load())
 		switch state {
-		case StateInMemory, StateOnDisk:
+		case StateOnDisk:
 			return nil
 		case StateFailed:
 			if err := sc.GetError(segIdx); err != nil {
@@ -670,13 +696,22 @@ func (sc *SegmentCache) evictLoop() {
 			return
 		case <-sc.evictSignal:
 		}
-		for sc.curDisk.Load() > sc.maxDisk {
-			idx := sc.findEvictable()
-			if idx < 0 {
-				break
-			}
-			sc.evictFromDisk(idx)
+		sc.drainOverBudget()
+	}
+}
+
+// drainOverBudget evicts oldest unpinned on-disk segments until disk usage is
+// back under maxDisk, or nothing more is evictable (everything still in budget
+// is pinned by in-flight reads). Safe for concurrent callers: evictFromDisk
+// uses CAS to claim each segment exactly once, and findEvictable returning -1
+// guarantees the loop terminates rather than spinning when all is pinned.
+func (sc *SegmentCache) drainOverBudget() {
+	for sc.curDisk.Load() > sc.maxDisk {
+		idx := sc.findEvictable()
+		if idx < 0 {
+			break
 		}
+		sc.evictFromDisk(idx)
 	}
 }
 
@@ -726,6 +761,16 @@ func (sc *SegmentCache) evictFromDisk(segIdx int) bool {
 	sc.onDisk[segIdx].Store(false)
 	sc.curDisk.Add(-size)
 	sc.stats.Evictions.Add(1)
+
+	// Physically release the region so the space is actually returned to the
+	// filesystem. Without this the bytes linger in segments.bin until Close;
+	// on tmpfs/ramdisk those are RAM pages, so a file streamed through a small
+	// maxDisk would still grow memory toward the whole file size. Best-effort:
+	// the per-segment offset is fixed and a re-fetch just rewrites here, so a
+	// failed punch only forgoes the reclaim — it never breaks correctness.
+	if err := punchHole(sc.diskFile, sc.segOffsets[segIdx], size); err != nil {
+		sc.logger.Debug().Err(err).Int("segment", segIdx).Msg("hole punch on evict failed")
+	}
 	return true
 }
 

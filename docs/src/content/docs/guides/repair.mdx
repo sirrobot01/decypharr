@@ -39,7 +39,7 @@ Healthy entries that haven't changed since the last successful check are skipped
 
 ### Single-entry recheck
 
-You can force a recheck on any one entry from the Browse UI or the API. This works even when the global health checker is disabled, does not produce a run record, and can optionally also repair (`fix=true`).
+You can force a recheck on any one entry from the Browse UI or the API. This works even when the global health checker is disabled and does not produce a run record. Repairs should be triggered through the Arr integration.
 
 ## Configuration
 
@@ -54,6 +54,7 @@ You can force a recheck on any one entry from the Browse UI or the API. This wor
     "recheck_interval": "168h",
     "arrs": [],
     "auto_repair": true,
+    "skip_nzb_repair": false,
     "notify_on_complete": false,
     "nntp_connection_percent": 20
   }
@@ -70,6 +71,7 @@ You can force a recheck on any one entry from the Browse UI or the API. This wor
 | `recheck_interval`        | How long a healthy entry's check stays fresh before it becomes a candidate again.        | `168h`      |
 | `arrs`                    | Optional filter when `source=arr`. Empty list means all eligible Arrs.                   | `[]`        |
 | `auto_repair`             | When `true`, brokens are repaired in the same sweep. When `false`, the sweep is detect-only. | `false` |
+| `skip_nzb_repair`         | Skip NZB / Usenet entries during scheduled sweeps.                                      | `false` |
 | `notify_on_complete`      | Send a notification when a sweep finishes.                                               | `false`     |
 | `nntp_connection_percent` | Percentage of NNTP connections the probe is allowed to use. Avoids starving downloads.   | `20`        |
 
@@ -111,15 +113,15 @@ A failure to persist a single entry's health update is logged but never aborts t
 | `GET`    | `/api/repair/config`                  | Read current config.                                                     |
 | `PUT`    | `/api/repair/config`                  | Update config (validates cron, workers, source).                         |
 | `GET`    | `/api/repair/status`                  | Active run summary, last completed run, and counts of entries by status. |
-| `POST`   | `/api/repair/run`                     | Trigger a sweep now.                                                     |
+| `POST`   | `/api/repair/run`                     | Trigger a sweep now. Body can include `ignore_last_checked`, `auto_repair`, `unrestrict_link`, and `protocol`. |
 | `POST`   | `/api/repair/stop`                    | Cancel the active run.                                                   |
 | `GET`    | `/api/repair/runs`                    | Run history.                                                             |
 | `GET`    | `/api/repair/runs/{id}`               | Run detail.                                                              |
 | `DELETE` | `/api/repair/runs`                    | Clear run history.                                                       |
 | `GET`    | `/api/repair/health`                  | List entry health (optional `?status=broken`).                           |
 | `GET`    | `/api/repair/health/{name}`           | Per-entry health, including the broken-file list.                        |
-| `POST`   | `/api/repair/health/{name}/check`     | Force-recheck this entry. Add `?fix=true` to also repair.                |
-| `POST`   | `/api/repair/recheck/media`           | Recheck a single Arr media item. Body: `{arr, media_id, fix}`.           |
+| `POST`   | `/api/repair/health/{name}/check`     | Force-recheck this entry.                                                |
+| `POST`   | `/api/repair/recheck/media`           | Recheck a single Arr media item. Body: `{arr, media_id, fix}`. Repairs run through Arr. |
 
 ### Examples
 
@@ -127,7 +129,9 @@ Run a sweep now:
 
 ```bash
 curl -X POST http://localhost:8282/api/repair/run \
-  -H "Authorization: Bearer YOUR_API_TOKEN"
+  -H "Authorization: Bearer YOUR_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"protocol":"all","unrestrict_link":true}'
 ```
 
 Stop the active sweep:
@@ -137,14 +141,14 @@ curl -X POST http://localhost:8282/api/repair/stop \
   -H "Authorization: Bearer YOUR_API_TOKEN"
 ```
 
-Force-recheck a single entry, and repair it if broken:
+Force-recheck a single entry:
 
 ```bash
-curl -X POST 'http://localhost:8282/api/repair/health/My.Show.S01/check?fix=true' \
+curl -X POST 'http://localhost:8282/api/repair/health/My.Show.S01/check' \
   -H "Authorization: Bearer YOUR_API_TOKEN"
 ```
 
-Recheck a single Sonarr series:
+Recheck a single Sonarr series and repair it if broken:
 
 ```bash
 curl -X POST http://localhost:8282/api/repair/recheck/media \
@@ -155,7 +159,7 @@ curl -X POST http://localhost:8282/api/repair/recheck/media \
 
 ## Browse page
 
-Each entry row carries a health badge whose colour reflects the current status (healthy / broken / repairing / unknown / stale / unsupported). Hovering shows the last-checked time, broken-file count, and top failure reason. The row's action menu has **Recheck** and **Recheck & fix**, and clicking the badge opens a side panel listing every broken file with its reason and Arr link.
+Each entry row carries a health badge whose colour reflects the current status (healthy / broken / repairing / unknown / stale / unsupported). Hovering shows the last-checked time, broken-file count, and top failure reason. The row's action menu has **Recheck health**, and clicking the badge opens a side panel listing every broken file with its reason and Arr link.
 
 The badges flip live during a sweep — entries move through `repairing → healthy/broken` as the workers report results, without needing to refresh after the run finishes.
 
@@ -175,8 +179,8 @@ Skip repair for all NZB / Usenet entries:
 
 ```json
 {
-  "usenet": {
-    "skip_repair": true
+  "repair": {
+    "skip_nzb_repair": true
   }
 }
 ```
@@ -220,7 +224,7 @@ Lower `workers`, lengthen `schedule`, or set `auto_repair: false` to run detect-
 
 ### One entry keeps flipping broken
 
-Open its detail panel from Browse to see the broken-file list and reason. For Arr-sourced entries you can use **Recheck & fix** for a one-shot repair without waiting for the next sweep.
+Open its detail panel from Browse to see the broken-file list and reason. For Arr-sourced entries, trigger fixes through the Arr integration without waiting for the next sweep.
 
 ## Migration from v1
 

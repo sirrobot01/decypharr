@@ -42,6 +42,15 @@ type Usenet struct {
 	MaxConnections int `json:"max_connections,omitempty"` // Maximum concurrent connections per file for parsing and streaming (default: 10)
 	// Read-ahead configuration
 	ReadAhead string `json:"read_ahead,omitempty"` // Bytes to prefetch ahead of reads e.g. "16MB", "32MB" (default: 128MB)
+	// SocketReadBuffer / SocketWriteBuffer set the per-connection TCP
+	// SO_RCVBUF / SO_SNDBUF (e.g. "4MB"). At high RTT a single connection's
+	// throughput is capped at roughly buffer ÷ RTT, so the receive buffer must
+	// cover the bandwidth-delay product (BDP = link_speed × RTT). "0" leaves
+	// OS autotuning in charge. Note: the OS still caps these
+	// (Linux net.core.rmem_max/wmem_max, macOS kern.ipc.maxsockbuf) — raise
+	// those sysctls too to actually get large windows. Defaults: 4MB / 1MB.
+	SocketReadBuffer  string `json:"socket_read_buffer,omitempty"`
+	SocketWriteBuffer string `json:"socket_write_buffer,omitempty"`
 	// Processing timeout
 	ProcessingTimeout string `json:"processing_timeout,omitempty"` // Timeout for NZB processing e.g. "5m", "10m" (default: 10m). Mark as bad if exceeded.
 	// Availability check sampling
@@ -69,6 +78,15 @@ func (c *Config) updateUsenetConfig() {
 	// Read-ahead default - bytes to prefetch ahead of reads
 	if c.Usenet.ReadAhead == "" {
 		c.Usenet.ReadAhead = "16MB" // Default: 16MB read-ahead buffer
+	}
+
+	// TCP socket buffer defaults sized for high-RTT BDP. "0" (explicit) opts
+	// into OS autotuning, so only fill when unset.
+	if c.Usenet.SocketReadBuffer == "" {
+		c.Usenet.SocketReadBuffer = "4MB"
+	}
+	if c.Usenet.SocketWriteBuffer == "" {
+		c.Usenet.SocketWriteBuffer = "1MB"
 	}
 
 	// Processing timeout default
@@ -142,6 +160,14 @@ func (c *Config) applyUsenetEnvVars() {
 
 	if readAhead := getEnv("USENET__READ_AHEAD"); readAhead != "" {
 		c.Usenet.ReadAhead = readAhead
+	}
+
+	if v := getEnv("USENET__SOCKET_READ_BUFFER"); v != "" {
+		c.Usenet.SocketReadBuffer = v
+	}
+
+	if v := getEnv("USENET__SOCKET_WRITE_BUFFER"); v != "" {
+		c.Usenet.SocketWriteBuffer = v
 	}
 
 	if processingTimeout := getEnv("USENET__PROCESSING_TIMEOUT"); processingTimeout != "" {
