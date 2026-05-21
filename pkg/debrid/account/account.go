@@ -49,7 +49,7 @@ func (a *Account) sliceFileLink(fileLink string) string {
 func (a *Account) GetDownloadLink(id string, file *types.File, fetcher LinkFetcher) (types.DownloadLink, error) {
 	slicedLink := a.sliceFileLink(file.Link)
 	dl, ok := a.links.Load(slicedLink)
-	if !ok {
+	if !ok || (!dl.ExpiresAt.IsZero() && time.Now().After(dl.ExpiresAt)) {
 		var err error
 		dl, err = fetcher(a, id, file)
 		if err != nil {
