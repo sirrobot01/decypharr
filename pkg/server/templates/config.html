@@ -448,6 +448,28 @@
                                                        placeholder="/cache">
                                                 <span class="text-sm opacity-70">Path for disk buffering during streaming</span>
                                             </div>
+                                            <div>
+                                                <label class="label cursor-pointer justify-start gap-3">
+                                                    <input type="checkbox" class="checkbox checkbox-primary"
+                                                           name="usenet.skip_repair" id="usenet.skip_repair">
+                                                    <div>
+                                                        <span class="label-text font-medium">Skip NZB Repair</span>
+                                                        <div class="label-text-alt">Skip NZBs when repairing entries
+                                                        </div>
+                                                    </div>
+                                                </label>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="usenet.deobfuscate_mode">
+                                                    <span class="font-medium">Deobfuscate Mode</span>
+                                                </label>
+                                                <select class="select w-full" name="usenet.deobfuscate_mode"
+                                                        id="usenet.deobfuscate_mode">
+                                                    <option value="">Nothing</option>
+                                                    <option value="index">Deobfuscate - file index</option>
+                                                    <option value="season_ep">Deobfuscate and auto assign season and ep number</option>
+                                                </select>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>

@@ -7,6 +7,23 @@ import (
 	"strconv"
 )
 
+// DeobfuscateMode controls how obfuscated NZB files are renamed.
+type DeobfuscateMode string
+
+const (
+	DeobfuscateModeOff      DeobfuscateMode = ""
+	DeobfuscateModeIndex    DeobfuscateMode = "index"
+	DeobfuscateModeSeasonEp DeobfuscateMode = "season_ep"
+)
+
+func (m DeobfuscateMode) IsValid() bool {
+	switch m {
+	case DeobfuscateModeOff, DeobfuscateModeIndex, DeobfuscateModeSeasonEp:
+		return true
+	}
+	return false
+}
+
 type UsenetProvider struct {
 	Host           string `json:"host,omitempty"` // Host of the usenet server
 	Port           int    `json:"port,omitempty"` // Port of the usenet server
@@ -42,6 +59,10 @@ type Usenet struct {
 	MaxConcurrentNZB int `json:"max_concurrent_nzb,omitempty"` // Maximum NZBs to process in parallel (default: 2)
 
 	DiskBufferPath string `json:"disk_buffer_path,omitempty"` // Path for disk buffer storage (empty = main_path/usenet/streams)
+
+	SkipRepair bool `json:"skip_repair,omitempty"` // Skip repairing nzb/usenet files
+
+	DeobfuscateMode DeobfuscateMode `json:"deobfuscate_mode,omitempty"` // Renaming mode for obfuscated files
 }
 
 func (u Usenet) IsZero() bool {
@@ -163,6 +184,14 @@ func (c *Config) applyUsenetEnvVars() {
 		if v, err := strconv.Atoi(maxConcurrentNZB); err == nil {
 			c.Usenet.MaxConcurrentNZB = v
 		}
+	}
+
+	if skipRepair := getEnv("USENET__SKIP_REPAIR"); skipRepair != "" {
+		c.Usenet.SkipRepair = parseBool(skipRepair)
+	}
+
+	if deobfuscateMode := getEnv("USENET__DEOBFUSCATE_MODE"); deobfuscateMode != "" {
+		c.Usenet.DeobfuscateMode = DeobfuscateMode(deobfuscateMode)
 	}
 
 	// Usenet providers array

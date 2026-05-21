@@ -38,7 +38,12 @@ func NewSevenZParser(manager *nntp.Client, maxConcurrent int, logger zerolog.Log
 
 func (p *SevenZParser) Process(ctx context.Context, group *FileGroup, password string) ([]*storage.NZBFile, error) {
 	sort.Slice(group.Files, func(i, j int) bool {
-		return group.Files[i].Filename < group.Files[j].Filename
+		oi := get7zVolumeOrder(group.Files[i].Filename)
+		oj := get7zVolumeOrder(group.Files[j].Filename)
+		if oi != oj {
+			return oi < oj
+		}
+		return group.Files[i].Number < group.Files[j].Number
 	})
 
 	volumes := buildArchiveVolumeDescriptors(group)
@@ -134,6 +139,7 @@ func (p *SevenZParser) Process(ctx context.Context, group *FileGroup, password s
 			Groups:       getGroupsList(group.Groups),
 			Segments:     segments,
 			Password:     password,
+			Number:       group.Files[0].Number,
 			FileType:     storage.NZBFileTypeSevenZip,
 		})
 	}
@@ -310,6 +316,7 @@ func (p *SevenZParser) processRARFilesFromPositions(
 			Segments:     fileSegments,
 			Groups:       getGroupsList(group.Groups),
 			Password:     password,
+			Number:       group.Files[0].Number,
 			FileType:     storage.NZBFileTypeRar,
 		})
 	}

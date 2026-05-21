@@ -221,6 +221,7 @@ func (p *RARParser) Process(ctx context.Context, group *FileGroup, password stri
 			Segments:      fileSegments, // Direct segment list with offsets!
 			Password:      password,
 			FileType:      storage.NZBFileTypeRar,
+			Number:        group.Files[0].Number,
 			Size:          size,
 			IsStored:      rarFile.IsStored,
 			IsEncrypted:   rarFile.IsEncrypted, // Per-file encryption from extra area

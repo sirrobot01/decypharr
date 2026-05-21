@@ -76,7 +76,12 @@ func NewZIPParser(manager *nntp.Client, maxConcurrent int, logger zerolog.Logger
 
 func (p *ZIPParser) Process(ctx context.Context, group *FileGroup, password string) ([]*storage.NZBFile, error) {
 	sort.Slice(group.Files, func(i, j int) bool {
-		return group.Files[i].Filename < group.Files[j].Filename
+		oi := getZIPVolumeOrder(group.Files[i].Filename)
+		oj := getZIPVolumeOrder(group.Files[j].Filename)
+		if oi != oj {
+			return oi < oj
+		}
+		return group.Files[i].Number < group.Files[j].Number
 	})
 
 	volumes := buildArchiveVolumeDescriptors(group)

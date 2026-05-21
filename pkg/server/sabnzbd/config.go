@@ -81,7 +81,7 @@ type MiscConfig struct {
 	ActionOnDuplicate         string   `json:"action_on_duplicate"`
 	BackupForDuplicates       string   `json:"backup_for_duplicates"`
 	CleanupList               []string `json:"cleanup_list"`
-	DeobfuscateFinalFilenames string   `json:"deobfuscate_final_filenames"`
+	DeobfuscateMode string `json:"deobfuscate_mode"`
 
 	// Scripts and Processing
 	PreScript             string `json:"pre_script"`

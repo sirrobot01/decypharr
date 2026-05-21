@@ -49,10 +49,12 @@ type NZBFile struct {
 	NzbID         string       `json:"nzo_id" msgpack:"nzo_id"`
 	Name          string       `json:"name" msgpack:"name"`
 	InternalPath  string       `json:"internal_path,omitempty" msgpack:"internal_path,omitempty"` // Path within archive (for archived files)
+	LocalPath     string       `json:"local_path,omitempty" msgpack:"local_path,omitempty"`       // Optional on-disk path for repaired/extracted files
 	Size          int64        `json:"size" msgpack:"size"`
 	StartOffset   int64        `json:"start_offset" msgpack:"start_offset"`
 	Segments      []NZBSegment `json:"segments" msgpack:"segments"`
 	Groups        []string     `json:"groups" msgpack:"groups"`
+	Number        int          `json:"number,omitempty" msgpack:"number,omitempty"`             // Original sequence number from NZB
 	FileType      NZBFileType  `json:"archive_type,omitempty" msgpack:"archive_type,omitempty"` // Type of the file (media, rar, 7z, zip, par2, ignore, unknown)
 	Password      string       `json:"password,omitempty" msgpack:"password,omitempty"`
 	IsDeleted     bool         `json:"is_deleted" msgpack:"is_deleted"`
