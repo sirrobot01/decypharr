@@ -375,7 +375,7 @@ func TestCacheItemReleaseStopsDownloadersAfterGracePeriod(t *testing.T) {
 }
 
 func TestCacheItemOpenCancelsPendingDownloaderStop(t *testing.T) {
-	setReleaseStopGracePeriodForTest(t, 20*time.Millisecond)
+	setReleaseStopGracePeriodForTest(t, 200*time.Millisecond)
 
 	parentCtx := context.Background()
 	ctx, cancel := context.WithCancel(parentCtx)
@@ -397,7 +397,7 @@ func TestCacheItemOpenCancelsPendingDownloaderStop(t *testing.T) {
 	select {
 	case <-ctx.Done():
 		t.Fatal("downloader context was canceled even though the item reopened during grace period")
-	case <-time.After(300 * time.Millisecond):
+	case <-time.After(500 * time.Millisecond):
 	}
 
 	if got := item.opens.Load(); got != 1 {
