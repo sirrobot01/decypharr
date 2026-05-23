@@ -14,6 +14,14 @@ const (
 	testMiB = 1024 * testKiB
 )
 
+func setReleaseStopGracePeriodForTest(t *testing.T, d time.Duration) {
+	t.Helper()
+	old := releaseStopGracePeriodNanos.Swap(int64(d))
+	t.Cleanup(func() {
+		releaseStopGracePeriodNanos.Store(old)
+	})
+}
+
 func TestCurrentKickerInterval(t *testing.T) {
 	dls := &Downloaders{}
 
@@ -27,10 +35,153 @@ func TestCurrentKickerInterval(t *testing.T) {
 	}
 }
 
+func TestAdaptiveStateForNewDownloader_InheritsExactContiguousState(t *testing.T) {
+	const (
+		baseChunk     = 16 * testMiB
+		adaptiveEnd   = 64 * testMiB
+		adaptiveChunk = 64 * testMiB
+	)
+
+	dls := &Downloaders{
+		adaptiveEnd:              adaptiveEnd,
+		adaptiveChunkSize:        adaptiveChunk,
+		adaptiveSuccessfulChunks: 3,
+	}
+
+	dls.mu.Lock()
+	currentChunk, successfulChunks := dls.adaptiveStateForNewDownloaderLocked(
+		adaptiveEnd,
+		baseChunk,
+		baseChunk,
+	)
+	dls.mu.Unlock()
+
+	if currentChunk != adaptiveChunk {
+		t.Fatalf("unexpected inherited chunk size: got %d, want %d", currentChunk, adaptiveChunk)
+	}
+	if successfulChunks != 3 {
+		t.Fatalf("unexpected inherited successful chunk count: got %d, want 3", successfulChunks)
+	}
+}
+
+func TestAdaptiveStateForNewDownloader_ResetsOnNonContiguousFullSizeRequest(t *testing.T) {
+	const (
+		baseChunk     = 16 * testMiB
+		adaptiveEnd   = 64 * testMiB
+		adaptiveChunk = 64 * testMiB
+	)
+
+	dls := &Downloaders{
+		adaptiveEnd:              adaptiveEnd,
+		adaptiveChunkSize:        adaptiveChunk,
+		adaptiveSuccessfulChunks: 3,
+	}
+
+	dls.mu.Lock()
+	currentChunk, successfulChunks := dls.adaptiveStateForNewDownloaderLocked(
+		128*testMiB,
+		baseChunk,
+		baseChunk,
+	)
+	dls.mu.Unlock()
+
+	if currentChunk != baseChunk {
+		t.Fatalf("unexpected chunk size after reset: got %d, want %d", currentChunk, baseChunk)
+	}
+	if successfulChunks != 0 {
+		t.Fatalf("unexpected successful chunk count after reset: got %d, want 0", successfulChunks)
+	}
+	if dls.adaptiveEnd != 0 {
+		t.Fatalf("expected adaptive end to reset, got %d", dls.adaptiveEnd)
+	}
+	if dls.adaptiveChunkSize != 0 {
+		t.Fatalf("expected adaptive chunk size to reset, got %d", dls.adaptiveChunkSize)
+	}
+	if dls.adaptiveSuccessfulChunks != 0 {
+		t.Fatalf("expected adaptive successful chunk count to reset, got %d", dls.adaptiveSuccessfulChunks)
+	}
+}
+
+func TestAdaptiveStateForNewDownloader_KeepsStateForNonContiguousSmallProbe(t *testing.T) {
+	const (
+		baseChunk     = 16 * testMiB
+		adaptiveEnd   = 64 * testMiB
+		adaptiveChunk = 64 * testMiB
+	)
+
+	dls := &Downloaders{
+		adaptiveEnd:              adaptiveEnd,
+		adaptiveChunkSize:        adaptiveChunk,
+		adaptiveSuccessfulChunks: 3,
+	}
+
+	dls.mu.Lock()
+	currentChunk, successfulChunks := dls.adaptiveStateForNewDownloaderLocked(
+		128*testMiB,
+		4*testKiB,
+		baseChunk,
+	)
+	dls.mu.Unlock()
+
+	if currentChunk != baseChunk {
+		t.Fatalf("unexpected chunk size for small probe: got %d, want %d", currentChunk, baseChunk)
+	}
+	if successfulChunks != 0 {
+		t.Fatalf("unexpected successful chunk count for small probe: got %d, want 0", successfulChunks)
+	}
+	if dls.adaptiveEnd != adaptiveEnd {
+		t.Fatalf("expected adaptive end to be preserved, got %d", dls.adaptiveEnd)
+	}
+	if dls.adaptiveChunkSize != adaptiveChunk {
+		t.Fatalf("expected adaptive chunk size to be preserved, got %d", dls.adaptiveChunkSize)
+	}
+	if dls.adaptiveSuccessfulChunks != 3 {
+		t.Fatalf("expected adaptive successful chunk count to be preserved, got %d", dls.adaptiveSuccessfulChunks)
+	}
+}
+
 func getMaxOffset(dl *downloader) int64 {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
 	return dl.maxOffset
+}
+
+func TestFindDownloaderForPosLocked_ReusesAssignedRangeAheadOfCurrentOffset(t *testing.T) {
+	const chunkSize = 16 * testMiB
+
+	dl := &downloader{
+		start:     0,
+		offset:    2 * testMiB,
+		maxOffset: 32 * testMiB,
+	}
+
+	dls := &Downloaders{
+		chunkSize: chunkSize,
+		dls:       []*downloader{dl},
+	}
+
+	if got := dls.findDownloaderForPosLocked(20 * testMiB); got != dl {
+		t.Fatal("expected downloader to be reused for a position already inside its assigned range")
+	}
+}
+
+func TestFindDownloaderForPosLocked_ReusesNearbyDownloaderOutsideAssignedRange(t *testing.T) {
+	const chunkSize = 8 * testMiB
+
+	dl := &downloader{
+		start:     0,
+		offset:    10 * testMiB,
+		maxOffset: 12 * testMiB,
+	}
+
+	dls := &Downloaders{
+		chunkSize: chunkSize,
+		dls:       []*downloader{dl},
+	}
+
+	if got := dls.findDownloaderForPosLocked(13 * testMiB); got != dl {
+		t.Fatal("expected nearby downloader to be reused within the match window")
+	}
 }
 
 func TestEnsureDownloaderLocked_ExtendsMissByReadAhead(t *testing.T) {
@@ -186,7 +337,9 @@ func TestStopAllClearsWaiters(t *testing.T) {
 	}
 }
 
-func TestCacheItemReleaseStopsDownloadersOnZeroOpens(t *testing.T) {
+func TestCacheItemReleaseStopsDownloadersAfterGracePeriod(t *testing.T) {
+	setReleaseStopGracePeriodForTest(t, 20*time.Millisecond)
+
 	parentCtx := context.Background()
 	ctx, cancel := context.WithCancel(parentCtx)
 
@@ -203,14 +356,52 @@ func TestCacheItemReleaseStopsDownloadersOnZeroOpens(t *testing.T) {
 
 	item.Release()
 
+	// Releasing the last handle should no longer stop downloaders synchronously.
 	select {
 	case <-ctx.Done():
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("expected downloader context to be canceled when opens reaches zero")
+		t.Fatal("downloader context was canceled immediately instead of waiting for grace period")
+	default:
+	}
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected downloader context to be canceled after release grace period")
 	}
 
 	if got := item.opens.Load(); got != 0 {
 		t.Fatalf("unexpected opens after release: got %d, want 0", got)
+	}
+}
+
+func TestCacheItemOpenCancelsPendingDownloaderStop(t *testing.T) {
+	setReleaseStopGracePeriodForTest(t, 200*time.Millisecond)
+
+	parentCtx := context.Background()
+	ctx, cancel := context.WithCancel(parentCtx)
+
+	dls := &Downloaders{
+		parentCtx: parentCtx,
+		ctx:       ctx,
+		cancel:    cancel,
+	}
+
+	item := &CacheItem{
+		downloaders: dls,
+	}
+	item.opens.Store(1)
+
+	item.Release()
+	item.Open()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal("downloader context was canceled even though the item reopened during grace period")
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	if got := item.opens.Load(); got != 1 {
+		t.Fatalf("unexpected opens after reopen: got %d, want 1", got)
 	}
 }
 

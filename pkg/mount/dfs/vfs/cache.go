@@ -39,6 +39,16 @@ const (
 	speedSampleInterval = 1 * time.Second
 )
 
+// releaseStopGracePeriod is how long to wait after the last file handle closes
+// before stopping downloaders. Short-lived scanners often close and reopen the
+// same file rapidly; the grace period avoids tearing down useful in-flight work
+// during those brief gaps.
+var releaseStopGracePeriodNanos atomic.Int64
+
+func init() {
+	releaseStopGracePeriodNanos.Store(int64(2 * time.Second))
+}
+
 // Cache manages sparse cache files for streaming
 type Cache struct {
 	config *config.FuseConfig
@@ -576,6 +586,10 @@ type CacheItem struct {
 	fileMu sync.RWMutex
 	dlMu   sync.Mutex
 
+	handleMu              sync.Mutex
+	releaseStopTimer      *time.Timer
+	releaseStopGeneration uint64
+
 	metaDirty   atomic.Bool
 	metaFlushCh chan struct{}
 	metaStopCh  chan struct{}
@@ -683,14 +697,24 @@ func (item *CacheItem) touch() {
 	item.markMetadataDirty()
 }
 
-// Open increments the open count (prevents eviction)
+// Open increments the open count (prevents eviction) and cancels any pending
+// delayed downloader stop from a recent zero-open interval.
 func (item *CacheItem) Open() {
+	item.handleMu.Lock()
 	item.opens.Add(1)
+	item.cancelPendingDownloaderStopLocked()
+	item.handleMu.Unlock()
+
 	item.touch()
 }
 
-// Release decrements the open count
+// Release decrements the open count. When the last handle closes, downloaders
+// are stopped after a short grace period so rapid scanner close/reopen cycles do
+// not repeatedly tear down useful in-flight work.
 func (item *CacheItem) Release() {
+	item.handleMu.Lock()
+	defer item.handleMu.Unlock()
+
 	newCount := item.opens.Add(-1)
 	if newCount > 0 {
 		return
@@ -698,13 +722,41 @@ func (item *CacheItem) Release() {
 	if newCount < 0 {
 		item.opens.Store(0)
 	}
-	// Last handle closed: stop in-flight downloads so we don't keep stale
-	// downloader goroutines active after the file is no longer in use.
-	item.StopDownloaders()
+
+	item.scheduleDownloaderStopLocked()
+}
+
+func (item *CacheItem) cancelPendingDownloaderStopLocked() {
+	item.releaseStopGeneration++
+	if item.releaseStopTimer != nil {
+		item.releaseStopTimer.Stop()
+		item.releaseStopTimer = nil
+	}
+}
+
+func (item *CacheItem) scheduleDownloaderStopLocked() {
+	item.cancelPendingDownloaderStopLocked()
+	generation := item.releaseStopGeneration
+	gracePeriod := time.Duration(releaseStopGracePeriodNanos.Load())
+
+	item.releaseStopTimer = time.AfterFunc(gracePeriod, func() {
+		item.handleMu.Lock()
+		defer item.handleMu.Unlock()
+
+		if generation != item.releaseStopGeneration || item.opens.Load() > 0 {
+			return
+		}
+
+		item.releaseStopTimer = nil
+		// Stop while holding handleMu so Open() cannot reopen between the
+		// final zero-open check and downloader shutdown.
+		item.StopDownloaders()
+	})
 }
 
 // StopDownloaders stops active downloads but keeps the cache item alive
-// for potential cache reuse. This is called when all file handles are closed.
+// for potential cache reuse.
+// This is called after the last file handle remains closed past the release grace period.
 func (item *CacheItem) StopDownloaders() {
 	item.dlMu.Lock()
 	dls := item.downloaders
@@ -744,6 +796,16 @@ func (item *CacheItem) ReadAtContext(ctx context.Context, p []byte, off int64) (
 		item.cache.RecordCacheHit()
 	} else {
 		item.cache.RecordCacheMiss()
+
+		// Trace cold reads so we can see the actual access pattern from callers
+		// such as ffprobe, Sonarr, and media players before read-ahead expands it.
+		item.cache.logger.Trace().
+			Str("event", "dfs_cache_miss").
+			Str("key", item.key).
+			Int64("offset", off).
+			Int64("size", readSize).
+			Int64("file_size", item.info.Size).
+			Msg("dfs cache miss")
 	}
 
 	// Ensure data is on disk (may block until downloaded or ctx canceled)
@@ -842,6 +904,10 @@ func (item *CacheItem) FindMissing(r ranges.Range) ranges.Range {
 // Close closes the cache item and saves metadata
 func (item *CacheItem) Close() error {
 	item.closeOnce.Do(func() {
+		item.handleMu.Lock()
+		item.cancelPendingDownloaderStopLocked()
+		item.handleMu.Unlock()
+
 		// Stop downloaders without holding the downloaders lock to avoid deadlocks.
 		item.dlMu.Lock()
 		dls := item.downloaders
