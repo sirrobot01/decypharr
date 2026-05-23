@@ -740,21 +740,17 @@ func (item *CacheItem) scheduleDownloaderStopLocked() {
 	gracePeriod := time.Duration(releaseStopGracePeriodNanos.Load())
 
 	item.releaseStopTimer = time.AfterFunc(gracePeriod, func() {
-		shouldStop := false
 		item.handleMu.Lock()
+		defer item.handleMu.Unlock()
 
 		if generation != item.releaseStopGeneration || item.opens.Load() > 0 {
-			item.handleMu.Unlock()
 			return
 		}
 
 		item.releaseStopTimer = nil
-		shouldStop = true
-		item.handleMu.Unlock()
-
-		if shouldStop {
-			item.StopDownloaders()
-		}
+		// Stop while holding handleMu so Open() cannot reopen between the
+		// final zero-open check and downloader shutdown.
+		item.StopDownloaders()
 	})
 }
 
