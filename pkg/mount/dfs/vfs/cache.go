@@ -43,7 +43,11 @@ const (
 // before stopping downloaders. Short-lived scanners often close and reopen the
 // same file rapidly; the grace period avoids tearing down useful in-flight work
 // during those brief gaps.
-var releaseStopGracePeriod = 2 * time.Second
+var releaseStopGracePeriodNanos atomic.Int64
+
+func init() {
+	releaseStopGracePeriodNanos.Store(int64(2 * time.Second))
+}
 
 // Cache manages sparse cache files for streaming
 type Cache struct {
@@ -733,8 +737,9 @@ func (item *CacheItem) cancelPendingDownloaderStopLocked() {
 func (item *CacheItem) scheduleDownloaderStopLocked() {
 	item.cancelPendingDownloaderStopLocked()
 	generation := item.releaseStopGeneration
+	gracePeriod := time.Duration(releaseStopGracePeriodNanos.Load())
 
-	item.releaseStopTimer = time.AfterFunc(releaseStopGracePeriod, func() {
+	item.releaseStopTimer = time.AfterFunc(gracePeriod, func() {
 		item.handleMu.Lock()
 		defer item.handleMu.Unlock()
 

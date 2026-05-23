@@ -551,9 +551,9 @@ func (dls *Downloaders) updateAdaptiveState(start, end, currentChunk int64, succ
 	dls.adaptiveSuccessfulChunks = successfulChunks
 }
 
-// adaptiveStateForNewDownloader returns the starting adaptive state for a new
+// adaptiveStateForNewDownloaderLocked returns the starting adaptive state for a new
 // downloader. Caller must hold dls.mu.
-func (dls *Downloaders) adaptiveStateForNewDownloader(pos, size, baseChunk int64) (int64, int) {
+func (dls *Downloaders) adaptiveStateForNewDownloaderLocked(pos, size, baseChunk int64) (int64, int) {
 	currentChunk := baseChunk
 	successfulChunks := 0
 
@@ -588,7 +588,7 @@ func (dls *Downloaders) newDownloaderLocked(r ranges.Range, targetEnd int64, pri
 	currentChunk := baseChunk
 	successfulChunks := 0
 	if !priority {
-		currentChunk, successfulChunks = dls.adaptiveStateForNewDownloader(r.Pos, r.Size, baseChunk)
+		currentChunk, successfulChunks = dls.adaptiveStateForNewDownloaderLocked(r.Pos, r.Size, baseChunk)
 	}
 
 	// Each downloader gets its own context derived from the Downloaders context.

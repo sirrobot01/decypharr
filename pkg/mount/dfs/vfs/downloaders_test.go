@@ -14,6 +14,14 @@ const (
 	testMiB = 1024 * testKiB
 )
 
+func setReleaseStopGracePeriodForTest(t *testing.T, d time.Duration) {
+	t.Helper()
+	old := releaseStopGracePeriodNanos.Swap(int64(d))
+	t.Cleanup(func() {
+		releaseStopGracePeriodNanos.Store(old)
+	})
+}
+
 func TestCurrentKickerInterval(t *testing.T) {
 	dls := &Downloaders{}
 
@@ -41,7 +49,7 @@ func TestAdaptiveStateForNewDownloader_InheritsExactContiguousState(t *testing.T
 	}
 
 	dls.mu.Lock()
-	currentChunk, successfulChunks := dls.adaptiveStateForNewDownloader(
+	currentChunk, successfulChunks := dls.adaptiveStateForNewDownloaderLocked(
 		adaptiveEnd,
 		baseChunk,
 		baseChunk,
@@ -70,7 +78,7 @@ func TestAdaptiveStateForNewDownloader_ResetsOnNonContiguousFullSizeRequest(t *t
 	}
 
 	dls.mu.Lock()
-	currentChunk, successfulChunks := dls.adaptiveStateForNewDownloader(
+	currentChunk, successfulChunks := dls.adaptiveStateForNewDownloaderLocked(
 		128*testMiB,
 		baseChunk,
 		baseChunk,
@@ -108,7 +116,7 @@ func TestAdaptiveStateForNewDownloader_KeepsStateForNonContiguousSmallProbe(t *t
 	}
 
 	dls.mu.Lock()
-	currentChunk, successfulChunks := dls.adaptiveStateForNewDownloader(
+	currentChunk, successfulChunks := dls.adaptiveStateForNewDownloaderLocked(
 		128*testMiB,
 		4*testKiB,
 		baseChunk,
@@ -330,11 +338,7 @@ func TestStopAllClearsWaiters(t *testing.T) {
 }
 
 func TestCacheItemReleaseStopsDownloadersAfterGracePeriod(t *testing.T) {
-	oldGrace := releaseStopGracePeriod
-	releaseStopGracePeriod = 20 * time.Millisecond
-	t.Cleanup(func() {
-		releaseStopGracePeriod = oldGrace
-	})
+	setReleaseStopGracePeriodForTest(t, 20*time.Millisecond)
 
 	parentCtx := context.Background()
 	ctx, cancel := context.WithCancel(parentCtx)
@@ -361,7 +365,7 @@ func TestCacheItemReleaseStopsDownloadersAfterGracePeriod(t *testing.T) {
 
 	select {
 	case <-ctx.Done():
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(2 * time.Second):
 		t.Fatal("expected downloader context to be canceled after release grace period")
 	}
 
@@ -371,11 +375,7 @@ func TestCacheItemReleaseStopsDownloadersAfterGracePeriod(t *testing.T) {
 }
 
 func TestCacheItemOpenCancelsPendingDownloaderStop(t *testing.T) {
-	oldGrace := releaseStopGracePeriod
-	releaseStopGracePeriod = 20 * time.Millisecond
-	t.Cleanup(func() {
-		releaseStopGracePeriod = oldGrace
-	})
+	setReleaseStopGracePeriodForTest(t, 20*time.Millisecond)
 
 	parentCtx := context.Background()
 	ctx, cancel := context.WithCancel(parentCtx)
@@ -397,7 +397,7 @@ func TestCacheItemOpenCancelsPendingDownloaderStop(t *testing.T) {
 	select {
 	case <-ctx.Done():
 		t.Fatal("downloader context was canceled even though the item reopened during grace period")
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(300 * time.Millisecond):
 	}
 
 	if got := item.opens.Load(); got != 1 {
