@@ -33,6 +33,7 @@ type FileInfo struct {
 	canDelete    bool
 	byteRange    *[2]int64
 	infohash     string
+	sidecarPath  string     // path on disk for sidecar files (subtitles etc.)
 	sys          interface{} // For caching fuse nodes
 }
 
@@ -47,7 +48,9 @@ func (f *FileInfo) Content() []byte      { return f.content }
 func (f *FileInfo) Parent() string       { return f.parent }
 func (f *FileInfo) ActiveDebrid() string { return f.activeDebrid }
 func (f *FileInfo) CanDelete() bool      { return f.canDelete }
-func (f *FileInfo) IsRemote() bool       { return len(f.content) == 0 }
+func (f *FileInfo) IsRemote() bool       { return len(f.content) == 0 && f.sidecarPath == "" }
+func (f *FileInfo) SidecarPath() string  { return f.sidecarPath }
+func (f *FileInfo) IsSidecar() bool      { return f.sidecarPath != "" }
 func (f *FileInfo) ByteRange() *[2]int64 { return f.byteRange }
 func (f *FileInfo) InfoHash() string     { return f.infohash }
 
@@ -134,7 +137,11 @@ func (m *Manager) GetEntryChildren(group string) (*FileInfo, []FileInfo) {
 }
 
 func (m *Manager) GetTorrentChildren(name string) (*FileInfo, []FileInfo) {
-	return m.entry.Get(torrentEntryCachePrefix + name)
+	dir, children := m.entry.Get(torrentEntryCachePrefix + name)
+	if sc := m.GetSidecars(name); len(sc) > 0 {
+		children = append(children, sc...)
+	}
+	return dir, children
 }
 
 func (m *Manager) GetTorrentEntry(torrentName string) (*FileInfo, error) {
@@ -174,10 +181,18 @@ func (m *Manager) GetEntryInfo(name string) (*FileInfo, error) {
 func (m *Manager) GetTorrentFile(torrentName, fileName string) (*FileInfo, error) {
 	entry, err := m.storage.GetEntryItem(torrentName)
 	if err != nil {
+		// Fall back to sidecar before returning error
+		if sc := m.GetSidecarFile(torrentName, fileName); sc != nil {
+			return sc, nil
+		}
 		return nil, fmt.Errorf("torrent %s not found", torrentName)
 	}
 	file, err := entry.GetFile(fileName)
 	if err != nil {
+		// Fall back to sidecar registry
+		if sc := m.GetSidecarFile(torrentName, fileName); sc != nil {
+			return sc, nil
+		}
 		return nil, fmt.Errorf("file %s not found in torrent %s", fileName, torrentName)
 	}
 	return &FileInfo{

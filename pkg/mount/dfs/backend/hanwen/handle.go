@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -41,11 +42,20 @@ func (fh *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRe
 	}
 
 	// Static content (e.g. version.txt): serve from the in-memory buffer.
-	// Check this first — streamFile is nil for static files, so dereferencing
-	// it below would panic.
 	if len(fh.file.content) > 0 {
 		data := fh.readFromStaticContent(off, int64(len(dest)))
 		return fuse.ReadResultData(data), 0
+	}
+
+	// Sidecar file (e.g. subtitle): serve from disk.
+	if fh.file.info.IsSidecar() {
+		f, err := os.Open(fh.file.info.SidecarPath())
+		if err != nil {
+			return nil, syscall.ENOENT
+		}
+		defer f.Close()
+		n, _ := f.ReadAt(dest, off)
+		return fuse.ReadResultData(dest[:n]), 0
 	}
 
 	if fh.streamFile == nil {

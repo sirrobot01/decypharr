@@ -87,6 +87,7 @@ type Manager struct {
 
 	// Notifications service
 	Notifications *notifications.Service
+
 }
 
 // New creates a new Manager instance
@@ -153,6 +154,7 @@ func New() *Manager {
 		debridSpeedTestResults: xsync.NewMap[string, debridTypes.SpeedTestResult](),
 		activeStreams:          xsync.NewMap[string, *ActiveStream](),
 		processingEntries:      xsync.NewMap[string, struct{}](),
+
 	}
 
 	instance.init()
@@ -227,6 +229,7 @@ func (m *Manager) init() {
 
 	m.initEntryCache()
 
+	// Load persisted sidecar files (subtitles etc.)
 	// Initialize notifications service
 	m.Notifications = notifications.New(&m.config.Notifications, m.logger)
 

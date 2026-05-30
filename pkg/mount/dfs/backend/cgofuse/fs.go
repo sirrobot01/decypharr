@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -18,6 +19,19 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/mount/dfs/vfs"
 	"github.com/winfsp/cgofuse/fuse"
 )
+
+var subtitleExts = map[string]bool{
+	".srt": true, ".ass": true, ".ssa": true,
+	".sub": true, ".vtt": true, ".idx": true,
+}
+
+func isSubtitleFile(name string) bool {
+	dot := strings.LastIndex(name, ".")
+	if dot < 0 {
+		return false
+	}
+	return subtitleExts[strings.ToLower(name[dot:])]
+}
 
 // FS implements the cgofuse FileSystemInterface
 type FS struct {
@@ -189,8 +203,18 @@ func (f *FS) entryStat(info *manager.FileInfo) *fuse.Stat_t {
 	return stat
 }
 
-// CreateEx is required by fuse.FileSystemOpenEx but this is a read-only filesystem
+// CreateEx intercepts subtitle file creation and routes to sidecar injection.
 func (f *FS) CreateEx(path string, mode uint32, fi *fuse.FileInfo_t) int {
+	parts := splitPath(path)
+	// Only allow subtitle writes at depth 2+ (inside a torrent folder)
+	if len(parts) >= 2 && isSubtitleFile(parts[len(parts)-1]) {
+		torrentName := parts[len(parts)-2]
+		filename := parts[len(parts)-1]
+		fh := f.handles.CreateSidecar(torrentName, filename, f.vfs.GetManager())
+		fi.Fh = fh
+		fi.DirectIo = true
+		return 0
+	}
 	return -fuse.EACCES
 }
 
@@ -261,8 +285,7 @@ func (f *FS) Read(path string, buff []byte, off int64, fh uint64) int {
 		size = int(handle.info.Size() - off)
 	}
 
-	// Static content (e.g. version.txt): serve from in-memory buffer. These
-	// files have no reader because IsRemote() is false when content is set.
+	// Static content (e.g. version.txt): serve from in-memory buffer.
 	if content := handle.info.Content(); len(content) > 0 {
 		if off >= int64(len(content)) {
 			return 0
@@ -272,6 +295,17 @@ func (f *FS) Read(path string, buff []byte, off int64, fh uint64) int {
 			end = int64(len(content))
 		}
 		return copy(buff, content[off:end])
+	}
+
+	// Sidecar file (e.g. subtitle): serve from disk.
+	if handle.info.IsSidecar() {
+		f, err := os.Open(handle.info.SidecarPath())
+		if err != nil {
+			return -fuse.ENOENT
+		}
+		defer f.Close()
+		n, _ := f.ReadAt(buff[:size], off)
+		return n
 	}
 
 	if handle.reader == nil {
@@ -301,12 +335,43 @@ func (f *FS) Read(path string, buff []byte, off int64, fh uint64) int {
 	return n
 }
 
+// Write handles writes for sidecar (subtitle) files
+func (f *FS) Write(path string, buff []byte, off int64, fh uint64) int {
+	handle := f.handles.Get(fh)
+	if handle == nil || handle.sidecar == nil {
+		return -fuse.EBADF
+	}
+	sc := handle.sidecar
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	end := int(off) + len(buff)
+	if end > len(sc.buf) {
+		newBuf := make([]byte, end)
+		copy(newBuf, sc.buf)
+		sc.buf = newBuf
+	}
+	copy(sc.buf[off:], buff)
+	return len(buff)
+}
+
 // Release closes a file handle
 func (f *FS) Release(path string, fh uint64) int {
-
 	handle := f.handles.Get(fh)
 	if handle != nil {
-		f.releaseHandleResources(handle)
+		if handle.sidecar != nil {
+			sc := handle.sidecar
+			sc.mu.Lock()
+			content := make([]byte, len(sc.buf))
+			copy(content, sc.buf)
+			sc.mu.Unlock()
+			if len(content) > 0 {
+				if err := sc.mgr.InjectSidecarFile(sc.torrentName, sc.filename, content); err != nil {
+					f.logger.Error().Err(err).Str("torrent", sc.torrentName).Str("file", sc.filename).Msg("Failed to inject sidecar")
+				}
+			}
+		} else {
+			f.releaseHandleResources(handle)
+		}
 	}
 	f.handles.Delete(fh)
 	return 0
@@ -481,8 +546,18 @@ type HandleManager struct {
 
 // FileHandle represents an open file
 type FileHandle struct {
-	info   *manager.FileInfo
-	reader *vfs.StreamingFile
+	info    *manager.FileInfo
+	reader  *vfs.StreamingFile
+	sidecar *SidecarHandle
+}
+
+// SidecarHandle buffers writes for subtitle injection
+type SidecarHandle struct {
+	torrentName string
+	filename    string
+	mgr         *manager.Manager
+	mu          sync.Mutex
+	buf         []byte
 }
 
 // NewHandleManager creates a new handle manager
@@ -501,6 +576,20 @@ func (h *HandleManager) Create(info *manager.FileInfo, reader *vfs.StreamingFile
 	h.handles.Store(fh, &FileHandle{
 		info:   info,
 		reader: reader,
+	})
+	return fh
+}
+
+// CreateSidecar creates a handle for buffered subtitle injection
+func (h *HandleManager) CreateSidecar(torrentName, filename string, mgr *manager.Manager) uint64 {
+	fh := h.nextFH.Load()
+	h.nextFH.Add(1)
+	h.handles.Store(fh, &FileHandle{
+		sidecar: &SidecarHandle{
+			torrentName: torrentName,
+			filename:    filename,
+			mgr:         mgr,
+		},
 	})
 	return fh
 }
