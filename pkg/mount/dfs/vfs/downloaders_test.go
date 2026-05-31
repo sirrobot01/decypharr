@@ -186,6 +186,36 @@ func TestStopAllClearsWaiters(t *testing.T) {
 	}
 }
 
+func TestDownloadDoesNotCreateWorkWhileStopping(t *testing.T) {
+	parentCtx := context.Background()
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
+
+	dls := &Downloaders{
+		parentCtx: parentCtx,
+		ctx:       ctx,
+		cancel:    cancel,
+		stopping:  true,
+		item: &CacheItem{
+			info: ItemInfo{Size: 1 * testMiB},
+		},
+	}
+
+	err := dls.Download(context.Background(), ranges.Range{Pos: 0, Size: 1})
+	if err == nil {
+		t.Fatal("expected Download to fail while StopAll is active")
+	}
+	if got := len(dls.waiters); got != 0 {
+		t.Fatalf("Download created waiters while stopping: got %d, want 0", got)
+	}
+	if got := len(dls.dls); got != 0 {
+		t.Fatalf("Download created downloaders while stopping: got %d, want 0", got)
+	}
+	if dls.streamID != "" {
+		t.Fatal("Download registered a stream while stopping")
+	}
+}
+
 func TestCacheItemReleaseStopsDownloadersOnZeroOpens(t *testing.T) {
 	parentCtx := context.Background()
 	ctx, cancel := context.WithCancel(parentCtx)
