@@ -8,6 +8,7 @@ import (
 
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/rs/zerolog"
+	"github.com/sirrobot01/decypharr/internal/buffer"
 	fuseconfig "github.com/sirrobot01/decypharr/pkg/mount/dfs/config"
 )
 
@@ -46,6 +47,32 @@ func TestScanDiskCandidates_DoesNotDeleteLegacyFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(dataPath); err != nil {
 		t.Fatalf("data should not be deleted on scan: %v", err)
+	}
+}
+
+func TestScanDiskCandidates_RemovesOrphanMetadataWithCachedRanges(t *testing.T) {
+	cacheDir := t.TempDir()
+	entryDir := filepath.Join(cacheDir, "entry")
+	if err := os.MkdirAll(entryDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	metaPath := filepath.Join(entryDir, "video.mkv.json")
+	if err := os.WriteFile(metaPath, []byte(`{"size":1024,"ranges":[{"Pos":100,"Size":50}]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := newTestCache(cacheDir)
+	candidates, totalSize := c.scanDiskCandidates()
+
+	if len(candidates) != 0 {
+		t.Fatalf("expected no candidates for orphan metadata, got %+v", candidates)
+	}
+	if totalSize != 0 {
+		t.Fatalf("expected total size 0 for orphan metadata, got %d", totalSize)
+	}
+	if _, err := os.Stat(metaPath); !os.IsNotExist(err) {
+		t.Fatalf("orphan metadata should be removed, stat err=%v", err)
 	}
 }
 
@@ -115,7 +142,13 @@ func TestCleanupItems_ForceZeroOpenClosesRecentItems(t *testing.T) {
 	}
 
 	dataPath := filepath.Join(entryDir, "video.mkv")
-	file, err := os.OpenFile(dataPath, os.O_RDWR|os.O_CREATE, 0644)
+
+	// Build a CacheItem backed by a real buffer so Close() exercises the
+	// production teardown path. The buffer creates and owns the disk file.
+	buf, err := buffer.New(buffer.Config{
+		DiskPath:  dataPath,
+		TotalSize: 1024,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +157,7 @@ func TestCleanupItems_ForceZeroOpenClosesRecentItems(t *testing.T) {
 	item := &CacheItem{
 		cache:    c,
 		key:      "entry/video.mkv",
-		file:     file,
+		buf:      buf,
 		metaPath: dataPath + ".json",
 		info: ItemInfo{
 			ATime: time.Now(),
@@ -142,10 +175,7 @@ func TestCleanupItems_ForceZeroOpenClosesRecentItems(t *testing.T) {
 	if got := c.itemCount.Load(); got != 0 {
 		t.Fatalf("expected item count 0 after forced cleanup, got %d", got)
 	}
-
-	item.fileMu.RLock()
-	defer item.fileMu.RUnlock()
-	if item.file != nil {
-		t.Fatal("expected cache file to be closed after forced cleanup")
+	if item.buf != nil {
+		t.Fatal("expected cache buffer to be closed after forced cleanup")
 	}
 }

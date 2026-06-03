@@ -17,6 +17,7 @@ import (
 
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/rs/zerolog"
+	"github.com/sirrobot01/decypharr/internal/buffer"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/manager"
@@ -199,7 +200,22 @@ func (c *Cache) scanDiskCandidates() ([]candidateEntry, int64) {
 			// Verify data file exists
 			dataStat, err := os.Stat(dataPath)
 			if err != nil {
-				c.logger.Warn().Err(err).Str("path", dataPath).Msg("cache data file missing")
+				if os.IsNotExist(err) && !inMap && opens == 0 && info.Rs.Size() > 0 {
+					if rmErr := os.Remove(metaPath); rmErr != nil && !os.IsNotExist(rmErr) {
+						c.logger.Warn().
+							Err(rmErr).
+							Str("path", metaPath).
+							Msg("failed to remove orphan cache metadata")
+					} else {
+						c.logger.Warn().
+							Err(err).
+							Str("path", dataPath).
+							Str("metadata", metaPath).
+							Msg("removed orphan cache metadata for missing data file")
+					}
+				} else {
+					c.logger.Warn().Err(err).Str("path", dataPath).Msg("cache data file missing")
+				}
 				continue
 			}
 
@@ -302,48 +318,56 @@ func (c *Cache) evictCandidates(now time.Time, candidates []candidateEntry, tota
 	return totalSize, len(removed)
 }
 
-// newItem creates a new cache item
+// newItem creates a new cache item. The underlying byte storage is a
+// buffer.Buffer over a sparse file at <CacheDir>/<entryName>/<filename>;
+// the buffer is seeded with any ranges from previously-persisted metadata
+// so a re-opened item can serve its cached bytes immediately without
+// re-downloading.
 func (c *Cache) newItem(key, entryName, filename string, fileSize int64) (*CacheItem, error) {
-	// Create directory structure
 	itemDir := filepath.Join(c.config.CacheDir, entryName)
-	if err := os.MkdirAll(itemDir, 0755); err != nil {
+	if err := os.MkdirAll(itemDir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create item dir: %w", err)
 	}
 
 	cachePath := filepath.Join(itemDir, filename)
 	metaPath := filepath.Join(itemDir, filename+".json")
 
-	// Try to load existing metadata
+	// Load existing metadata before constructing the buffer so its range
+	// tracker is seeded with anything the prior session persisted.
 	var info ItemInfo
 	if err := decodeJSONFile(metaPath, &info); err != nil && !os.IsNotExist(err) {
 		c.logger.Warn().Err(err).Str("key", key).Msg("corrupt metadata, resetting")
 		info = ItemInfo{}
 	}
 
-	// if cachePath is a directory, remove it to avoid conflicts with file creation
+	// Defend against a directory accidentally sitting at cachePath
+	// (interrupted prior run, leftover state).
 	if stat, err := os.Stat(cachePath); err == nil && stat.IsDir() {
 		if err := os.RemoveAll(cachePath); err != nil {
 			return nil, fmt.Errorf("failed to remove directory at cache path: %w", err)
 		}
 	}
 
-	// Open or create sparse file
-	fd, err := os.OpenFile(cachePath, os.O_RDWR|os.O_CREATE, 0644)
+	// Translate persisted ranges into the buffer's seed format.
+	seed := make([]buffer.Range, 0, len(info.Rs))
+	for _, r := range info.Rs {
+		if r.Size > 0 {
+			seed = append(seed, buffer.Range{Off: r.Pos, Size: r.Size})
+		}
+	}
+
+	buf, err := buffer.New(buffer.Config{
+		// MemorySize left at the buffer's default (64 MB). Plenty for
+		// the per-item working set of a streaming reader; the file's
+		// cold pages live in the OS page cache around the sparse file.
+		DiskPath:      cachePath,
+		TotalSize:     fileSize,
+		InitialRanges: seed,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to open cache file: %w", err)
+		return nil, fmt.Errorf("failed to create buffer: %w", err)
 	}
 
-	if err := markSparseFile(fd); err != nil {
-		// just log the error and continue
-		c.logger.Error().Err(err).Str("key", key).Msg("failed to mark cache file as sparse")
-	}
-
-	if err := fd.Truncate(fileSize); err != nil {
-		fd.Close()
-		return nil, fmt.Errorf("failed to truncate cache file: %w", err)
-	}
-
-	// Update info
 	info.Size = fileSize
 	info.ModTime = utils.Now()
 	info.ATime = utils.Now()
@@ -351,7 +375,7 @@ func (c *Cache) newItem(key, entryName, filename string, fileSize int64) (*Cache
 	log := logger.NewRateLimitedLogger(logger.WithLogger(_logger))
 	entry, err := c.manager.GetEntryByName(entryName, filename)
 	if err != nil {
-		_ = fd.Close()
+		_ = buf.Close()
 		return nil, fmt.Errorf("failed to get storage entry: %w", err)
 	}
 
@@ -360,17 +384,15 @@ func (c *Cache) newItem(key, entryName, filename string, fileSize int64) (*Cache
 		key:      key,
 		entry:    entry,
 		filename: filename,
-		file:     fd,
+		buf:      buf,
 		metaPath: metaPath,
 		info:     info,
 		logger:   log.Rate(buildCacheKey(entryName, filename)),
 	}
 
-	// Create downloaders coordinator
 	item.downloaders = NewDownloaders(c.ctx, c.manager, item, c.config)
 	item.startMetaWriter()
 	item.markMetadataDirty()
-
 	return item, nil
 }
 
@@ -556,14 +578,17 @@ func (c *Cache) GetStats() map[string]interface{} {
 	}
 }
 
-// CacheItem represents a single cached file
+// CacheItem represents a single cached file. Byte storage is delegated to
+// a buffer.Buffer — sparse disk file plus an LRU-managed in-RAM block
+// cache — so this struct only carries the per-item *policy* state
+// (downloaders coordinator, pin/refcounts, metadata persistence).
 type CacheItem struct {
 	cache    *Cache
 	key      string
 	entry    *storage.Entry
 	filename string
 
-	file     *os.File
+	buf      *buffer.Buffer
 	metaPath string
 
 	info ItemInfo
@@ -573,7 +598,6 @@ type CacheItem struct {
 	downloaders *Downloaders // Download coordinator
 
 	metaMu sync.RWMutex
-	fileMu sync.RWMutex
 	dlMu   sync.Mutex
 
 	metaDirty   atomic.Bool
@@ -761,55 +785,53 @@ func (item *CacheItem) ReadAtContext(ctx context.Context, p []byte, off int64) (
 		return 0, fmt.Errorf("download failed: %w", err)
 	}
 
-	// Read from sparse file
-	item.fileMu.RLock()
-	if item.file == nil {
-		item.fileMu.RUnlock()
+	// Read via the buffer. It serves from its in-RAM block cache when hot
+	// and from its sparse disk file otherwise. No fadvise(DONTNEED) here:
+	// that hint was found to defeat kernel readahead and hurt prefetch.
+	if item.buf == nil {
 		return 0, errors.New("cache file closed")
 	}
-	f := item.file
-	n, err := f.ReadAt(p, off)
-	item.fileMu.RUnlock()
+	n, err := item.buf.ReadAt(p, off)
+	if errors.Is(err, buffer.ErrNotPresent) {
+		// We checked info.Rs before downloading, so an ErrNotPresent here
+		// would mean the metadata is out of sync with the buffer. Surface
+		// as EIO-equivalent rather than confusing the caller with the
+		// internal sentinel.
+		return n, fmt.Errorf("buffer reported missing range at %d+%d: %w", off, len(p), err)
+	}
 	return n, err
 }
 
-// WriteAtNoOverwrite writes only bytes not already present
+// WriteAtNoOverwrite writes only the bytes in p that aren't already cached.
+// Returns total p length as n (for io.Writer contract) and the count of
+// bytes skipped because they were already present.
+//
+// The on-item info.Rs range tracker is the authoritative metadata view
+// (serialized to JSON on Close); the buffer's internal tracker mirrors it
+// after each insert. Keeping both in sync is what lets a reopened item
+// resume cached data via the buffer's InitialRanges seed.
 func (item *CacheItem) WriteAtNoOverwrite(p []byte, off int64) (n, skipped int, err error) {
+	if item.buf == nil {
+		return len(p), 0, errors.New("cache file closed")
+	}
 	writeRange := ranges.Range{Pos: off, Size: int64(len(p))}
 	n = len(p)
-	skipped = 0
 
-	// FindAll is read-only; hold RLock for its duration instead of copying the
-	// ranges slice first. The lock window is O(log k) where k is typically 1–3
-	// during active streaming, so extending the hold is negligible.
 	item.metaMu.RLock()
 	frs := item.info.Rs.FindAll(writeRange)
 	item.metaMu.RUnlock()
 
-	// pread/pwrite are thread-safe, so RLock suffices to guard against Close() nil-ing the file.
-	// This allows reads and writes to proceed concurrently on the same file.
-	item.fileMu.RLock()
-	if item.file == nil {
-		item.fileMu.RUnlock()
-		return n, skipped, errors.New("cache file closed")
-	}
-	f := item.file
 	for _, fr := range frs {
 		if fr.Present {
-			// Skip - already on disk
 			skipped += int(fr.R.Size)
 			continue
 		}
-		// Write missing part
 		localOff := fr.R.Pos - off
-		if _, werr := f.WriteAt(p[localOff:localOff+fr.R.Size], fr.R.Pos); werr != nil {
-			item.fileMu.RUnlock()
+		if _, werr := item.buf.WriteAt(p[localOff:localOff+fr.R.Size], fr.R.Pos); werr != nil {
 			return n, skipped, werr
 		}
 	}
-	item.fileMu.RUnlock()
 
-	// Mark range as present
 	item.metaMu.Lock()
 	item.info.Rs.Insert(writeRange)
 	item.metaMu.Unlock()
@@ -839,10 +861,12 @@ func (item *CacheItem) FindMissing(r ranges.Range) ranges.Range {
 	return item.info.Rs.FindMissing(r)
 }
 
-// Close closes the cache item and saves metadata
+// Close closes the cache item and saves metadata. The underlying buffer's
+// disk file is NOT removed (DFS persistence across runs is part of the
+// design — the user expects re-opens of a previously-cached file to hit
+// disk, not re-download).
 func (item *CacheItem) Close() error {
 	item.closeOnce.Do(func() {
-		// Stop downloaders without holding the downloaders lock to avoid deadlocks.
 		item.dlMu.Lock()
 		dls := item.downloaders
 		item.downloaders = nil
@@ -857,14 +881,12 @@ func (item *CacheItem) Close() error {
 		item.stopMetaWriter()
 		item.flushMetadata(true)
 
-		item.fileMu.Lock()
-		if item.file != nil {
-			if err := item.file.Close(); err != nil && item.closeErr == nil {
+		if item.buf != nil {
+			if err := item.buf.Close(); err != nil && item.closeErr == nil {
 				item.closeErr = err
 			}
-			item.file = nil
+			item.buf = nil
 		}
-		item.fileMu.Unlock()
 	})
 	return item.closeErr
 }

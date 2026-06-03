@@ -16,6 +16,15 @@ type UsenetProvider struct {
 	MaxConnections int    `json:"max_connections,omitempty"` // Max connections for this provider (default: 10)
 	SSL            bool   `json:"ssl,omitempty"`             // Use SSL/TLS for the connection
 	Priority       int    `json:"priority,omitempty"`        // Priority for this provider (lower = higher priority)
+	// Backup marks this provider as a fallback tier. Backups are only
+	// consulted when every non-backup ("primary") provider is excluded
+	// — e.g. all primaries returned article-not-found or had connection
+	// errors. They are NOT used just because a primary's pool is busy;
+	// the request waits for a primary slot instead. This matches the
+	// "unlimited primary + block backup for completion" model that most
+	// other Usenet clients implement, and prevents block providers from
+	// being billed for articles the unlimited could have served.
+	Backup bool `json:"backup,omitempty"`
 }
 
 // Usenet configuration for usenet streaming and downloading
@@ -37,7 +46,8 @@ type Usenet struct {
 	// Processing timeout
 	ProcessingTimeout string `json:"processing_timeout,omitempty"` // Timeout for NZB processing e.g. "5m", "10m" (default: 10m). Mark as bad if exceeded.
 	// Availability check sampling
-	AvailabilitySamplePercent int `json:"availability_sample_percent,omitempty"` // Percentage of segments to check for availability (1-100, default: 100 = check all)
+	AvailabilitySamplePercent       int `json:"availability_sample_percent,omitempty"`        // Percentage of segments to check during repair (1-100, default: 10)
+	ImportAvailabilitySamplePercent int `json:"import_availability_sample_percent,omitempty"` // Percentage of segments to check when adding an NZB (1-100, default: 1)
 	// Max concurrent NZB processing
 	MaxConcurrentNZB int `json:"max_concurrent_nzb,omitempty"` // Maximum NZBs to process in parallel (default: 2)
 
@@ -80,6 +90,11 @@ func (c *Config) updateUsenetConfig() {
 		c.Usenet.AvailabilitySamplePercent = 10
 	} else if c.Usenet.AvailabilitySamplePercent > 100 {
 		c.Usenet.AvailabilitySamplePercent = 100
+	}
+	if c.Usenet.ImportAvailabilitySamplePercent <= 0 {
+		c.Usenet.ImportAvailabilitySamplePercent = 1
+	} else if c.Usenet.ImportAvailabilitySamplePercent > 100 {
+		c.Usenet.ImportAvailabilitySamplePercent = 100
 	}
 
 	// Max concurrent NZB processing default
@@ -158,6 +173,11 @@ func (c *Config) applyUsenetEnvVars() {
 			c.Usenet.AvailabilitySamplePercent = v
 		}
 	}
+	if availabilitySample := getEnv("USENET__IMPORT_AVAILABILITY_SAMPLE_PERCENT"); availabilitySample != "" {
+		if v, err := strconv.Atoi(availabilitySample); err == nil {
+			c.Usenet.ImportAvailabilitySamplePercent = v
+		}
+	}
 
 	if maxConcurrentNZB := getEnv("USENET__MAX_CONCURRENT_NZB"); maxConcurrentNZB != "" {
 		if v, err := strconv.Atoi(maxConcurrentNZB); err == nil {
@@ -202,6 +222,10 @@ func (c *Config) applyUsenetEnvVars() {
 				if v, err := strconv.Atoi(priority); err == nil {
 					c.Usenet.Providers[i].Priority = v
 				}
+			}
+
+			if backup := getEnv(prefix + "BACKUP"); backup != "" {
+				c.Usenet.Providers[i].Backup = parseBool(backup)
 			}
 		}
 	}

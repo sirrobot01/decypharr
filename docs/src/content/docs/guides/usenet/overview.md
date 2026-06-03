@@ -127,16 +127,18 @@ Prefetch buffer for smoother playback. Higher = smoother but more memory.
 ```json
 {
   "usenet": {
-    "availability_sample_percent": 10
+    "availability_sample_percent": 10,
+    "import_availability_sample_percent": 1
   }
 }
 ```
 
-Sample `10%` of segments to check availability before downloading.
+Use `availability_sample_percent` for repair checks and
+`import_availability_sample_percent` for the availability gate when adding an NZB.
 
 - `100`: Check all segments (slow but accurate)
 - `10`: Check 10% (fast but may miss issues)
-- `1`: Quick check (recommended for large files)
+- `1`: Quick import check (default)
 
 ## Disk Buffer
 

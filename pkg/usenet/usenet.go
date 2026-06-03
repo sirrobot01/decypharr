@@ -26,7 +26,6 @@ import (
 
 const (
 	bufferSize = 256 * 1024 // 256KB buffer for streaming
-	preImportSamplePercent = 10
 )
 
 var streamBufferPool = sync.Pool{
@@ -464,6 +463,7 @@ func (u *Usenet) Process(ctx context.Context, nzb *storage.NZB, groups map[strin
 // CheckFileAvailability, so they do not fail the NZB. It returns on the first
 // definitively-missing file (fail fast).
 func (u *Usenet) checkNZBAvailability(ctx context.Context, nzb *storage.NZB) error {
+	samplePercent := config.Get().Usenet.ImportAvailabilitySamplePercent
 	for i := range nzb.Files {
 		file := &nzb.Files[i]
 		if file.IsDeleted || len(file.Segments) == 0 {
@@ -477,7 +477,7 @@ func (u *Usenet) checkNZBAvailability(ctx context.Context, nzb *storage.NZB) err
 			// Cancelled/timed out: not a content failure — don't fail the NZB.
 			return nil
 		}
-		if err := u.CheckFileAvailability(ctx, file, preImportSamplePercent); err != nil {
+		if err := u.CheckFileAvailability(ctx, file, samplePercent); err != nil {
 			u.logger.Warn().
 				Err(err).
 				Str("nzb_id", nzb.ID).

@@ -104,18 +104,24 @@ func (c *Collector) collect() *Snapshot {
 	snap := &Snapshot{}
 
 	// --- System ---
+	mb := func(b uint64) string { return fmt.Sprintf("%.2fMB", float64(b)/1024/1024) }
 	snap.System = SystemStats{
-		HeapAllocMB:   fmt.Sprintf("%.2fMB", float64(memStats.Sys)/1024/1024),
-		MemoryUsed:    fmt.Sprintf("%.2fMB", float64(memStats.HeapAlloc)/1024/1024),
-		GCCycles:      memStats.NumGC,
-		Goroutines:    runtime.NumGoroutine(),
-		NumCPU:        runtime.NumCPU(),
-		OS:            runtime.GOOS,
-		Arch:          runtime.GOARCH,
-		GoVersion:     runtime.Version(),
-		UptimeSeconds: int64(uptime.Seconds()),
-		Uptime:        uptime.String(),
-		StartTime:     startTime.Format("2006-01-02 15:04:05"),
+		// Sys - HeapReleased is the heap actually held from the OS; HeapReleased
+		// has been handed back (MADV_DONTNEED on Linux) so it does not count.
+		MemoryUsed:     mb(memStats.Sys - memStats.HeapReleased),
+		HeapAllocMB:    mb(memStats.HeapAlloc),
+		HeapInuseMB:    mb(memStats.HeapInuse),
+		HeapReleasedMB: mb(memStats.HeapReleased),
+		SysMB:          mb(memStats.Sys),
+		GCCycles:       memStats.NumGC,
+		Goroutines:     runtime.NumGoroutine(),
+		NumCPU:         runtime.NumCPU(),
+		OS:             runtime.GOOS,
+		Arch:           runtime.GOARCH,
+		GoVersion:      runtime.Version(),
+		UptimeSeconds:  int64(uptime.Seconds()),
+		Uptime:         uptime.String(),
+		StartTime:      startTime.Format("2006-01-02 15:04:05"),
 	}
 
 	// --- Debrids ---

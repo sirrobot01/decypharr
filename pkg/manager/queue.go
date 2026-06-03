@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -199,7 +200,7 @@ func (q *Queue) ListFilterFunc(category string, protocol config.Protocol, state 
 	hashSet := make(map[string]struct{}, len(hashes))
 	if len(hashes) > 0 {
 		for _, h := range hashes {
-			hashSet[h] = struct{}{}
+			hashSet[strings.ToLower(h)] = struct{}{}
 		}
 	}
 
@@ -213,7 +214,7 @@ func (q *Queue) ListFilterFunc(category string, protocol config.Protocol, state 
 				return false
 			}
 			if len(hashSet) > 0 {
-				if _, ok := hashSet[t.InfoHash]; !ok {
+				if _, ok := hashSet[strings.ToLower(t.InfoHash)]; !ok {
 					return false
 				}
 			}

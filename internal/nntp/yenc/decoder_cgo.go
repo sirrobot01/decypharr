@@ -4,6 +4,7 @@ package yenc
 
 import (
 	"io"
+	"sync"
 
 	"github.com/Tensai75/rapidyenc"
 )
@@ -12,6 +13,13 @@ import (
 type rapidyencAdapter struct {
 	dec     *rapidyenc.Decoder
 	yencDec *Decoder
+}
+
+var rapidyencAdapterPool = sync.Pool{
+	New: func() any {
+		yd := &Decoder{}
+		return &rapidyencAdapter{yencDec: yd}
+	},
 }
 
 func (a *rapidyencAdapter) Read(p []byte) (int, error) {
@@ -34,11 +42,11 @@ func AcquireDecoder(r io.Reader) *Decoder {
 	if UsePureGo {
 		return acquirePureGoDecoder(r)
 	}
-	dec := rapidyenc.AcquireDecoder(r)
-	yd := &Decoder{}
-	adapter := &rapidyencAdapter{dec: dec, yencDec: yd}
-	yd.Reader = adapter
-	return yd
+	adapter := rapidyencAdapterPool.Get().(*rapidyencAdapter)
+	adapter.dec = rapidyenc.AcquireDecoder(r)
+	adapter.yencDec.Reader = adapter
+	adapter.yencDec.Meta = DecoderMeta{}
+	return adapter.yencDec
 }
 
 // ReleaseDecoder returns the underlying rapidyenc decoder to the pool.
@@ -48,5 +56,9 @@ func ReleaseDecoder(dec *Decoder) {
 	}
 	if adapter, ok := dec.Reader.(*rapidyencAdapter); ok {
 		rapidyenc.ReleaseDecoder(adapter.dec)
+		adapter.dec = nil
+		dec.Reader = nil
+		dec.Meta = DecoderMeta{}
+		rapidyencAdapterPool.Put(adapter)
 	}
 }

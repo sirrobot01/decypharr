@@ -61,6 +61,7 @@ type pureGoYencDecoder struct {
 	meta     *DecoderMeta
 	out      []byte
 	outPos   int
+	scratch  []byte // reused buffer for lines longer than the bufio buffer (rare)
 	sawBegin bool
 	done     bool
 }
@@ -117,12 +118,32 @@ func (d *pureGoYencDecoder) Read(p []byte) (int, error) {
 	return n, nil
 }
 
+// readLine returns the next line including its trailing '\n' without allocating
+// per line: ReadSlice returns a slice into the bufio buffer (valid only until
+// the next read, which is fine since processLine consumes it immediately). A
+// line longer than the 64 KiB bufio buffer — not expected for valid yEnc, whose
+// lines are ~128 bytes — falls back to a reused scratch buffer, so steady state
+// stays zero-alloc. This replaces ReadBytes, which allocated a fresh slice for
+// every line (~6k allocations per article).
+func (d *pureGoYencDecoder) readLine() ([]byte, error) {
+	line, err := d.r.ReadSlice('\n')
+	if err != bufio.ErrBufferFull {
+		return line, err
+	}
+	d.scratch = append(d.scratch[:0], line...)
+	for err == bufio.ErrBufferFull {
+		line, err = d.r.ReadSlice('\n')
+		d.scratch = append(d.scratch, line...)
+	}
+	return d.scratch, err
+}
+
 func (d *pureGoYencDecoder) fill() error {
 	d.out = d.out[:0]
 	d.outPos = 0
 
 	for {
-		line, err := d.r.ReadBytes('\n')
+		line, err := d.readLine()
 		if err != nil && err != io.EOF {
 			return err
 		}

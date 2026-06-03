@@ -1213,6 +1213,7 @@ class ConfigManager {
             const sslInput = getField('ssl');
             const maxConnectionsInput = getField('max_connections');
             const priorityInput = getField('priority');
+            const backupInput = getField('backup');
 
             if (!hostInput || !portInput || !usernameInput || !passwordInput || !backboneInput || !sslInput || !maxConnectionsInput || !priorityInput) {
                 return;
@@ -1226,7 +1227,11 @@ class ConfigManager {
                 backbone: backboneInput.value.trim(),
                 ssl: sslInput.checked,
                 max_connections: parseInt(maxConnectionsInput.value) || 100,
-                priority: parseInt(priorityInput.value) || 0
+                priority: parseInt(priorityInput.value) || 0,
+                // Backup is optional and defaults false — old form versions
+                // (or missing inputs after a hot-reload) shouldn't accidentally
+                // turn a primary into a backup.
+                backup: backupInput ? backupInput.checked : false
             };
 
             if (provider.host && provider.username && provider.password) {
@@ -1240,6 +1245,7 @@ class ConfigManager {
             read_ahead: document.querySelector('[name="usenet.read_ahead"]').value || "32MB",
             processing_timeout: document.querySelector('[name="usenet.processing_timeout"]')?.value || "5m",
             availability_sample_percent: parseInt(document.querySelector('[name="usenet.availability_sample_percent"]')?.value) || 10,
+            import_availability_sample_percent: parseInt(document.querySelector('[name="usenet.import_availability_sample_percent"]')?.value) || 1,
             max_concurrent_nzb: parseInt(document.querySelector('[name="usenet.max_concurrent_nzb"]')?.value) || 2,
             disk_buffer_path: document.querySelector('[name="usenet.disk_buffer_path"]')?.value || ""
         };
@@ -1666,6 +1672,7 @@ class ConfigManager {
             'read_ahead': usenet.read_ahead,
             'processing_timeout': usenet.processing_timeout,
             'availability_sample_percent': usenet.availability_sample_percent,
+            'import_availability_sample_percent': usenet.import_availability_sample_percent,
             'max_concurrent_nzb': usenet.max_concurrent_nzb,
             'disk_buffer_path': usenet.disk_buffer_path
         };
@@ -1798,12 +1805,19 @@ class ConfigManager {
                     </div>
                 </div>
 
-                <div class="flex gap-4 mt-4">
+                <div class="flex flex-wrap gap-4 mt-4">
                     <label class="flex items-center gap-2 cursor-pointer">
                         <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
                                name="usenet.providers[${index}].ssl"
                                id="usenet_provider_${index}_ssl">
                         <span class="text-sm">Use SSL</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer"
+                           title="Only used when every non-backup provider is excluded (article not found, connection errors). Not used just because primary pools are busy — requests wait for a primary slot instead. Use this for block providers you only want to bill for completion.">
+                        <input type="checkbox" class="checkbox checkbox-warning checkbox-sm"
+                               name="usenet.providers[${index}].backup"
+                               id="usenet_provider_${index}_backup">
+                        <span class="text-sm">Backup provider (fallback only)</span>
                     </label>
                 </div>
             </div>

@@ -384,9 +384,27 @@ func (s *Storage) MarkEntryDirty(entryName string, protocol config.Protocol, rea
 	_ = s.SaveEntryHealth(state)
 }
 
+// healthCountsTTL bounds how often CountEntryHealthByStatus scans the entire
+// repair-state store. The histogram is consumed by the stats dashboard, so a
+// few seconds of staleness is acceptable; the alternative is a full scan +
+// JSON-unmarshal per call, which dominated heap churn at scale.
+const healthCountsTTL = 30 * time.Second
+
 // CountEntryHealthByStatus returns a per-status histogram without loading full
-// EntryHealth payloads.
+// EntryHealth payloads. The result is cached for healthCountsTTL and
+// invalidated whenever repair state mutates.
 func (s *Storage) CountEntryHealthByStatus() map[HealthStatus]int {
+	s.healthCountsMu.Lock()
+	if s.healthCounts != nil && time.Since(s.healthCountsBuiltAt) < healthCountsTTL {
+		out := make(map[HealthStatus]int, len(s.healthCounts))
+		for k, v := range s.healthCounts {
+			out[k] = v
+		}
+		s.healthCountsMu.Unlock()
+		return out
+	}
+	s.healthCountsMu.Unlock()
+
 	counts := make(map[HealthStatus]int)
 	_ = s.repairState.ForEach(func(_ string, value []byte) error {
 		var stub struct {
@@ -397,7 +415,17 @@ func (s *Storage) CountEntryHealthByStatus() map[HealthStatus]int {
 		}
 		return nil
 	})
-	return counts
+
+	s.healthCountsMu.Lock()
+	s.healthCounts = counts
+	s.healthCountsBuiltAt = time.Now()
+	s.healthCountsMu.Unlock()
+
+	out := make(map[HealthStatus]int, len(counts))
+	for k, v := range counts {
+		out[k] = v
+	}
+	return out
 }
 
 // EntryItemRepairFingerprint produces a deterministic hash of the file set

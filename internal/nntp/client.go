@@ -22,7 +22,6 @@ import (
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/retry"
 	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sourcegraph/conc/pool"
 	"golang.org/x/sys/unix"
 )
 
@@ -48,10 +47,14 @@ type Client struct {
 	// Speed test results storage
 	speedTestResults *xsync.Map[string, SpeedTestResult]
 
-	// repairBank gates repair-mode availability checks so they can't starve
-	// streaming. Sized at construction from cfg.Repair.NNTPConnectionPercent;
-	// nil when repair has no NNTP budget.
-	repairBank *RepairBank
+	// repairPool is the shared worker pool that processes BatchStat
+	// chunks. Sized at construction from cfg.Repair.NNTPConnectionPercent.
+	// Replaces the previous RepairBank counting semaphore + per-call
+	// conc.Pool design — that pattern produced N × bank.Capacity
+	// goroutines under N concurrent BatchStat calls because each call
+	// sized its own pool to the entire bank capacity. The shared pool
+	// caps total worker goroutines to exactly pool.Capacity().
+	repairPool *RepairPool
 
 	// TCP socket buffer sizes (bytes) applied to every new connection. 0 means
 	// "leave OS autotuning untouched". Sized from cfg.Usenet.Socket*Buffer.
@@ -76,6 +79,28 @@ type connectionEntry struct {
 	conn     *Connection
 	provider config.UsenetProvider
 	lastUsed time.Time
+}
+
+var connectionEntryPool = sync.Pool{
+	New: func() any {
+		return &connectionEntry{}
+	},
+}
+
+func acquireConnectionEntry(conn *Connection, provider config.UsenetProvider, lastUsed time.Time) *connectionEntry {
+	entry := connectionEntryPool.Get().(*connectionEntry)
+	entry.conn = conn
+	entry.provider = provider
+	entry.lastUsed = lastUsed
+	return entry
+}
+
+func releaseConnectionEntry(entry *connectionEntry) {
+	if entry == nil {
+		return
+	}
+	*entry = connectionEntry{}
+	connectionEntryPool.Put(entry)
 }
 
 // TimeoutConfig holds all NNTP timeout settings in one place.
@@ -168,6 +193,15 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		return providers[i].Priority < providers[j].Priority
 	})
 
+	// Pre-normalize backbones once. excludes() runs on every connection
+	// acquisition (potentially hundreds of times per second under load),
+	// and the previous code re-ran strings.ToLower + TrimSpace per call
+	// per provider, allocating a fresh string each time. Caching it here
+	// turns the hot path into pure map lookups.
+	for i := range providers {
+		providers[i].Backbone = normalizeBackbone(providers[i].Backbone)
+	}
+
 	pools := make(map[string]*ProviderPool)
 	for _, p := range providers {
 		pp := &ProviderPool{
@@ -188,7 +222,7 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		sockReadBuf:      parseSockBuf(cfg.Usenet.SocketReadBuffer),
 		sockWriteBuf:     parseSockBuf(cfg.Usenet.SocketWriteBuffer),
 	}
-	cm.repairBank = cm.newRepairBank(cfg.Repair.NNTPConnectionPercent)
+	cm.repairPool = cm.newRepairPool(cfg.Repair.NNTPConnectionPercent)
 
 	// Start background reaper
 	go cm.reaper()
@@ -222,11 +256,7 @@ func (c *Client) put(conn *Connection, provider config.UsenetProvider) {
 		return
 	}
 
-	entry := &connectionEntry{
-		conn:     conn,
-		provider: provider,
-		lastUsed: utils.Now(),
-	}
+	entry := acquireConnectionEntry(conn, provider, utils.Now())
 
 	pp.mu.Lock()
 	// Cap stack size (shouldn't happen with semaphore, but be safe)
@@ -303,9 +333,24 @@ func (c *Client) ExecuteWithFailover(ctx context.Context, fn func(conn *Connecti
 		// returnOrReleaseConn always releases the right semaphore slot.
 		var currentConn = conn
 		var currentProvider = connProvider
+		// Healthy streaming is the overwhelmingly common case. Avoid building
+		// retry configuration and invoking retry.Do unless the first execution
+		// actually fails. When it does fail, pendingErr lets the retry closure
+		// process that first error as attempt 1 so retry counts and failover
+		// behavior stay identical to the original path.
+		pendingErr := c.safeExecute(currentConn, fn)
+		if pendingErr == nil {
+			c.returnOrReleaseConn(currentConn, currentProvider)
+			return nil
+		}
 		err = retry.Do(
 			func() error {
-				execErr := c.safeExecute(currentConn, fn)
+				execErr := pendingErr
+				if execErr != nil {
+					pendingErr = nil
+				} else {
+					execErr = c.safeExecute(currentConn, fn)
+				}
 				if execErr == nil {
 					return nil
 				}
@@ -452,21 +497,38 @@ func (c *Client) safeExecute(conn *Connection, fn func(conn *Connection) error) 
 // getAnyAvailableConnection gets a connection from ANY provider that isn't excluded.
 // Phase 1: Non-blocking scan of all eligible providers (fast path)
 // Phase 2: If all busy, race goroutines to get first available slot
+//
+// Tiering: providers with Backup=true are NOT considered until every
+// non-backup ("primary") provider is excluded. A primary's pool being
+// merely busy is not enough — the caller waits for a primary slot to free
+// up rather than dipping into a backup. This matches the
+// unlimited-primary + block-backup-for-completion model and prevents
+// block providers from being billed for articles the primary could have
+// served given a moment's patience.
+//
+// Within a tier, providers are still consumed opportunistically across
+// hosts — so two unlimited primaries split load the way they do today.
 func (c *Client) getAnyAvailableConnection(ctx context.Context, exclusions providerExclusions) (*Connection, config.UsenetProvider, error) {
-	// Build list of eligible providers
-	var eligible []config.UsenetProvider
+	// Determine whether any primary is eligible first. Avoid building provider
+	// slices on the common path: when a pool has a free slot, the first scan
+	// returns immediately. A slice is only needed for the uncommon all-busy
+	// fallback that races across providers.
+	useBackups := true
 	for _, p := range c.providers {
-		if !exclusions.excludes(p) {
-			eligible = append(eligible, p)
+		if !p.Backup && !exclusions.excludes(p) {
+			useBackups = false
+			break
 		}
 	}
 
-	if len(eligible) == 0 {
-		return nil, config.UsenetProvider{}, errors.New("no eligible providers available")
-	}
-
 	// Phase 1: Non-blocking scan - try to get a free slot from any provider
-	for _, provider := range eligible {
+	// within the current tier.
+	eligibleCount := 0
+	for _, provider := range c.providers {
+		if provider.Backup != useBackups || exclusions.excludes(provider) {
+			continue
+		}
+		eligibleCount++
 		pp := c.pools[provider.Host]
 
 		select {
@@ -484,7 +546,19 @@ func (c *Client) getAnyAvailableConnection(ctx context.Context, exclusions provi
 		}
 	}
 
-	// Phase 2: All providers busy - race for first available
+	if eligibleCount == 0 {
+		return nil, config.UsenetProvider{}, errors.New("no eligible providers available")
+	}
+
+	// Phase 2: All providers in this tier busy - race for first available
+	// slot in the tier. When the primary tier is in use this is the wait
+	// that lets a backup remain idle rather than getting roped in.
+	eligible := make([]config.UsenetProvider, 0, eligibleCount)
+	for _, provider := range c.providers {
+		if provider.Backup == useBackups && !exclusions.excludes(provider) {
+			eligible = append(eligible, provider)
+		}
+	}
 	return c.raceForConnection(ctx, eligible)
 }
 
@@ -625,17 +699,23 @@ func (c *Client) getOrCreateFromPool(ctx context.Context, pp *ProviderPool, prov
 
 			now := utils.Now()
 			if isIdleExpired(entry.lastUsed, now) {
-				_ = entry.conn.Close()
+				conn := entry.conn
+				releaseConnectionEntry(entry)
+				_ = conn.Close()
 				continue
 			}
 
 			// Health check outside lock
 			if c.isHealthy(entry) {
-				pp.activeConns.Store(entry.conn, struct{}{}) // Register as active (checked-out)
-				return entry.conn, nil
+				conn := entry.conn
+				releaseConnectionEntry(entry)
+				pp.activeConns.Store(conn, struct{}{}) // Register as active (checked-out)
+				return conn, nil
 			}
 			// Unhealthy - close and try next pooled connection
-			_ = entry.conn.Close()
+			conn := entry.conn
+			releaseConnectionEntry(entry)
+			_ = conn.Close()
 			continue
 		}
 		pp.mu.Unlock()
@@ -827,6 +907,9 @@ func (c *Client) reapIdleConnections() {
 
 		// Remove expired connections from the front of the slice
 		if expiredCount > 0 {
+			for i := 0; i < expiredCount; i++ {
+				releaseConnectionEntry(pp.conns[i])
+			}
 			// Shift remaining items to front
 			remaining := len(pp.conns) - expiredCount
 			copy(pp.conns, pp.conns[expiredCount:])
@@ -961,14 +1044,21 @@ func (e *providerExclusions) excludeBackbone(backbone string) {
 }
 
 func (e providerExclusions) excludes(provider config.UsenetProvider) bool {
+	// Fast path: the overwhelming majority of acquisitions happen with
+	// no exclusions in flight (first attempt before any failover). Skip
+	// the map lookups and backbone work entirely.
+	if e.hosts == nil && e.backbones == nil {
+		return false
+	}
 	if _, ok := e.hosts[provider.Host]; ok {
 		return true
 	}
-	backbone := normalizeBackbone(provider.Backbone)
-	if backbone == "" {
+	// Backbone is pre-normalized at NewClient time, so no per-call
+	// strings.ToLower / TrimSpace allocation here.
+	if provider.Backbone == "" {
 		return false
 	}
-	_, ok := e.backbones[backbone]
+	_, ok := e.backbones[provider.Backbone]
 	return ok
 }
 
@@ -980,8 +1070,9 @@ func excludeForArticleNotFound(exclusions *providerExclusions, provider config.U
 	if exclusions == nil {
 		return
 	}
-	if backbone := normalizeBackbone(provider.Backbone); backbone != "" {
-		exclusions.excludeBackbone(backbone)
+	// Backbone is pre-normalized at NewClient time, so we read it raw.
+	if provider.Backbone != "" {
+		exclusions.excludeBackbone(provider.Backbone)
 		return
 	}
 	exclusions.excludeHost(provider.Host)
@@ -1008,30 +1099,30 @@ func (c *Client) BatchStat(ctx context.Context, messageIDs []string) (*BatchStat
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Batch size per worker. Keeps cancellation latency and connection-drop
-	// blast radius bounded while still amortizing worker scheduling.
-	const statBatchSize = 50
-	// Worker count when no bank is configured (no repair budget). Keeps
-	// non-repair callers cheap.
-	const defaultWorkers = 2
+	// Per-chunk batch size is adaptive: we want enough chunks to keep
+	// every pool worker busy on this BatchStat call, but not so few IDs
+	// per chunk that we pay the per-chunk overhead (provider-acquire
+	// round-trips, per-call slice allocations in batchStatAcrossProviders,
+	// callback dispatch) on near-nothing.
+	//
+	// Ceiling: keeps cancellation latency and connection-drop blast
+	// radius bounded for a single chunk's worth of STATs.
+	// Floor: smaller than this and per-chunk overhead starts dominating
+	// the actual STAT round-trip.
+	const (
+		statBatchSize    = 50
+		statBatchMinSize = 10
+	)
+	batchSize := pickStatBatchSize(len(messageIDs), c.repairPool.Capacity(), statBatchSize, statBatchMinSize)
 
 	type chunk struct {
 		startIdx   int
 		messageIDs []string
 	}
-	chunks := make([]chunk, 0, (len(messageIDs)+statBatchSize-1)/statBatchSize)
-	for i := 0; i < len(messageIDs); i += statBatchSize {
-		end := min(i+statBatchSize, len(messageIDs))
+	chunks := make([]chunk, 0, (len(messageIDs)+batchSize-1)/batchSize)
+	for i := 0; i < len(messageIDs); i += batchSize {
+		end := min(i+batchSize, len(messageIDs))
 		chunks = append(chunks, chunk{startIdx: i, messageIDs: messageIDs[i:end]})
-	}
-
-	workers := defaultWorkers
-	if c.repairBank != nil {
-		workers = c.repairBank.Capacity()
-	}
-	workers = min(workers, len(chunks))
-	if workers < 1 {
-		workers = 1
 	}
 
 	allResults := make([]StatResult, len(messageIDs))
@@ -1039,16 +1130,12 @@ func (c *Client) BatchStat(ctx context.Context, messageIDs []string) (*BatchStat
 		allResults[i].MessageID = msgID
 	}
 
-	// One task per chunk, at most `workers` running concurrently. Tasks write
-	// disjoint index ranges of allResults, so no results channel or per-write
-	// locking is needed — the only shared state is the one-shot early-bailout
-	// cancel.
-	//
-	// The bank token is acquired per chunk-task rather than held for a
-	// worker's whole lifetime: with WithMaxGoroutines(workers) and workers ==
-	// bank.Capacity() the max concurrent connection cap is unchanged, but the
-	// token is released between chunks so concurrent BatchStat/repair callers
-	// interleave fairly instead of one caller hogging the bank until it's done.
+	// Each chunk submits to the shared RepairPool. Concurrency is bounded
+	// by the pool's worker count, NOT by a per-call pool — so M concurrent
+	// BatchStat calls share the same pool.Capacity() workers in FIFO
+	// arrival order instead of each spinning up its own bank-sized pool.
+	// Tasks write disjoint index ranges of allResults; the only shared
+	// mutable state is the early-bailout cancel.
 	markChunkErr := func(startIdx, n int, e error) {
 		for i := startIdx; i < startIdx+n; i++ {
 			allResults[i].Available = false
@@ -1056,39 +1143,27 @@ func (c *Client) BatchStat(ctx context.Context, messageIDs []string) (*BatchStat
 		}
 	}
 	var bailOnce sync.Once
-	p := pool.New().WithMaxGoroutines(workers)
+	var wg sync.WaitGroup
 	for _, ch := range chunks {
 		ch := ch
-		p.Go(func() {
-			release, err := c.repairBank.acquire(ctx) // nil-safe; blocks on the bank
-			if err != nil {
-				markChunkErr(ch.startIdx, len(ch.messageIDs), err)
-				return
-			}
-			defer release()
-
-			if err := ctx.Err(); err != nil {
-				// Early-bailout already fired (or caller cancelled): skip STATs.
-				markChunkErr(ch.startIdx, len(ch.messageIDs), err)
-				return
-			}
-
-			results, connErr := c.batchStatAcrossProviders(ctx, ch.messageIDs)
-			if connErr != nil {
+		wg.Add(1)
+		err := c.repairPool.Submit(ctx, ch.messageIDs, func(results []StatResult, taskErr error) {
+			defer wg.Done()
+			if taskErr != nil {
 				// Mirrors the previous behaviour: a chunk-level connection
 				// error fails the whole chunk (partial results discarded).
-				markChunkErr(ch.startIdx, len(ch.messageIDs), connErr)
+				markChunkErr(ch.startIdx, len(ch.messageIDs), taskErr)
 				return
 			}
 			for i := range results {
 				allResults[ch.startIdx+i] = results[i]
 			}
-
 			// Bail out the rest of the sample as soon as one segment is
 			// definitively missing — not-found on every provider, so the
 			// terminal classification carries an ArticleNotFound error.
-			// Per-segment provider failover has already completed inside this
-			// chunk before we get here, so this never short-circuits failover.
+			// Per-segment provider failover has already completed inside
+			// this chunk before we get here, so this never short-circuits
+			// failover.
 			for _, r := range results {
 				if !r.Available && IsArticleNotFoundError(r.Error) {
 					bailOnce.Do(cancel)
@@ -1096,8 +1171,15 @@ func (c *Client) BatchStat(ctx context.Context, messageIDs []string) (*BatchStat
 				}
 			}
 		})
+		if err != nil {
+			// Submit refused the task — caller's ctx expired before a worker
+			// took it, or the pool is shutting down. Synthesize a chunk-wide
+			// error so the result vector still has the right shape.
+			markChunkErr(ch.startIdx, len(ch.messageIDs), err)
+			wg.Done()
+		}
 	}
-	p.Wait()
+	wg.Wait()
 
 	result := &BatchStatResult{
 		Results:    allResults,
@@ -1283,6 +1365,7 @@ func (c *Client) Close() error {
 		// Close idle connections
 		for _, entry := range pp.conns {
 			_ = entry.conn.Close()
+			releaseConnectionEntry(entry)
 			totalClosed++
 		}
 		pp.conns = nil
@@ -1297,6 +1380,11 @@ func (c *Client) Close() error {
 			return true
 		})
 	}
+
+	// Stop the BatchStat worker pool last — its workers may be holding
+	// connections we just force-closed, which makes them return with
+	// errors and exit cleanly.
+	c.repairPool.Stop()
 
 	c.logger.Info().
 		Int("total_closed", totalClosed).

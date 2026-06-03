@@ -107,6 +107,7 @@ Array of Debrid services:
     "read_ahead": "16MB",
     "processing_timeout": "10m",
     "availability_sample_percent": 10,
+    "import_availability_sample_percent": 1,
     "max_concurrent_nzb": 2,
     "disk_buffer_path": "/cache/usenet/streams"
   }
@@ -121,7 +122,8 @@ Array of Debrid services:
 | `max_connections`             | int    | Max connections per file/stream | `15`                         |
 | `read_ahead`                  | string | Prefetch buffer size            | `16MB`                       |
 | `processing_timeout`          | string | Max time for NZB processing     | `10m`                        |
-| `availability_sample_percent` | int    | % of segments to check (1-100)  | `10`                         |
+| `availability_sample_percent` | int    | % of segments to check during repairs (1-100) | `10`             |
+| `import_availability_sample_percent` | int | % of segments to check when adding an NZB (1-100) | `1`         |
 | `max_concurrent_nzb`          | int    | Parallel NZB processing limit   | `2`                          |
 | `disk_buffer_path`            | string | Disk buffer location            | `{main_path}/usenet/streams` |
 

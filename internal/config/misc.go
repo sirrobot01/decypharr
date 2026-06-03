@@ -104,20 +104,31 @@ func getDefaultExtensions() []string {
 func ParseSize(sizeStr string) (int64, error) {
 	sizeStr = strings.ToUpper(strings.TrimSpace(sizeStr))
 
-	// Absolute size-based cache
+	// Absolute size-based cache. Order matters: two-letter units must be
+	// checked before the bare "B" suffix. ParseFloat below means decimal
+	// values (e.g. "2.2TB", "1.5GB") are supported for every unit.
 	multiplier := 1.0
-	if strings.HasSuffix(sizeStr, "GB") {
+	switch {
+	case strings.HasSuffix(sizeStr, "PB"):
+		multiplier = 1024 * 1024 * 1024 * 1024 * 1024
+		sizeStr = strings.TrimSuffix(sizeStr, "PB")
+	case strings.HasSuffix(sizeStr, "TB"):
+		multiplier = 1024 * 1024 * 1024 * 1024
+		sizeStr = strings.TrimSuffix(sizeStr, "TB")
+	case strings.HasSuffix(sizeStr, "GB"):
 		multiplier = 1024 * 1024 * 1024
 		sizeStr = strings.TrimSuffix(sizeStr, "GB")
-	} else if strings.HasSuffix(sizeStr, "MB") {
+	case strings.HasSuffix(sizeStr, "MB"):
 		multiplier = 1024 * 1024
 		sizeStr = strings.TrimSuffix(sizeStr, "MB")
-	} else if strings.HasSuffix(sizeStr, "KB") {
+	case strings.HasSuffix(sizeStr, "KB"):
 		multiplier = 1024
 		sizeStr = strings.TrimSuffix(sizeStr, "KB")
+	case strings.HasSuffix(sizeStr, "B"):
+		sizeStr = strings.TrimSuffix(sizeStr, "B")
 	}
 
-	size, err := strconv.ParseFloat(sizeStr, 64)
+	size, err := strconv.ParseFloat(strings.TrimSpace(sizeStr), 64)
 	if err != nil {
 		return 0, err
 	}

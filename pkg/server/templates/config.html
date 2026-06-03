@@ -420,14 +420,25 @@
                                             </div>
                                             <div>
                                                 <label class="label" for="usenet.availability_sample_percent">
-                                                    <span class="font-medium">Availability Sample %</span>
+                                                    <span class="font-medium">Repair Availability Sample %</span>
                                                 </label>
                                                 <input type="number" class="input w-full"
                                                        name="usenet.availability_sample_percent"
                                                        id="usenet.availability_sample_percent" min="1" max="100"
                                                        placeholder="10">
-                                                <span class="text-sm opacity-70">Percentage of segments to check for
-                                                    availability (1-100, default: 10)</span>
+                                                <span class="text-sm opacity-70">Percentage of segments to check during
+                                                    repairs (1-100, default: 10)</span>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="usenet.import_availability_sample_percent">
+                                                    <span class="font-medium">NZB Import Availability Sample %</span>
+                                                </label>
+                                                <input type="number" class="input w-full"
+                                                       name="usenet.import_availability_sample_percent"
+                                                       id="usenet.import_availability_sample_percent" min="1" max="100"
+                                                       placeholder="1">
+                                                <span class="text-sm opacity-70">Percentage of segments to check when
+                                                    adding an NZB (1-100, default: 1)</span>
                                             </div>
                                             <div>
                                                 <label class="label" for="usenet.max_concurrent_nzb">

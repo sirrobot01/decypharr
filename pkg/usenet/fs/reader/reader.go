@@ -213,6 +213,13 @@ func (sr *StreamingReader) readAtPlain(ctx context.Context, p []byte, off int64)
 
 	sr.stats.BytesRead.Add(int64(n))
 
+	// Tell the cache what we actually delivered so its sliding-window
+	// sweeper can advance the back-window cutoff. Skip on zero-byte reads
+	// (probe, short EOF) to avoid moving the high-water mark spuriously.
+	if n > 0 {
+		sr.cache.MarkConsumed(off, int64(n))
+	}
+
 	if eofAfter && int64(n) == readLen {
 		return n, io.EOF
 	}

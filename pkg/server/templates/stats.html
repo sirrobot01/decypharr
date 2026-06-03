@@ -909,7 +909,7 @@
             document.getElementById('uptime').textContent = formatUptime(sys.uptime_seconds);
             document.getElementById('start-time').textContent = `Started: ${sys.start_time || '-'}`;
             document.getElementById('memory-used').textContent = sys.memory_used || '-';
-            document.getElementById('heap-alloc').textContent = `Heap: ${sys.heap_alloc_mb || '-'}`;
+            document.getElementById('heap-alloc').textContent = `Heap: ${sys.heap_alloc_mb || '-'} · Released: ${sys.heap_released_mb || '-'}`;
             document.getElementById('goroutines').textContent = formatNumber(sys.goroutines || 0);
             document.getElementById('gc-cycles').textContent = `GC: ${formatNumber(sys.gc_cycles || 0)} cycles`;
             document.getElementById('num-cpu').textContent = sys.num_cpu || '-';
