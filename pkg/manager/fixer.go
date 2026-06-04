@@ -106,6 +106,21 @@ func (f *Fixer) FixTorrent(ctx context.Context, entry *storage.Entry, skipCurren
 
 	var lastErr error
 	totalAttempts := 0
+	refreshNeeded := false
+	skipPersist := false
+	persistState := func() {
+		if skipPersist {
+			return
+		}
+		callback := func(t *storage.Entry) {
+			f.manager.RefreshEntries(true)
+		}
+		if !refreshNeeded {
+			callback = nil
+		}
+		_ = f.manager.AddOrUpdate(entry, callback)
+	}
+	defer persistState()
 
 	for _, debridName := range attemptOrder {
 		// Check if entry has been marked as failed to re-insert
@@ -152,6 +167,7 @@ func (f *Fixer) FixTorrent(ctx context.Context, entry *storage.Entry, skipCurren
 				Error:         nil,
 				AttemptsCount: totalAttempts,
 			}
+			refreshNeeded = true
 			req.result <- result
 			return result, nil
 		}
@@ -173,9 +189,14 @@ func (f *Fixer) FixTorrent(ctx context.Context, entry *storage.Entry, skipCurren
 	// Mark entry as bad
 	entry.Bad = true
 	entry.UpdatedAt = time.Now()
-	_ = f.manager.AddOrUpdate(entry, func(t *storage.Entry) {
-		f.manager.RefreshEntries(true)
-	})
+	refreshNeeded = true
+
+	if err := f.manager.DeleteEntry(entry.InfoHash, true); err != nil {
+		f.manager.logger.Warn().Err(err).Str("infohash", entry.InfoHash).Msg("Failed to auto-prune terminal bad entry")
+	} else {
+		skipPersist = true
+		f.manager.logger.Info().Str("infohash", entry.InfoHash).Msg("Auto-pruned terminal bad entry")
+	}
 
 	result := &FixResult{
 		Success:       false,
@@ -195,11 +216,6 @@ func (f *Fixer) MoveTorrent(entry *storage.Entry, debridName string, reinsert bo
 	if !entry.CanBeMoved() {
 		return false, fmt.Errorf("entry %s cannot be moved", entry.Name)
 	}
-
-	defer func() {
-		// Save to storage
-		_ = f.manager.AddOrUpdate(entry, nil) // No need to refresh mounts
-	}()
 
 	client := f.manager.ProviderClient(debridName)
 	if client == nil {
