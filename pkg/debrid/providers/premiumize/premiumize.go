@@ -629,6 +629,9 @@ func (pm *Premiumize) syncAccount(acc *account.Account) error {
 
 func (pm *Premiumize) DeleteLink(downloadLink types.DownloadLink) error {
 	return pm.accountsManager.DeleteDownloadLink(downloadLink, func(account *account.Account, dl types.DownloadLink) error {
+		// Premiumize exposes item and transfer deletion, but not a safe
+		// generated-link deletion endpoint. Deleting dl.Id here would delete
+		// the user's cloud file, not just invalidate this cached CDN link.
 		return nil
 	})
 }
