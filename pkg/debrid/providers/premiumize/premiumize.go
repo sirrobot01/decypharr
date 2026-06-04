@@ -2,6 +2,7 @@ package premiumize
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -172,7 +173,7 @@ func (pm *Premiumize) addMagnet(t *types.Torrent) (*types.Torrent, error) {
 func (pm *Premiumize) addTorrent(t *types.Torrent) (*types.Torrent, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	part, err := writer.CreateFormFile("src", cmpString(t.Filename, cmpString(t.Magnet.Name, "upload.torrent")))
+	part, err := writer.CreateFormFile("src", cmp.Or(t.Filename, t.Magnet.Name, "upload.torrent"))
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +207,7 @@ func (pm *Premiumize) applySubmittedTorrent(t *types.Torrent, data transferCreat
 		t.Filename = data.Name
 	}
 	if t.OriginalFilename == "" {
-		t.OriginalFilename = cmpString(t.Magnet.Name, t.Name)
+		t.OriginalFilename = cmp.Or(t.Magnet.Name, t.Name)
 	}
 }
 
@@ -264,7 +265,7 @@ func (pm *Premiumize) UpdateTorrent(t *types.Torrent) error {
 			t.Files = updated.Files
 			t.Links = updated.Links
 			t.Debrid = updated.Debrid
-			t.InfoHash = cmpString(updated.InfoHash, t.InfoHash)
+			t.InfoHash = cmp.Or(updated.InfoHash, t.InfoHash)
 			return nil
 		}
 	}
@@ -364,14 +365,14 @@ func (pm *Premiumize) transferToTorrent(tr premiumizeTransfer, fallbackInfoHash 
 	for _, file := range files {
 		size += file.Size
 	}
-	name := cmpString(tr.Name, tr.ID)
+	name := cmp.Or(tr.Name, tr.ID)
 	added := time.Unix(tr.Created.Unix, 0)
 	if tr.Created.Unix == 0 {
 		added = time.Time{}
 	}
 	return &types.Torrent{
 		Id:               tr.ID,
-		InfoHash:         cmpString(utils.ExtractInfoHash(tr.Src), fallbackInfoHash),
+		InfoHash:         cmp.Or(utils.ExtractInfoHash(tr.Src), fallbackInfoHash),
 		Name:             name,
 		Filename:         name,
 		OriginalFilename: name,
@@ -713,13 +714,4 @@ func normalizeProgress(progress float64) float64 {
 		return progress * 100
 	}
 	return progress
-}
-
-func cmpString(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }
