@@ -605,7 +605,8 @@ func (pm *Premiumize) getClientProfile(client *request.Client) (*types.Profile, 
 }
 
 func (pm *Premiumize) GetAvailableSlots() (int, error) {
-	return 1_000_000 - pm.config.MinimumFreeSlot, nil
+	// Premiumize does not provide active slot info without listing transfers.
+	return config.DefaultAvailableSlots, nil
 }
 
 func (pm *Premiumize) AccountManager() *account.Manager {
