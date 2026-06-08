@@ -67,6 +67,15 @@ func (c *Collector) Snapshot() *Snapshot {
 	return c.snapshot
 }
 
+// Refresh rebuilds and stores a fresh snapshot immediately.
+func (c *Collector) Refresh() *Snapshot {
+	snap := c.collect()
+	c.mu.Lock()
+	c.snapshot = snap
+	c.mu.Unlock()
+	return snap
+}
+
 // Handler returns an http.HandlerFunc that serves the cached snapshot as JSON.
 func (c *Collector) Handler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
