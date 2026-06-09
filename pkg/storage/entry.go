@@ -101,8 +101,15 @@ func (s *Storage) ForEach(fn func(*Entry) error) error {
 func (s *Storage) ForEachBatch(batchSize int, fn func([]*Entry) error) error {
 	batch := make([]*Entry, 0, batchSize)
 
+	// Reuse a single proto message across the scan. proto.Reset zeroes it
+	// between records, so Unmarshal reuses the message's backing storage
+	// instead of allocating a fresh EntryProto (and its nested message/slice
+	// fields) per entry. Safe because ProtoToEntry copies values out into a
+	// fresh Entry (the one aliased field, Tags, is replaced by Reset->nil
+	// before the next Unmarshal, leaving the prior entry's slice untouched).
+	var pb EntryProto
 	err := s.entries.ForEach(func(key string, value []byte) error {
-		var pb EntryProto
+		proto.Reset(&pb)
 		if err := proto.Unmarshal(value, &pb); err != nil {
 			return nil
 		}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -63,12 +64,11 @@ type QBitTorrent struct {
 	Categories          []string `json:"categories,omitempty"`
 	RefreshInterval     int      `json:"refresh_interval,omitempty"`
 	SkipPreCache        bool     `json:"skip_pre_cache,omitempty"`
-	MaxDownloads        int      `json:"max_downloads,omitempty"`
 	AlwaysRmTrackerUrls bool     `json:"always_rm_tracker_urls,omitempty"`
 }
 
 func (q QBitTorrent) IsZero() bool {
-	return q.DownloadFolder == "" && len(q.Categories) == 0 && q.RefreshInterval == 0 && !q.SkipPreCache && q.MaxDownloads == 0 && !q.AlwaysRmTrackerUrls
+	return q.DownloadFolder == "" && len(q.Categories) == 0 && q.RefreshInterval == 0 && !q.SkipPreCache && !q.AlwaysRmTrackerUrls
 }
 
 type Arr struct {
@@ -118,13 +118,12 @@ type RepairConfig struct {
 	Arrs                  []string     `json:"arrs,omitempty"`
 	AutoRepair            bool         `json:"auto_repair,omitempty"`
 	SkipNZBRepair         bool         `json:"skip_nzb_repair,omitempty"`
-	NotifyOnComplete      bool         `json:"notify_on_complete,omitempty"`
 }
 
 func (r RepairConfig) IsZero() bool {
 	return !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
 		r.NNTPConnectionPercent == 0 && r.Strategy == "" && r.RecheckInterval == "" && len(r.Arrs) == 0 &&
-		!r.AutoRepair && !r.SkipNZBRepair && !r.NotifyOnComplete
+		!r.AutoRepair && !r.SkipNZBRepair
 }
 
 type Config struct {
@@ -166,7 +165,7 @@ type Config struct {
 	// Manager settings
 	DownloadFolder        string                   `json:"download_folder,omitempty"`
 	RefreshInterval       string                   `json:"refresh_interval,omitempty"`
-	MaxDownloads          int                      `json:"max_downloads,omitempty"`
+	MaxActiveDownloads    int                      `json:"max_active_downloads,omitempty"`
 	SkipPreCache          bool                     `json:"skip_pre_cache,omitempty"`
 	SkipMultiSeason       bool                     `json:"skip_multi_season,omitempty"`
 	AlwaysRmTrackerUrls   bool                     `json:"always_rm_tracker_urls,omitempty"`
@@ -351,10 +350,6 @@ func (c *Config) migrateQBitTorrentToManager() {
 		c.SkipPreCache = c.QBitTorrent.SkipPreCache
 	}
 
-	if c.MaxDownloads == 0 && c.QBitTorrent.MaxDownloads > 0 {
-		c.MaxDownloads = c.QBitTorrent.MaxDownloads
-	}
-
 	if !c.AlwaysRmTrackerUrls && c.QBitTorrent.AlwaysRmTrackerUrls {
 		c.AlwaysRmTrackerUrls = c.QBitTorrent.AlwaysRmTrackerUrls
 	}
@@ -403,6 +398,9 @@ func (c *Config) setDefaults() {
 
 	if c.DefaultDownloadAction == "" {
 		c.DefaultDownloadAction = DownloadActionSymlink
+	}
+	if c.MaxActiveDownloads <= 0 {
+		c.MaxActiveDownloads = 5
 	}
 
 	for i, debrid := range c.Debrids {
@@ -594,6 +592,92 @@ func (c *Config) Save() error {
 func Reset() {
 	once = sync.Once{}
 	instance = nil
+}
+
+// clearHotFields zeroes every field that can be applied at runtime without a
+// full service restart. It is used by RequiresRestart so that only the
+// remaining ("cold") fields participate in the change comparison.
+//
+// IMPORTANT: any new Config field defaults to "cold" (restart-required) unless
+// it is added here. That is deliberate — it is always safe to fall back to a
+// restart, but never safe to skip one for a field that needs it.
+func clearHotFields(c *Config) {
+	// Auth lives in auth.json and is preserved separately by the caller.
+	c.Auth = nil
+
+	// AppURL is only read live (e.g. STRM URL generation in the downloader);
+	// it is never cached in a service struct, so it applies without a restart.
+	c.AppURL = ""
+
+	// Auth toggles are evaluated live per-request by every auth middleware
+	// (main app, qbit, sabnzbd, and webdav), so they apply without a restart.
+	c.UseAuth = false
+	c.EnableWebdavAuth = false
+
+	// Manager / processing settings — read live via config.Get() on the
+	// relevant code paths, or applied lazily on the next natural restart.
+	c.Arrs = nil
+	c.AllowedExt = nil
+	c.AllowSamples = false
+	c.MinFileSize = ""
+	c.MaxFileSize = ""
+	c.RemoveStalledAfter = ""
+	c.NZBUserAgent = ""
+	c.Notifications = Notifications{}
+	c.DiscordWebhook = ""
+	c.CallbackURL = ""
+	c.DownloadFolder = ""
+	c.RefreshInterval = ""
+	c.MaxActiveDownloads = 0
+	c.SkipPreCache = false
+	c.SkipMultiSeason = false
+	c.AlwaysRmTrackerUrls = false
+	c.Categories = nil
+	c.FolderNaming = ""
+	c.CustomFolders = nil
+	c.DefaultDownloadAction = ""
+	c.RefreshDirs = ""
+	c.Retries = 0
+	c.SkipAutoMove = false
+	c.Repair = RepairConfig{}
+
+	// Deprecated, migrated into Manager fields above.
+	c.QBitTorrent = QBitTorrent{}
+
+	// Usenet is mostly cold (providers, connection pool sizing, socket buffers,
+	// and the streaming buffer pool are all established at startup). But the
+	// availability sampling percentages are read live on each repair/import
+	// check (see Usenet.CheckFile / checkNZBAvailability), so they apply without
+	// a restart. Everything else in Usenet stays restart-required.
+	c.Usenet.AvailabilitySamplePercent = 0
+	c.Usenet.ImportAvailabilitySamplePercent = 0
+}
+
+// RequiresRestart reports whether applying n on top of c needs a full service
+// restart (re-binding the HTTP listener, recreating debrid/usenet clients, or
+// re-mounting the filesystem). It returns false when only runtime-applicable
+// ("hot") fields changed, in which case the caller can use ApplyRuntime to
+// update the live config in place without tearing anything down.
+//
+// Both configs are compared after their defaults have been applied (see
+// setDefaults / Save), so callers should persist n before calling this.
+func (c *Config) RequiresRestart(n *Config) bool {
+	a, b := *c, *n
+	clearHotFields(&a)
+	clearHotFields(&b)
+	return !reflect.DeepEqual(a, b)
+}
+
+// ApplyRuntime copies n into the live config in place, preserving the in-memory
+// Auth pointer. Because every holder of the *Config singleton shares this
+// struct, the updated values become visible everywhere without a restart.
+//
+// Only call this when RequiresRestart(n) is false: the cold fields are then
+// identical between c and n, so this effectively updates just the hot fields.
+func (c *Config) ApplyRuntime(n *Config) {
+	auth := c.Auth
+	*c = *n
+	c.Auth = auth
 }
 
 func (c *Config) createConfig() error {

@@ -17,12 +17,25 @@ type FuseConfig struct {
 	CacheDiskSize        int64 // in bytes
 	CacheCleanupInterval time.Duration
 
+	// BufferMemory is the RAM budget (bytes) for the DFS streaming-buffer pool,
+	// shared across all open files. 0 disables the cap.
+	BufferMemory int64
+
 	CacheExpiry time.Duration
 
 	// Performance settings
 	ChunkSize     int64
 	ReadAheadSize int64
 	DaemonTimeout time.Duration
+
+	// DropBehindMargin, when > 0, makes the read path release the disk file's
+	// page cache for data more than this many bytes behind the current read
+	// offset (keeping the trailing margin resident so readahead/short
+	// seek-backs are unaffected, and keeping the bytes on disk so a longer
+	// seek-back re-reads locally rather than re-downloading). 0 disables it —
+	// the default, since the page cache it trims is reclaimable and only worth
+	// dropping under a tight memory cap.
+	DropBehindMargin int64
 
 	Retries int
 
@@ -59,6 +72,8 @@ func ParseFuseConfig() *FuseConfig {
 
 	fuseConfig.CacheDir = cfg.CacheDir
 	fuseConfig.MountPath = mainCfg.Mount.MountPath
+	fuseConfig.BufferMemory = cfg.BufferMemoryBytes()
+	fuseConfig.BufferMemory = cfg.BufferMemoryBytes()
 
 	if cfg.DaemonTimeout != "" {
 		timeout, err := utils.ParseDuration(cfg.DaemonTimeout)
@@ -102,6 +117,12 @@ func ParseFuseConfig() *FuseConfig {
 		size, err := config.ParseSize(cfg.ReadAheadSize)
 		if err == nil {
 			fuseConfig.ReadAheadSize = size
+		}
+	}
+	if cfg.DropBehindMargin != "" {
+		size, err := config.ParseSize(cfg.DropBehindMargin)
+		if err == nil {
+			fuseConfig.DropBehindMargin = size
 		}
 	}
 	// Otherwise keep the default (4) from DefaultFuseConfig()

@@ -107,9 +107,13 @@ const (
 	// the rest.
 	segmentSweepBatch = 128
 
-	// bufferMemorySize is the RAM budget for the underlying buffer. Sized
-	// for steady-state streaming working set: forward prefetch + recent
-	// reads. 64 MB easily covers ~85 segments hot in RAM.
+	// bufferMemorySize is the per-stream RAM ceiling for the underlying buffer:
+	// forward prefetch + recent reads. 32 MB covers ~40 segments hot in RAM —
+	// enough headroom that a bursty download or a seek-back within the window
+	// doesn't stall playback or force a re-download. Aggregate RAM across many
+	// concurrent streams is bounded separately by the global buffer budget
+	// (buffer.SetGlobalMemoryBudget), so this can stay generous without the
+	// per-stream-size x concurrency blowup that a small ceiling was guarding.
 	bufferMemorySize = 32 << 20
 )
 
@@ -154,10 +158,23 @@ func NewSegmentCache(
 		}
 	}
 
-	buf, err := buffer.New(buffer.Config{
+	// sc is referenced by the buffer's OnEvict closure; assigned just below
+	// before any read/write can trigger a pool-driven punch.
+	var sc *SegmentCache
+
+	buf, err := usenetBufferPool().NewBuffer(buffer.Config{
 		MemorySize: bufferMemorySize,
 		DiskPath:   filepath.Join(diskPath, "segments.bin"),
 		TotalSize:  totalSize,
+		// Only fires if the usenet pool is given a disk limit (off by default —
+		// usenet bounds disk via its own sliding-window sweep). If a pool-driven
+		// punch ever does happen, mark the covered segments Empty so they
+		// re-fetch instead of pointing at a hole.
+		OnEvict: func(off, length int64) {
+			if sc != nil {
+				sc.onBufferEvict(off, length)
+			}
+		},
 	})
 	if err != nil {
 		cancel()
@@ -165,7 +182,7 @@ func NewSegmentCache(
 		return nil, fmt.Errorf("create buffer: %w", err)
 	}
 
-	sc := &SegmentCache{
+	sc = &SegmentCache{
 		segments:    segments,
 		segCount:    segCount,
 		segOffsets:  offsets,
@@ -416,7 +433,7 @@ func (w *bufferStreamWriter) Write(p []byte) (int, error) {
 	consumed := 0
 
 	if w.skipped < w.dataStart {
-		skip := min64(w.dataStart-w.skipped, int64(len(p)))
+		skip := min(w.dataStart-w.skipped, int64(len(p)))
 		w.skipped += skip
 		consumed += int(skip)
 		p = p[skip:]
@@ -714,7 +731,7 @@ func (sc *SegmentCache) MarkConsumed(off, length int64) {
 			// stricter — anything we've explicitly consumed past is fair
 			// game for promotion to evict.
 			if sc.buf != nil {
-				sc.buf.SetEvictionMinOff(end)
+				sc.buf.SetReadHead(end)
 			}
 			return
 		}
@@ -836,6 +853,37 @@ func (sc *SegmentCache) evictBatch(indices []int) {
 	}
 }
 
+// onBufferEvict is invoked by the buffer pool after it punches a hole behind
+// the read head (only when the usenet pool is configured with a disk limit —
+// off by default). It marks every segment fully inside the reclaimed range
+// Empty so a later read re-fetches it rather than reading a hole. Segments that
+// only partially overlap are left alone; the pool only punches present ranges,
+// so a partial overlap means the segment straddles the back-window boundary and
+// should be kept.
+func (sc *SegmentCache) onBufferEvict(off, length int64) {
+	end := off + length
+	startIdx, endIdx := sc.SegmentsForRange(off, length)
+	for idx := startIdx; idx <= endIdx && idx < sc.segCount; idx++ {
+		segStart := sc.segOffsets[idx]
+		segEnd := sc.segOffsets[idx+1]
+		if segStart < off || segEnd > end {
+			continue // not fully contained
+		}
+		if sc.pinCounts[idx].Load() > 0 {
+			continue
+		}
+		if !sc.states[idx].CompareAndSwap(uint32(StateOnDisk), uint32(StateEmpty)) {
+			continue
+		}
+		size := sc.segLengths[idx].Load()
+		if size <= 0 {
+			size = segEnd - segStart
+		}
+		sc.curDisk.Add(-size)
+		sc.stats.Evictions.Add(1)
+	}
+}
+
 // SegmentsForRange returns the segment indices covering [offset, offset+length).
 func (sc *SegmentCache) SegmentsForRange(offset, length int64) (int, int) {
 	if sc.segCount == 0 {
@@ -912,11 +960,4 @@ func (sc *SegmentCache) Close() error {
 		_ = os.RemoveAll(sc.diskPath)
 	}
 	return nil
-}
-
-func min64(a, b int64) int64 {
-	if a < b {
-		return a
-	}
-	return b
 }

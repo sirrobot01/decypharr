@@ -68,6 +68,7 @@ type StorageStats struct {
 
 type QueueStats struct {
 	Pending int `json:"pending"`
+	Active  int `json:"active"`
 }
 
 type ArrStats struct {

@@ -58,10 +58,10 @@ func (h *Handler) Routes() chi.Router {
 	r.Use(h.readinessMiddleware)
 	r.Use(h.commonMiddleware)
 	r.Use(middleware.AllowContentEncoding("gzip"))
-	cfg := config.Get()
-	if cfg.UseAuth && cfg.EnableWebdavAuth {
-		r.Use(h.authMiddleware)
-	}
+	// Always install the auth middleware; whether it actually enforces auth is
+	// decided live per-request from config, so toggling UseAuth/EnableWebdavAuth
+	// takes effect without rebuilding the router (no restart).
+	r.Use(h.authMiddleware)
 
 	r.HandleFunc("/", h.handleRoot)
 	r.HandleFunc("/{group}", h.handleGroup)
@@ -147,6 +147,13 @@ func (h *Handler) commonMiddleware(next http.Handler) http.Handler {
 
 func (h *Handler) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Read the auth toggles live so changes apply without a restart.
+		cfg := config.Get()
+		if !cfg.UseAuth || !cfg.EnableWebdavAuth {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		username, password, ok := r.BasicAuth()
 		if !ok || !config.VerifyAuth(username, password) {
 			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)

@@ -1,6 +1,8 @@
 package qbit
 
 import (
+	"github.com/sirrobot01/decypharr/internal/config"
+	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
@@ -207,6 +209,7 @@ type TorrentProperties struct {
 }
 
 func getAppPreferences() *AppPreferences {
+	maxActiveDownloads := config.Get().MaxActiveDownloads
 	preferences := &AppPreferences{
 		AddTrackers:                        "",
 		AddTrackersEnabled:                 false,
@@ -273,8 +276,8 @@ func getAppPreferences() *AppPreferences {
 		MailNotificationSmtp:               "smtp.changeme.com",
 		MailNotificationSslEnabled:         false,
 		MailNotificationUsername:           "",
-		MaxActiveDownloads:                 3,
-		MaxActiveTorrents:                  5,
+		MaxActiveDownloads:                 maxActiveDownloads,
+		MaxActiveTorrents:                  maxActiveDownloads,
 		MaxActiveUploads:                   3,
 		MaxConnec:                          500,
 		MaxConnecPerTorrent:                100,
@@ -427,6 +430,9 @@ func convertToQBitTorrentTorrent(t *storage.Entry) Torrent {
 		Ratio:      1,
 		RatioLimit: 1,
 		Tracker:    "udp://tracker.opentrackr.org:1337",
+	}
+	if t.Status == debridTypes.TorrentStatusQueued {
+		qbitTorrent.State = storage.TorrentState("queuedDL")
 	}
 
 	return qbitTorrent

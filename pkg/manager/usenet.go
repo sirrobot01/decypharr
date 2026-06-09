@@ -13,10 +13,16 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/usenet/parser"
 )
 
-// AddNewNZB processes an NZB file and stores it as a storage.Entry
+// AddNewNZB adds an NZB to the unified active-download queue.
 func (m *Manager) AddNewNZB(ctx context.Context, req *ImportRequest) (string, error) {
 	if m.usenet == nil {
 		return "", fmt.Errorf("usenet not configured")
+	}
+	if req == nil || len(req.NZBContent) == 0 {
+		return "", fmt.Errorf("NZB content is empty")
+	}
+	if req.Arr == nil {
+		return "", fmt.Errorf("arr is required")
 	}
 
 	m.logger.Info().
@@ -24,23 +30,20 @@ func (m *Manager) AddNewNZB(ctx context.Context, req *ImportRequest) (string, er
 		Str("category", req.Arr.Name).
 		Msg("Adding new NZB to usenet")
 
-	// Parse NZB through usenet client
-	meta, groups, err := m.usenet.Parse(ctx, req.Name, req.NZBContent, req.Arr.Name)
+	stagedPath, err := m.usenet.StageNZB(req.Id, req.NZBContent)
 	if err != nil {
-		return "", fmt.Errorf("usenet process failed: %w", err)
+		return "", err
 	}
 
-	// Create storage.Entry
 	entry := &storage.Entry{
-		InfoHash:         meta.ID,
-		Name:             meta.Name,
-		OriginalFilename: meta.Name,
-		Size:             meta.TotalSize,
+		InfoHash:         req.Id,
+		Name:             req.Name,
+		OriginalFilename: req.Name,
 		Protocol:         config.ProtocolNZB,
-		Bytes:            meta.TotalSize,
+		Magnet:           stagedPath,
 		Category:         req.Arr.Name,
 		SavePath:         filepath.Join(req.DownloadFolder, req.Arr.Name),
-		Status:           debridTypes.TorrentStatusDownloading,
+		Status:           debridTypes.TorrentStatusQueued,
 		State:            storage.EntryStateDownloading,
 		Progress:         0,
 		Action:           req.Action,
@@ -55,20 +58,54 @@ func (m *Manager) AddNewNZB(ctx context.Context, req *ImportRequest) (string, er
 	}
 
 	entry.ContentPath = entry.DownloadPath()
-	_ = entry.AddUsenetProvider(meta)
-	entry.ActiveProvider = "usenet"
-	entry.UpdatedAt = time.Now()
-	entry.State = storage.EntryStateDownloading
-	entry.Status = debridTypes.TorrentStatusDownloading
 	if err := m.queue.Add(entry); err != nil {
+		m.usenet.RemoveStagedNZB(stagedPath)
 		return "", fmt.Errorf("failed to add nzb to queue: %w", err)
 	}
 
-	// Submit job to unbounded worker pool queue (never blocks)
-	m.nzbQueue.Push(&nzbJob{entry: entry, meta: meta, groups: groups})
-	m.logger.Debug().Str("name", entry.Name).Int("queued", m.nzbQueue.Len()).Msg("NZB added to processing queue")
+	req.Status = "queued"
+	job := NewJob(JobTypeNZB, req)
+	job.ID = entry.InfoHash
+	job.Entry = entry
+	if err := m.SubmitJob(job); err != nil {
+		m.usenet.RemoveStagedNZB(stagedPath)
+		entry.MarkAsError(err)
+		_ = m.queue.Update(entry)
+		return "", fmt.Errorf("failed to queue NZB: %w", err)
+	}
+	return req.Id, nil
+}
 
-	return meta.ID, nil
+func (m *Manager) processNZBJob(ctx context.Context, job *Job) error {
+	if job == nil || job.Request == nil || job.Entry == nil {
+		return fmt.Errorf("invalid NZB job")
+	}
+	if _, err := m.queue.GetTorrent(job.Entry.InfoHash); err != nil {
+		return nil
+	}
+
+	req := job.Request
+	meta, groups, err := m.usenet.ParseWithID(ctx, job.Entry.InfoHash, req.Name, req.NZBContent, req.Arr.Name)
+	if err != nil {
+		return fmt.Errorf("usenet parse failed: %w", err)
+	}
+	m.usenet.RemoveStagedNZB(job.Entry.Magnet)
+	job.Entry.Magnet = ""
+
+	job.NZBMeta = meta
+	job.NZBGroups = groups
+	job.Entry.Name = meta.Name
+	job.Entry.OriginalFilename = meta.Name
+	job.Entry.Size = meta.TotalSize
+	job.Entry.Bytes = meta.TotalSize
+	job.Entry.Status = debridTypes.TorrentStatusDownloading
+	job.Entry.ActiveProvider = "usenet"
+	_ = job.Entry.AddUsenetProvider(meta)
+	if err := m.queue.Update(job.Entry); err != nil {
+		return fmt.Errorf("failed to update queued NZB: %w", err)
+	}
+	req.Status = "started"
+	return m.processNewNzb(ctx, job.Entry, meta, groups)
 }
 
 func (m *Manager) processNZB(ctx context.Context, entry *storage.Entry, metadata *storage.NZB) error {
@@ -93,14 +130,6 @@ func (m *Manager) processNZB(ctx context.Context, entry *storage.Entry, metadata
 	entry.UpdatedAt = time.Now()
 	_ = m.queue.Update(entry)
 
-	for _, file := range metadata.Files {
-		go func(f storage.NZBFile) {
-			cacheCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			defer cancel()
-			_ = m.usenet.PreCache(cacheCtx, metadata.ID, f.Name) // This will fetch head and tail of the file
-		}(file)
-	}
-
 	if len(entry.Files) == 0 {
 		return fmt.Errorf("nzb has no files")
 	}
@@ -110,9 +139,9 @@ func (m *Manager) processNZB(ctx context.Context, entry *storage.Entry, metadata
 }
 
 // processNewNzb processes a new NZB entry after it has been added to the usenet client
-func (m *Manager) processNewNzb(entry *storage.Entry, metadata *storage.NZB, groups map[string]*parser.FileGroup) error {
+func (m *Manager) processNewNzb(parentCtx context.Context, entry *storage.Entry, metadata *storage.NZB, groups map[string]*parser.FileGroup) error {
 	// Create context with timeout for processing
-	ctx, cancel := context.WithTimeout(context.Background(), m.usenetTimeout)
+	ctx, cancel := context.WithTimeout(parentCtx, m.usenetTimeout)
 	defer cancel()
 
 	updatedNZB, err := m.usenet.Process(ctx, metadata, groups)
@@ -218,60 +247,33 @@ func (m *Manager) syncNZBs(ctx context.Context) error {
 		return nil
 	}
 
-	newNZBs, err := m.usenet.ProcessNewNZBs(ctx)
+	m.nzbSyncMu.Lock()
+	defer m.nzbSyncMu.Unlock()
+
+	pendingNZBs, err := m.usenet.ClaimNewNZBs()
 	if err != nil {
-		return fmt.Errorf("failed to get new NZBs from usenet client: %w", err)
+		return fmt.Errorf("failed to claim new NZBs from usenet client: %w", err)
 	}
 
-	for _, meta := range newNZBs {
-		// Skip if already in storage or queue to avoid overwriting in-progress entries
-		if _, err := m.GetEntry(meta.ID); err == nil {
+	for _, pending := range pendingNZBs {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		req := NewNZBRequest(
+			pending.Name,
+			m.config.DownloadFolder,
+			pending.Content,
+			m.arr.GetOrCreate(""),
+			config.DownloadActionNone,
+			"",
+			ImportTypeWatch,
+			false,
+		)
+		if _, err := m.AddNewNZB(ctx, req); err != nil {
+			m.logger.Error().Err(err).Str("name", pending.Name).Msg("Failed to queue watched NZB")
 			continue
 		}
-		if _, err := m.queue.GetTorrent(meta.ID); err == nil {
-			continue
-		}
-
-		entry := &storage.Entry{
-			InfoHash:         meta.ID,
-			Name:             meta.Name,
-			OriginalFilename: meta.Name,
-			Size:             meta.TotalSize,
-			Protocol:         config.ProtocolNZB,
-			Bytes:            meta.TotalSize,
-			Category:         meta.Category,
-			Status:           debridTypes.TorrentStatusDownloading,
-			State:            storage.EntryStateDownloading,
-			Progress:         0,
-			CreatedAt:        time.Now(),
-			UpdatedAt:        time.Now(),
-			AddedOn:          time.Now(),
-			Providers:        make(map[string]*storage.ProviderEntry),
-			Files:            make(map[string]*storage.File),
-			Tags:             []string{},
-		}
-		entry.ContentPath = entry.DownloadPath()
-
-		// AddOrUpdate placement
-		_ = entry.AddUsenetProvider(meta)
-		entry.ActiveProvider = "usenet"
-		// AddOrUpdate files here using logical streamable files
-		for _, file := range meta.Files {
-			tFile := &storage.File{
-				Name:     file.Name,
-				Size:     file.Size,
-				InfoHash: entry.InfoHash,
-				AddedOn:  entry.AddedOn,
-				Path:     file.Name,
-			}
-			entry.Files[file.Name] = tFile
-		}
-
-		// Add the entry to storage
-		if err := m.storage.AddOrUpdate(entry); err != nil {
-			m.logger.Error().Err(err).Str("name", entry.Name).Msg("Failed to addOrUpdate synced NZB entry to storage")
-			continue
-		}
+		m.usenet.RemoveClaimedNZB(pending.Path)
 	}
 	return nil
 }

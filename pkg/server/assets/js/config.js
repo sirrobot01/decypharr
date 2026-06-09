@@ -69,6 +69,7 @@ class ConfigManager {
     populateForm(config) {
         // Load general settings
         this.populateGeneralSettings(config);
+        this.populateDownloadSettings(config);
 
         // Load debrid configs
         if (config.debrids && Array.isArray(config.debrids)) {
@@ -130,7 +131,6 @@ class ConfigManager {
         if ($('repair.strategy')) $('repair.strategy').value = repair.strategy || 'per_entry';
         if ($('repair.auto_repair')) $('repair.auto_repair').checked = !!repair.auto_repair;
         if ($('repair.skip_nzb_repair')) $('repair.skip_nzb_repair').checked = !!repair.skip_nzb_repair;
-        if ($('repair.notify_on_complete')) $('repair.notify_on_complete').checked = !!repair.notify_on_complete;
     }
 
     collectRepairConfig() {
@@ -149,7 +149,6 @@ class ConfigManager {
             strategy: $('repair.strategy')?.value || 'per_entry',
             auto_repair: $('repair.auto_repair')?.checked || false,
             skip_nzb_repair: $('repair.skip_nzb_repair')?.checked || false,
-            notify_on_complete: $('repair.notify_on_complete')?.checked || false,
             arrs,
         };
     }
@@ -157,11 +156,8 @@ class ConfigManager {
     populateGeneralSettings(config) {
         const fields = [
             'log_level', 'url_base', 'bind_address', 'port',
-            'min_file_size', 'max_file_size', 'remove_stalled_after',
-            'nzb_user_agent', 'download_folder', 'refresh_interval',
-            'max_downloads', 'skip_pre_cache', 'always_rm_tracker_urls',
-            'folder_naming', 'refresh_dirs', 'disable_webdav',
-            'default_download_action', 'app_url'
+            'min_file_size', 'max_file_size', 'folder_naming',
+            'refresh_dirs', 'disable_webdav', 'app_url'
         ];
 
         fields.forEach(field => {
@@ -180,25 +176,25 @@ class ConfigManager {
         if (config.allowed_file_types && Array.isArray(config.allowed_file_types)) {
             document.querySelector('[name="allowed_file_types"]').value = config.allowed_file_types.join(', ');
         }
-
-        // Set up downloader section toggle
-        this.setupDownloaderToggle();
     }
 
-    setupDownloaderToggle() {
-        const actionSelect = document.getElementById('default_download_action');
-        if (!actionSelect) return;
+    populateDownloadSettings(config) {
+        const fields = [
+            'remove_stalled_after', 'nzb_user_agent', 'download_folder',
+            'refresh_interval', 'max_active_downloads', 'skip_pre_cache',
+            'always_rm_tracker_urls', 'default_download_action'
+        ];
 
-        const toggleDownloaderOptions = () => {
-            const isDownload = actionSelect.value === 'download';
-            document.querySelectorAll('.downloader-option').forEach(el => {
-                el.disabled = !isDownload;
-                el.closest('div').classList.toggle('opacity-50', !isDownload);
-            });
-        };
-
-        actionSelect.addEventListener('change', toggleDownloaderOptions);
-        toggleDownloaderOptions();
+        fields.forEach(field => {
+            const element = document.querySelector(`[name="${field}"]`);
+            if (element && config[field] !== undefined) {
+                if (element.type === 'checkbox') {
+                    element.checked = config[field];
+                } else {
+                    element.value = config[field];
+                }
+            }
+        });
     }
 
     populateNotificationSettings(notificationsConfig) {
@@ -287,7 +283,7 @@ class ConfigManager {
         if (!dfsConfig) return;
 
         const fields = [
-            'cache_dir', 'disk_cache_size', 'cache_expiry', 'cache_cleanup_interval',
+            'cache_dir', 'disk_cache_size', 'buffer_memory', 'cache_expiry', 'cache_cleanup_interval',
             'chunk_size', 'read_ahead_size', 'daemon_timeout',
             'uid', 'gid', 'umask'
         ];
@@ -1071,12 +1067,25 @@ class ConfigManager {
                 throw new Error(errorText || 'Failed to save configuration');
             }
 
-            window.decypharrUtils.createToast('Configuration saved successfully! Services are restarting...', 'success');
+            let restarted = true;
+            try {
+                const result = await response.json();
+                restarted = result.restarted !== false;
+            } catch (_) {
+                // Older backends return no body; assume a restart happened.
+            }
 
-            // Reload page after a delay to allow services to restart
-            setTimeout(() => {
-                window.location.reload();
-            }, 2000);
+            if (restarted) {
+                window.decypharrUtils.createToast('Configuration saved successfully! Services are restarting...', 'success');
+                // Reload page after a delay to allow services to restart
+                setTimeout(() => {
+                    window.location.reload();
+                }, 2000);
+            } else {
+                // Applied live — no restart, no disruptive reload.
+                window.decypharrUtils.createToast('Configuration saved and applied.', 'success');
+                this.refs.loadingOverlay.classList.add('hidden');
+            }
 
         } catch (error) {
             console.error('Error saving configuration:', error);
@@ -1149,7 +1158,7 @@ class ConfigManager {
             download_folder: document.querySelector('[name="download_folder"]').value,
             refresh_interval: document.querySelector('[name="refresh_interval"]').value || "30s",
             default_download_action: document.querySelector('[name="default_download_action"]')?.value || "symlink",
-            max_downloads: parseInt(document.querySelector('[name="max_downloads"]').value) || 0,
+            max_active_downloads: parseInt(document.querySelector('[name="max_active_downloads"]').value) || 5,
             skip_pre_cache: document.querySelector('[name="skip_pre_cache"]').checked,
             always_rm_tracker_urls: document.querySelector('[name="always_rm_tracker_urls"]').checked,
             folder_naming: document.querySelector('[name="folder_naming"]')?.value || "",
@@ -1241,13 +1250,16 @@ class ConfigManager {
 
         return {
             providers: providers,
-            max_connections: parseInt(document.querySelector('[name="usenet.max_connections"]')?.value) || 10,
-            read_ahead: document.querySelector('[name="usenet.read_ahead"]').value || "32MB",
+            max_connections: parseInt(document.querySelector('[name="usenet.max_connections"]')?.value) || 15,
+            processing_max_connections: parseInt(document.querySelector('[name="usenet.processing_max_connections"]')?.value)
+                || parseInt(document.querySelector('[name="usenet.max_connections"]')?.value)
+                || 15,
+            read_ahead: document.querySelector('[name="usenet.read_ahead"]').value || "16MB",
             processing_timeout: document.querySelector('[name="usenet.processing_timeout"]')?.value || "5m",
             availability_sample_percent: parseInt(document.querySelector('[name="usenet.availability_sample_percent"]')?.value) || 10,
             import_availability_sample_percent: parseInt(document.querySelector('[name="usenet.import_availability_sample_percent"]')?.value) || 1,
-            max_concurrent_nzb: parseInt(document.querySelector('[name="usenet.max_concurrent_nzb"]')?.value) || 2,
-            disk_buffer_path: document.querySelector('[name="usenet.disk_buffer_path"]')?.value || ""
+            disk_buffer_path: document.querySelector('[name="usenet.disk_buffer_path"]')?.value || "",
+            buffer_memory: document.querySelector('[name="usenet.buffer_memory"]')?.value || ""
         };
     }
 
@@ -1438,6 +1450,7 @@ class ConfigManager {
         return {
             cache_dir: getElementValue('cache_dir'),
             disk_cache_size: getElementValue('disk_cache_size'),
+            buffer_memory: getElementValue('buffer_memory'),
             cache_expiry: getElementValue('cache_expiry'),
             cache_cleanup_interval: getElementValue('cache_cleanup_interval'),
             chunk_size: getElementValue('chunk_size'),
@@ -1669,12 +1682,13 @@ class ConfigManager {
         // Populate stream settings
         const streamFields = {
             'max_connections': usenet.max_connections,
+            'processing_max_connections': usenet.processing_max_connections,
             'read_ahead': usenet.read_ahead,
             'processing_timeout': usenet.processing_timeout,
             'availability_sample_percent': usenet.availability_sample_percent,
             'import_availability_sample_percent': usenet.import_availability_sample_percent,
-            'max_concurrent_nzb': usenet.max_concurrent_nzb,
-            'disk_buffer_path': usenet.disk_buffer_path
+            'disk_buffer_path': usenet.disk_buffer_path,
+            'buffer_memory': usenet.buffer_memory
         };
 
         Object.entries(streamFields).forEach(([id, value]) => {

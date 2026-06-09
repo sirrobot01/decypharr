@@ -153,8 +153,11 @@ func (c *Collector) collect() *Snapshot {
 	}
 
 	// --- Queue ---
-	snap.Queue = QueueStats{
-		Pending: c.mgr.Queue().RequestsSize(),
+	if queue := c.mgr.JobQueue(); queue != nil {
+		snap.Queue = QueueStats{
+			Pending: queue.Len(),
+			Active:  queue.ActiveCount(),
+		}
 	}
 
 	// --- Arrs ---

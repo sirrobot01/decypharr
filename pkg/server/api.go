@@ -468,17 +468,31 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	// Sync arr storage with the new configuration
 	s.manager.Arr().SyncFromConfig(newConfig.Arrs)
 
-	// Save the updated config
+	// Save the updated config. This also applies defaults to newConfig, so the
+	// restart comparison below sees a fully-normalized config on both sides.
 	if err := newConfig.Save(); err != nil {
 		s.logger.Error().Err(err).Msg("Failed to save config")
 		http.Error(w, "Error saving config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Restart services asynchronously
-	go s.Restart()
+	// Only restart when a field that needs it actually changed (HTTP bind,
+	// debrid/usenet clients, or the mount). For everything else, apply the new
+	// config live so users aren't disrupted by a full restart on every save.
+	restarted := config.Get().RequiresRestart(&newConfig)
+	if restarted {
+		go s.Restart()
+	} else {
+		config.Get().ApplyRuntime(&newConfig)
+		// Reschedule/reapply the repair sweep if its settings changed.
+		if svc := s.manager.Repair(); svc != nil {
+			if err := svc.ApplyConfig(); err != nil {
+				s.logger.Warn().Err(err).Msg("Failed to apply repair config after live update")
+			}
+		}
+	}
 
-	utils.JSONResponse(w, map[string]string{"status": "success"}, http.StatusOK)
+	utils.JSONResponse(w, map[string]any{"status": "success", "restarted": restarted}, http.StatusOK)
 }
 
 func (s *Server) handleGetRepairConfig(w http.ResponseWriter, r *http.Request) {

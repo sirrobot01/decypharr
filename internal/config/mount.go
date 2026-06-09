@@ -55,9 +55,20 @@ type DFS struct {
 	DiskCacheSize        string `json:"disk_cache_size,omitempty"`        // 10GB, 50GB etc
 	CacheCleanupInterval string `json:"cache_cleanup_interval,omitempty"` // 10m, 1h etc
 
+	// BufferMemory caps the total RAM the DFS streaming buffers hold across all
+	// open files, e.g. "512MB". Per-file buffers stay generous for smooth
+	// playback; this bounds the aggregate so many concurrent streams can't OOM.
+	// Empty = default (512MB); "0" disables the cap.
+	BufferMemory string `json:"buffer_memory,omitempty"`
+
 	// Performance settings
 	ChunkSize     string `json:"chunk_size,omitempty"`      // Initial chunk size, e.g 10MB
 	ReadAheadSize string `json:"read_ahead_size,omitempty"` // Read ahead size (deprecated, use MaxChunkSize)
+
+	// DropBehindMargin, e.g "256MB", makes the read path drop the page cache for
+	// streamed data more than this far behind the read head (bytes stay on disk).
+	// Empty/0 = disabled. Only useful under a tight memory cap.
+	DropBehindMargin string `json:"drop_behind_margin,omitempty"`
 
 	DaemonTimeout string `json:"daemon_timeout,omitempty"` // Time after which the FUSE daemon will exit if idle
 
@@ -65,6 +76,34 @@ type DFS struct {
 	UID                uint32 `json:"uid,omitempty"`                 // User ID for mounted files
 	GID                uint32 `json:"gid,omitempty"`                 // Group ID for mounted files
 	Umask              string `json:"umask,omitempty"`               // File permissions mask
+}
+
+// DiskCacheSizeBytes resolves the DFS on-disk cache budget in bytes. Empty or
+// unparseable -> 0 (unlimited). This is the disk limit handed to the DFS buffer
+// pool, which punches holes behind the read head once an open stream pushes the
+// cache past it.
+func (d DFS) DiskCacheSizeBytes() int64 {
+	if d.DiskCacheSize == "" {
+		return 0
+	}
+	n, err := ParseSize(d.DiskCacheSize)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// BufferMemoryBytes resolves the DFS streaming-buffer RAM cap. Empty -> 512MB
+// default; "0" -> disabled (0).
+func (d DFS) BufferMemoryBytes() int64 {
+	if d.BufferMemory == "" {
+		return 512 << 20
+	}
+	n, err := ParseSize(d.BufferMemory)
+	if err != nil {
+		return 512 << 20
+	}
+	return n
 }
 
 type ExternalRclone struct {

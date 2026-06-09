@@ -80,12 +80,14 @@ Lower `priority` = higher preference.
 ```json
 {
   "usenet": {
-    "max_connections": 15
+    "max_connections": 15,
+    "processing_max_connections": 15
   }
 }
 ```
 
-- `max_connections`: Per-file/stream connection limit
+- `max_connections`: Per-file streaming connection limit
+- `processing_max_connections`: Per-file parsing and NZB download connection limit
 - Provider `max_connections`: Per-provider limit
 
 **Example:**
@@ -112,14 +114,12 @@ Prefetch buffer for smoother playback. Higher = smoother but more memory.
 
 ```json
 {
-  "usenet": {
-    "max_concurrent_nzb": 2,
-    "processing_timeout": "10m"
-  }
+  "max_active_downloads": 5,
+  "usenet": {"processing_timeout": "10m"}
 }
 ```
 
-- `max_concurrent_nzb`: How many NZBs to process in parallel
+- `max_active_downloads`: Shared active-download limit for torrents and NZBs
 - `processing_timeout`: Mark as bad if processing exceeds this
 
 ### Availability Checking
@@ -186,7 +186,7 @@ See [Sabnzbd Integration](./sabnzbd/) for details.
 
 - Increase `processing_timeout` for large files
 - Reduce `availability_sample_percent` for faster checks
-- Increase `max_concurrent_nzb` if CPU allows
+- Increase `max_active_downloads` if the system and providers have capacity
 
 ### Incomplete Downloads
 
@@ -200,6 +200,7 @@ Full Usenet config with optimal settings:
 
 ```json
 {
+  "max_active_downloads": 5,
   "usenet": {
     "providers": [
       {
@@ -213,10 +214,10 @@ Full Usenet config with optimal settings:
       }
     ],
     "max_connections": 15,
+    "processing_max_connections": 15,
     "read_ahead": "32MB",
     "processing_timeout": "15m",
     "availability_sample_percent": 5,
-    "max_concurrent_nzb": 3,
     "disk_buffer_path": "/cache/usenet",
     "skip_repair": false
   }

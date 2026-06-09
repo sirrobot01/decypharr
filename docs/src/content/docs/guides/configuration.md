@@ -38,6 +38,16 @@ Configuration is stored in `config.json`. Most settings can be managed via the W
 
 Password is bcrypt-hashed. API token is auto-generated.
 
+## Downloads
+
+```json
+{
+  "max_active_downloads": 5
+}
+```
+
+`max_active_downloads` is the shared active-processing limit for torrent and NZB downloads. Additional imports remain queued until an active download completes.
+
 ## Debrid Providers
 
 Array of Debrid services:
@@ -104,11 +114,11 @@ Array of Debrid services:
       }
     ],
     "max_connections": 15,
+    "processing_max_connections": 15,
     "read_ahead": "16MB",
     "processing_timeout": "10m",
     "availability_sample_percent": 10,
     "import_availability_sample_percent": 1,
-    "max_concurrent_nzb": 2,
     "disk_buffer_path": "/cache/usenet/streams"
   }
 }
@@ -119,12 +129,12 @@ Array of Debrid services:
 | Field                         | Type   | Description                     | Default                      |
 |-------------------------------|--------|---------------------------------|------------------------------|
 | `providers`                   | array  | NNTP server configurations      | `[]`                         |
-| `max_connections`             | int    | Max connections per file/stream | `15`                         |
+| `max_connections`             | int    | Max connections per streaming file | `15`                      |
+| `processing_max_connections`  | int    | Max connections per file for parsing and NZB downloads | Same as `max_connections` |
 | `read_ahead`                  | string | Prefetch buffer size            | `16MB`                       |
 | `processing_timeout`          | string | Max time for NZB processing     | `10m`                        |
 | `availability_sample_percent` | int    | % of segments to check during repairs (1-100) | `10`             |
 | `import_availability_sample_percent` | int | % of segments to check when adding an NZB (1-100) | `1`         |
-| `max_concurrent_nzb`          | int    | Parallel NZB processing limit   | `2`                          |
 | `disk_buffer_path`            | string | Disk buffer location            | `{main_path}/usenet/streams` |
 
 ### Provider Fields
@@ -278,7 +288,6 @@ Connect to an existing Rclone instance's RC API.
 | `arrs`                    | Optional Arr filter when `source=arr`. Empty = all eligible                | `[]`        |
 | `auto_repair`             | When `true`, brokens are repaired in-sweep. When `false`, detect-only      | `false`     |
 | `skip_nzb_repair`         | Skip NZB / Usenet entries during scheduled repair sweeps                   | `false`     |
-| `notify_on_complete`      | Send a notification when a sweep finishes                                  | `false`     |
 | `nntp_connection_percent` | Share of NNTP connections probes may use, to avoid starving downloads      | `20`        |
 
 See the [Health Checker & Repair guide](/guides/repair/) for the full model, API, and Browse-page integration.

@@ -49,6 +49,11 @@ type Cache struct {
 	totalSize atomic.Int64
 	itemCount atomic.Int64
 
+	// pool is the process-wide DFS buffer pool: it owns the shared RAM budget
+	// and the disk limit (CacheDiskSize) that bounds total on-disk cache even
+	// for a single huge open stream, by punching holes behind the read head.
+	pool *buffer.Pool
+
 	manager *manager.Manager
 
 	ctx    context.Context
@@ -96,6 +101,22 @@ func NewCache(ctx context.Context, mgr *manager.Manager, config *config.FuseConf
 			threshold = maxSize
 		}
 	}
+	// The DFS streaming-buffer pool: its own RAM budget plus a disk limit equal
+	// to the cache size, so a single huge open stream stays bounded by punching
+	// holes behind the read head once over the limit. Keep a back-window of
+	// recent history behind the head (capped to a quarter of the disk limit so
+	// the backstop can still reclaim when the limit is small).
+	backWindow := int64(256 << 20)
+	if maxSize > 0 && backWindow > maxSize/4 {
+		backWindow = maxSize / 4
+	}
+	pool := buffer.NewPool(buffer.PoolConfig{
+		Name:         "dfs",
+		MemoryBudget: config.BufferMemory,
+		DiskLimit:    maxSize,
+		BackWindow:   backWindow,
+	})
+
 	c := &Cache{
 		config:    config,
 		logger:    logger.New("dfs"),
@@ -104,6 +125,7 @@ func NewCache(ctx context.Context, mgr *manager.Manager, config *config.FuseConf
 		ctx:       ctx,
 		cancel:    cancel,
 		threshold: threshold,
+		pool:      pool,
 	}
 	go c.evictLoop()
 	go c.speedSampleLoop()
@@ -356,13 +378,31 @@ func (c *Cache) newItem(key, entryName, filename string, fileSize int64) (*Cache
 		}
 	}
 
-	buf, err := buffer.New(buffer.Config{
-		// MemorySize left at the buffer's default (64 MB). Plenty for
-		// the per-item working set of a streaming reader; the file's
-		// cold pages live in the OS page cache around the sparse file.
+	// item is referenced by the buffer's OnEvict closure below; it is assigned
+	// before the buffer can fire OnEvict (which only happens during active
+	// streaming, well after this returns), so the closure's nil-check is just
+	// belt-and-suspenders.
+	var item *CacheItem
+
+	buf, err := c.pool.NewBuffer(buffer.Config{
+		// 32 MB per-item RAM ceiling for the streaming working set; cold pages
+		// live in the OS page cache around the sparse file. Aggregate RAM
+		// across all open/cached files is bounded by the DFS buffer pool's
+		// budget rather than by a tiny per-item ceiling, so a library scan
+		// touching hundreds of files can't blow up RSS while a single stream
+		// still gets enough headroom to play smoothly.
+		MemorySize:    32 << 20,
 		DiskPath:      cachePath,
 		TotalSize:     fileSize,
 		InitialRanges: seed,
+		// When the DFS pool punches a hole behind the read head to stay under
+		// the disk limit, drop the same range from the persisted metadata so a
+		// later reopen doesn't claim bytes that are now a hole on disk.
+		OnEvict: func(off, length int64) {
+			if item != nil {
+				item.onBufferEvict(off, length)
+			}
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create buffer: %w", err)
@@ -379,7 +419,7 @@ func (c *Cache) newItem(key, entryName, filename string, fileSize int64) (*Cache
 		return nil, fmt.Errorf("failed to get storage entry: %w", err)
 	}
 
-	item := &CacheItem{
+	item = &CacheItem{
 		cache:    c,
 		key:      key,
 		entry:    entry,
@@ -485,6 +525,12 @@ func (c *Cache) Close() error {
 	})
 	c.items.Clear()
 	c.itemCount.Store(0)
+
+	// Stop the pool's disk-eviction worker after all items (and their buffers)
+	// are closed.
+	if c.pool != nil {
+		_ = c.pool.Close()
+	}
 
 	return nil
 }
@@ -786,12 +832,26 @@ func (item *CacheItem) ReadAtContext(ctx context.Context, p []byte, off int64) (
 	}
 
 	// Read via the buffer. It serves from its in-RAM block cache when hot
-	// and from its sparse disk file otherwise. No fadvise(DONTNEED) here:
-	// that hint was found to defeat kernel readahead and hurt prefetch.
+	// and from its sparse disk file otherwise.
+	//
+	// We do NOT fadvise(DONTNEED) the range just read — that defeats kernel
+	// readahead and hurts prefetch. Instead, when DropBehindMargin is set, we
+	// drop the cache for data well behind the read head (see DropBehind): the
+	// margin keeps readahead and short seek-backs intact, and the bytes stay on
+	// disk so a longer seek-back re-reads locally instead of re-downloading.
 	if item.buf == nil {
 		return 0, errors.New("cache file closed")
 	}
 	n, err := item.buf.ReadAt(p, off)
+	if err == nil || errors.Is(err, io.EOF) {
+		// Publish the read position so the pool's disk backstop knows what is
+		// safe to punch (everything behind off-BackWindow) once the cache is
+		// over its disk limit, and so RAM eviction protects the active window.
+		item.buf.SetReadHead(off + int64(n))
+		if margin := item.cache.config.DropBehindMargin; margin > 0 {
+			item.buf.DropBehind(off+int64(n), margin)
+		}
+	}
 	if errors.Is(err, buffer.ErrNotPresent) {
 		// We checked info.Rs before downloading, so an ErrNotPresent here
 		// would mean the metadata is out of sync with the buffer. Surface
@@ -837,6 +897,20 @@ func (item *CacheItem) WriteAtNoOverwrite(p []byte, off int64) (n, skipped int, 
 	item.metaMu.Unlock()
 	item.markMetadataDirty()
 	return n, skipped, nil
+}
+
+// onBufferEvict is invoked by the buffer pool after it punches a hole behind
+// the read head to keep the DFS cache under its disk limit. It drops the
+// reclaimed range from the persisted metadata so a later reopen seeds
+// InitialRanges with only what is actually still on disk — otherwise the
+// reopened item would claim cached bytes that are now a hole and ReadAt would
+// report a phantom missing range. The bytes are simply re-downloaded if the
+// reader seeks back into the punched region.
+func (item *CacheItem) onBufferEvict(off, length int64) {
+	item.metaMu.Lock()
+	item.info.Rs.Remove(ranges.Range{Pos: off, Size: length})
+	item.metaMu.Unlock()
+	item.markMetadataDirty()
 }
 
 // HasRange returns true if entire range is on disk

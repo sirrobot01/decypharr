@@ -218,6 +218,7 @@ func (s *Server) setupCompleteHandler(w http.ResponseWriter, r *http.Request) {
 			Priority:       1,
 		}}
 		cfg.Usenet.MaxConnections = readerConnections
+		cfg.Usenet.ProcessingMaxConnections = readerConnections
 	} else {
 		cfg.Usenet.Providers = nil
 	}
@@ -240,8 +241,8 @@ func (s *Server) setupCompleteHandler(w http.ResponseWriter, r *http.Request) {
 	if len(cfg.Categories) == 0 {
 		cfg.Categories = []string{"sonarr", "radarr"}
 	}
-	if cfg.MaxDownloads == 0 {
-		cfg.MaxDownloads = 10
+	if cfg.MaxActiveDownloads == 0 {
+		cfg.MaxActiveDownloads = 5
 	}
 	cfg.Mount.Type = config.MountType(req.Mount.MountType)
 

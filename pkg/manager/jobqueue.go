@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -33,8 +34,12 @@ type Job struct {
 
 // NewJob creates a new job
 func NewJob(jobType JobType, req *ImportRequest) *Job {
+	id := ""
+	if req != nil {
+		id = req.Id
+	}
 	return &Job{
-		ID:        req.Id,
+		ID:        id,
 		Type:      jobType,
 		Request:   req,
 		CreatedAt: time.Now(),
@@ -53,6 +58,7 @@ type JobQueue struct {
 	maxWorkers int
 	logger     zerolog.Logger
 	wg         sync.WaitGroup
+	active     atomic.Int64
 
 	// processFunc is called by workers to process a job
 	processFunc func(ctx context.Context, job *Job)
@@ -113,6 +119,27 @@ func (q *JobQueue) Len() int {
 	return len(q.jobs)
 }
 
+// ActiveCount returns the number of jobs currently holding an active-download slot.
+func (q *JobQueue) ActiveCount() int {
+	return int(q.active.Load())
+}
+
+// Retry submits a job again after a delay without holding an active slot.
+func (q *JobQueue) Retry(job *Job, delay time.Duration) {
+	go func() {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-q.ctx.Done():
+			return
+		case <-timer.C:
+			if err := q.Submit(job); err != nil {
+				q.logger.Debug().Err(err).Str("job_id", job.ID).Msg("Failed to retry job")
+			}
+		}
+	}()
+}
+
 // Close signals all workers to stop and waits for them to finish
 func (q *JobQueue) Close() {
 	q.mu.Lock()
@@ -142,7 +169,9 @@ func (q *JobQueue) worker(id int) {
 			Int("queued", q.Len()).
 			Msg("Processing job")
 
+		q.active.Add(1)
 		q.processFunc(q.ctx, job)
+		q.active.Add(-1)
 	}
 }
 
@@ -156,7 +185,7 @@ func (q *JobQueue) pop() *Job {
 		q.cond.Wait()
 	}
 
-	if q.closed && len(q.jobs) == 0 {
+	if q.closed {
 		return nil
 	}
 

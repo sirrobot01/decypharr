@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,7 +22,6 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/usenet/fs"
 	"github.com/sirrobot01/decypharr/pkg/usenet/parser"
 	"github.com/sirrobot01/decypharr/pkg/usenet/types"
-	"github.com/sourcegraph/conc/pool"
 )
 
 const (
@@ -179,13 +179,14 @@ func (r *contextSectionReader) Read(p []byte) (int, error) {
 }
 
 type Usenet struct {
-	nntp           *nntp.Client
-	logger         zerolog.Logger
-	metadataDir    string
-	nzbStorage     *NZBStorage // File-based NZB metadata storage
-	maxConnections int         // Connections allocated per file for parsing and streaming
-	prefetchSize   int64       // Prefetch size in bytes
-	failedFiles    *xsync.Map[string, error]
+	nntp                     *nntp.Client
+	logger                   zerolog.Logger
+	metadataDir              string
+	nzbStorage               *NZBStorage // File-based NZB metadata storage
+	maxConnections           int         // Connections allocated per streaming file
+	processingMaxConnections int         // Connections allocated per file for parsing and NZB downloads
+	prefetchSize             int64       // Streaming prefetch size in bytes
+	failedFiles              *xsync.Map[string, error]
 
 	fs *xsync.Map[string, *fsEntry]
 }
@@ -232,6 +233,10 @@ func New() (*Usenet, error) {
 	if maxConns <= 0 {
 		maxConns = 10
 	}
+	processingMaxConns := usenetConfig.ProcessingMaxConnections
+	if processingMaxConns <= 0 {
+		processingMaxConns = maxConns
+	}
 
 	prefetchSize, err := config.ParseSize(usenetConfig.ReadAhead)
 	if err != nil {
@@ -239,14 +244,15 @@ func New() (*Usenet, error) {
 	}
 
 	u := &Usenet{
-		nzbStorage:     nzbStorage,
-		nntp:           client,
-		logger:         _logger,
-		metadataDir:    metadataDir,
-		maxConnections: maxConns,
-		prefetchSize:   prefetchSize,
-		fs:             xsync.NewMap[string, *fsEntry](),
-		failedFiles:    xsync.NewMap[string, error](),
+		nzbStorage:               nzbStorage,
+		nntp:                     client,
+		logger:                   _logger,
+		metadataDir:              metadataDir,
+		maxConnections:           maxConns,
+		processingMaxConnections: processingMaxConns,
+		prefetchSize:             prefetchSize,
+		fs:                       xsync.NewMap[string, *fsEntry](),
+		failedFiles:              xsync.NewMap[string, error](),
 	}
 
 	// clean streams dir
@@ -368,6 +374,12 @@ func (u *Usenet) cleanupIdleFS() {
 
 // Parse processes an NZB for download/streaming (quick parse, defers archive extraction)
 func (u *Usenet) Parse(ctx context.Context, name string, content []byte, category string) (*storage.NZB, map[string]*parser.FileGroup, error) {
+	return u.ParseWithID(ctx, "", name, content, category)
+}
+
+// ParseWithID parses an NZB using a caller-provided ID. Supplying the ID lets
+// the manager expose a queued entry before the active-download worker starts.
+func (u *Usenet) ParseWithID(ctx context.Context, id, name string, content []byte, category string) (*storage.NZB, map[string]*parser.FileGroup, error) {
 	if len(content) == 0 {
 		return nil, nil, fmt.Errorf("NZB content is empty")
 	}
@@ -378,12 +390,15 @@ func (u *Usenet) Parse(ctx context.Context, name string, content []byte, categor
 	}
 
 	// Create parser with the manager
-	prs := parser.NewParser(u.nntp, u.maxConnections, u.logger.With().Str("component", "parser").Logger())
+	prs := parser.NewParser(u.nntp, u.processingMaxConnections, u.logger.With().Str("component", "parser").Logger())
 
 	// Quick parse: defer archive extraction for async processing
 	nzb, groups, err := prs.Parse(ctx, name, content)
 	if err != nil {
 		return nil, nil, err
+	}
+	if id != "" {
+		nzb.ID = id
 	}
 
 	nzb.Category = category
@@ -420,7 +435,7 @@ func (u *Usenet) Process(ctx context.Context, nzb *storage.NZB, groups map[strin
 		Msg("Processing archive files in NZB")
 
 	// Create parser with the manager
-	prs := parser.NewParser(u.nntp, u.maxConnections, u.logger.With().Str("component", "parser").Logger())
+	prs := parser.NewParser(u.nntp, u.processingMaxConnections, u.logger.With().Str("component", "parser").Logger())
 	// Process the groups (archives)
 	updatedNZB, err := prs.Process(ctx, nzb, groups)
 	if err != nil {
@@ -967,6 +982,27 @@ func (u *Usenet) saveNZBFile(name string, content []byte) (string, error) {
 	return path, nil
 }
 
+// StageNZB persists a queued NZB before an active-download worker starts.
+func (u *Usenet) StageNZB(id string, content []byte) (string, error) {
+	if id == "" {
+		return "", fmt.Errorf("NZB ID is required")
+	}
+	// Keep the staged file off the .nzb extension so the metadata-directory
+	// watcher does not treat a pending active-download job as an unmanaged import.
+	path := filepath.Join(u.metadataDir, id+".queued")
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		return "", fmt.Errorf("failed to stage NZB file: %w", err)
+	}
+	return path, nil
+}
+
+// RemoveStagedNZB removes a queued source file after it has been parsed.
+func (u *Usenet) RemoveStagedNZB(path string) {
+	if path != "" {
+		_ = os.Remove(path)
+	}
+}
+
 func (u *Usenet) markAsProcessing(nzb *storage.NZB) error {
 	// Mark as processing by creating a marker file with the NZB ID
 	markerPath := nzb.Path + ".processing"
@@ -1041,135 +1077,70 @@ func (u *Usenet) Delete(nzoID string) error {
 	return nil
 }
 
-// ProcessNewNZBs scans the metadata directory for unprocessed NZB files, parses them, and returns the new NZBs
-func (u *Usenet) ProcessNewNZBs(ctx context.Context) ([]*storage.NZB, error) {
+// PendingNZB is an unmanaged NZB file claimed by the metadata-directory watcher.
+type PendingNZB struct {
+	Name    string
+	Path    string
+	Content []byte
+}
+
+// ClaimNewNZBs moves unmanaged NZB files out of the watched extension and
+// returns them for submission to the shared active-download queue.
+func (u *Usenet) ClaimNewNZBs() ([]PendingNZB, error) {
 	entries, err := os.ReadDir(u.metadataDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read metadata dir: %w", err)
 	}
 
-	// Collect unprocessed NZB files
-	var unprocessedFiles []string
+	var pending []PendingNZB
 	for _, entry := range entries {
-		// process the .nzb files only
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".nzb" {
+		if entry.IsDir() {
 			continue
 		}
 
-		// Check if already processed
-		markerPath := filepath.Join(u.metadataDir, entry.Name()+".processed")
-		if _, err := os.Stat(markerPath); err == nil {
+		name := entry.Name()
+		claimedPath := filepath.Join(u.metadataDir, name)
+		if strings.HasSuffix(name, ".nzb.importing") {
+			name = strings.TrimSuffix(name, ".importing")
+		} else {
+			if filepath.Ext(name) != ".nzb" {
+				continue
+			}
+			path := filepath.Join(u.metadataDir, name)
+			if fileExists(path+".processed") || fileExists(path+".processing") || fileExists(path+".failed") {
+				continue
+			}
+			claimedPath = path + ".importing"
+			if err := os.Rename(path, claimedPath); err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				return nil, fmt.Errorf("failed to claim NZB %s: %w", name, err)
+			}
+		}
+
+		content, err := os.ReadFile(claimedPath)
+		if err != nil {
+			u.logger.Error().Err(err).Str("path", claimedPath).Msg("Failed to read claimed NZB")
 			continue
 		}
-
-		processingMarkerPath := filepath.Join(u.metadataDir, entry.Name()+".processing")
-		if _, err := os.Stat(processingMarkerPath); err == nil {
-			continue
-		}
-
-		// Check if failed
-		failedMarkerPath := filepath.Join(u.metadataDir, entry.Name()+".failed")
-		if _, err := os.Stat(failedMarkerPath); err == nil {
-			continue
-		}
-
-		// New unprocessed NZB file
-		unprocessedFiles = append(unprocessedFiles, entry.Name())
+		pending = append(pending, PendingNZB{Name: name, Path: claimedPath, Content: content})
 	}
 
-	if len(unprocessedFiles) == 0 {
-		return nil, nil
+	if len(pending) > 0 {
+		u.logger.Info().Int("count", len(pending)).Msg("Found new NZB files to queue")
 	}
-
-	u.logger.Info().Int("count", len(unprocessedFiles)).Msg("Found new NZB files to process")
-
-	// Use pool to process files concurrently
-	type result struct {
-		nzb *storage.NZB
-		err error
-	}
-
-	results := make([]*result, len(unprocessedFiles))
-	processPool := pool.New().WithContext(ctx).WithMaxGoroutines(min(120, len(unprocessedFiles)))
-
-	for i, filename := range unprocessedFiles {
-		processPool.Go(func(ctx context.Context) error {
-			nzb, err := u.processNZBFile(ctx, filename)
-			results[i] = &result{nzb: nzb, err: err}
-			return nil // Don't fail the entire pool on individual errors
-		})
-	}
-
-	if err := processPool.Wait(); err != nil {
-		return nil, err
-	}
-
-	// Collect successful NZBs and log errors
-	var newNZBs []*storage.NZB
-	for _, res := range results {
-		if res.err != nil {
-			continue
-		}
-		if res.nzb != nil {
-			newNZBs = append(newNZBs, res.nzb)
-		}
-	}
-
-	return newNZBs, nil
+	return pending, nil
 }
 
-// processNZBFile processes a single NZB file from disk
-func (u *Usenet) processNZBFile(ctx context.Context, filename string) (*storage.NZB, error) {
-	filePath := filepath.Join(u.metadataDir, filename)
-
-	// Helper to mark file as failed
-	markFailed := func(err error) {
-		failedPath := filePath + ".failed"
-		_ = os.WriteFile(failedPath, []byte(err.Error()), 0644)
-		u.logger.Error().Err(err).Str("filename", filename).Msg("NZB processing failed, marked as failed")
+// RemoveClaimedNZB removes a watched source after it has been staged by the queue.
+func (u *Usenet) RemoveClaimedNZB(path string) {
+	if path != "" {
+		_ = os.Remove(path)
 	}
+}
 
-	// Read NZB content
-	nzbContent, err := os.ReadFile(filePath)
-	if err != nil {
-		err = fmt.Errorf("failed to read NZB file: %w", err)
-		markFailed(err)
-		return nil, err
-	}
-
-	// Validate NZB content
-	if err := validateNZB(nzbContent); err != nil {
-		err = fmt.Errorf("invalid NZB content: %w", err)
-		markFailed(err)
-		return nil, err
-	}
-
-	// Create parser with the manager
-	prs := parser.NewParser(u.nntp, 2, u.logger.With().Str("component", "parser").Logger())
-
-	// Parse NZB (using filename as both name and arr name for now)
-	nzb, groups, err := prs.Parse(ctx, filename, nzbContent)
-	if err != nil {
-		err = fmt.Errorf("failed to parse NZB content: %w", err)
-		markFailed(err)
-		return nil, err
-	}
-
-	// Process the groups (archives)
-	nzb, err = prs.Process(ctx, nzb, groups)
-	if err != nil {
-		err = fmt.Errorf("failed to process NZB archives: %w", err)
-		markFailed(err)
-		return nil, err
-	}
-
-	// Save NZB file path
-	nzb.Path = filePath
-
-	// Mark as completed
-	if err := u.markAsCompleted(nzb); err != nil {
-		return nil, fmt.Errorf("failed to mark NZB as completed: %w", err)
-	}
-
-	return nzb, nil
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

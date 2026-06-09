@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/customerror"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/debrid/common"
 	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
@@ -16,28 +15,15 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/usenet"
 )
 
-// AddNewTorrent creates a torrent from import request and processes it
+// AddNewTorrent adds a torrent to the unified active-download queue.
 func (m *Manager) AddNewTorrent(ctx context.Context, importReq *ImportRequest) error {
-	var (
-		debridTorrent *debridTypes.Torrent
-		err           error
-	)
-
-	debridTorrent, err = m.SendToDebrid(ctx, importReq)
-	if err != nil {
-		// Check if too many active downloads
-		var customErr *customerror.Error
-		if errors.As(err, &customErr) && customErr.Code == "too_many_active_downloads" {
-			m.logger.Warn().Msgf("Too many active downloads, marking as queued: %s", importReq.Magnet.Name)
-			if err := m.queue.ReQueue(importReq); err != nil {
-				return err
-			}
-			return nil
-		}
-		return fmt.Errorf("failed to submit torrent to debrid: %w", err)
+	if importReq == nil || importReq.Magnet == nil {
+		return fmt.Errorf("magnet is required")
+	}
+	if importReq.Arr == nil {
+		return fmt.Errorf("arr is required")
 	}
 
-	// Create managed torrent with InfoHash as primary key
 	torrent := &storage.Entry{
 		InfoHash:         importReq.Magnet.InfoHash,
 		Name:             importReq.Magnet.Name,
@@ -48,11 +34,10 @@ func (m *Manager) AddNewTorrent(ctx context.Context, importReq *ImportRequest) e
 		Magnet:           importReq.Magnet.Link,
 		Category:         importReq.Arr.Name,
 		SavePath:         filepath.Join(importReq.DownloadFolder, importReq.Arr.Name),
-		Status:           debridTypes.TorrentStatusDownloading,
+		Status:           debridTypes.TorrentStatusQueued,
 		State:            storage.EntryStateDownloading,
 		Progress:         0,
 		Action:           importReq.Action,
-		DownloadUncached: debridTorrent.DownloadUncached,
 		CallbackURL:      importReq.CallBackUrl,
 		SkipMultiSeason:  importReq.SkipMultiSeason,
 		CreatedAt:        time.Now(),
@@ -69,9 +54,34 @@ func (m *Manager) AddNewTorrent(ctx context.Context, importReq *ImportRequest) e
 		return fmt.Errorf("failed to add torrent to queue: %w", err)
 	}
 
-	// Parse in background
-	go m.processNewTorrent(torrent, debridTorrent)
+	importReq.Status = "queued"
+	job := NewJob(JobTypeTorrent, importReq)
+	job.ID = torrent.InfoHash
+	job.Entry = torrent
+	if err := m.SubmitJob(job); err != nil {
+		torrent.MarkAsError(err)
+		_ = m.queue.Update(torrent)
+		return fmt.Errorf("failed to queue torrent: %w", err)
+	}
+	return nil
+}
 
+func (m *Manager) processTorrentJob(ctx context.Context, job *Job) error {
+	if job == nil || job.Request == nil || job.Entry == nil {
+		return fmt.Errorf("invalid torrent job")
+	}
+	if _, err := m.queue.GetTorrent(job.Entry.InfoHash); err != nil {
+		return nil
+	}
+	debridTorrent, err := m.SendToDebrid(ctx, job.Request)
+	if err != nil {
+		return fmt.Errorf("failed to submit torrent to debrid: %w", err)
+	}
+
+	job.Entry.Status = debridTypes.TorrentStatusDownloading
+	job.Entry.DownloadUncached = debridTorrent.DownloadUncached
+	job.Request.Status = "started"
+	m.processNewTorrent(job.Entry, debridTorrent)
 	return nil
 }
 
@@ -83,6 +93,9 @@ func (m *Manager) processQueuedEntries() {
 	for _, entry := range queueEntries {
 		// Parse only active downloading torrents
 		if entry.State != storage.EntryStateDownloading {
+			continue
+		}
+		if entry.Status == debridTypes.TorrentStatusQueued {
 			continue
 		}
 		// Skip entries that are actively being downloading
@@ -257,6 +270,9 @@ func (m *Manager) processAction(entry *storage.Entry) {
 	if err := m.AddOrUpdate(entry, func(t *storage.Entry) {
 		m.RefreshEntries(true)
 	}); err != nil {
+		m.logger.Error().Err(err).Str("name", entry.Name).Msg("Failed to persist completed download")
+		entry.MarkAsError(err)
+		_ = m.queue.Update(entry)
 		return
 	}
 	err := m.downloader.download(entry)
@@ -265,6 +281,8 @@ func (m *Manager) processAction(entry *storage.Entry) {
 			Err(err).
 			Str("name", entry.Name).
 			Msg("Error running post-download action")
+		entry.MarkAsError(err)
+		_ = m.queue.Update(entry)
 		return
 	}
 }

@@ -37,6 +37,7 @@ var (
 	ErrStoreClosed          = errors.New("store is closed")
 	ErrCorruptedData        = errors.New("corrupted data detected")
 	ErrCompactionInProgress = errors.New("compaction already in progress")
+	errKeyNotFound          = errors.New("key not found")
 )
 
 // Config holds store configuration
@@ -326,7 +327,7 @@ func (s *Store) Get(key string) ([]byte, error) {
 	// Look up in index
 	entry := s.index.Get(key)
 	if entry == nil {
-		return nil, fmt.Errorf("key %s not found", key)
+		return nil, fmt.Errorf("key %s: %w", key, errKeyNotFound)
 	}
 
 	// Read from log
@@ -359,7 +360,7 @@ func (s *Store) GetMeta(key string) (*IndexEntry, error) {
 
 	entry := s.index.Get(key)
 	if entry == nil {
-		return nil, fmt.Errorf("key %s not found", key)
+		return nil, fmt.Errorf("key %s: %w", key, errKeyNotFound)
 	}
 
 	return entry, nil
@@ -376,7 +377,7 @@ func (s *Store) Delete(key string) error {
 
 	// Check if key exists
 	if s.index.Get(key) == nil {
-		return fmt.Errorf("key %s not found", key)
+		return fmt.Errorf("key %s: %w", key, errKeyNotFound)
 	}
 
 	// Write tombstone to log
@@ -418,7 +419,16 @@ func (s *Store) Keys() []string {
 	return s.index.Keys()
 }
 
-// ForEach iterates over all entries in disk order (optimized for sequential I/O)
+// ForEach iterates over all entries in disk order (optimized for sequential
+// I/O). The value passed to fn is owned by ForEach and only valid for the
+// duration of that call — callers that retain it must copy.
+//
+// Scans deliberately bypass the LRU cache: a full pass touches every entry once
+// and never reuses them, so caching would evict the genuinely-hot working set
+// (active streams) and replace it with single-use scan data. Each value is read
+// under a short RLock so writers interleave between keys and reads observe the
+// current log even across a compaction swap. A single reusable buffer keeps the
+// scan allocation-free per record.
 func (s *Store) ForEach(fn func(key string, value []byte) error) error {
 	if s.closed.Load() {
 		return ErrStoreClosed
@@ -428,14 +438,21 @@ func (s *Store) ForEach(fn func(key string, value []byte) error) error {
 	keys := s.index.KeysSortedByOffset()
 	s.mu.RUnlock()
 
+	var scratch []byte
 	for _, key := range keys {
-		value, err := s.Get(key)
-		if err != nil {
-			if errors.Is(err, fmt.Errorf("key %s not found", key)) {
-				continue // Deleted between snapshot and read
-			}
-			return err
+		s.mu.RLock()
+		entry := s.index.Get(key)
+		if entry == nil {
+			s.mu.RUnlock()
+			continue // deleted between the snapshot and now
 		}
+		value, err := s.log.ReadAtInto(entry.Offset, entry.Size, scratch)
+		s.mu.RUnlock()
+		if err != nil {
+			return fmt.Errorf("failed to read from log: %w", err)
+		}
+		scratch = value // keep the (possibly grown) buffer for reuse
+		s.stats.Reads.Add(1)
 
 		if err := fn(key, value); err != nil {
 			return err

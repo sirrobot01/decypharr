@@ -27,6 +27,12 @@ type block struct {
 	// needs to be persisted to disk.
 	dirtyLo, dirtyHi int
 
+	// lastAccess is a coarse recency stamp (unix nanos) set when the block
+	// enters the LRU front. The LRU is write-order (reads don't touch it), so
+	// this is effectively the block's creation/write time — used only by the
+	// global-budget instrument to compare block recency across Buffers.
+	lastAccess int64
+
 	// LRU doubly-linked list pointers. Managed only by the Buffer under
 	// b.mu — never inspect from outside the cache layer.
 	prev, next *block

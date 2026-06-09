@@ -47,9 +47,9 @@ func (c *Config) applyEnvOverrides() {
 	if val := getEnv("REFRESH_INTERVAL"); val != "" {
 		c.RefreshInterval = val
 	}
-	if val := getEnv("MAX_DOWNLOADS"); val != "" {
+	if val := getEnv("MAX_ACTIVE_DOWNLOADS"); val != "" {
 		if v, err := strconv.Atoi(val); err == nil {
-			c.MaxDownloads = v
+			c.MaxActiveDownloads = v
 		}
 	}
 	if val := getEnv("SKIP_PRE_CACHE"); val != "" {

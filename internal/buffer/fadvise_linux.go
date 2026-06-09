@@ -68,6 +68,32 @@ func adviseDontNeedAll(f *os.File) {
 	_ = unix.Fadvise(fd, 0, 0, unix.FADV_DONTNEED)
 }
 
+// adviseDropBehind drops [start,end) from the page cache without freeing the
+// underlying disk bytes. It aligns INWARD (start up, end down) so it never
+// touches a page outside the range — in particular it cannot spill into the
+// resident trailing margin the caller wants to keep. Clean pages are dropped
+// immediately; pages still dirty from a recent write are left alone by the
+// kernel (they'll drop on a later call once written back), which is fine for a
+// drop-behind running well behind the write frontier.
+func adviseDropBehind(f *os.File, start, end int64) {
+	if f == nil {
+		return
+	}
+	fd := int(f.Fd())
+	if fd < 0 {
+		return
+	}
+	page := int64(os.Getpagesize())
+	if rem := start % page; rem != 0 {
+		start += page - rem // align up
+	}
+	end -= end % page // align down
+	if end <= start {
+		return
+	}
+	_ = unix.Fadvise(fd, start, end-start, unix.FADV_DONTNEED)
+}
+
 // adviseWillNeed asks the kernel to start populating the given range in
 // its page cache asynchronously. Callers use this when they've queued a
 // download that will land at this offset shortly — the kernel can prefetch

@@ -1,6 +1,7 @@
 package hybrid
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -251,7 +252,7 @@ func (l *appendLog) Append(key string, value []byte, deleted bool, category, pro
 	return valueOffset, int32(len(value)), nil
 }
 
-// ReadAt reads value data at the given offset
+// ReadAt reads value data at the given offset into a freshly allocated buffer.
 func (l *appendLog) ReadAt(offset int64, size int32) ([]byte, error) {
 	buf := make([]byte, size)
 	_, err := l.file.ReadAt(buf, offset)
@@ -261,183 +262,189 @@ func (l *appendLog) ReadAt(offset int64, size int32) ([]byte, error) {
 	return buf, nil
 }
 
-// Iterate scans the log and calls fn for each record
+// ReadAtInto reads size bytes at offset into buf, growing it only when it is
+// too small, and returns the filled slice (which aliases buf). The result is
+// valid only until buf is next reused — callers that retain the bytes must
+// copy them. Used by scan paths to avoid an allocation per record.
+func (l *appendLog) ReadAtInto(offset int64, size int32, buf []byte) ([]byte, error) {
+	if cap(buf) < int(size) {
+		buf = make([]byte, size)
+	} else {
+		buf = buf[:size]
+	}
+	if _, err := l.file.ReadAt(buf, offset); err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+// Iterate scans the log and calls fn for each record. It reads the file
+// sequentially through a buffered reader rather than issuing a positioned read
+// per field, so recovering N records costs ~one syscall per buffer-full instead
+// of ~16 per record. The value payload is skipped (recovery only needs
+// metadata + its on-disk offset).
 func (l *appendLog) Iterate(fn func(*LogRecord) error) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	if _, err := l.file.Seek(logHeaderSize, io.SeekStart); err != nil {
+		return err
+	}
+	r := bufio.NewReaderSize(l.file, 1<<20)
+
 	pos := int64(logHeaderSize)
 	fileSize := l.writePos
+	var fixed [8]byte    // scratch for fixed-width fields
+	var sbuf []byte      // reused scratch for length-prefixed strings
 
 	for pos < fileSize {
-		record, nextPos, err := l.readRecordAt(pos)
+		record, nextPos, err := readRecordFrom(r, pos, l.version, fixed[:], &sbuf)
 		if err != nil {
 			if err == io.EOF {
 				break
 			}
 			return err
 		}
-
 		if err := fn(record); err != nil {
 			return err
 		}
-
 		pos = nextPos
 	}
 
 	return nil
 }
 
-func (l *appendLog) readRecordAt(pos int64) (*LogRecord, int64, error) {
-	// Read key length
-	lenBuf := make([]byte, 4)
-	if _, err := l.file.ReadAt(lenBuf, pos); err != nil {
+// readRecordFrom parses one record from r, which must be positioned at the
+// record starting at file offset startPos. fixed is an >=8 byte scratch for
+// fixed-width fields; *sbuf is a reused growable buffer for string fields
+// (string() copies out of it, so reuse across calls is safe). The value payload
+// is discarded, not read. Returns the record and the next record's offset.
+func readRecordFrom(r *bufio.Reader, startPos int64, version uint32, fixed []byte, sbuf *[]byte) (*LogRecord, int64, error) {
+	pos := startPos
+
+	readU32 := func() (uint32, error) {
+		if _, err := io.ReadFull(r, fixed[:4]); err != nil {
+			return 0, err
+		}
+		pos += 4
+		return binary.LittleEndian.Uint32(fixed[:4]), nil
+	}
+	readU16 := func() (uint16, error) {
+		if _, err := io.ReadFull(r, fixed[:2]); err != nil {
+			return 0, err
+		}
+		pos += 2
+		return binary.LittleEndian.Uint16(fixed[:2]), nil
+	}
+	readU64 := func() (int64, error) {
+		if _, err := io.ReadFull(r, fixed[:8]); err != nil {
+			return 0, err
+		}
+		pos += 8
+		return int64(binary.LittleEndian.Uint64(fixed[:8])), nil
+	}
+	readStr := func(n int) (string, error) {
+		if n == 0 {
+			return "", nil
+		}
+		if cap(*sbuf) < n {
+			*sbuf = make([]byte, n)
+		}
+		b := (*sbuf)[:n]
+		if _, err := io.ReadFull(r, b); err != nil {
+			return "", err
+		}
+		pos += int64(n)
+		return string(b), nil
+	}
+
+	// Key
+	keyLen, err := readU32()
+	if err != nil {
 		return nil, 0, err
 	}
-	keyLen := binary.LittleEndian.Uint32(lenBuf)
 	if keyLen > 1024*1024 { // 1MB sanity check
 		return nil, 0, fmt.Errorf("invalid key length: %d", keyLen)
 	}
-
-	// Read key
-	keyBuf := make([]byte, keyLen)
-	if _, err := l.file.ReadAt(keyBuf, pos+4); err != nil {
+	key, err := readStr(int(keyLen))
+	if err != nil {
 		return nil, 0, err
 	}
 
-	curPos := pos + 4 + int64(keyLen)
-
-	// Read value length
-	if _, err := l.file.ReadAt(lenBuf, curPos); err != nil {
+	// Value: record its offset, then skip the payload.
+	valueLen, err := readU32()
+	if err != nil {
 		return nil, 0, err
 	}
-	valueLen := binary.LittleEndian.Uint32(lenBuf)
-	valueOffset := curPos + 4
-
-	curPos = valueOffset + int64(valueLen)
-
-	// Read flags (bit 0 = deleted, bit 1 = bad in v3+)
-	flagBuf := make([]byte, 1)
-	if _, err := l.file.ReadAt(flagBuf, curPos); err != nil {
+	valueOffset := pos
+	if _, err := r.Discard(int(valueLen)); err != nil {
 		return nil, 0, err
 	}
-	deleted := (flagBuf[0] & 1) != 0
-	// Bad flag only valid in v3+, ignore for older versions
-	bad := l.version >= 3 && (flagBuf[0]&2) != 0
-	curPos++
+	pos += int64(valueLen)
 
-	// Read category
-	lenBuf2 := make([]byte, 2)
-	if _, err := l.file.ReadAt(lenBuf2, curPos); err != nil {
+	// Flags
+	if _, err := io.ReadFull(r, fixed[:1]); err != nil {
 		return nil, 0, err
 	}
-	catLen := binary.LittleEndian.Uint16(lenBuf2)
-	curPos += 2
+	pos++
+	deleted := fixed[0]&1 != 0
+	bad := version >= 3 && fixed[0]&2 != 0
 
-	catBuf := make([]byte, catLen)
-	if catLen > 0 {
-		if _, err := l.file.ReadAt(catBuf, curPos); err != nil {
-			return nil, 0, err
+	readField := func() (string, error) {
+		n, err := readU16()
+		if err != nil {
+			return "", err
 		}
+		return readStr(int(n))
 	}
-	curPos += int64(catLen)
 
-	// Read provider
-	if _, err := l.file.ReadAt(lenBuf2, curPos); err != nil {
+	category, err := readField()
+	if err != nil {
 		return nil, 0, err
 	}
-	provLen := binary.LittleEndian.Uint16(lenBuf2)
-	curPos += 2
-
-	provBuf := make([]byte, provLen)
-	if provLen > 0 {
-		if _, err := l.file.ReadAt(provBuf, curPos); err != nil {
-			return nil, 0, err
-		}
-	}
-	curPos += int64(provLen)
-
-	// Read status
-	if _, err := l.file.ReadAt(lenBuf2, curPos); err != nil {
+	provider, err := readField()
+	if err != nil {
 		return nil, 0, err
 	}
-	statusLen := binary.LittleEndian.Uint16(lenBuf2)
-	curPos += 2
-
-	statusBuf := make([]byte, statusLen)
-	if statusLen > 0 {
-		if _, err := l.file.ReadAt(statusBuf, curPos); err != nil {
-			return nil, 0, err
-		}
-	}
-	curPos += int64(statusLen)
-
-	// Read name
-	if _, err := l.file.ReadAt(lenBuf2, curPos); err != nil {
+	status, err := readField()
+	if err != nil {
 		return nil, 0, err
 	}
-	nameLen := binary.LittleEndian.Uint16(lenBuf2)
-	curPos += 2
-
-	nameBuf := make([]byte, nameLen)
-	if nameLen > 0 {
-		if _, err := l.file.ReadAt(nameBuf, curPos); err != nil {
-			return nil, 0, err
-		}
-	}
-	curPos += int64(nameLen)
-
-	// Read totalSize
-	sizeBuf := make([]byte, 8)
-	if _, err := l.file.ReadAt(sizeBuf, curPos); err != nil {
+	name, err := readField()
+	if err != nil {
 		return nil, 0, err
 	}
-	totalSize := int64(binary.LittleEndian.Uint64(sizeBuf))
-	curPos += 8
 
-	// Read v3+ fields (protocol, addedOn) only if version >= 3
+	totalSize, err := readU64()
+	if err != nil {
+		return nil, 0, err
+	}
+
 	var protocol string
 	var addedOn int64
-	if l.version >= 3 {
-		// Read protocol
-		if _, err := l.file.ReadAt(lenBuf2, curPos); err != nil {
+	if version >= 3 {
+		if protocol, err = readField(); err != nil {
 			return nil, 0, err
 		}
-		protocolLen := binary.LittleEndian.Uint16(lenBuf2)
-		curPos += 2
-		if protocolLen > 0 {
-			protocolBuf := make([]byte, protocolLen)
-			if _, err := l.file.ReadAt(protocolBuf, curPos); err != nil {
-				return nil, 0, err
-			}
-			protocol = string(protocolBuf)
-			curPos += int64(protocolLen)
-		}
-
-		// Read addedOn
-		if _, err := l.file.ReadAt(sizeBuf, curPos); err != nil {
+		if addedOn, err = readU64(); err != nil {
 			return nil, 0, err
 		}
-		addedOn = int64(binary.LittleEndian.Uint64(sizeBuf))
-		curPos += 8
 	}
 
-	record := &LogRecord{
-		Key:       string(keyBuf),
+	return &LogRecord{
+		Key:       key,
 		Offset:    valueOffset,
 		Size:      int32(valueLen),
 		Deleted:   deleted,
-		Category:  string(catBuf),
-		Provider:  string(provBuf),
-		Status:    string(statusBuf),
-		Name:      string(nameBuf),
+		Category:  category,
+		Provider:  provider,
+		Status:    status,
+		Name:      name,
 		TotalSize: totalSize,
 		Protocol:  protocol,
 		Bad:       bad,
 		AddedOn:   addedOn,
-	}
-
-	return record, curPos, nil
+	}, pos, nil
 }
 
 // Sync flushes data to disk
