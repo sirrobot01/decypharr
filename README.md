@@ -21,6 +21,7 @@ Usenet streaming.
 - [Torbox](https://torbox.app)
 - [Debrid Link](https://debrid-link.com)
 - [All Debrid](https://alldebrid.com)
+- [Premiumize](https://www.premiumize.me)
 
 ## Quick Start
 

@@ -7,7 +7,7 @@ import (
 )
 
 type Debrid struct {
-	Provider                     string   `json:"provider,omitempty"` // realdebrid, alldebrid, debridlink, torbox
+	Provider                     string   `json:"provider,omitempty"` // realdebrid, alldebrid, debridlink, torbox, premiumize
 	Name                         string   `json:"name,omitempty"`
 	APIKey                       string   `json:"api_key,omitempty"`
 	DownloadAPIKeys              []string `json:"download_api_keys,omitempty"`
