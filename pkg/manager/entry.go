@@ -137,8 +137,15 @@ func (m *Manager) GetEntryChildren(group string) (*FileInfo, []FileInfo) {
 }
 
 func (m *Manager) GetTorrentChildren(name string) (*FileInfo, []FileInfo) {
-	dir, children := m.entry.Get(torrentEntryCachePrefix + name)
-	if sc := m.GetSidecars(name); len(sc) > 0 {
+	return m.entry.Get(torrentEntryCachePrefix + name)
+}
+
+func (m *Manager) GetTorrentChildrenWithSidecars(name string) (*FileInfo, []FileInfo) {
+	dir, children := m.GetTorrentChildren(name)
+	if dir == nil {
+		return nil, nil
+	}
+	if sc := m.GetSidecars(dir.InfoHash()); len(sc) > 0 {
 		children = append(children, sc...)
 	}
 	return dir, children
@@ -181,17 +188,15 @@ func (m *Manager) GetEntryInfo(name string) (*FileInfo, error) {
 func (m *Manager) GetTorrentFile(torrentName, fileName string) (*FileInfo, error) {
 	entry, err := m.storage.GetEntryItem(torrentName)
 	if err != nil {
-		// Fall back to sidecar before returning error
-		if sc := m.GetSidecarFile(torrentName, fileName); sc != nil {
-			return sc, nil
-		}
 		return nil, fmt.Errorf("torrent %s not found", torrentName)
 	}
 	file, err := entry.GetFile(fileName)
 	if err != nil {
-		// Fall back to sidecar registry
-		if sc := m.GetSidecarFile(torrentName, fileName); sc != nil {
-			return sc, nil
+		// Fall back to sidecar — look up by the entry's InfoHash (from first file)
+		if first, ferr := entry.GetFirstFile(); ferr == nil && first.InfoHash != "" {
+			if sc := m.GetSidecarFile(first.InfoHash, fileName); sc != nil {
+				return sc, nil
+			}
 		}
 		return nil, fmt.Errorf("file %s not found in torrent %s", fileName, torrentName)
 	}
@@ -368,7 +373,11 @@ func (m *Manager) getTorrentChildren(name string) (*FileInfo, []FileInfo) {
 	// Convert files to FileInfo
 	infos := make([]FileInfo, 0, len(entry.Files))
 	size := int64(0)
+	var firstInfoHash string
 	for _, file := range entry.Files {
+		if firstInfoHash == "" {
+			firstInfoHash = file.InfoHash
+		}
 		infos = append(infos, FileInfo{
 			name:      file.Name,
 			size:      file.Size,
@@ -385,10 +394,11 @@ func (m *Manager) getTorrentChildren(name string) (*FileInfo, []FileInfo) {
 	}
 
 	currentDir := &FileInfo{
-		name:    entry.Name,
-		size:    size,
-		modTime: infos[0].modTime,
-		isDir:   true,
+		infohash: firstInfoHash,
+		name:     entry.Name,
+		size:     size,
+		modTime:  infos[0].modTime,
+		isDir:    true,
 	}
 	return currentDir, infos
 }

@@ -229,7 +229,6 @@ func (m *Manager) init() {
 
 	m.initEntryCache()
 
-	// Load persisted sidecar files (subtitles etc.)
 	// Initialize notifications service
 	m.Notifications = notifications.New(&m.config.Notifications, m.logger)
 
@@ -586,6 +585,8 @@ func (m *Manager) DeleteEntry(infohash string, removePlacements bool) error {
 	if err := m.storage.Delete(infohash); err != nil {
 		return err
 	}
+	// Remove any sidecar files stored for this entry
+	m.deleteSidecars(infohash)
 	// Refresh entry cache
 	m.RefreshEntries(true)
 	return nil

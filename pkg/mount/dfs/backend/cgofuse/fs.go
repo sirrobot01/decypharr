@@ -20,18 +20,6 @@ import (
 	"github.com/winfsp/cgofuse/fuse"
 )
 
-var subtitleExts = map[string]bool{
-	".srt": true, ".ass": true, ".ssa": true,
-	".sub": true, ".vtt": true, ".idx": true,
-}
-
-func isSubtitleFile(name string) bool {
-	dot := strings.LastIndex(name, ".")
-	if dot < 0 {
-		return false
-	}
-	return subtitleExts[strings.ToLower(name[dot:])]
-}
 
 // FS implements the cgofuse FileSystemInterface
 type FS struct {
@@ -153,7 +141,7 @@ func (f *FS) Readdir(path string, fill func(name string, stat *fuse.Stat_t, ofst
 		_, children := f.vfs.GetManager().GetEntryChildren(groupOrTorrent)
 		if children == nil {
 			// Try as a direct torrent directory
-			_, children = f.vfs.GetManager().GetTorrentChildren(groupOrTorrent)
+			_, children = f.vfs.GetManager().GetTorrentChildrenWithSidecars(groupOrTorrent)
 		}
 		for _, child := range children {
 			fill(child.Name(), f.entryStat(&child), 0)
@@ -166,7 +154,7 @@ func (f *FS) Readdir(path string, fill func(name string, stat *fuse.Stat_t, ofst
 	torrentName := parts[1]
 
 	// get the torrent's children (files)
-	_, children := f.vfs.GetManager().GetTorrentChildren(torrentName)
+	_, children := f.vfs.GetManager().GetTorrentChildrenWithSidecars(torrentName)
 	for _, child := range children {
 		fill(child.Name(), f.entryStat(&child), 0)
 	}
@@ -207,11 +195,15 @@ func (f *FS) entryStat(info *manager.FileInfo) *fuse.Stat_t {
 func (f *FS) CreateEx(path string, mode uint32, fi *fuse.FileInfo_t) int {
 	parts := splitPath(path)
 	// Only allow subtitle writes at depth 2+ (inside a torrent folder)
-	if len(parts) >= 2 && isSubtitleFile(parts[len(parts)-1]) {
+	if len(parts) >= 2 && manager.IsSubtitleFile(parts[len(parts)-1]) {
 		torrentName := parts[len(parts)-2]
 		filename := parts[len(parts)-1]
-		fh := f.handles.CreateSidecar(torrentName, filename, f.vfs.GetManager())
-		fi.Fh = fh
+		mgr := f.vfs.GetManager()
+		infoHash := mgr.GetInfoHashByName(torrentName)
+		if infoHash == "" {
+			return -fuse.ENOENT
+		}
+		fi.Fh = f.handles.CreateSidecar(infoHash, filename, mgr)
 		fi.DirectIo = true
 		return 0
 	}
@@ -238,6 +230,17 @@ func (f *FS) OpenEx(path string, fi *fuse.FileInfo_t) int {
 	}
 
 	var reader *vfs.StreamingFile
+
+	// Open sidecar file once here; Read will use the stored fd.
+	if info.IsSidecar() {
+		fd, err := os.Open(info.SidecarPath())
+		if err != nil {
+			return -fuse.ENOENT
+		}
+		fi.DirectIo = true
+		fi.Fh = f.handles.CreateWithSidecarFd(info, fd)
+		return 0
+	}
 
 	// get reader/stream for remote files
 	if info.IsRemote() {
@@ -270,7 +273,7 @@ func (f *FS) Open(path string, flags int) (int, uint64) {
 func (f *FS) Read(path string, buff []byte, off int64, fh uint64) int {
 
 	handle := f.handles.Get(fh)
-	if handle == nil {
+	if handle == nil || handle.info == nil {
 		return -fuse.EBADF
 	}
 
@@ -297,14 +300,9 @@ func (f *FS) Read(path string, buff []byte, off int64, fh uint64) int {
 		return copy(buff, content[off:end])
 	}
 
-	// Sidecar file (e.g. subtitle): serve from disk.
-	if handle.info.IsSidecar() {
-		f, err := os.Open(handle.info.SidecarPath())
-		if err != nil {
-			return -fuse.ENOENT
-		}
-		defer f.Close()
-		n, _ := f.ReadAt(buff[:size], off)
+	// Sidecar file (e.g. subtitle): serve from the pre-opened fd.
+	if handle.sidecarFd != nil {
+		n, _ := handle.sidecarFd.ReadAt(buff[:size], off)
 		return n
 	}
 
@@ -358,15 +356,17 @@ func (f *FS) Write(path string, buff []byte, off int64, fh uint64) int {
 func (f *FS) Release(path string, fh uint64) int {
 	handle := f.handles.Get(fh)
 	if handle != nil {
-		if handle.sidecar != nil {
+		if handle.sidecarFd != nil {
+			_ = handle.sidecarFd.Close()
+		} else if handle.sidecar != nil {
 			sc := handle.sidecar
 			sc.mu.Lock()
 			content := make([]byte, len(sc.buf))
 			copy(content, sc.buf)
 			sc.mu.Unlock()
 			if len(content) > 0 {
-				if err := sc.mgr.InjectSidecarFile(sc.torrentName, sc.filename, content); err != nil {
-					f.logger.Error().Err(err).Str("torrent", sc.torrentName).Str("file", sc.filename).Msg("Failed to inject sidecar")
+				if err := sc.mgr.InjectSidecarFile(sc.infoHash, sc.filename, content); err != nil {
+					f.logger.Error().Err(err).Str("infohash", sc.infoHash).Str("file", sc.filename).Msg("Failed to inject sidecar")
 				}
 			}
 		} else {
@@ -529,6 +529,11 @@ func (f *FS) releaseHandleResources(handle *FileHandle) {
 		return
 	}
 
+	if handle.sidecarFd != nil {
+		_ = handle.sidecarFd.Close()
+		handle.sidecarFd = nil
+	}
+
 	if handle.reader != nil && handle.info != nil {
 		if err := handle.reader.Close(); err != nil && !customerror.IsSilentError(err) {
 			f.logger.Debug().Err(err).Msg("Failed to close VFS reader")
@@ -546,18 +551,19 @@ type HandleManager struct {
 
 // FileHandle represents an open file
 type FileHandle struct {
-	info    *manager.FileInfo
-	reader  *vfs.StreamingFile
-	sidecar *SidecarHandle
+	info       *manager.FileInfo
+	reader     *vfs.StreamingFile
+	sidecar    *SidecarHandle
+	sidecarFd  *os.File // open fd for reading a committed sidecar
 }
 
 // SidecarHandle buffers writes for subtitle injection
 type SidecarHandle struct {
-	torrentName string
-	filename    string
-	mgr         *manager.Manager
-	mu          sync.Mutex
-	buf         []byte
+	infoHash string
+	filename string
+	mgr      *manager.Manager
+	mu       sync.Mutex
+	buf      []byte
 }
 
 // NewHandleManager creates a new handle manager
@@ -567,6 +573,17 @@ func NewHandleManager() *HandleManager {
 	}
 	hm.nextFH.Store(1)
 	return hm
+}
+
+// CreateWithSidecarFd creates a read handle for a committed sidecar file.
+func (h *HandleManager) CreateWithSidecarFd(info *manager.FileInfo, fd *os.File) uint64 {
+	fh := h.nextFH.Load()
+	h.nextFH.Add(1)
+	h.handles.Store(fh, &FileHandle{
+		info:      info,
+		sidecarFd: fd,
+	})
+	return fh
 }
 
 // Create creates a new handle
@@ -581,14 +598,14 @@ func (h *HandleManager) Create(info *manager.FileInfo, reader *vfs.StreamingFile
 }
 
 // CreateSidecar creates a handle for buffered subtitle injection
-func (h *HandleManager) CreateSidecar(torrentName, filename string, mgr *manager.Manager) uint64 {
+func (h *HandleManager) CreateSidecar(infoHash, filename string, mgr *manager.Manager) uint64 {
 	fh := h.nextFH.Load()
 	h.nextFH.Add(1)
 	h.handles.Store(fh, &FileHandle{
 		sidecar: &SidecarHandle{
-			torrentName: torrentName,
-			filename:    filename,
-			mgr:         mgr,
+			infoHash: infoHash,
+			filename: filename,
+			mgr:      mgr,
 		},
 	})
 	return fh

@@ -28,6 +28,7 @@ var (
 type Handle struct {
 	file       *File
 	streamFile *vfs.StreamingFile
+	sidecarFd  *os.File // pre-opened fd for sidecar reads
 	closed     atomic.Bool
 	logger     *logger.RateLimitedEvent
 	lastAccess atomic.Int64
@@ -47,14 +48,9 @@ func (fh *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRe
 		return fuse.ReadResultData(data), 0
 	}
 
-	// Sidecar file (e.g. subtitle): serve from disk.
-	if fh.file.info.IsSidecar() {
-		f, err := os.Open(fh.file.info.SidecarPath())
-		if err != nil {
-			return nil, syscall.ENOENT
-		}
-		defer f.Close()
-		n, _ := f.ReadAt(dest, off)
+	// Sidecar file (e.g. subtitle): serve from the pre-opened fd.
+	if fh.sidecarFd != nil {
+		n, _ := fh.sidecarFd.ReadAt(dest, off)
 		return fuse.ReadResultData(dest[:n]), 0
 	}
 
@@ -106,6 +102,11 @@ func (fh *Handle) readFromStaticContent(offset, size int64) []byte {
 func (fh *Handle) Release(ctx context.Context) syscall.Errno {
 	if !fh.closed.CompareAndSwap(false, true) {
 		return 0
+	}
+
+	if fh.sidecarFd != nil {
+		_ = fh.sidecarFd.Close()
+		fh.sidecarFd = nil
 	}
 
 	if fh.streamFile != nil {

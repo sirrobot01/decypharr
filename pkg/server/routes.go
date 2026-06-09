@@ -85,8 +85,8 @@ func (s *Server) WebRoutes() http.Handler {
 				// File download
 				r.Get("/download/{torrent}/{file}", s.handleDownloadFile)
 
-				// Sidecar injection (e.g. subtitles for Plex mode)
-				r.Put("/nzbs/{torrent}/{file}", s.handleInjectSidecarFile)
+				// Sidecar injection (e.g. subtitles for Plex mode) — {hash} is the entry InfoHash
+				r.Put("/nzbs/{hash}/{file}", s.handleInjectSidecarFile)
 
 				// Rename an entry by infohash
 				r.Patch("/torrents/{hash}/rename", s.handleRenameEntry)

@@ -118,7 +118,7 @@ func (h *Handler) handleGroup(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleTorrentFolder(w http.ResponseWriter, r *http.Request) {
 	torrent := utils.PathUnescape(chi.URLParam(r, "torrent"))
 
-	currentInfo, children := h.manager.GetTorrentChildren(torrent)
+	currentInfo, children := h.manager.GetTorrentChildrenWithSidecars(torrent)
 	h.handler(currentInfo, children, w, r)
 }
 

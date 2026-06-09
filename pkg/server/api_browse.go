@@ -20,14 +20,13 @@ import (
 
 // BrowseEntry represents a file or folder in the browse view
 type BrowseEntry struct {
-	Infohash     string `json:"infohash,omitempty"`
 	Name         string `json:"name"`
 	Path         string `json:"path"`
 	Size         int64  `json:"size"`
 	ModTime      string `json:"mod_time"`
 	IsDir        bool   `json:"is_dir"`
-	InfoHash     string `json:"info_hash,omitempty"`  // For torrent folders
-	CanDelete    bool   `json:"can_delete,omitempty"` // Whether this can be deleted
+	InfoHash     string `json:"info_hash,omitempty"`
+	CanDelete    bool   `json:"can_delete,omitempty"`
 	ActiveDebrid string `json:"active_debrid"`
 }
 
@@ -472,22 +471,24 @@ func (s *Server) handleRenameEntry(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+const maxSidecarBytes = 32 << 20 // 32 MB
+
 func (s *Server) handleInjectSidecarFile(w http.ResponseWriter, r *http.Request) {
-	torrent := utils.PathUnescape(chi.URLParam(r, "torrent"))
+	infoHash := utils.PathUnescape(chi.URLParam(r, "hash"))
 	file := utils.PathUnescape(chi.URLParam(r, "file"))
 
-	content, err := io.ReadAll(r.Body)
+	content, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSidecarBytes))
 	if err != nil {
-		http.Error(w, "failed to read body", http.StatusBadRequest)
+		http.Error(w, "failed to read body (too large?)", http.StatusBadRequest)
 		return
 	}
 
-	if err := s.manager.InjectSidecarFile(torrent, file, content); err != nil {
+	if err := s.manager.InjectSidecarFile(infoHash, file, content); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	s.logger.Info().Str("torrent", torrent).Str("file", file).Int("bytes", len(content)).Msg("Sidecar file injected")
+	s.logger.Info().Str("infohash", infoHash).Str("file", file).Int("bytes", len(content)).Msg("Sidecar file injected")
 	w.WriteHeader(http.StatusOK)
 }
 

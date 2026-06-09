@@ -4,7 +4,6 @@ package hanwen
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"syscall"
 
@@ -13,25 +12,13 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/manager"
 )
 
-var subtitleExts = map[string]bool{
-	".srt": true, ".ass": true, ".ssa": true,
-	".sub": true, ".vtt": true, ".idx": true,
-}
-
-func isSubtitleFile(name string) bool {
-	dot := strings.LastIndex(name, ".")
-	if dot < 0 {
-		return false
-	}
-	return subtitleExts[strings.ToLower(name[dot:])]
-}
 
 // SidecarFile is a writable FUSE node for subtitle files being injected.
 type SidecarFile struct {
 	fs.Inode
-	torrentName string
-	filename    string
-	mgr         *manager.Manager
+	infoHash string
+	filename string
+	mgr      *manager.Manager
 }
 
 var _ = (fs.NodeCreater)((*Dir)(nil))
@@ -41,14 +28,20 @@ func (d *Dir) Create(ctx context.Context, name string, flags uint32, mode uint32
 	if d.level != LevelFile {
 		return nil, nil, 0, syscall.EPERM
 	}
-	if !isSubtitleFile(name) {
+	if !manager.IsSubtitleFile(name) {
 		return nil, nil, 0, syscall.EACCES
 	}
 
+	mgr := d.vfs.GetManager()
+	infoHash := mgr.GetInfoHashByName(d.name)
+	if infoHash == "" {
+		return nil, nil, 0, syscall.ENOENT
+	}
+
 	sf := &SidecarFile{
-		torrentName: d.name,
-		filename:    name,
-		mgr:         d.vfs.GetManager(),
+		infoHash: infoHash,
+		filename: name,
+		mgr:      mgr,
 	}
 
 	out.Attr.Mode = fuse.S_IFREG | 0644
@@ -101,7 +94,7 @@ func (h *SidecarWriteHandle) Release(ctx context.Context) syscall.Errno {
 	if len(content) == 0 {
 		return 0
 	}
-	if err := h.sf.mgr.InjectSidecarFile(h.sf.torrentName, h.sf.filename, content); err != nil {
+	if err := h.sf.mgr.InjectSidecarFile(h.sf.infoHash, h.sf.filename, content); err != nil {
 		return syscall.EIO
 	}
 	return 0

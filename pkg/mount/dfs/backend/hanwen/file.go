@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"syscall"
 	"time"
 
@@ -70,6 +71,16 @@ func (f *File) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOut)
 // Open creates file handle with VFS or DFS based on configuration
 // Reader is created eagerly here instead of lazily in Read() to surface errors early
 func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
+	// Sidecar files (subtitles): open the on-disk fd once and keep it for all Reads.
+	if f.info.IsSidecar() {
+		fd, err := os.Open(f.info.SidecarPath())
+		if err != nil {
+			return nil, 0, syscall.ENOENT
+		}
+		fh := &Handle{file: f, sidecarFd: fd, logger: f.logger}
+		fh.lastAccess.Store(time.Now().Unix())
+		return fh, fuse.FOPEN_DIRECT_IO, 0
+	}
 
 	var reader *vfs.StreamingFile
 	if f.info.IsRemote() && len(f.content) == 0 {
