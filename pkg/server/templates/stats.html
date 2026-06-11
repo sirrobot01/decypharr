@@ -1,4 +1,114 @@
 {{ define "stats" }}
+<style>
+    #mount-content .mount-stat-section-title {
+        color: color-mix(in oklab, var(--color-base-content) 58%, transparent);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        margin-bottom: 0.5rem;
+        text-transform: uppercase;
+    }
+
+    #mount-content .mount-stat-section-header {
+        align-items: center;
+        border-top: 1px solid color-mix(in oklab, var(--color-base-content) 10%, transparent);
+        display: flex;
+        gap: 1rem;
+        justify-content: space-between;
+        margin-top: 0.5rem;
+        padding-top: 1.5rem;
+    }
+
+    #mount-content .mount-stat-section-header .mount-stat-section-title {
+        margin-bottom: 0;
+    }
+
+    #mount-content .mount-cache-action-btn {
+        min-height: 2rem;
+    }
+
+    #mount-content .mount-cache-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        justify-content: flex-end;
+    }
+
+    #mount-content .mount-stat-grid {
+        display: grid;
+        gap: 0;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    #mount-content .mount-stat-grid > .stat {
+        border-left: 1px dashed color-mix(in oklab, var(--color-base-content) 16%, transparent);
+        min-height: 9.5rem;
+        padding: 1.5rem 2rem;
+    }
+
+    #mount-content .mount-stat-grid > .stat:nth-child(4n + 1) {
+        border-left: 0;
+    }
+
+    #mount-content .mount-stat-grid > .stat:nth-child(n + 5) {
+        border-top: 1px dashed color-mix(in oklab, var(--color-base-content) 12%, transparent);
+    }
+
+    #mount-content .mount-stat-value-compact {
+        font-size: 1.55rem;
+        line-height: 1.85rem;
+    }
+
+    #mount-content .mount-stat-wrap {
+        max-width: 18rem;
+        overflow-wrap: anywhere;
+        white-space: normal;
+        word-break: break-word;
+    }
+
+    #purge-cache-modal .purge-cache-summary {
+        border: 1px solid color-mix(in oklab, var(--color-base-content) 10%, transparent);
+    }
+
+    @media (max-width: 1023px) {
+        #mount-content .mount-stat-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        #mount-content .mount-stat-grid > .stat:nth-child(odd) {
+            border-left: 0;
+        }
+
+        #mount-content .mount-stat-grid > .stat:nth-child(n + 3) {
+            border-top: 1px dashed color-mix(in oklab, var(--color-base-content) 12%, transparent);
+        }
+
+    }
+
+    @media (max-width: 639px) {
+        #mount-content .mount-stat-grid {
+            grid-template-columns: 1fr;
+        }
+
+        #mount-content .mount-stat-section-header {
+            align-items: flex-start;
+            flex-direction: column;
+        }
+
+        #mount-content .mount-cache-actions {
+            justify-content: flex-start;
+        }
+
+        #mount-content .mount-stat-grid > .stat {
+            border-left: 0;
+            padding: 1.25rem 1rem;
+        }
+
+        #mount-content .mount-stat-grid > .stat:nth-child(n + 2) {
+            border-top: 1px dashed color-mix(in oklab, var(--color-base-content) 12%, transparent);
+        }
+    }
+</style>
 <div class="container mx-auto">
     <div class="flex items-center justify-between mb-6">
         <div class="flex items-center gap-3">
@@ -240,6 +350,49 @@
     </div>
 </div>
 
+<dialog id="purge-cache-modal" class="modal">
+    <div class="modal-box max-w-lg">
+        <form method="dialog">
+            <button class="btn btn-sm btn-circle btn-ghost absolute right-3 top-3" aria-label="Close">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </form>
+        <h3 class="font-bold text-lg flex items-center gap-2 mb-3">
+            <i class="bi bi-trash3 text-error"></i>
+            Purge DFS Cache
+        </h3>
+        <p class="text-sm text-base-content/70 mb-4">
+            This removes cached disk files that are not currently open or streaming. Active files will be skipped.
+        </p>
+        <div class="purge-cache-summary rounded-lg bg-base-200/50 p-4">
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <div class="text-xs text-base-content/60">Cached Files</div>
+                    <div class="font-bold text-info text-xl" id="purge-cache-files">0</div>
+                </div>
+                <div>
+                    <div class="text-xs text-base-content/60">Disk Used</div>
+                    <div class="font-bold text-warning text-xl" id="purge-cache-disk-used">0 B</div>
+                </div>
+            </div>
+        </div>
+        <div class="alert alert-warning mt-4">
+            <i class="bi bi-exclamation-triangle"></i>
+            <span>Cached files may need to be downloaded again after purging.</span>
+        </div>
+        <div class="modal-action">
+            <button type="button" class="btn btn-ghost" id="cancel-purge-cache">Cancel</button>
+            <button type="button" class="btn btn-error" id="confirm-purge-cache">
+                <i class="bi bi-trash3"></i>
+                Purge Cache
+            </button>
+        </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
+
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         const loadingEl = document.getElementById('loading-stats');
@@ -355,6 +508,7 @@
             const activeFiles = detail.active_files || 0;
             const totalFiles = detail.total_files || 0;
             const cacheItems = detail.cache_item_count || 0;
+            const activeCacheItems = detail.cache_active_item_count || 0;
             const cacheTotalSize = detail.cache_total_size || 0;
             const cacheMaxSize = detail.cache_max_size || 0;
             const cacheType = (detail.cache_type || 'vfs').toUpperCase();
@@ -366,7 +520,6 @@
             const cacheUsageTextClass = cacheUsageNumber > 90 ? 'text-error'
                 : cacheUsageNumber > 75 ? 'text-warning'
                     : 'text-success';
-
             // New stats
             const activeDownloads = detail.cache_active_downloads || 0;
             const downloadSpeed = detail.cache_download_speed || 0;
@@ -379,9 +532,19 @@
                 : cacheHitRate > 0.5 ? 'text-warning'
                     : cacheHits + cacheMisses === 0 ? 'text-base-content/50' : 'text-error';
             const circuitBreakers = detail.cache_circuit_breakers || 0;
+            const cacheHealthClass = circuitBreakers > 0 ? 'text-warning' : 'text-success';
+            const cacheHealthLabel = circuitBreakers > 0 ? 'Attention' : 'OK';
+            const cacheHealthDesc = circuitBreakers > 0
+                ? `${formatNumber(circuitBreakers)} ${circuitBreakers === 1 ? 'file' : 'files'} temporarily paused`
+                : 'Cache reads normal';
+            const cacheHealthTitle = circuitBreakers > 0
+                ? 'Decypharr paused cache reads for these files after repeated provider errors. It will retry automatically.'
+                : 'Cache reads are operating normally.';
+            const cacheHealthIcon = circuitBreakers > 0 ? 'bi-shield-exclamation' : 'bi-shield-check';
 
             let html = `
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="mount-stat-section-title">Current Activity</div>
+                <div class="mount-stat-grid">
                     <div class="stat">
                         <div class="stat-figure text-primary">
                             <i class="bi bi-download text-2xl"></i>
@@ -407,42 +570,202 @@
                         <div class="stat-desc">${formatNumber(cacheHits)} hits / ${formatNumber(cacheMisses)} misses</div>
                     </div>
                     <div class="stat">
-                        <div class="stat-title">Active Files</div>
+                        <div class="stat-figure text-secondary">
+                            <i class="bi bi-folder2-open text-2xl"></i>
+                        </div>
+                        <div class="stat-title">Open Files</div>
                         <div class="stat-value text-secondary">${formatNumber(activeFiles)}</div>
-                        <div class="stat-desc">Total tracked: ${formatNumber(totalFiles)}</div>
+                        <div class="stat-desc">Opened since startup: ${formatNumber(totalFiles)}</div>
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
+                <div class="mount-stat-section-header">
+                    <div class="mount-stat-section-title">Cache Storage</div>
+                    <div class="mount-cache-actions">
+                        <button type="button" class="btn btn-outline btn-sm mount-cache-action-btn" data-run-cache-cleanup>
+                            <i class="bi bi-play-circle"></i>
+                            Run Cleanup
+                        </button>
+                        <button type="button"
+                                class="btn btn-outline btn-sm mount-cache-action-btn"
+                                data-purge-cache
+                                data-cache-items="${cacheItems}"
+                                data-cache-size="${cacheTotalSize}"
+                                data-cache-max="${cacheMaxSize}">
+                            <i class="bi bi-trash3"></i>
+                            Purge Cache
+                        </button>
+                    </div>
+                </div>
+                <div class="mount-stat-grid">
                     <div class="stat">
-                        <div class="stat-title">Cache Items</div>
-                        <div class="stat-value text-sm">${formatNumber(cacheItems)}</div>
-                        <div class="stat-desc">${cacheType} cache</div>
+                        <div class="stat-figure text-info">
+                            <i class="bi bi-archive text-2xl"></i>
+                        </div>
+                        <div class="stat-title">Cached Files</div>
+                        <div class="stat-value mount-stat-value-compact text-info">${formatNumber(cacheItems)}</div>
+                        <div class="stat-desc">Stored on disk</div>
                     </div>
                     <div class="stat">
-                        <div class="stat-title">Cache Utilization</div>
-                        <div class="stat-value text-sm ${cacheUsageTextClass}">${cacheUtilizationPercent}%</div>
-                        <div class="stat-desc">${window.decypharrUtils.formatBytes(cacheTotalSize)} / ${window.decypharrUtils.formatBytes(cacheMaxSize)}</div>
+                        <div class="stat-figure ${cacheUsageTextClass}">
+                            <i class="bi bi-hdd text-2xl"></i>
+                        </div>
+                        <div class="stat-title">Disk Used</div>
+                        <div class="stat-value mount-stat-value-compact ${cacheUsageTextClass}">${window.decypharrUtils.formatBytes(cacheTotalSize)}</div>
+                        <div class="stat-desc">${cacheUtilizationPercent}% of ${window.decypharrUtils.formatBytes(cacheMaxSize)}</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-figure text-accent">
+                            <i class="bi bi-memory text-2xl"></i>
+                        </div>
+                        <div class="stat-title">Loaded Cache Items</div>
+                        <div class="stat-value mount-stat-value-compact text-accent">${formatNumber(activeCacheItems)}</div>
+                        <div class="stat-desc">Resident in ${cacheType} memory</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-figure ${cacheHealthClass}">
+                            <i class="bi ${cacheHealthIcon} text-2xl"></i>
+                        </div>
+                        <div class="stat-title">Cache Health</div>
+                        <div class="stat-value mount-stat-value-compact ${cacheHealthClass}">${cacheHealthLabel}</div>
+                        <div class="stat-desc ${cacheHealthClass}" title="${window.decypharrUtils.escapeHtml(cacheHealthTitle)}">${cacheHealthDesc}</div>
                     </div>
             `;
 
-            // Show circuit breaker warning if any are tripped
-            if (circuitBreakers > 0) {
-                html += `
-                    <div class="stat">
-                        <div class="stat-figure text-error">
-                            <i class="bi bi-exclamation-triangle text-2xl"></i>
-                        </div>
-                        <div class="stat-title">Circuit Breakers</div>
-                        <div class="stat-value text-error">${circuitBreakers}</div>
-                        <div class="stat-desc text-error">Downloads paused (cooldown)</div>
-                    </div>
-                `;
-            }
-
-            html += '</div>';
+            html += `
+                </div>
+            `;
 
             contentEl.innerHTML = html;
+            const cleanupButton = contentEl.querySelector('[data-run-cache-cleanup]');
+            if (cleanupButton) {
+                cleanupButton.addEventListener('click', () => runDFSCacheCleanup(cleanupButton));
+            }
+            const purgeButton = contentEl.querySelector('[data-purge-cache]');
+            if (purgeButton) {
+                purgeButton.addEventListener('click', () => runDFSCachePurge(purgeButton));
+            }
+        }
+
+        async function runDFSCacheCleanup(button) {
+            try {
+                const response = await window.decypharrUtils.fetcher('/api/mount/cache/cleanup', {
+                    method: 'POST',
+                    loadingButton: button,
+                });
+
+                if (!response.ok) {
+                    const message = await response.text();
+                    throw new Error(message || `HTTP ${response.status}`);
+                }
+
+                const result = await response.json();
+                const cache = result.cache || {};
+                const warnings = cache.cleanup_warning_count || 0;
+                const freedBytes = cache.cleanup_freed_bytes || 0;
+                const removedItems = cache.cleanup_removed_items || 0;
+                const toastType = warnings > 0 ? 'warning' : 'success';
+                const toastMessage = warnings > 0
+                    ? `Cache cleanup completed with ${warnings} warning(s).`
+                    : `Cache cleanup completed. Freed ${window.decypharrUtils.formatBytes(freedBytes)} and evicted ${formatNumber(removedItems)} file(s).`;
+
+                window.decypharrUtils.createToast(toastMessage, toastType);
+                loadStats();
+            } catch (error) {
+                window.decypharrUtils.createToast(`Cache cleanup failed: ${error.message}`, 'error');
+            }
+        }
+
+        function confirmDFSCachePurge(button) {
+            const modal = document.getElementById('purge-cache-modal');
+            const confirmButton = document.getElementById('confirm-purge-cache');
+            const cancelButton = document.getElementById('cancel-purge-cache');
+            const filesEl = document.getElementById('purge-cache-files');
+            const diskUsedEl = document.getElementById('purge-cache-disk-used');
+            if (!modal || !confirmButton || !cancelButton) {
+                return Promise.resolve(false);
+            }
+
+            const cacheItems = Number(button.dataset.cacheItems || 0);
+            const cacheSize = Number(button.dataset.cacheSize || 0);
+            const cacheMax = Number(button.dataset.cacheMax || 0);
+            if (filesEl) {
+                filesEl.textContent = formatNumber(cacheItems);
+            }
+            if (diskUsedEl) {
+                const sizeText = window.decypharrUtils.formatBytes(cacheSize);
+                diskUsedEl.textContent = cacheMax > 0
+                    ? `${sizeText} / ${window.decypharrUtils.formatBytes(cacheMax)}`
+                    : `${sizeText} / unlimited`;
+            }
+
+            return new Promise(resolve => {
+                let resolved = false;
+                const cleanup = () => {
+                    confirmButton.removeEventListener('click', onConfirm);
+                    cancelButton.removeEventListener('click', onCancel);
+                    modal.removeEventListener('close', onCancel);
+                };
+                const finish = value => {
+                    if (resolved) {
+                        return;
+                    }
+                    resolved = true;
+                    cleanup();
+                    resolve(value);
+                    if (modal.open) {
+                        modal.close();
+                    }
+                };
+                const onConfirm = () => finish(true);
+                const onCancel = () => finish(false);
+
+                confirmButton.addEventListener('click', onConfirm);
+                cancelButton.addEventListener('click', onCancel);
+                modal.addEventListener('close', onCancel);
+
+                if (typeof modal.showModal === 'function') {
+                    modal.showModal();
+                } else {
+                    modal.setAttribute('open', '');
+                }
+            });
+        }
+
+        async function runDFSCachePurge(button) {
+            const confirmed = await confirmDFSCachePurge(button);
+            if (!confirmed) {
+                return;
+            }
+
+            try {
+                const response = await window.decypharrUtils.fetcher('/api/mount/cache/purge', {
+                    method: 'POST',
+                    loadingButton: button,
+                });
+
+                if (!response.ok) {
+                    const message = await response.text();
+                    throw new Error(message || `HTTP ${response.status}`);
+                }
+
+                const result = await response.json();
+                const cache = result.cache || {};
+                const warnings = cache.purge_warning_count || 0;
+                const freedBytes = cache.purge_freed_bytes || 0;
+                const removedItems = cache.purge_removed_items || 0;
+                const skippedBusyItems = cache.purge_skipped_busy_items || 0;
+                const toastType = warnings > 0 ? 'warning' : 'success';
+                const skippedText = skippedBusyItems > 0 ? ` Skipped ${formatNumber(skippedBusyItems)} active item(s).` : '';
+                const toastMessage = warnings > 0
+                    ? `Cache purge completed with ${warnings} warning(s).${skippedText}`
+                    : `Cache purge completed. Freed ${window.decypharrUtils.formatBytes(freedBytes)} and removed ${formatNumber(removedItems)} file(s).${skippedText}`;
+
+                window.decypharrUtils.createToast(toastMessage, toastType);
+                loadStats();
+            } catch (error) {
+                window.decypharrUtils.createToast(`Cache purge failed: ${error.message}`, 'error');
+            }
         }
 
         function updateRcloneStats(rclone, contentEl) {

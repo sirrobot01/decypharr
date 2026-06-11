@@ -48,6 +48,7 @@ type Cache struct {
 	items     *xsync.Map[string, *CacheItem]
 	totalSize atomic.Int64
 	itemCount atomic.Int64
+	diskItems atomic.Int64
 
 	// pool is the process-wide DFS buffer pool: it owns the shared RAM budget
 	// and the disk limit (CacheDiskSize) that bounds total on-disk cache even
@@ -61,6 +62,7 @@ type Cache struct {
 
 	createGroup singleflight.Group
 	threshold   int64
+	cleanupMu   sync.Mutex
 
 	// Stats counters
 	cacheHits       atomic.Int64
@@ -83,6 +85,40 @@ type candidateEntry struct {
 	cachedSize int64 // Actual bytes on disk (from ranges)
 	opens      int32
 	inMap      bool // Whether this item is loaded in the cache map
+}
+
+type diskScanResult struct {
+	candidates            []candidateEntry
+	totalSize             int64
+	emptyDirsRemoved      int
+	orphanMetadataRemoved int
+	errors                int
+}
+
+type cleanupRunSummary struct {
+	scan              diskScanResult
+	scanPasses        int
+	closedIdleItems   int
+	forcedClosedItems int
+	removedDiskItems  int
+	sizeBefore        int64
+	sizeAfter         int64
+	freedBytes        int64
+	evictionSkipped   bool
+	status            string
+	result            string
+}
+
+type purgeRunSummary struct {
+	scan             diskScanResult
+	forcedClosed     int
+	removedDiskItems int
+	skippedBusyItems int
+	sizeBefore       int64
+	sizeAfter        int64
+	freedBytes       int64
+	status           string
+	result           string
 }
 
 // NewCache creates a new sparse file cache
@@ -164,14 +200,13 @@ func (c *Cache) GetItem(entryName, filename string, fileSize int64) (*CacheItem,
 	return item, nil
 }
 
-func (c *Cache) scanDiskCandidates() ([]candidateEntry, int64) {
-	var candidates []candidateEntry
-	var totalSize int64
-
+func (c *Cache) scanDiskCandidates() diskScanResult {
+	var result diskScanResult
 	topEntries, err := os.ReadDir(c.config.CacheDir)
 	if err != nil {
 		c.logger.Warn().Err(err).Msg("failed to read cache directory")
-		return candidates, totalSize
+		result.errors++
+		return result
 	}
 
 	for _, topEntry := range topEntries {
@@ -184,12 +219,19 @@ func (c *Cache) scanDiskCandidates() ([]candidateEntry, int64) {
 
 		subEntries, err := os.ReadDir(entryDir)
 		if err != nil {
+			c.logger.Warn().Err(err).Str("path", entryDir).Msg("failed to read cache entry directory")
+			result.errors++
 			continue
 		}
 
 		// Remove empty directories
 		if len(subEntries) == 0 {
-			_ = os.RemoveAll(entryDir)
+			if err := os.RemoveAll(entryDir); err != nil && !os.IsNotExist(err) {
+				c.logger.Warn().Err(err).Str("path", entryDir).Msg("failed to remove empty cache directory")
+				result.errors++
+			} else {
+				result.emptyDirsRemoved++
+			}
 			continue
 		}
 
@@ -216,6 +258,7 @@ func (c *Cache) scanDiskCandidates() ([]candidateEntry, int64) {
 			var info ItemInfo
 			if err := decodeJSONFile(metaPath, &info); err != nil {
 				c.logger.Warn().Err(err).Str("path", metaPath).Msg("failed to read or parse cache metadata")
+				result.errors++
 				continue
 			}
 
@@ -228,15 +271,18 @@ func (c *Cache) scanDiskCandidates() ([]candidateEntry, int64) {
 							Err(rmErr).
 							Str("path", metaPath).
 							Msg("failed to remove orphan cache metadata")
+						result.errors++
 					} else {
 						c.logger.Warn().
 							Err(err).
 							Str("path", dataPath).
 							Str("metadata", metaPath).
 							Msg("removed orphan cache metadata for missing data file")
+						result.orphanMetadataRemoved++
 					}
 				} else {
 					c.logger.Warn().Err(err).Str("path", dataPath).Msg("cache data file missing")
+					result.errors++
 				}
 				continue
 			}
@@ -255,7 +301,7 @@ func (c *Cache) scanDiskCandidates() ([]candidateEntry, int64) {
 					atime = mtime
 				}
 			}
-			candidates = append(candidates, candidateEntry{
+			result.candidates = append(result.candidates, candidateEntry{
 				key:        key,
 				path:       entryDir,
 				dataPath:   dataPath,
@@ -266,20 +312,21 @@ func (c *Cache) scanDiskCandidates() ([]candidateEntry, int64) {
 				opens:      opens,
 				inMap:      inMap,
 			})
-			totalSize += cachedSize
+			result.totalSize += cachedSize
 		}
 	}
 
-	return candidates, totalSize
+	return result
 }
 
-func (c *Cache) evictCandidates(now time.Time, candidates []candidateEntry, totalSize int64, thresholdOverride int64) (int64, int) {
+func (c *Cache) evictCandidates(now time.Time, candidates []candidateEntry, totalSize int64, thresholdOverride int64) (int64, int, int, map[string]struct{}) {
 	threshold := c.threshold
 	if thresholdOverride > 0 {
 		threshold = thresholdOverride
 	}
 
 	removed := make(map[string]struct{})
+	removalErrors := 0
 	removeCandidate := func(candidate candidateEntry) {
 		if _, skip := removed[candidate.key]; skip {
 			return
@@ -292,11 +339,13 @@ func (c *Cache) evictCandidates(now time.Time, candidates []candidateEntry, tota
 		if candidate.dataPath != "" {
 			if err := os.Remove(candidate.dataPath); err != nil && !os.IsNotExist(err) {
 				c.logger.Warn().Err(err).Str("path", candidate.dataPath).Msg("failed to remove cache data file")
+				removalErrors++
 			}
 		}
 		if candidate.metaPath != "" {
 			if err := os.Remove(candidate.metaPath); err != nil && !os.IsNotExist(err) {
 				c.logger.Warn().Err(err).Str("path", candidate.metaPath).Msg("failed to remove cache meta file")
+				removalErrors++
 			}
 		}
 		removed[candidate.key] = struct{}{}
@@ -337,7 +386,64 @@ func (c *Cache) evictCandidates(now time.Time, candidates []candidateEntry, tota
 		}
 	}
 
-	return totalSize, len(removed)
+	return totalSize, len(removed), removalErrors, removed
+}
+
+func (c *Cache) purgeCandidates(candidates []candidateEntry, totalSize int64) (int64, int, int, int, map[string]struct{}) {
+	removed := make(map[string]struct{})
+	removalErrors := 0
+	skippedBusy := 0
+
+	for _, candidate := range candidates {
+		if candidate.inMap || candidate.opens > 0 {
+			skippedBusy++
+			continue
+		}
+		if _, skip := removed[candidate.key]; skip {
+			continue
+		}
+
+		hadError := false
+		if candidate.dataPath != "" {
+			if err := os.Remove(candidate.dataPath); err != nil && !os.IsNotExist(err) {
+				c.logger.Warn().Err(err).Str("path", candidate.dataPath).Msg("failed to purge cache data file")
+				removalErrors++
+				hadError = true
+			}
+		}
+		if candidate.metaPath != "" {
+			if err := os.Remove(candidate.metaPath); err != nil && !os.IsNotExist(err) {
+				c.logger.Warn().Err(err).Str("path", candidate.metaPath).Msg("failed to purge cache meta file")
+				removalErrors++
+				hadError = true
+			}
+		}
+
+		if hadError {
+			continue
+		}
+		removed[candidate.key] = struct{}{}
+		totalSize -= candidate.cachedSize
+	}
+
+	if totalSize < 0 {
+		totalSize = 0
+	}
+	return totalSize, len(removed), removalErrors, skippedBusy, removed
+}
+
+func (c *Cache) storeDiskStats(candidates []candidateEntry, removed map[string]struct{}) {
+	count := int64(0)
+
+	for _, candidate := range candidates {
+		if _, skip := removed[candidate.key]; skip {
+			continue
+		}
+
+		count++
+	}
+
+	c.diskItems.Store(count)
 }
 
 // newItem creates a new cache item. The underlying byte storage is a
@@ -482,37 +588,229 @@ func (c *Cache) cleanupItems(now time.Time, forceZeroOpen bool) int {
 	return len(evicted)
 }
 
+func combineDiskScanResults(first, second diskScanResult) diskScanResult {
+	second.emptyDirsRemoved += first.emptyDirsRemoved
+	second.orphanMetadataRemoved += first.orphanMetadataRemoved
+	second.errors += first.errors
+	return second
+}
+
+func countBusyCandidates(candidates []candidateEntry) int {
+	var busy int
+	for _, candidate := range candidates {
+		if candidate.inMap || candidate.opens > 0 {
+			busy++
+		}
+	}
+	return busy
+}
+
+func cacheUsageText(size, maxSize int64) string {
+	if maxSize <= 0 {
+		return fmt.Sprintf("%s / unlimited", utils.FormatSize(size))
+	}
+	utilization := float64(size) / float64(maxSize) * 100
+	return fmt.Sprintf("%s / %s (%.1f%%)", utils.FormatSize(size), utils.FormatSize(maxSize), utilization)
+}
+
+func cleanupActionText(closedIdleItems, forcedClosedItems, removedDiskItems, removedEmptyDirs, removedOrphanMetadata int) string {
+	if closedIdleItems == 0 && forcedClosedItems == 0 && removedDiskItems == 0 && removedEmptyDirs == 0 && removedOrphanMetadata == 0 {
+		return "no cleanup needed"
+	}
+	return fmt.Sprintf(
+		"closed %d idle, force-closed %d, removed %d disk items, %d empty dirs, %d orphan metadata files",
+		closedIdleItems,
+		forcedClosedItems,
+		removedDiskItems,
+		removedEmptyDirs,
+		removedOrphanMetadata,
+	)
+}
+
+func cleanupResultText(errors int, evictionSkipped bool) string {
+	if errors > 0 {
+		return fmt.Sprintf("%d warning(s); check nearby warn logs for details", errors)
+	}
+	if evictionSkipped {
+		return "Cache is within limit"
+	}
+	return "Completed successfully"
+}
+
+func (c *Cache) logCleanupSummary(summary cleanupRunSummary) {
+	c.logger.Debug().Msgf(
+		"DFS cache cleanup: %s. Scanned %d cache item(s), %d busy, across %d scan pass(es). Cleanup: %s; freed %s. Result: %s.",
+		cacheUsageText(summary.sizeAfter, c.config.CacheDiskSize),
+		len(summary.scan.candidates),
+		countBusyCandidates(summary.scan.candidates),
+		summary.scanPasses,
+		cleanupActionText(summary.closedIdleItems, summary.forcedClosedItems, summary.removedDiskItems, summary.scan.emptyDirsRemoved, summary.scan.orphanMetadataRemoved),
+		utils.FormatSize(summary.freedBytes),
+		summary.result,
+	)
+}
+
+func (c *Cache) logPurgeSummary(summary purgeRunSummary) {
+	c.logger.Info().Msgf(
+		"DFS cache purge: %s. Scanned %d cache item(s), skipped %d busy, force-closed %d idle item(s), removed %d disk item(s), freed %s. Result: %s.",
+		cacheUsageText(summary.sizeAfter, c.config.CacheDiskSize),
+		len(summary.scan.candidates),
+		summary.skippedBusyItems,
+		summary.forcedClosed,
+		summary.removedDiskItems,
+		utils.FormatSize(summary.freedBytes),
+		summary.result,
+	)
+}
+
+func (c *Cache) finalizeCleanupSummary(summary cleanupRunSummary) cleanupRunSummary {
+	summary.freedBytes = summary.sizeBefore - summary.sizeAfter
+	if summary.freedBytes < 0 {
+		summary.freedBytes = 0
+	}
+	summary.result = cleanupResultText(summary.scan.errors, summary.evictionSkipped)
+	if summary.scan.errors > 0 {
+		summary.status = "warning"
+	} else {
+		summary.status = "healthy"
+	}
+
+	return summary
+}
+
+func cleanupResultStats(summary cleanupRunSummary) map[string]interface{} {
+	return map[string]interface{}{
+		"cleanup_status":              summary.status,
+		"cleanup_result":              summary.result,
+		"cleanup_warning_count":       int64(summary.scan.errors),
+		"cleanup_freed_bytes":         summary.freedBytes,
+		"cleanup_removed_items":       int64(summary.removedDiskItems),
+		"cleanup_force_closed_items":  int64(summary.forcedClosedItems),
+		"cleanup_closed_idle_items":   int64(summary.closedIdleItems),
+		"cleanup_empty_dirs_removed":  int64(summary.scan.emptyDirsRemoved),
+		"cleanup_orphan_meta_removed": int64(summary.scan.orphanMetadataRemoved),
+	}
+}
+
 // evict removes old and excess cache items
-func (c *Cache) evict() {
+func (c *Cache) evict() cleanupRunSummary {
+	c.cleanupMu.Lock()
+	defer c.cleanupMu.Unlock()
+
 	now := utils.Now()
 
-	c.cleanupItems(now, false)
+	closedIdleItems := c.cleanupItems(now, false)
 
-	candidates, totalSize := c.scanDiskCandidates()
+	scanPasses := 1
+	scan := c.scanDiskCandidates()
+	candidates := scan.candidates
+	totalSize := scan.totalSize
 
 	// WinFsp clients tend to speculatively open files. If we're already over
 	// budget, close zero-open cache items immediately so they become evictable
 	// on the same pass instead of waiting for the idle timeout.
+	forcedClosedItems := 0
 	if runtime.GOOS == "windows" && c.threshold > 0 && totalSize > c.threshold {
-		if c.cleanupItems(now, true) > 0 {
-			candidates, totalSize = c.scanDiskCandidates()
+		forcedClosedItems = c.cleanupItems(now, true)
+		if forcedClosedItems > 0 {
+			rescan := c.scanDiskCandidates()
+			scanPasses++
+			scan = combineDiskScanResults(scan, rescan)
+			candidates = scan.candidates
+			totalSize = scan.totalSize
 		}
 	}
 
-	oldSize := c.totalSize.Load()
+	sizeBefore := totalSize
+	removedCount := 0
+	evictionSkipped := false
+	removedKeys := map[string]struct{}{}
 
 	// If cache expiry is disabled and we're under threshold, skip disk scan.
 	if c.config.CacheExpiry <= 0 && (c.threshold <= 0 || totalSize <= c.threshold) {
-		return
-	}
-
-	totalSize, removedCount := c.evictCandidates(now, candidates, totalSize, 0)
-
-	if removedCount > 0 && oldSize > totalSize {
-		c.logger.Trace().Msgf("cache evict removed %d entries, freed %s (total size: %s)", removedCount, utils.FormatSize(oldSize-totalSize), utils.FormatSize(totalSize))
+		evictionSkipped = true
+	} else {
+		var removalErrors int
+		totalSize, removedCount, removalErrors, removedKeys = c.evictCandidates(now, candidates, totalSize, 0)
+		scan.errors += removalErrors
 	}
 
 	c.totalSize.Store(totalSize)
+	c.storeDiskStats(scan.candidates, removedKeys)
+
+	summary := c.finalizeCleanupSummary(cleanupRunSummary{
+		scan:              scan,
+		scanPasses:        scanPasses,
+		closedIdleItems:   closedIdleItems,
+		forcedClosedItems: forcedClosedItems,
+		removedDiskItems:  removedCount,
+		sizeBefore:        sizeBefore,
+		sizeAfter:         totalSize,
+		evictionSkipped:   evictionSkipped,
+	})
+	c.logCleanupSummary(summary)
+	return summary
+}
+
+// RunCleanup executes the same cache cleanup path used by the background loop
+// and returns this run's maintenance result for API callers.
+func (c *Cache) RunCleanup() map[string]interface{} {
+	return cleanupResultStats(c.evict())
+}
+
+// PurgeCache removes all cached disk items that are not currently in use.
+func (c *Cache) PurgeCache() map[string]interface{} {
+	c.cleanupMu.Lock()
+	defer c.cleanupMu.Unlock()
+
+	now := utils.Now()
+	forcedClosed := c.cleanupItems(now, true)
+	scan := c.scanDiskCandidates()
+	sizeBefore := scan.totalSize
+
+	totalSize, removedCount, removalErrors, skippedBusy, removedKeys := c.purgeCandidates(scan.candidates, scan.totalSize)
+	scan.errors += removalErrors
+
+	c.totalSize.Store(totalSize)
+	c.storeDiskStats(scan.candidates, removedKeys)
+
+	freedBytes := sizeBefore - totalSize
+	if freedBytes < 0 {
+		freedBytes = 0
+	}
+	status := "healthy"
+	result := "Purged cache"
+	if scan.errors > 0 {
+		status = "warning"
+		result = fmt.Sprintf("%d warning(s); check nearby warn logs for details", scan.errors)
+	}
+
+	summary := purgeRunSummary{
+		scan:             scan,
+		forcedClosed:     forcedClosed,
+		removedDiskItems: removedCount,
+		skippedBusyItems: skippedBusy,
+		sizeBefore:       sizeBefore,
+		sizeAfter:        totalSize,
+		freedBytes:       freedBytes,
+		status:           status,
+		result:           result,
+	}
+	c.logPurgeSummary(summary)
+
+	return map[string]interface{}{
+		"purge_status":              summary.status,
+		"purge_result":              summary.result,
+		"purge_warning_count":       int64(summary.scan.errors),
+		"purge_freed_bytes":         summary.freedBytes,
+		"purge_removed_items":       int64(summary.removedDiskItems),
+		"purge_skipped_busy_items":  int64(summary.skippedBusyItems),
+		"purge_force_closed_items":  int64(summary.forcedClosed),
+		"purge_cache_size_before":   summary.sizeBefore,
+		"purge_cache_size_after":    summary.sizeAfter,
+		"purge_empty_dirs_removed":  int64(summary.scan.emptyDirsRemoved),
+		"purge_orphan_meta_removed": int64(summary.scan.orphanMetadataRemoved),
+	}
 }
 
 // Close shuts down the cache
@@ -525,6 +823,7 @@ func (c *Cache) Close() error {
 	})
 	c.items.Clear()
 	c.itemCount.Store(0)
+	c.diskItems.Store(0)
 
 	// Stop the pool's disk-eviction worker after all items (and their buffers)
 	// are closed.
@@ -608,20 +907,23 @@ func (c *Cache) GetStats() map[string]interface{} {
 		hitRate = float64(hits) / float64(total)
 	}
 
-	return map[string]interface{}{
-		"type":             "vfs",
-		"total_size":       c.totalSize.Load(),
-		"max_size":         c.config.CacheDiskSize,
-		"item_count":       c.itemCount.Load(),
-		"utilization":      utilization,
-		"cache_hits":       hits,
-		"cache_misses":     misses,
-		"cache_hit_rate":   hitRate,
-		"active_downloads": c.activeDownloads.Load(),
-		"total_downloaded": c.totalDownloaded.Load(),
-		"download_speed":   c.downloadSpeed.Load(),
-		"circuit_breakers": c.circuitBreakers.Load(),
+	stats := map[string]interface{}{
+		"type":              "vfs",
+		"total_size":        c.totalSize.Load(),
+		"max_size":          c.config.CacheDiskSize,
+		"item_count":        c.diskItems.Load(),
+		"active_item_count": c.itemCount.Load(),
+		"utilization":       utilization,
+		"cache_hits":        hits,
+		"cache_misses":      misses,
+		"cache_hit_rate":    hitRate,
+		"active_downloads":  c.activeDownloads.Load(),
+		"total_downloaded":  c.totalDownloaded.Load(),
+		"download_speed":    c.downloadSpeed.Load(),
+		"circuit_breakers":  c.circuitBreakers.Load(),
 	}
+
+	return stats
 }
 
 // CacheItem represents a single cached file. Byte storage is delegated to

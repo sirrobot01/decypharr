@@ -159,6 +159,26 @@ func (m *Manager) GetStats() map[string]interface{} {
 	return stats
 }
 
+func (m *Manager) CleanupCache() map[string]interface{} {
+	if m.cache == nil {
+		return map[string]interface{}{
+			"cleanup_status": "unsupported",
+			"cleanup_result": "cache is not initialized",
+		}
+	}
+	return m.cache.RunCleanup()
+}
+
+func (m *Manager) PurgeCache() map[string]interface{} {
+	if m.cache == nil {
+		return map[string]interface{}{
+			"purge_status": "unsupported",
+			"purge_result": "cache is not initialized",
+		}
+	}
+	return m.cache.PurgeCache()
+}
+
 func buildFileKey(parent, name string) string {
 	if parent == "" {
 		return name
