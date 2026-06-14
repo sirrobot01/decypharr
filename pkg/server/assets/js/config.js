@@ -411,6 +411,7 @@ class ConfigManager {
                                 <option value="alldebrid">AllDebrid</option>
                                 <option value="debridlink">Debrid Link</option>
                                 <option value="torbox">Torbox</option>
+                                <option value="premiumize">Premiumize</option>
                             </select>
                         </div>
                         
