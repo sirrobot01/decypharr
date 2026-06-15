@@ -1379,6 +1379,27 @@
                                     <option value="per_file">Per file</option>
                                 </select>
                             </div>
+
+                            <div>
+                                <label class="label" for="repair.stop_schedule">
+                                    <span class="font-medium">Stop schedule <span class="opacity-60 font-normal">(optional)</span></span>
+                                </label>
+                                <input type="text" class="input w-full" name="repair.stop_schedule" id="repair.stop_schedule"
+                                       placeholder="e.g. 06:00, 0 6 * * *, 4h">
+                                <span class="label-text-alt opacity-70">Cron expression, clock time, or interval. If a sweep is still running when this fires, it's stopped early.</span>
+                            </div>
+
+                            <div>
+                                <label class="label" for="repair.stop_action">
+                                    <span class="font-medium">On stop</span>
+                                </label>
+                                <select class="select w-full" name="repair.stop_action" id="repair.stop_action">
+                                    <option value="">Leave auto-repair as configured</option>
+                                    <option value="repair">Repair everything found broken so far</option>
+                                    <option value="no_repair">Don't repair anything found broken so far</option>
+                                </select>
+                                <span class="label-text-alt opacity-70">Only applies when the stop schedule cuts a sweep short.</span>
+                            </div>
                         </div>
 
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1395,6 +1416,7 @@
                         </div>
                     </div>
                 </div>
+
 
             </div>
         </div>

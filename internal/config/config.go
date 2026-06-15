@@ -104,6 +104,23 @@ const (
 	RepairSourceManaged RepairSource = "managed"
 )
 
+// RepairStopAction selects what happens to a sweep that's still running when
+// its StopSchedule fires, and what the sweep does with whatever it has
+// already found broken at that point.
+type RepairStopAction string
+
+const (
+	// RepairStopActionInherit leaves auto-repair as configured by AutoRepair
+	// (or the run's own override) - stopping the sweep doesn't change it.
+	RepairStopActionInherit RepairStopAction = ""
+	// RepairStopActionRepair forces a repair pass over whatever was found
+	// broken so far, even if AutoRepair is off for the run.
+	RepairStopActionRepair RepairStopAction = "repair"
+	// RepairStopActionNoRepair stops the sweep without repairing anything
+	// found so far, even if AutoRepair is on for the run.
+	RepairStopActionNoRepair RepairStopAction = "no_repair"
+)
+
 // RepairConfig is the single, global configuration for the health checker.
 // When Enabled is true, a recurring sweep runs on Schedule and visits only
 // entries that are unhealthy, dirty, or older than RecheckInterval.
@@ -118,12 +135,24 @@ type RepairConfig struct {
 	Arrs                  []string     `json:"arrs,omitempty"`
 	AutoRepair            bool         `json:"auto_repair,omitempty"`
 	SkipNZBRepair         bool         `json:"skip_nzb_repair,omitempty"`
+
+	// StopSchedule, when set, stops an in-progress sweep at this time/interval
+	// (same formats as Schedule: clock time, cron expression, or duration).
+	// A sweep still running when StopSchedule fires is cancelled before it
+	// finishes enumerating/probing every candidate. Empty disables the stop
+	// schedule entirely - the sweep always runs to completion.
+	StopSchedule string `json:"stop_schedule,omitempty"`
+	// StopAction controls auto-repair for entries found broken before a
+	// StopSchedule-triggered stop. RepairStopActionInherit (default) leaves
+	// AutoRepair as-is; RepairStopActionRepair/RepairStopActionNoRepair force
+	// repair on/off for that stop only.
+	StopAction RepairStopAction `json:"stop_action,omitempty"`
 }
 
 func (r RepairConfig) IsZero() bool {
 	return !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
 		r.NNTPConnectionPercent == 0 && r.Strategy == "" && r.RecheckInterval == "" && len(r.Arrs) == 0 &&
-		!r.AutoRepair && !r.SkipNZBRepair
+		!r.AutoRepair && !r.SkipNZBRepair && r.StopSchedule == "" && r.StopAction == ""
 }
 
 type Config struct {
