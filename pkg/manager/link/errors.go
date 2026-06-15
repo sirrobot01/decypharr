@@ -94,7 +94,9 @@ var (
 var (
 	Err404 = errors.New("HTTP 404 Not Found")
 	Err429 = errors.New("HTTP 429 Too Many Requests")
+	Err502 = errors.New("HTTP 502 Bad Gateway")
 	Err503 = errors.New("HTTP 503 Service Unavailable")
+	Err504 = errors.New("HTTP 504 Gateway Timeout")
 )
 
 // NewLinkError creates a new LinkError with the given error and category
@@ -145,8 +147,12 @@ func ErrorCodeToLinkError(code string) *Error {
 		return NewPermanentError(Err404, code)
 	case "429":
 		return NewRetryableError(Err429, code)
+	case "502":
+		return NewRetryableError(Err502, code)
 	case "503":
 		return NewRetryableError(Err503, code)
+	case "504":
+		return NewRetryableError(Err504, code)
 	default:
 		return NewPermanentError(fmt.Errorf("unknown error code: %s", code), code)
 	}
