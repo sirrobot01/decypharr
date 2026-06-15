@@ -50,19 +50,28 @@ class ConfigManager {
         this.refs.addUsenetProviderBtn.addEventListener('click', () => this.addUsenetProvider());
     }
 
-    async loadConfiguration() {
-        try {
-            const response = await window.decypharrUtils.fetcher('/api/config');
-            if (!response.ok) {
-                throw new Error('Failed to load configuration');
+    async loadConfiguration(retries = 5, delayMs = 1000) {
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+                const response = await window.decypharrUtils.fetcher('/api/config');
+                if (!response.ok) {
+                    throw new Error('Failed to load configuration');
+                }
+
+                const config = await response.json();
+                this.populateForm(config);
+                return;
+
+            } catch (error) {
+                // The server may still be restarting after a config save.
+                // Wait and retry before giving up.
+                if (attempt < retries) {
+                    await new Promise(resolve => setTimeout(resolve, delayMs));
+                    continue;
+                }
+                console.error('Error loading configuration:', error);
+                window.decypharrUtils.createToast('Error loading configuration', 'error');
             }
-
-            const config = await response.json();
-            this.populateForm(config);
-
-        } catch (error) {
-            console.error('Error loading configuration:', error);
-            window.decypharrUtils.createToast('Error loading configuration', 'error');
         }
     }
 
