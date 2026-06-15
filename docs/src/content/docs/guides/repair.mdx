@@ -56,7 +56,9 @@ You can force a recheck on any one entry from the Browse UI or the API. This wor
     "auto_repair": true,
     "skip_nzb_repair": false,
     "notify_on_complete": false,
-    "nntp_connection_percent": 20
+    "nntp_connection_percent": 20,
+    "stop_schedule": "06:00",
+    "stop_action": "repair"
   }
 }
 ```
@@ -74,6 +76,33 @@ You can force a recheck on any one entry from the Browse UI or the API. This wor
 | `skip_nzb_repair`         | Skip NZB / Usenet entries during scheduled sweeps.                                      | `false` |
 | `notify_on_complete`      | Send a notification when a sweep finishes.                                               | `false`     |
 | `nntp_connection_percent` | Percentage of NNTP connections the probe is allowed to use. Avoids starving downloads.   | `20`        |
+| `stop_schedule`           | Optional cron expression, clock time, or interval. If a sweep is still running when this fires, it's stopped early. Leave empty to always run to completion. | — |
+| `stop_action`             | What to do with entries already found broken when `stop_schedule` cuts a sweep short: `""` (leave `auto_repair` as configured), `"repair"` (force a repair pass over them), or `"no_repair"` (skip repairing them this run). | `""` |
+
+### Stop schedule
+
+`stop_schedule` is useful when a sweep needs to finish (or get out of the way) before something else happens — for example, before your overnight maintenance window ends, or before peak-usage hours when probes would compete for bandwidth.
+
+- The sweep is cancelled at the next firing of `stop_schedule`, mid-probe if necessary. Entries not yet probed are left as they were before this sweep (their existing health and `next_check_due_at` are untouched, so they're picked up again on the next scheduled run).
+- The run is recorded as `completed` (not `cancelled`), with `cancel_reason` noting it was stopped by schedule.
+- `stop_action` only changes behavior for entries this sweep *did* manage to probe and found broken:
+  - `repair` (or unset, if `auto_repair` is already `true`) repairs them via the normal Arr delete + re-search flow.
+  - `no_repair` leaves them recorded as broken without triggering Arr repair, even if `auto_repair` is `true`.
+
+#### Multi-day coverage
+
+Each sweep probes due entries **oldest-checked-first** (never-checked entries first, then least-recently-checked, ...). Probing an entry updates its `last_checked_at` immediately, which moves it to the back of the queue for future sweeps.
+
+This means a sweep scheduled daily with a `stop_schedule` (e.g. `schedule: "0 0 * * *"`, `stop_schedule: "0 9 * * *"`) makes guaranteed forward progress across days, as long as `recheck_interval` is comfortably longer than the time it takes to cycle through the whole library:
+
+- Day 1, 00:00–09:00: probes the oldest N due entries (or however many fit in 9 hours), marking each one's `last_checked_at` as it finishes.
+- Day 1, 09:00: `stop_schedule` fires, the sweep stops. The remaining entries are untouched and stay oldest in the queue.
+- Day 2, 00:00: the next sweep's `due` set excludes everything probed on day 1 (their `last_checked_at` is now within `recheck_interval`), so it continues with the next-oldest N.
+- This repeats until the whole library has been probed within one `recheck_interval` window, then the cycle restarts from the oldest again.
+
+If a full sweep would take 2 days at 9 hours/day but `recheck_interval` is `168h` (1 week), this comfortably completes a full pass well before entries become due again. If `recheck_interval` is shorter than the time a full cycle actually takes, some entries may go stale before they're re-probed — increase `recheck_interval`, the daily window, or `workers` to compensate.
+
+
 
 ### Strategies
 
