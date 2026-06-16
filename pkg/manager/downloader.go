@@ -16,6 +16,7 @@ import (
 	grab "github.com/cavaliergopher/grab/v3"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/nntp"
 	"github.com/sirrobot01/decypharr/pkg/notifications"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sourcegraph/conc/pool"
@@ -561,7 +562,17 @@ func (d *Downloader) processTorrentDownload(entry *storage.Entry) (retErr error)
 }
 
 // processUsenetDownload downloads NZB files via parallel NNTP segment fetching
-func (d *Downloader) processUsenetDownload(entry *storage.Entry) error {
+func (d *Downloader) processUsenetDownload(entry *storage.Entry) (retErr error) {
+	// download() sets IsDownloading=true before entering here. Reset it on any
+	// error path so the scheduler can pick the entry up again on the next cycle
+	// instead of leaving it permanently stuck with IsDownloading=true.
+	defer func() {
+		if retErr != nil {
+			entry.IsDownloading = false
+			_ = d.manager.queue.Update(entry)
+		}
+	}()
+
 	if d.manager.usenet == nil {
 		return fmt.Errorf("usenet client not configured")
 	}
@@ -588,16 +599,25 @@ func (d *Downloader) processUsenetDownload(entry *storage.Entry) error {
 	// Track per-file progress so we can compute the global total across all files
 	fileProgress := make(map[string]int64)
 
-	p := pool.New().WithErrors().WithFirstError()
+	// fileErrs[i] is written only by goroutine i — no lock needed.
+	type fileErr struct {
+		permanent bool // true = 430 article-not-found; false = transient error
+		err       error
+	}
+	fileErrs := make([]fileErr, len(files))
+
+	p := pool.New()
 	if d.maxDownloads > 0 {
 		p = p.WithMaxGoroutines(d.maxDownloads)
 	}
-	for _, file := range files {
-		p.Go(func() error {
+	for i, file := range files {
+		i, file := i, file
+		p.Go(func() {
 			destPath := filepath.Join(downloadedFolder, file.Name)
 			destFile, err := os.Create(destPath)
 			if err != nil {
-				return fmt.Errorf("failed to create file %s: %w", file.Name, err)
+				fileErrs[i] = fileErr{err: fmt.Errorf("failed to create file %s: %w", file.Name, err)}
+				return
 			}
 			defer destFile.Close()
 
@@ -618,25 +638,67 @@ func (d *Downloader) processUsenetDownload(entry *storage.Entry) error {
 
 			if err := d.manager.usenet.Download(d.manager.ctx, entry.InfoHash, file.Name, destFile, progressCallback); err != nil {
 				_ = os.Remove(destPath)
-				return fmt.Errorf("failed to download %s: %w", file.Name, err)
+				fileErrs[i] = fileErr{
+					// 430 article-not-found is a permanent failure — the content
+					// is gone from all providers and retrying will not help.
+					permanent: nntp.IsArticleNotFoundError(err),
+					err:       fmt.Errorf("failed to download %s: %w", file.Name, err),
+				}
+				return
 			}
-
 			d.logger.Info().Msgf("Downloaded NZB file: %s", file.Name)
-			return nil
 		})
 	}
+	p.Wait()
 
-	err := p.Wait()
-
-	if err != nil {
-		entry.MarkAsError(err)
-		_ = d.manager.queue.Update(entry)
-		return fmt.Errorf("NZB download failed: %w", err)
+	// Tally outcomes and decide how to proceed.
+	var permanentCount, transientCount int
+	for i, fe := range fileErrs {
+		if fe.err == nil {
+			continue
+		}
+		if fe.permanent {
+			permanentCount++
+			// Mark the file as deleted so GetActiveFiles skips it on subsequent
+			// calls. The arr client will import the files that did download and
+			// re-search for the missing ones automatically.
+			files[i].Deleted = true
+			d.logger.Warn().Msgf("File permanently unavailable on Usenet, marking deleted: %s", files[i].Name)
+		} else {
+			transientCount++
+			d.logger.Error().Err(fe.err).Msgf("Transient error downloading NZB file")
+		}
 	}
 
-	d.completeEntry(entry)
-	d.logger.Info().Msgf("Downloaded all NZB files for %s", entry.Name)
-	return nil
+	successCount := len(files) - permanentCount - transientCount
+
+	switch {
+	case transientCount > 0:
+		// Network / timeout failures — clean up and let the scheduler retry.
+		_ = os.RemoveAll(downloadedFolder)
+		return fmt.Errorf("%d NZB file(s) failed with transient errors", transientCount)
+
+	case permanentCount > 0 && successCount == 0:
+		// Every file is permanently gone — clean up and mark error so the arr
+		// client can blocklist the release and trigger a fresh search.
+		_ = os.RemoveAll(downloadedFolder)
+		entry.MarkAsError(fmt.Errorf("all %d file(s) unavailable on Usenet", permanentCount))
+		_ = d.manager.queue.Update(entry)
+		return fmt.Errorf("NZB download failed: all files unavailable on Usenet")
+
+	case permanentCount > 0:
+		// Some files permanently missing but others downloaded successfully.
+		// Complete the entry with the available files; the arr client imports
+		// what is there and re-searches for the episodes/parts that are missing.
+		d.logger.Info().Msgf("Partial NZB download: %d/%d files available for %s", successCount, len(files), entry.Name)
+		d.completeEntry(entry)
+		return nil
+
+	default:
+		d.completeEntry(entry)
+		d.logger.Info().Msgf("Downloaded all NZB files for %s", entry.Name)
+		return nil
+	}
 }
 
 // processStrm creates symlinks for torrent files
