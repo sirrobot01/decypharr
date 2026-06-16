@@ -106,7 +106,7 @@ func (h *Handler) handleDownload(info *manager.FileInfo, w http.ResponseWriter, 
 		var streamErr *customerror.Error
 		if errors.As(err, &streamErr) {
 			if !streamErr.HeadersWritten {
-				http.Error(w, streamErr.Error(), http.StatusInternalServerError)
+				http.Error(w, streamErr.Error(), streamErr.StatusCode())
 			}
 			if !streamErr.IsSilent() {
 				h.logger.Rate(logKey).Error().Err(err).Msgf("Error streaming file: %s", logKey)
