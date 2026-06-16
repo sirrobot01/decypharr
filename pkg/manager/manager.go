@@ -583,6 +583,14 @@ func (m *Manager) DeleteEntry(infohash string, removePlacements bool) error {
 	if err := m.storage.Delete(infohash); err != nil {
 		return err
 	}
+
+	// Clean up NZB metadata so WebDAV stops serving the file path after deletion
+	if torr.Protocol == config.ProtocolNZB && m.usenet != nil {
+		if err := m.usenet.Delete(infohash); err != nil {
+			m.logger.Warn().Err(err).Str("infohash", infohash).Msg("Failed to delete NZB metadata after queue entry deletion")
+		}
+	}
+
 	// Refresh entry cache
 	m.RefreshEntries(true)
 	return nil

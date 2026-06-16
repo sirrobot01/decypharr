@@ -292,6 +292,13 @@ func (m *Manager) streamUsenet(ctx context.Context, entry *storage.Entry, filena
 		return retry.Unrecoverable(fmt.Errorf("file not found in entry: %s", filename))
 	}
 
+	// Check for permanent article-not-found failures BEFORE writing HTTP response headers.
+	// This lets the caller return a non-retryable status (410 Gone) instead of starting a
+	// response that the client will retry after the connection drops.
+	if err := m.usenet.IsFilePermanentlyFailed(entry.InfoHash, filename); err != nil {
+		return err
+	}
+
 	contentLength := end - start + 1
 
 	// Only build headers if onReady callback is provided (avoids allocations for DFS streaming)
