@@ -471,7 +471,17 @@ func (d *Downloader) processDownload(entry *storage.Entry) error {
 }
 
 // processTorrentDownload downloads files from debrid via HTTP
-func (d *Downloader) processTorrentDownload(entry *storage.Entry) error {
+func (d *Downloader) processTorrentDownload(entry *storage.Entry) (retErr error) {
+	// download() sets IsDownloading=true before entering here. If we return an
+	// error the flag must be cleared so processQueuedEntries can pick this entry
+	// up again on the next scheduler cycle instead of leaving it permanently stuck.
+	defer func() {
+		if retErr != nil {
+			entry.IsDownloading = false
+			_ = d.manager.queue.Update(entry)
+		}
+	}()
+
 	files := entry.GetActiveFiles()
 	d.logger.Info().Msgf("Downloading %d files...", len(files))
 
@@ -501,7 +511,10 @@ func (d *Downloader) processTorrentDownload(entry *storage.Entry) error {
 		_ = d.manager.queue.Update(entry)
 	}
 
-	// Resolve download links before spawning goroutines
+	// Resolve all download links before spawning goroutines.
+	// A single GetLink failure aborts the entire batch: silently skipping a
+	// file would mark the job complete with missing content and cause the arr
+	// client to think the season pack is fully imported (#315).
 	type downloadTask struct {
 		file *storage.File
 		link string
@@ -510,15 +523,13 @@ func (d *Downloader) processTorrentDownload(entry *storage.Entry) error {
 	for _, file := range files {
 		downloadLink, err := d.manager.linkService.GetLink(context.Background(), entry, file.Name)
 		if err != nil {
-			d.logger.Error().Msgf("Failed to get download link for %s: %v", file.Name, err)
-			continue
+			return fmt.Errorf("failed to get download link for %s: %w", file.Name, err)
 		}
 		tasks = append(tasks, downloadTask{file: file, link: downloadLink.DownloadLink})
 	}
 
-	// If no valid download links were obtained, return error instead of panic
 	if len(tasks) == 0 {
-		return fmt.Errorf("no valid download links available for %s", entry.Name)
+		return fmt.Errorf("no files to download for %s", entry.Name)
 	}
 
 	p := pool.New().WithErrors().WithFirstError()
