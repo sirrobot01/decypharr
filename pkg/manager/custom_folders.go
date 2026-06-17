@@ -35,6 +35,13 @@ const (
 	filterByFileCountLT   string = "file_count_lt"
 	filterByFilesRegex    string = "files_regex"
 	filterByNotFilesRegex string = "not_files_regex"
+
+	// Filters by qBit category (set by the *arr at torrent-add time, e.g.
+	// "tv-sonarr" / "radarr" / a Whisparr-side name). Lets virtual folders
+	// scope to "torrents added by a specific *arr" without any external
+	// tagging — Category is already a hot field on the in-memory IndexEntry.
+	filterByCategory    string = "category"
+	filterByNotCategory string = "not_category"
 )
 
 type CustomFolders struct {
@@ -83,7 +90,8 @@ func (m *Manager) GetCustomFolders() []string {
 
 // matchesFilter checks if a torrent matches all filters for a folder.
 // getFileNames is a lazy loader called only when files_regex/not_files_regex/file_count filters are needed.
-func (cf *CustomFolders) matchesFilter(folderName string, fileInfo os.FileInfo, addedTime time.Time, getFileNames func() []string) bool {
+// category is the qBit category set at torrent-add time (typically the *arr name); empty string means unknown.
+func (cf *CustomFolders) matchesFilter(folderName string, fileInfo os.FileInfo, addedTime time.Time, category string, getFileNames func() []string) bool {
 	filters, ok := cf.filters[folderName]
 	if !ok {
 		return false
@@ -136,7 +144,7 @@ func (cf *CustomFolders) matchesFilter(folderName string, fileInfo os.FileInfo, 
 	} else {
 		// Single type present — AND logic
 		for _, filter := range append(regexFilters, filesRegexFilters...) {
-			if !cf.checkSingleFilter(filter, fileInfo, addedTime, getFileNames) {
+			if !cf.checkSingleFilter(filter, fileInfo, addedTime, category, getFileNames) {
 				return false
 			}
 		}
@@ -144,7 +152,7 @@ func (cf *CustomFolders) matchesFilter(folderName string, fileInfo os.FileInfo, 
 
 	// All other filters AND match
 	for _, filter := range otherFilters {
-		if !cf.checkSingleFilter(filter, fileInfo, addedTime, getFileNames) {
+		if !cf.checkSingleFilter(filter, fileInfo, addedTime, category, getFileNames) {
 			return false
 		}
 	}
@@ -153,7 +161,7 @@ func (cf *CustomFolders) matchesFilter(folderName string, fileInfo os.FileInfo, 
 }
 
 // checkSingleFilter checks if a single filter matches
-func (cf *CustomFolders) checkSingleFilter(filter directoryFilter, fileInfo os.FileInfo, addedTime time.Time, getFileNames func() []string) bool {
+func (cf *CustomFolders) checkSingleFilter(filter directoryFilter, fileInfo os.FileInfo, addedTime time.Time, category string, getFileNames func() []string) bool {
 	name := fileInfo.Name()
 	size := fileInfo.Size()
 
@@ -202,6 +210,12 @@ func (cf *CustomFolders) checkSingleFilter(filter directoryFilter, fileInfo os.F
 			}
 		}
 		return true
+	case filterByCategory:
+		// Exact-match on the qBit category set at add-time. Useful for
+		// scoping a virtual folder to torrents from a specific *arr.
+		return category == filter.value
+	case filterByNotCategory:
+		return category != filter.value
 	default:
 		return false
 	}

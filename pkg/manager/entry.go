@@ -524,7 +524,7 @@ func (m *Manager) getCustomFolderChildren(folder string) []FileInfo {
 		if m.customFolders.matchesFilter(folder, &FileInfo{
 			name: meta.Name,
 			size: meta.Size,
-		}, meta.AddedOn, getFileNames) {
+		}, meta.AddedOn, meta.Category, getFileNames) {
 			if _, ok := seen[meta.Name]; ok {
 				return nil
 			}

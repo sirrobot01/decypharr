@@ -138,6 +138,7 @@ type EntryMetaInfo struct {
 	AddedOn  time.Time
 	Provider string
 	Protocol string
+	Category string // qBit category set at add time (typically the arr name: "tv-sonarr", "radarr", etc.)
 	Bad      bool
 }
 
@@ -152,6 +153,7 @@ func (s *Storage) ForEachMeta(fn func(*EntryMetaInfo) error) error {
 			AddedOn:  time.Unix(meta.AddedOn, 0),
 			Provider: meta.Provider,
 			Protocol: meta.Protocol,
+			Category: meta.Category,
 			Bad:      meta.Bad,
 		})
 	})
