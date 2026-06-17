@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/crypto"
@@ -265,7 +266,7 @@ func (sr *StreamingReader) readFromCache(ctx context.Context, p []byte, off int6
 			// pinning this segment specifically and retrying a few times to
 			// close the race where the segment is evicted again before we
 			// can read it back.
-			const maxRefetchAttempts = 3
+			const maxRefetchAttempts = 10
 			for attempt := 1; ; attempt++ {
 				sr.logger.Warn().Int("segment", segIdx).Int("attempt", attempt).
 					Msg("segment data missing after wait, re-fetching")
@@ -294,6 +295,9 @@ func (sr *StreamingReader) readFromCache(ctx context.Context, p []byte, off int6
 				if attempt >= maxRefetchAttempts {
 					return totalRead, fmt.Errorf("segment %d still missing after %d re-fetch attempts", segIdx, maxRefetchAttempts)
 				}
+				// Brief pause before next attempt to avoid hammering the cache
+				// in a tight loop and to let any in-flight eviction settle.
+				time.Sleep(100 * time.Millisecond)
 			}
 		}
 

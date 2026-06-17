@@ -207,13 +207,21 @@ func (sf *SegmentFetcher) doFetch(ctx context.Context, segIdx int) error {
 			return ctxErr
 		}
 
-		// Treat zero-byte articles as missing — the article exists on the
-		// server but its body is empty/corrupted after yEnc decoding.
+		// Treat zero-byte articles as a transient connection error rather
+		// than ArticleNotFound. A zero-byte yEnc decode can result from a
+		// partial/interrupted transfer, not necessarily a missing article —
+		// repair consistently finds these segments healthy on the provider.
+		// Using ErrorTypeArticleNotFound here causes ExecuteWithFailover to
+		// permanently exclude the whole backbone group and mark the segment
+		// StateFailed with no further retries, even though a fresh connection
+		// to the same or a different provider would succeed. Treating it as
+		// ErrorTypeConnection instead lets the normal retry+failover path
+		// recover from the transient failure without poisoning the backbone.
 		if n == 0 {
 			writer.Discard()
 			return &nntp.Error{
-				Type:    nntp.ErrorTypeArticleNotFound,
-				Message: "article produced no data after decoding",
+				Type:    nntp.ErrorTypeConnection,
+				Message: "article produced no data after decoding (transient empty body)",
 			}
 		}
 
