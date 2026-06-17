@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,7 +42,9 @@ func (m *Manager) restoreActiveDownloadJobs() {
 			_ = m.queue.Update(entry)
 			continue
 		}
-		entry.Status = debridTypes.TorrentStatusQueued
+		if job.DebridTorrent == nil && job.NZBMeta == nil {
+			entry.Status = debridTypes.TorrentStatusQueued
+		}
 		_ = m.queue.Update(entry)
 		if err := m.SubmitJob(job); err != nil {
 			entry.MarkAsError(err)
@@ -73,6 +76,15 @@ func (m *Manager) rebuildQueuedJob(entry *storage.Entry) (*Job, error) {
 }
 
 func (m *Manager) rebuildQueuedTorrentJob(entry *storage.Entry) (*Job, error) {
+	if entry.ActiveProvider != "" && entry.GetActiveProvider() != nil {
+		return &Job{
+			ID:             entry.InfoHash,
+			Type:           JobTypeTorrent,
+			Entry:          entry,
+			ResumeExisting: true,
+		}, nil
+	}
+
 	magnet, err := utils.GetMagnetInfo(entry.Magnet, m.config.AlwaysRmTrackerUrls)
 	if err != nil {
 		magnet = utils.ConstructMagnet(entry.InfoHash, entry.Name)
@@ -110,8 +122,29 @@ func (m *Manager) rebuildQueuedNZBJob(entry *storage.Entry) (*Job, error) {
 		return nil, err
 	}
 
+	name := entry.OriginalFilename
+	if name == "" {
+		name = entry.Name
+	}
+	meta, groups, err := m.usenet.ParseWithID(context.Background(), entry.InfoHash, name, content, entry.Category)
+	if err != nil {
+		return nil, fmt.Errorf("usenet parse failed: %w", err)
+	}
+	if entry.Magnet != "" && sourcePath == entry.Magnet {
+		m.usenet.RemoveStagedNZB(entry.Magnet)
+	}
+
+	entry.Magnet = ""
+	entry.Name = meta.Name
+	entry.OriginalFilename = meta.Name
+	entry.Size = meta.TotalSize
+	entry.Bytes = meta.TotalSize
+	entry.Status = debridTypes.TorrentStatusDownloading
+	entry.ActiveProvider = "usenet"
+	_ = entry.AddUsenetProvider(meta)
+
 	req := NewNZBRequest(
-		entry.OriginalFilename,
+		meta.Name,
 		downloadFolderForEntry(m.config.DownloadFolder, entry),
 		content,
 		m.arr.GetOrCreate(entry.Category),
@@ -124,6 +157,8 @@ func (m *Manager) rebuildQueuedNZBJob(entry *storage.Entry) (*Job, error) {
 	job := NewJob(JobTypeNZB, req)
 	job.ID = entry.InfoHash
 	job.Entry = entry
+	job.NZBMeta = meta
+	job.NZBGroups = groups
 	return job, nil
 }
 

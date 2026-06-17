@@ -578,16 +578,57 @@
 
                 <div class="tab-content hidden" data-tab-content="arrs">
                     <div class="space-y-6">
-                        <div class="flex justify-between items-center">
-                            <h2 class="text-2xl font-bold flex items-center">
-                                <i class="bi bi-collection mr-3 text-warning"></i>Arr Applications
-                            </h2>
-                            <button type="button" id="addArrBtn" class="btn btn-warning">
+                        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <h2 class="text-2xl font-bold flex items-center">
+                                    <i class="bi bi-collection mr-3 text-warning"></i>Arr Applications
+                                </h2>
+                                <p class="text-sm opacity-70 mt-1">Configure each connected Arr service and its import behavior.</p>
+                            </div>
+                            <button type="button" id="addArrBtn" class="btn btn-warning sm:shrink-0">
                                 <i class="bi bi-plus mr-2"></i>Add Arr Service
                             </button>
                         </div>
 
-                        <div id="arrConfigs" class="space-y-4">
+                        <div id="arrConfigs" class="grid grid-cols-2 gap-4">
+                        </div>
+
+                        <div class="rounded-box border border-base-300 bg-base-200/30 p-4 space-y-4">
+                            <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                                <div>
+                                    <h3 class="text-lg font-semibold flex items-center">
+                                        <i class="bi bi-funnel mr-2 text-warning"></i>Queue Cleanup Actions
+                                    </h3>
+                                    <p class="text-sm opacity-70 mt-1 max-w-4xl">
+                                        These actions apply to configured Arr services. Unmatched warnings stay in the queue,
+                                        and changes apply on the next cleanup cycle.
+                                    </p>
+                                </div>
+                                <span class="badge badge-outline badge-warning lg:shrink-0">Global policy</span>
+                            </div>
+
+                            <div class="grid grid-cols-1 xl:grid-cols-5 gap-4">
+                                <div class="xl:col-span-3 rounded-box border border-base-300 bg-base-100 overflow-hidden">
+                                    <div class="px-3 py-2 border-b border-base-300">
+                                        <h4 class="font-medium text-sm">Known issues</h4>
+                                        <p class="text-xs opacity-60 mt-1">Choose the action for each built-in queue warning.</p>
+                                    </div>
+                                    <div id="queueCleanupCatalog" class="divide-y divide-base-200"></div>
+                                </div>
+
+                                <div class="xl:col-span-2 rounded-box border border-base-300 bg-base-100 p-3 space-y-3">
+                                    <div class="flex items-center justify-between gap-3">
+                                        <div>
+                                            <h4 class="font-medium text-sm">Custom rules</h4>
+                                            <p class="text-xs opacity-60 mt-1">Match status-message text after known issues.</p>
+                                        </div>
+                                        <button type="button" id="addQueueCleanupRuleBtn" class="btn btn-sm btn-ghost shrink-0">
+                                            <i class="bi bi-plus mr-1"></i>Add
+                                        </button>
+                                    </div>
+                                    <div id="queueCleanupCustom" class="space-y-2"></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

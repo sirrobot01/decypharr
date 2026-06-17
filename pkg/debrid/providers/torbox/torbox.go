@@ -263,7 +263,9 @@ func (tb *Torbox) getTorboxStatus(status string, finished bool) types.TorrentSta
 	downloading := []string{"paused", "downloading",
 		"checkingResumeData", "metaDL", "pausedUP", "queuedUP", "checkingUP",
 		"forcedUP", "allocating", "downloading", "metaDL", "pausedDL",
-		"queuedDL", "checkingDL", "forcedDL", "checkingResumeData", "moving"}
+		"queuedDL", "checkingDL", "forcedDL", "checkingResumeData", "moving",
+		"incomplete",
+	}
 
 	downloaded := []string{
 		"completed", "cached", "uploading", "downloaded",

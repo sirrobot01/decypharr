@@ -48,6 +48,37 @@ class ConfigManager {
         this.refs.addArrBtn.addEventListener('click', () => this.addArrConfig());
         this.refs.addVirtualFolderBtn.addEventListener('click', () => this.addVirtualFolder());
         this.refs.addUsenetProviderBtn.addEventListener('click', () => this.addUsenetProvider());
+
+        const addRuleBtn = document.getElementById('addQueueCleanupRuleBtn');
+        if (addRuleBtn) addRuleBtn.addEventListener('click', () => this.addQueueCleanupCustomRow());
+    }
+
+    // Display labels for the built-in queue-cleanup catalog. IDs MUST match
+    // config.DefaultQueueCleanupRules / catalogMatchers on the backend.
+    get queueCleanupCatalog() {
+        return [
+            {id: 'failed_download', label: 'Failed download'},
+            {id: 'title_mismatch', label: 'Title mismatch (automatic import not possible)'},
+            {id: 'matched_by_id', label: 'Release matched to series/movie by ID'},
+            {id: 'unable_to_parse', label: 'Unable to parse download'},
+            {id: 'no_eligible_files', label: 'No files eligible for import'},
+            {id: 'episodes_missing', label: 'Episodes missing / not imported from release'},
+            {id: 'file_empty', label: 'Downloaded file is empty'},
+            {id: 'invalid_local_path', label: 'Invalid local path (remote path mapping)'},
+            {id: 'not_grabbed', label: 'Not grabbed by the arr / no category'},
+        ];
+    }
+
+    queueCleanupActionOptions(selected) {
+        const opts = [
+            {value: '', label: 'Ignore (leave in queue)'},
+            {value: 'import', label: 'Force import'},
+            {value: 'blacklist', label: 'Blacklist only'},
+            {value: 'blacklist_research', label: 'Blacklist + research'},
+        ];
+        return opts.map(o =>
+            `<option value="${o.value}" ${o.value === (selected || '') ? 'selected' : ''}>${o.label}</option>`
+        ).join('');
     }
 
     async loadConfiguration() {
@@ -90,6 +121,9 @@ class ConfigManager {
         if (config.arrs && Array.isArray(config.arrs)) {
             config.arrs.forEach(arr => this.addArrConfig(arr));
         }
+
+        // Load queue cleanup rules
+        this.populateQueueCleanup(config.queue_cleanup);
 
         // Load rclone config
         this.populateMountSettings(config.mount);
@@ -948,15 +982,15 @@ class ConfigManager {
 
         return `
             <div class="card bg-base-100 border border-base-300 shadow-sm arr-config ${isAutoDetected ? 'border-info' : ''}" data-index="${index}">
-                <div class="card-body">
-                    <div class="flex justify-between items-start mb-4">
-                        <h3 class="card-title text-lg">
-                            <i class="bi bi-collection mr-2 text-warning"></i>
-                            Arr Service #${index + 1}
-                            ${isAutoDetected ? '<div class="badge badge-info badge-sm ml-2">Auto-detected</div>' : ''}
+                <div class="card-body p-4 gap-4">
+                    <div class="flex items-start justify-between gap-3">
+                        <h3 class="card-title text-base leading-tight min-w-0">
+                            <i class="bi bi-collection text-warning shrink-0"></i>
+                            <span class="min-w-0 break-words">Arr Service #${index + 1}</span>
+                            ${isAutoDetected ? '<span class="badge badge-info badge-sm shrink-0">Auto-detected</span>' : ''}
                         </h3>
                         ${!isAutoDetected ? `
-                            <button type="button" class="btn btn-error btn-sm" onclick="this.closest('.arr-config').remove();">
+                            <button type="button" class="btn btn-error btn-sm btn-square shrink-0" onclick="this.closest('.arr-config').remove();">
                                 <i class="bi bi-trash"></i>
                             </button>
                         ` : ''}
@@ -964,10 +998,10 @@ class ConfigManager {
 
                     <input type="hidden" name="arr[${index}].source" value="${data.source || ''}">
 
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 gap-3">
                         <div>
                             <label class="label" for="arr[${index}].name">
-                                <span class=" font-medium">Service Name</span>
+                                <span class="font-medium">Service Name</span>
                             </label>
                             <input type="text" class="input ${isAutoDetected ? 'input-disabled' : ''}"
                                    name="arr[${index}].name" id="arr[${index}].name"
@@ -977,7 +1011,7 @@ class ConfigManager {
 
                         <div>
                             <label class="label" for="arr[${index}].host">
-                                <span class=" font-medium">Host URL</span>
+                                <span class="font-medium">Host URL</span>
                             </label>
                             <input type="url" class="input ${isAutoDetected ? 'input-disabled' : ''}"
                                    name="arr[${index}].host" id="arr[${index}].host"
@@ -987,7 +1021,7 @@ class ConfigManager {
 
                         <div>
                             <label class="label" for="arr[${index}].token">
-                                <span class=" font-medium">API Token</span>
+                                <span class="font-medium">API Token</span>
                             </label>
                             <div class="password-toggle-container">
                                 <input type="password" class="input input-has-toggle ${isAutoDetected ? 'input-disabled' : ''}"
@@ -1002,7 +1036,7 @@ class ConfigManager {
 
                         <div>
                             <label class="label" for="arr[${index}].selected_debrid">
-                                <span class=" font-medium">Preferred Provider</span>
+                                <span class="font-medium">Preferred Provider</span>
                             </label>
                             <select class="select w-full" name="arr[${index}].selected_debrid" id="arr[${index}].selected_debrid">
                                 <option value="">Auto Select</option>
@@ -1012,28 +1046,20 @@ class ConfigManager {
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-3 gap-4">
-                        <div>
-                            <label class="label cursor-pointer justify-start gap-2">
-                                <input type="checkbox" class="checkbox checkbox-sm checkbox-primary"
-                                       name="arr[${index}].cleanup" id="arr[${index}].cleanup">
-                                <span class=" text-sm">Cleanup Queue</span>
-                            </label>
-                        </div>
-
-                        <div>
-                            <label class="label cursor-pointer justify-start gap-2">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <div class="rounded-box bg-base-200/50 px-3 py-2">
+                            <label class="label cursor-pointer justify-start gap-2 p-0">
                                 <input type="checkbox" class="checkbox checkbox-sm checkbox-primary"
                                        name="arr[${index}].skip_repair" id="arr[${index}].skip_repair">
-                                <span class=" text-sm">Skip Repair</span>
+                                <span class="text-sm leading-tight">Skip Repair</span>
                             </label>
                         </div>
 
-                        <div>
-                            <label class="label cursor-pointer justify-start gap-2">
+                        <div class="rounded-box bg-base-200/50 px-3 py-2">
+                            <label class="label cursor-pointer justify-start gap-2 p-0">
                                 <input type="checkbox" class="checkbox checkbox-sm checkbox-primary"
                                        name="arr[${index}].download_uncached" id="arr[${index}].download_uncached">
-                                <span class=" text-sm">Download Uncached</span>
+                                <span class="text-sm leading-tight">Download Uncached</span>
                             </label>
                         </div>
                     </div>
@@ -1172,6 +1198,9 @@ class ConfigManager {
 
             // Arr configurations
             arrs: this.collectArrConfigs(),
+
+            // Global arr queue-cleanup policy
+            queue_cleanup: this.collectQueueCleanup(),
 
             // Mount configuration
             mount: this.collectMountConfig(),
@@ -1339,13 +1368,12 @@ class ConfigManager {
             const nameInput = getField('name');
             const hostInput = getField('host');
             const tokenInput = getField('token');
-            const cleanupInput = getField('cleanup');
             const skipRepairInput = getField('skip_repair');
             const downloadUncachedInput = getField('download_uncached');
             const selectedDebridInput = getField('selected_debrid');
             const sourceInput = getField('source');
 
-            if (!nameInput || !hostInput || !tokenInput || !cleanupInput || !skipRepairInput || !downloadUncachedInput || !selectedDebridInput || !sourceInput) {
+            if (!nameInput || !hostInput || !tokenInput || !skipRepairInput || !downloadUncachedInput || !selectedDebridInput || !sourceInput) {
                 return;
             }
 
@@ -1353,7 +1381,6 @@ class ConfigManager {
                 name: nameInput.value,
                 host: hostInput.value,
                 token: tokenInput.value,
-                cleanup: cleanupInput.checked,
                 skip_repair: skipRepairInput.checked,
                 download_uncached: downloadUncachedInput.checked,
                 selected_debrid: selectedDebridInput.value,
@@ -1366,6 +1393,79 @@ class ConfigManager {
         });
 
         return arrs;
+    }
+
+    populateQueueCleanup(queueCleanup) {
+        const catalogEl = document.getElementById('queueCleanupCatalog');
+        const customEl = document.getElementById('queueCleanupCustom');
+        if (!catalogEl || !customEl) return;
+
+        const rules = (queueCleanup && Array.isArray(queueCleanup.rules)) ? queueCleanup.rules : [];
+
+        // Saved actions for catalog rules, keyed by id.
+        const savedActions = {};
+        const customRules = [];
+        rules.forEach(r => {
+            if (r && r.id) {
+                savedActions[r.id] = r.action || '';
+            } else if (r && (r.match || '').trim()) {
+                customRules.push(r);
+            }
+        });
+
+        const esc = window.decypharrUtils.escapeHtml;
+        catalogEl.innerHTML = this.queueCleanupCatalog.map(c => {
+            const action = c.id in savedActions ? savedActions[c.id] : '';
+            return `
+                <div class="grid grid-cols-1 md:grid-cols-5 gap-2 md:items-center px-3 py-3 even:bg-base-200/40" data-rule-id="${c.id}">
+                    <span class="md:col-span-3 text-sm leading-snug min-w-0">${esc(c.label)}</span>
+                    <select class="md:col-span-2 select select-sm w-full queue-cleanup-action">
+                        ${this.queueCleanupActionOptions(action)}
+                    </select>
+                </div>`;
+        }).join('');
+
+        customEl.innerHTML = '';
+        customRules.forEach(r => this.addQueueCleanupCustomRow(r.match, r.action));
+    }
+
+    addQueueCleanupCustomRow(match = '', action = '') {
+        const customEl = document.getElementById('queueCleanupCustom');
+        if (!customEl) return;
+        const esc = window.decypharrUtils.escapeHtml;
+        const row = document.createElement('div');
+        row.className = 'grid grid-cols-1 md:grid-cols-12 gap-2 queue-cleanup-custom-row';
+        row.innerHTML = `
+            <input type="text" class="md:col-span-7 input input-sm w-full min-w-0 queue-cleanup-match"
+                   placeholder="text in status message, e.g. stalled"
+                   value="${esc(match)}">
+            <select class="md:col-span-4 select select-sm w-full queue-cleanup-action">
+                ${this.queueCleanupActionOptions(action)}
+            </select>
+            <button type="button" class="md:col-span-1 btn btn-sm btn-square btn-ghost text-error queue-cleanup-remove" aria-label="Remove custom queue cleanup rule" title="Remove rule">
+                <i class="bi bi-trash"></i>
+            </button>`;
+        row.querySelector('.queue-cleanup-remove').addEventListener('click', () => row.remove());
+        customEl.appendChild(row);
+    }
+
+    collectQueueCleanup() {
+        const rules = [];
+
+        document.querySelectorAll('#queueCleanupCatalog [data-rule-id]').forEach(rowEl => {
+            const id = rowEl.getAttribute('data-rule-id');
+            const action = rowEl.querySelector('.queue-cleanup-action')?.value || '';
+            rules.push({id, action});
+        });
+
+        document.querySelectorAll('#queueCleanupCustom .queue-cleanup-custom-row').forEach(rowEl => {
+            const match = (rowEl.querySelector('.queue-cleanup-match')?.value || '').trim();
+            if (!match) return;
+            const action = rowEl.querySelector('.queue-cleanup-action')?.value || '';
+            rules.push({match, action});
+        });
+
+        return {rules};
     }
 
     collectMountConfig() {

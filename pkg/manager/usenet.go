@@ -13,7 +13,7 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/usenet/parser"
 )
 
-// AddNewNZB adds an NZB to the unified active-download queue.
+// AddNewNZB parses an NZB before entering the active-download queue.
 func (m *Manager) AddNewNZB(ctx context.Context, req *ImportRequest) (string, error) {
 	if m.usenet == nil {
 		return "", fmt.Errorf("usenet not configured")
@@ -30,20 +30,21 @@ func (m *Manager) AddNewNZB(ctx context.Context, req *ImportRequest) (string, er
 		Str("category", req.Arr.Name).
 		Msg("Adding new NZB to usenet")
 
-	stagedPath, err := m.usenet.StageNZB(req.Id, req.NZBContent)
+	meta, groups, err := m.usenet.ParseWithID(ctx, req.Id, req.Name, req.NZBContent, req.Arr.Name)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("usenet parse failed: %w", err)
 	}
 
 	entry := &storage.Entry{
-		InfoHash:         req.Id,
-		Name:             req.Name,
-		OriginalFilename: req.Name,
+		InfoHash:         meta.ID,
+		Name:             meta.Name,
+		OriginalFilename: meta.Name,
+		Size:             meta.TotalSize,
 		Protocol:         config.ProtocolNZB,
-		Magnet:           stagedPath,
+		Bytes:            meta.TotalSize,
 		Category:         req.Arr.Name,
 		SavePath:         filepath.Join(req.DownloadFolder, req.Arr.Name),
-		Status:           debridTypes.TorrentStatusQueued,
+		Status:           debridTypes.TorrentStatusDownloading,
 		State:            storage.EntryStateDownloading,
 		Progress:         0,
 		Action:           req.Action,
@@ -58,54 +59,44 @@ func (m *Manager) AddNewNZB(ctx context.Context, req *ImportRequest) (string, er
 	}
 
 	entry.ContentPath = entry.DownloadPath()
+	entry.ActiveProvider = "usenet"
+	_ = entry.AddUsenetProvider(meta)
 	if err := m.queue.Add(entry); err != nil {
-		m.usenet.RemoveStagedNZB(stagedPath)
 		return "", fmt.Errorf("failed to add nzb to queue: %w", err)
 	}
 
-	req.Status = "queued"
+	req.Status = "started"
 	job := NewJob(JobTypeNZB, req)
 	job.ID = entry.InfoHash
 	job.Entry = entry
+	job.NZBMeta = meta
+	job.NZBGroups = groups
 	if err := m.SubmitJob(job); err != nil {
-		m.usenet.RemoveStagedNZB(stagedPath)
 		entry.MarkAsError(err)
 		_ = m.queue.Update(entry)
 		return "", fmt.Errorf("failed to queue NZB: %w", err)
 	}
-	return req.Id, nil
+	return meta.ID, nil
 }
 
 func (m *Manager) processNZBJob(ctx context.Context, job *Job) error {
-	if job == nil || job.Request == nil || job.Entry == nil {
+	if job == nil || job.Entry == nil {
 		return fmt.Errorf("invalid NZB job")
 	}
 	if _, err := m.queue.GetTorrent(job.Entry.InfoHash); err != nil {
 		return nil
 	}
-
-	req := job.Request
-	meta, groups, err := m.usenet.ParseWithID(ctx, job.Entry.InfoHash, req.Name, req.NZBContent, req.Arr.Name)
-	if err != nil {
-		return fmt.Errorf("usenet parse failed: %w", err)
+	if job.NZBMeta == nil {
+		if job.Request == nil {
+			m.waitForDownloadCompletion(ctx, job.Entry)
+			return nil
+		}
+		return fmt.Errorf("parsed NZB metadata missing")
 	}
-	m.usenet.RemoveStagedNZB(job.Entry.Magnet)
-	job.Entry.Magnet = ""
-
-	job.NZBMeta = meta
-	job.NZBGroups = groups
-	job.Entry.Name = meta.Name
-	job.Entry.OriginalFilename = meta.Name
-	job.Entry.Size = meta.TotalSize
-	job.Entry.Bytes = meta.TotalSize
-	job.Entry.Status = debridTypes.TorrentStatusDownloading
-	job.Entry.ActiveProvider = "usenet"
-	_ = job.Entry.AddUsenetProvider(meta)
-	if err := m.queue.Update(job.Entry); err != nil {
-		return fmt.Errorf("failed to update queued NZB: %w", err)
+	if job.Request != nil {
+		job.Request.Status = "started"
 	}
-	req.Status = "started"
-	return m.processNewNzb(ctx, job.Entry, meta, groups)
+	return m.processNewNzb(ctx, job.Entry, job.NZBMeta, job.NZBGroups)
 }
 
 func (m *Manager) processNZB(ctx context.Context, entry *storage.Entry, metadata *storage.NZB) error {

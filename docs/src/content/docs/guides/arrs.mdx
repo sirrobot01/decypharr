@@ -130,6 +130,55 @@ Set in `config.json`:
 }
 ```
 
+## Queue Cleanup
+
+Sonarr/Radarr queues often get stuck on releases that can't import automatically — failed
+grabs, title mismatches, empty files, and so on. Decypharr watches every connected Arr's
+**Activity → Queue** and resolves these for you, so they don't pile up and block your library.
+
+You configure this **once, globally** (it is not per-Arr) under
+**Settings → Arrs → Queue Cleanup Actions** in the Web UI. Each kind of problem maps to one of
+four actions:
+
+| Action                   | What it does                                                            |
+|--------------------------|------------------------------------------------------------------------|
+| **Ignore**               | Leave it in the queue (default for ambiguous cases)                     |
+| **Force import**         | Try a manual import of the downloaded files                            |
+| **Blacklist only**       | Blocklist + remove the release, but **don't** grab a replacement       |
+| **Blacklist + research** | Blocklist + remove the release **and** search for a new one            |
+
+### Known issues
+
+The UI ships with a catalog of the common Sonarr/Radarr warnings, each with a sensible
+default you can override from a dropdown:
+
+| Issue                                            | Default action       |
+|--------------------------------------------------|----------------------|
+| Failed download                                  | Blacklist + research |
+| Title mismatch (automatic import not possible)   | Force import         |
+| Release matched to series/movie by ID            | Force import         |
+| Unable to parse download                         | Blacklist + research |
+| No files eligible for import                     | Blacklist + research |
+| Episodes missing / not imported from release     | Blacklist + research |
+| Downloaded file is empty                         | Blacklist + research |
+| Invalid local path (remote path mapping)         | Ignore               |
+| Not grabbed by the Arr / no category             | Ignore               |
+
+### Custom rules
+
+Need to handle something not in the list? Click **Add custom rule** and enter any text that
+appears in the queue item's status message (case-insensitive) plus the action to take. For
+example, match `stalled with no connections` and set **Blacklist + research**.
+
+Known issues are always evaluated before custom rules, and the **first match wins**. Anything
+that doesn't match any rule is left in the queue. Changes take effect on the next cleanup
+cycle — no restart needed.
+
+:::note
+The raw `queue_cleanup` config shape and the full list of catalog rule IDs are documented in
+[Configuration → Queue Cleanup](../configuration/#queue-cleanup).
+:::
+
 ## Auto-Detection
 
 Decypharr can auto-detect Arrs that connect to it:

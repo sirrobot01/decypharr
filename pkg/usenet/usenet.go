@@ -1014,19 +1014,24 @@ func (u *Usenet) markAsProcessing(nzb *storage.NZB) error {
 
 func (u *Usenet) markAsCompleted(nzb *storage.NZB) error {
 	nzb.Status = NZBStatusCompleted
+
+	// The parsed segment map (.meta) is the only artifact needed for streaming
+	// and repair, so the raw .nzb source file is dead weight once the NZB
+	// completes — delete it (and its processing marker) immediately. Path is
+	// cleared so a later Delete()/watch scan ignores the now-absent file; with
+	// the source gone there is nothing for ClaimNewNZBs to re-import, so no
+	// .processed marker is needed.
+	if nzb.Path != "" {
+		if err := os.Remove(nzb.Path); err != nil && !os.IsNotExist(err) {
+			u.logger.Warn().Err(err).Str("path", nzb.Path).Msg("Failed to delete NZB source file after completion")
+		}
+		_ = os.Remove(nzb.Path + ".processing")
+		nzb.Path = ""
+	}
+
 	if err := u.nzbStorage.AddNZB(nzb); err != nil {
 		return fmt.Errorf("failed to save NZB to storage: %w", err)
 	}
-
-	// Mark as processed by creating a marker file with the NZB ID
-	markerPath := nzb.Path + ".processed"
-	if err := os.WriteFile(markerPath, []byte(nzb.ID), 0644); err != nil {
-		return fmt.Errorf("failed to create processed marker: %w", err)
-	}
-
-	// Remove processing marker if exists
-	processingMarker := nzb.Path + ".processing"
-	_ = os.Remove(processingMarker)
 	return nil
 }
 

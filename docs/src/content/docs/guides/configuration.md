@@ -301,7 +301,6 @@ See the [Health Checker & Repair guide](/guides/repair/) for the full model, API
       "name": "Sonarr",
       "host": "http://sonarr:8989",
       "token": "API_TOKEN",
-      "cleanup": true,
       "skip_repair": false,
       "download_uncached": false,
       "selected_debrid": ""
@@ -315,11 +314,62 @@ See the [Health Checker & Repair guide](/guides/repair/) for the full model, API
 | `name`              | Display name                     | Required    |
 | `host`              | Arr URL                          | Required    |
 | `token`             | Arr API key                      | Required    |
-| `cleanup`           | Auto-remove completed downloads  | `true`      |
 | `skip_repair`       | Skip repair for this Arr         | `false`     |
 | `download_uncached` | Download uncached torrents       | `false`     |
 | `selected_debrid`   | Force specific Debrid provider   | `""` (auto) |
 | `source`            | Config source (`auto`, `config`) | `config`    |
+
+## Queue Cleanup
+
+Decypharr periodically scans each connected Arr's **Activity → Queue** and acts on stuck or
+failed downloads based on a global, rules-driven policy. This is configured once (not per-Arr)
+under **Settings → Arrs → Queue Cleanup Actions** in the Web UI, and stored in the
+`queue_cleanup` block of `config.json`. See the [Arrs guide](../arrs/#queue-cleanup) for a
+walkthrough.
+
+```json
+{
+  "queue_cleanup": {
+    "rules": [
+      { "id": "failed_download", "action": "blacklist_research" },
+      { "id": "title_mismatch", "action": "import" },
+      { "id": "no_eligible_files", "action": "blacklist_research" },
+      { "match": "stalled with no connections", "action": "blacklist" }
+    ]
+  }
+}
+```
+
+Each rule resolves a queue issue to one **action**:
+
+| Action               | Effect                                                                    |
+|----------------------|---------------------------------------------------------------------------|
+| `""` (ignore)        | Leave the item in the queue, do nothing                                    |
+| `import`             | Force a manual import of the downloaded files                             |
+| `blacklist`          | Blocklist the release and remove it, **without** searching for a new one  |
+| `blacklist_research` | Blocklist the release, remove it, and trigger a re-search                  |
+
+Rules are evaluated top-to-bottom, **first match wins**. Built-in catalog rules (those with an
+`id`) always run before custom rules (those with a `match`), and unmatched warnings/errors are
+left untouched. Changes apply on the next cleanup cycle — **no restart required**.
+
+### Built-in catalog rules
+
+| `id`                 | Triggered by                                            | Default action       |
+|----------------------|---------------------------------------------------------|----------------------|
+| `failed_download`    | Download reported as failed                             | `blacklist_research` |
+| `title_mismatch`     | Title mismatch; automatic import not possible           | `import`             |
+| `matched_by_id`      | Release matched to series/movie by ID                   | `import`             |
+| `unable_to_parse`    | Unable to parse the download                            | `blacklist_research` |
+| `no_eligible_files`  | No files eligible for import                            | `blacklist_research` |
+| `episodes_missing`   | Episodes not imported / missing from the release        | `blacklist_research` |
+| `file_empty`         | Downloaded file is empty                                | `blacklist_research` |
+| `invalid_local_path` | Invalid local path (needs a Remote Path Mapping)        | `""` (ignore)        |
+| `not_grabbed`        | Not grabbed by the Arr / no category                    | `""` (ignore)        |
+
+For catalog rules you only set `action`; the match text is fixed. **Custom rules** use a
+`match` field instead of an `id` — a case-insensitive substring tested against the queue
+item's status message text (e.g. `"stalled with no connections"`).
 
 ## Environment Variables
 

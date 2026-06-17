@@ -131,9 +131,6 @@ func (c *Config) applyEnvOverrides() {
 			if token := getEnv(prefix + "TOKEN"); token != "" {
 				c.Arrs[i].Token = token
 			}
-			if cleanup := getEnv(prefix + "CLEANUP"); cleanup != "" {
-				c.Arrs[i].Cleanup = parseBool(cleanup)
-			}
 		}
 	}
 

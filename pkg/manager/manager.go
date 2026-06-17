@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -16,7 +15,6 @@ import (
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/customerror"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/arr"
@@ -268,7 +266,10 @@ func (m *Manager) initJobQueue() {
 }
 
 func (m *Manager) processJob(ctx context.Context, job *Job) {
-	if job != nil && job.Entry != nil && job.Request == nil {
+	if job == nil {
+		return
+	}
+	if job.Entry != nil && job.Request == nil && job.DebridTorrent == nil && job.NZBMeta == nil && !job.ResumeExisting {
 		m.waitForDownloadCompletion(ctx, job.Entry)
 		return
 	}
@@ -287,8 +288,7 @@ func (m *Manager) processJob(ctx context.Context, job *Job) {
 		if ctx.Err() != nil {
 			return
 		}
-		var customErr *customerror.Error
-		if errors.As(err, &customErr) && customErr.Code == "too_many_active_downloads" {
+		if isTooManyActiveDownloads(err) {
 			if job.Entry != nil {
 				job.Entry.Status = debridTypes.TorrentStatusQueued
 				_ = m.queue.Update(job.Entry)

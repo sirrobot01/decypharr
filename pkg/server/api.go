@@ -67,7 +67,7 @@ func (s *Server) handleAddContent(w http.ResponseWriter, r *http.Request) {
 	_arr := s.manager.Arr().Get(arrName)
 	if _arr == nil {
 		// These are not found in the config. They are throwaway arrs.
-		_arr = arr.New(arrName, "", "", false, false, downloadUncached, "", "")
+		_arr = arr.New(arrName, "", "", false, downloadUncached, "", "")
 	}
 
 	// Unified task type for all content types

@@ -75,7 +75,6 @@ type Arr struct {
 	Name             string `json:"name,omitempty"`
 	Host             string `json:"host,omitempty"`
 	Token            string `json:"token,omitempty"`
-	Cleanup          bool   `json:"cleanup,omitempty"`
 	SkipRepair       bool   `json:"skip_repair,omitempty"`
 	DownloadUncached *bool  `json:"download_uncached,omitempty"`
 	SelectedDebrid   string `json:"selected_debrid,omitempty"`
@@ -83,7 +82,91 @@ type Arr struct {
 }
 
 func (a Arr) IsZero() bool {
-	return a.Name == "" && a.Host == "" && a.Token == "" && !a.Cleanup && !a.SkipRepair && a.DownloadUncached == nil && a.SelectedDebrid == "" && a.Source == ""
+	return a.Name == "" && a.Host == "" && a.Token == "" && !a.SkipRepair && a.DownloadUncached == nil && a.SelectedDebrid == "" && a.Source == ""
+}
+
+// QueueCleanup is the global policy that drives CleanupQueue. It maps
+// Sonarr/Radarr queue warnings/errors to an action.
+type QueueCleanup struct {
+	Rules []QueueCleanupRule `json:"rules,omitempty"`
+}
+
+// QueueCleanupRule maps a queue issue to a cleanup action.
+//
+// Catalog rules carry a non-empty ID whose match semantics are hardcoded in the
+// arr package (keyed by ID) — for these the user only customizes Action, and
+// Match is informational/display only. Custom rules have an empty ID and match
+// Match as a case-insensitive substring of the queue item's statusMessages text.
+type QueueCleanupRule struct {
+	ID     string `json:"id,omitempty"`     // catalog key; "" = user custom rule
+	Match  string `json:"match,omitempty"`  // custom: substring; catalog: display text
+	Action string `json:"action,omitempty"` // "" (ignore) | "import" | "blacklist" | "blacklist_research"
+}
+
+// DefaultQueueCleanupRules returns the built-in catalog of known Servarr queue
+// issues with sensible default actions. The order is significant: resolution is
+// first-match-wins, so more specific entries should precede broader ones.
+func DefaultQueueCleanupRules() []QueueCleanupRule {
+	return []QueueCleanupRule{
+		{ID: "failed_download", Match: "Failed download", Action: "blacklist_research"},
+		{ID: "title_mismatch", Match: "Title mismatch; automatic import is not possible", Action: "import"},
+		{ID: "matched_by_id", Match: "Matched to series/movie by ID", Action: "import"},
+		{ID: "unable_to_parse", Match: "Unable to parse download", Action: "blacklist_research"},
+		{ID: "no_eligible_files", Match: "No files found are eligible for import", Action: "blacklist_research"},
+		{ID: "episodes_missing", Match: "Episodes not imported or missing from the release", Action: "blacklist_research"},
+		{ID: "file_empty", Match: "Downloaded file is empty", Action: "blacklist_research"},
+		{ID: "invalid_local_path", Match: "Not a valid local path (remote path mapping)", Action: ""},
+		{ID: "not_grabbed", Match: "Not grabbed by the arr / no category", Action: ""},
+	}
+}
+
+// mergeQueueCleanupRules reconciles a stored rule set with the current catalog.
+// An empty set is seeded with the defaults. Otherwise the user's action choices
+// for existing catalog IDs and all custom rules are preserved, while any catalog
+// entries the user has never seen (e.g. added in a newer release) are appended
+// with their default action. Catalog display text is refreshed from the catalog.
+func mergeQueueCleanupRules(rules []QueueCleanupRule) []QueueCleanupRule {
+	defaults := DefaultQueueCleanupRules()
+	if len(rules) == 0 {
+		return defaults
+	}
+
+	stored := make(map[string]QueueCleanupRule, len(rules))
+	out := make([]QueueCleanupRule, 0, len(rules)+len(defaults))
+	for _, r := range rules {
+		if r.ID == "" {
+			// Custom rule: keep as-is (drop empties defensively).
+			if strings.TrimSpace(r.Match) != "" {
+				out = append(out, r)
+			}
+			continue
+		}
+		stored[r.ID] = r
+	}
+
+	// Emit the catalog in canonical order, preserving stored actions.
+	for _, d := range defaults {
+		if s, ok := stored[d.ID]; ok {
+			d.Action = s.Action
+		}
+		out = append(out, d)
+	}
+
+	// out currently holds [customs..., catalog...]; reorder so catalog rules
+	// come first. First-match-wins then favors the specific known issues over
+	// broad user substrings.
+	catalogFirst := make([]QueueCleanupRule, 0, len(out))
+	for _, r := range out {
+		if r.ID != "" {
+			catalogFirst = append(catalogFirst, r)
+		}
+	}
+	for _, r := range out {
+		if r.ID == "" {
+			catalogFirst = append(catalogFirst, r)
+		}
+	}
+	return catalogFirst
 }
 
 type CustomFolders struct {
@@ -179,6 +262,9 @@ type Config struct {
 	SkipAutoMove bool   `json:"skip_auto_move,omitempty"`
 
 	Repair RepairConfig `json:"repair,omitzero"`
+
+	// QueueCleanup is the global arr queue-cleanup policy (see CleanupQueue).
+	QueueCleanup QueueCleanup `json:"queue_cleanup,omitempty"`
 }
 
 func (c *Config) JsonFile() string {
@@ -456,6 +542,8 @@ func (c *Config) setDefaults() {
 		c.Retries = 3 // Default to 3 consecutive errors before switching
 	}
 
+	c.QueueCleanup.Rules = mergeQueueCleanupRules(c.QueueCleanup.Rules)
+
 	// Basic defaults
 	if c.URLBase == "" {
 		c.URLBase = "/"
@@ -640,6 +728,10 @@ func clearHotFields(c *Config) {
 	c.Retries = 0
 	c.SkipAutoMove = false
 	c.Repair = RepairConfig{}
+
+	// Queue cleanup rules are read live via config.Get() inside CleanupQueue,
+	// so changes apply on the next cleanup cycle without a restart.
+	c.QueueCleanup = QueueCleanup{}
 
 	// Deprecated, migrated into Manager fields above.
 	c.QBitTorrent = QBitTorrent{}
