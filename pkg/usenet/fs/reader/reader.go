@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/crypto"
@@ -261,14 +262,42 @@ func (sr *StreamingReader) readFromCache(ctx context.Context, p []byte, off int6
 		// No intermediate scratch buffer — zero extra allocation, zero amplification.
 		n, ok := sr.cache.ReadRangeInto(segIdx, segDataOffset, copyLen, p[outOffset:outOffset+copyLen])
 		if !ok {
-			// Segment was evicted between WaitForSegment and the read. Re-fetch.
-			sr.logger.Warn().Int("segment", segIdx).Msg("segment data missing after wait, re-fetching")
-			if err := sr.fetcher.Fetch(ctx, segIdx); err != nil {
-				return totalRead, fmt.Errorf("re-fetch segment %d: %w", segIdx, err)
-			}
-			n, ok = sr.cache.ReadRangeInto(segIdx, segDataOffset, copyLen, p[outOffset:outOffset+copyLen])
-			if !ok {
-				return totalRead, fmt.Errorf("segment %d still missing after re-fetch", segIdx)
+			// Segment was evicted between WaitForSegment and the read. Re-fetch,
+			// pinning this segment specifically and retrying a few times to
+			// close the race where the segment is evicted again before we
+			// can read it back.
+			const maxRefetchAttempts = 10
+			for attempt := 1; ; attempt++ {
+				sr.logger.Warn().Int("segment", segIdx).Int("attempt", attempt).
+					Msg("segment data missing after wait, re-fetching")
+
+				// Fetch() no-ops if GetState() still reports the segment as
+				// cached (e.g. a stale OnDisk state left behind by a partial
+				// eviction). Force the state back to Empty so MarkFetching's
+				// CAS actually fires and a real re-download happens.
+				if sr.cache.GetState(segIdx) != StateFetching {
+					sr.cache.ResetState(segIdx)
+				}
+
+				if err := sr.fetcher.Fetch(ctx, segIdx); err != nil {
+					return totalRead, fmt.Errorf("re-fetch segment %d: %w", segIdx, err)
+				}
+
+				// Pin this segment specifically while we read it back, so a
+				// concurrent evictor can't reclaim it again before this read.
+				sr.cache.PinRange(segIdx, segIdx)
+				n, ok = sr.cache.ReadRangeInto(segIdx, segDataOffset, copyLen, p[outOffset:outOffset+copyLen])
+				sr.cache.UnpinRange(segIdx, segIdx)
+
+				if ok {
+					break
+				}
+				if attempt >= maxRefetchAttempts {
+					return totalRead, fmt.Errorf("segment %d still missing after %d re-fetch attempts", segIdx, maxRefetchAttempts)
+				}
+				// Brief pause before next attempt to avoid hammering the cache
+				// in a tight loop and to let any in-flight eviction settle.
+				time.Sleep(100 * time.Millisecond)
 			}
 		}
 
