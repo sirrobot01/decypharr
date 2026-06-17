@@ -49,14 +49,18 @@ type ClearRepairStateResult struct {
 }
 
 const (
-	repairSchedulerTag    = "repair-sweep"
-	repairDefaultWorkers  = 5
-	repairDefaultRecheck  = 7 * 24 * time.Hour
-	repairHistoryRetained = 100
+	repairSchedulerTag     = "repair-sweep"
+	repairStopSchedulerTag = "repair-sweep-stop"
+	repairDefaultWorkers   = 5
+	repairDefaultRecheck   = 7 * 24 * time.Hour
+	repairHistoryRetained  = 100
 	// At most this many files probed concurrently within a single entry. The
 	// outer worker count comes from cfg.Repair.Workers.
 	repairFilesPerEntry    = 2
 	repairStopDrainTimeout = 30 * time.Second
+	// repairStopFinalRepairTimeout bounds the Arr delete + re-search pass run
+	// when StopSchedule fires with StopAction=repair.
+	repairStopFinalRepairTimeout = 5 * time.Minute
 )
 
 // Repair is the health-check / auto-repair service. One instance per Manager.
@@ -65,12 +69,14 @@ type Repair struct {
 	scheduler gocron.Scheduler
 	logger    zerolog.Logger
 
-	mu          sync.Mutex
-	parentCtx   context.Context
-	activeRunID string
-	cancelRun   context.CancelFunc
-	scheduled   bool
-	runWG       sync.WaitGroup
+	mu             sync.Mutex
+	parentCtx      context.Context
+	activeRunID    string
+	cancelRun      context.CancelFunc
+	scheduled      bool
+	stopScheduled  bool
+	activeStopFunc func(config.RepairStopAction) // called by the stop job for the active run
+	runWG          sync.WaitGroup
 }
 
 // NewRepair builds the repair service for the given manager. Call
@@ -179,6 +185,25 @@ func (r *Repair) Start(ctx context.Context) error {
 	}
 	r.scheduled = true
 	r.logger.Info().Str("schedule", cfg.Schedule).Msg("Repair sweep scheduled")
+
+	r.scheduler.RemoveByTags(repairStopSchedulerTag)
+	r.stopScheduled = false
+	if stopSchedule := strings.TrimSpace(cfg.StopSchedule); stopSchedule != "" {
+		stopJD, err := utils.ConvertToJobDef(stopSchedule)
+		if err != nil {
+			return fmt.Errorf("invalid repair stop schedule %q: %w", stopSchedule, err)
+		}
+		if _, err := r.scheduler.NewJob(stopJD,
+			gocron.NewTask(func() {
+				r.stopActiveSweep(cfg.StopAction)
+			}),
+			gocron.WithTags(repairStopSchedulerTag),
+		); err != nil {
+			return fmt.Errorf("failed to register repair stop schedule: %w", err)
+		}
+		r.stopScheduled = true
+		r.logger.Info().Str("stop_schedule", stopSchedule).Str("stop_action", string(cfg.StopAction)).Msg("Repair sweep stop schedule registered")
+	}
 	return nil
 }
 
@@ -190,9 +215,14 @@ func (r *Repair) Stop() {
 	cancel := r.cancelRun
 	r.cancelRun = nil
 	r.activeRunID = ""
+	r.activeStopFunc = nil
 	if r.scheduled {
 		r.scheduler.RemoveByTags(repairSchedulerTag)
 		r.scheduled = false
+	}
+	if r.stopScheduled {
+		r.scheduler.RemoveByTags(repairStopSchedulerTag)
+		r.stopScheduled = false
 	}
 	r.mu.Unlock()
 	if cancel != nil {
@@ -273,6 +303,27 @@ func (r *Repair) StopRun() error {
 	r.logger.Info().Str("run_id", id).Msg("Cancelling repair run")
 	cancel()
 	return nil
+}
+
+// stopActiveSweep is invoked by the StopSchedule job. Unlike StopRun, this is
+// not a user-initiated abort: the sweep is marked completed (not cancelled),
+// and action controls what happens to whatever was found broken up to this
+// point. With no active sweep this is a no-op.
+func (r *Repair) stopActiveSweep(action config.RepairStopAction) {
+	r.mu.Lock()
+	cancel := r.cancelRun
+	id := r.activeRunID
+	stopFunc := r.activeStopFunc
+	r.mu.Unlock()
+	if cancel == nil {
+		return
+	}
+
+	r.logger.Info().Str("run_id", id).Str("stop_action", string(action)).Msg("Repair sweep stop schedule fired; stopping sweep")
+	if stopFunc != nil {
+		stopFunc(action)
+	}
+	cancel()
 }
 
 // Status reports the current repair state for the API.
@@ -395,6 +446,7 @@ func (r *Repair) runSweep(trigger storage.RepairRunTrigger, opts RepairRunOption
 	}
 
 	runCtx, cancel := context.WithCancel(r.parentCtx)
+	stopState := &repairStopState{}
 	sourceParts := []string{string(cfg.Source)}
 	if opts.IgnoreLastChecked {
 		sourceParts = append(sourceParts, "ignore-last-checked")
@@ -422,12 +474,14 @@ func (r *Repair) runSweep(trigger storage.RepairRunTrigger, opts RepairRunOption
 	}
 	r.activeRunID = run.ID
 	r.cancelRun = cancel
+	r.activeStopFunc = stopState.set
 	r.mu.Unlock()
 
 	if err := r.manager.storage.SaveRepairRun(run); err != nil {
 		r.mu.Lock()
 		r.activeRunID = ""
 		r.cancelRun = nil
+		r.activeStopFunc = nil
 		r.mu.Unlock()
 		cancel()
 		return "", fmt.Errorf("failed to persist repair run: %w", err)
@@ -441,11 +495,12 @@ func (r *Repair) runSweep(trigger storage.RepairRunTrigger, opts RepairRunOption
 			if r.activeRunID == run.ID {
 				r.activeRunID = ""
 				r.cancelRun = nil
+				r.activeStopFunc = nil
 			}
 			r.mu.Unlock()
 			cancel()
 		}()
-		r.executeSweep(runCtx, run, opts)
+		r.executeSweep(runCtx, run, opts, stopState)
 	}()
 
 	r.logger.Info().Str("run_id", run.ID).Str("trigger", string(trigger)).Msg("Repair sweep started")
@@ -512,6 +567,32 @@ func discordContextFor(run *storage.RepairRun) string {
 		run.StartedAt.Format(dateFmt), run.CompletedAt.Format(dateFmt),
 		run.Stats.Probed, run.Stats.Broken, run.Stats.Repaired,
 	)
+}
+
+// repairStopState communicates a StopSchedule-triggered stop from
+// stopActiveSweep (called on the scheduler goroutine) into the running
+// sweep. set is called at most once; get is read after the probing context
+// is observed as cancelled.
+type repairStopState struct {
+	mu      sync.Mutex
+	stopped bool
+	action  config.RepairStopAction
+}
+
+func (s *repairStopState) set(action config.RepairStopAction) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return
+	}
+	s.stopped = true
+	s.action = action
+}
+
+func (s *repairStopState) get() (bool, config.RepairStopAction) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stopped, s.action
 }
 
 func (r *Repair) saveRun(run *storage.RepairRun) {
