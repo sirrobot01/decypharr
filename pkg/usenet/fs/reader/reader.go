@@ -93,7 +93,7 @@ func NewStreamingReader(
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
-	logger := zerolog.Nop() // Use logger from config if available
+	logger := config.Logger // Use caller-supplied logger; zero value is zerolog.Nop()
 
 	stats := &ReaderStats{}
 
