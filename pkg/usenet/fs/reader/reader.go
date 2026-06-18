@@ -262,30 +262,37 @@ func (sr *StreamingReader) readFromCache(ctx context.Context, p []byte, off int6
 		// No intermediate scratch buffer — zero extra allocation, zero amplification.
 		n, ok := sr.cache.ReadRangeInto(segIdx, segDataOffset, copyLen, p[outOffset:outOffset+copyLen])
 		if !ok {
-			// Segment was evicted between WaitForSegment and the read. Re-fetch,
-			// pinning this segment specifically and retrying a few times to
-			// close the race where the segment is evicted again before we
-			// can read it back.
+			// Segment was evicted between WaitForSegment and the read.
+			//
+			// Root cause: evictBatch does CAS (StateOnDisk->StateEmpty) then
+			// calls buf.Discard to hole-punch the disk region. A re-fetch that
+			// races between those two steps re-downloads the segment and sets
+			// StateOnDisk, but evictBatch's Discard then hole-punches the fresh
+			// data, leaving StateOnDisk with ErrNotPresent in the buffer.
+			//
+			// Fix: pin BEFORE resetting state and fetching. evictBatch skips
+			// pinned segments (pinCounts[idx] > 0 check), closing the race.
 			const maxRefetchAttempts = 10
 			for attempt := 1; ; attempt++ {
 				sr.logger.Warn().Int("segment", segIdx).Int("attempt", attempt).
 					Msg("segment data missing after wait, re-fetching")
 
-				// Fetch() no-ops if GetState() still reports the segment as
-				// cached (e.g. a stale OnDisk state left behind by a partial
-				// eviction). Force the state back to Empty so MarkFetching's
-				// CAS actually fires and a real re-download happens.
+				// Pin FIRST so evictBatch cannot Discard this segment's buffer
+				// region between our Fetch write and our ReadRangeInto.
+				sr.cache.PinRange(segIdx, segIdx)
+
+				// Reset state so Fetch's MarkFetching CAS fires and triggers a
+				// real re-download rather than a fast-path no-op.
 				if sr.cache.GetState(segIdx) != StateFetching {
 					sr.cache.ResetState(segIdx)
 				}
 
-				if err := sr.fetcher.Fetch(ctx, segIdx); err != nil {
-					return totalRead, fmt.Errorf("re-fetch segment %d: %w", segIdx, err)
+				fetchErr := sr.fetcher.Fetch(ctx, segIdx)
+				if fetchErr != nil {
+					sr.cache.UnpinRange(segIdx, segIdx)
+					return totalRead, fmt.Errorf("re-fetch segment %d: %w", segIdx, fetchErr)
 				}
 
-				// Pin this segment specifically while we read it back, so a
-				// concurrent evictor can't reclaim it again before this read.
-				sr.cache.PinRange(segIdx, segIdx)
 				n, ok = sr.cache.ReadRangeInto(segIdx, segDataOffset, copyLen, p[outOffset:outOffset+copyLen])
 				sr.cache.UnpinRange(segIdx, segIdx)
 
@@ -295,8 +302,7 @@ func (sr *StreamingReader) readFromCache(ctx context.Context, p []byte, off int6
 				if attempt >= maxRefetchAttempts {
 					return totalRead, fmt.Errorf("segment %d still missing after %d re-fetch attempts", segIdx, maxRefetchAttempts)
 				}
-				// Brief pause before next attempt to avoid hammering the cache
-				// in a tight loop and to let any in-flight eviction settle.
+				// Brief pause before retrying to let any concurrent eviction settle.
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
