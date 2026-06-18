@@ -41,7 +41,7 @@ func (u *Usenet) Download(ctx context.Context, nzoID, filename string, writer io
 	var downloadedBytes atomic.Int64
 
 	// Channel for segment results - buffered to allow parallel fetching ahead
-	resultChan := make(chan segmentResult, u.maxConnections*2)
+	resultChan := make(chan segmentResult, max(u.processingMaxConnections, 1)*2)
 
 	// Map to hold out-of-order segments waiting to be written
 	pendingSegments := make(map[int][]byte)
@@ -99,7 +99,7 @@ func (u *Usenet) Download(ctx context.Context, nzoID, filename string, writer io
 				if progressCallback != nil {
 					// Estimate speed (rough: assume ~1s per segment batch)
 					completed := completedSegments.Load()
-					speed := downloaded / max(1, completed) * int64(u.maxConnections)
+					speed := downloaded / max(1, completed) * int64(max(u.processingMaxConnections, 1))
 					progressCallback(downloaded, speed)
 				}
 
@@ -110,7 +110,7 @@ func (u *Usenet) Download(ctx context.Context, nzoID, filename string, writer io
 	}()
 
 	// Fetch segments in parallel
-	p := pool.New().WithContext(ctx).WithMaxGoroutines(max(u.maxConnections, 1))
+	p := pool.New().WithContext(ctx).WithMaxGoroutines(max(u.processingMaxConnections, 1))
 
 	for idx, segment := range file.Segments {
 		segIdx := idx

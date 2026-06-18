@@ -15,13 +15,19 @@
     <form id="configForm" class="space-y-6">
         <div class="card bg-base-100 shadow-xl">
             <div class="card-body">
-                <div class="border-b border-base-300 mb-8">
-                    <nav class="flex gap-8" aria-label="Configuration Tabs">
+                <div class="border-b border-base-300 mb-8 overflow-x-auto">
+                    <nav class="flex min-w-max gap-8" aria-label="Configuration Tabs">
                         <button type="button"
                                 class="tab-button active flex items-center gap-2 py-3 px-1 border-b-2 border-primary text-primary font-medium text-sm"
                                 data-tab="general">
                             <i class="bi bi-gear text-lg"></i>
                             <span class="hidden sm:inline">General</span>
+                        </button>
+                        <button type="button"
+                                class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                data-tab="downloads">
+                            <i class="bi bi-download text-lg"></i>
+                            <span class="hidden sm:inline">Downloads</span>
                         </button>
                         <button type="button"
                                 class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
@@ -32,7 +38,7 @@
                         <button type="button"
                                 class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
                                 data-tab="auth">
-                            <i class="bi bi-download text-lg"></i>
+                            <i class="bi bi-shield-lock text-lg"></i>
                             <span class="hidden sm:inline">Auth</span>
                         </button>
                         <button type="button"
@@ -166,111 +172,6 @@
                             </div>
 
                             <div class="divider">
-                                <span class="text-lg font-semibold">Qbittorent & SABnzbd Settings</span>
-                            </div>
-
-                            <div class="space-y-6">
-                                <div class="space-y-4">
-                                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                                        <div>
-                                            <label class="label" for="download_folder">
-                                                <span class="font-medium">Download Folder</span>
-                                            </label>
-                                            <input type="text" class="input w-full" name="download_folder"
-                                                   id="download_folder" placeholder="/mnt/symlinks/">
-                                            <span class="text-sm opacity-70">Folder where downloaded files will be
-                                                stored(this is your qbittorent download folder)</span>
-                                        </div>
-                                        <div>
-                                            <label class="label" for="refresh_interval">
-                                                <span class="font-medium">Refresh Interval</span>
-                                            </label>
-                                            <input type="text" class="input w-full" name="refresh_interval"
-                                                   id="refresh_interval" placeholder="30s">
-                                            <span class="text-sm opacity-70">How often to refresh torrent status (e.g.,
-                                                30s, 1m)</span>
-                                        </div>
-                                        <div>
-                                            <label class="label" for="removeStalledAfter">
-                                                <span class="font-medium">Remove Stalled After</span>
-                                            </label>
-                                            <input type="text" class="input w-full" id="removeStalledAfter"
-                                                   name="remove_stalled_after" placeholder="1h">
-                                            <span class="text-sm opacity-70">Duration before removing stalled
-                                                torrents</span>
-                                        </div>
-                                        <div>
-                                            <label class="label" for="nzbUserAgent">
-                                                <span class="font-medium">Nzb User Agent</span>
-                                            </label>
-                                            <input type="text" class="input w-full" id="nzbUserAgent"
-                                                   name="nzb_user_agent" placeholder="Sabnzbd/3.0.0">
-                                            <span class="text-sm opacity-70">User-Agent string for NZB downloads</span>
-                                        </div>
-                                        <div>
-                                            <label class="label cursor-pointer justify-start gap-3">
-                                                <input type="checkbox" class="checkbox checkbox-primary"
-                                                       name="skip_pre_cache" id="skip_pre_cache">
-                                                <div>
-                                                    <span class="font-medium">Skip Pre-Cache</span>
-                                                    <div class="label-text-alt">Disable pre-caching to speed up imports
-                                                    </div>
-                                                </div>
-                                            </label>
-                                        </div>
-                                        <div>
-                                            <label class="label cursor-pointer justify-start gap-3">
-                                                <input type="checkbox" class="checkbox checkbox-primary"
-                                                       name="always_rm_tracker_urls" id="always_rm_tracker_urls">
-                                                <div>
-                                                    <span class="font-medium">Always Remove Tracker URLs</span>
-                                                    <div class="label-text-alt">Allows you to <a
-                                                            href="https://docs.decypharr.com/"
-                                                            class="link link-hover font-semibold"
-                                                            target="_blank">download private tracker torrents</a> with
-                                                        lower risk
-                                                    </div>
-                                                </div>
-                                            </label>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="space-y-6">
-                                <div class="space-y-4">
-                                </div>
-                            </div>
-
-                            <div class="divider">
-                                <span class="text-lg font-semibold"><i class="bi bi-download mr-3 text-info"></i>Downloader</span>
-                            </div>
-
-                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4" id="downloaderSection">
-                                <div>
-                                    <label class="label" for="default_download_action">
-                                        <span class="font-medium">Default Download Action</span>
-                                    </label>
-                                    <select class="select w-full" name="default_download_action"
-                                            id="default_download_action">
-                                        <option value="symlink">Create Symlink</option>
-                                        <option value="strm">Create STRM Files</option>
-                                        <option value="download">Download Files</option>
-                                        <option value="none">No Action</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="label" for="max_downloads">
-                                        <span class="font-medium">Maximum Downloads</span>
-                                    </label>
-                                    <input type="number" class="input w-full downloader-option" name="max_downloads"
-                                           id="max_downloads" min="0" disabled>
-                                    <span class="text-sm opacity-70">Max simultaneous downloads (0 = unlimited)</span>
-                                </div>
-                            </div>
-
-
-                            <div class="divider">
                                 <span class="text-lg font-semibold"><i class="bi bi-hdd-network mr-3 text-info"></i>WebDAV & External Rclone
                                 Settings</span>
                             </div>
@@ -344,6 +245,100 @@
                     </div>
                 </div>
 
+                <div class="tab-content hidden" data-tab-content="downloads">
+                    <div class="space-y-6">
+                        <h2 class="text-2xl font-bold flex items-center mb-6">
+                            <i class="bi bi-download mr-3 text-info"></i>Download Clients
+                        </h2>
+
+                        <div class="divider">
+                            <span class="text-lg font-semibold">qBittorrent & SABnzbd</span>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <div>
+                                <label class="label" for="download_folder">
+                                    <span class="font-medium">Download Folder</span>
+                                </label>
+                                <input type="text" class="input w-full" name="download_folder"
+                                       id="download_folder" placeholder="/mnt/symlinks/">
+                                <span class="text-sm opacity-70">Folder exposed to qBittorrent, SABnzbd, and Arr applications</span>
+                            </div>
+                            <div>
+                                <label class="label" for="refresh_interval">
+                                    <span class="font-medium">Refresh Interval</span>
+                                </label>
+                                <input type="text" class="input w-full" name="refresh_interval"
+                                       id="refresh_interval" placeholder="30s">
+                                <span class="text-sm opacity-70">How often active download status is refreshed</span>
+                            </div>
+                            <div>
+                                <label class="label" for="removeStalledAfter">
+                                    <span class="font-medium">Remove Stalled After</span>
+                                </label>
+                                <input type="text" class="input w-full" id="removeStalledAfter"
+                                       name="remove_stalled_after" placeholder="1h">
+                                <span class="text-sm opacity-70">Duration before stalled active downloads are removed</span>
+                            </div>
+                            <div>
+                                <label class="label" for="nzbUserAgent">
+                                    <span class="font-medium">NZB User Agent</span>
+                                </label>
+                                <input type="text" class="input w-full" id="nzbUserAgent"
+                                       name="nzb_user_agent" placeholder="SABnzbd/3.0.0">
+                                <span class="text-sm opacity-70">User-Agent used when fetching NZB files</span>
+                            </div>
+                            <div>
+                                <label class="label cursor-pointer justify-start gap-3">
+                                    <input type="checkbox" class="checkbox checkbox-primary"
+                                           name="skip_pre_cache" id="skip_pre_cache">
+                                    <div>
+                                        <span class="font-medium">Skip Pre-Cache</span>
+                                        <div class="label-text-alt">Disable pre-caching during imports</div>
+                                    </div>
+                                </label>
+                            </div>
+                            <div>
+                                <label class="label cursor-pointer justify-start gap-3">
+                                    <input type="checkbox" class="checkbox checkbox-primary"
+                                           name="always_rm_tracker_urls" id="always_rm_tracker_urls">
+                                    <div>
+                                        <span class="font-medium">Always Remove Tracker URLs</span>
+                                        <div class="label-text-alt">Remove tracker URLs before submitting torrents to providers</div>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="divider">
+                            <span class="text-lg font-semibold">Downloader</span>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4" id="downloaderSection">
+                            <div>
+                                <label class="label" for="default_download_action">
+                                    <span class="font-medium">Default Download Action</span>
+                                </label>
+                                <select class="select w-full" name="default_download_action"
+                                        id="default_download_action">
+                                    <option value="symlink">Create Symlink</option>
+                                    <option value="strm">Create STRM Files</option>
+                                    <option value="download">Download Files</option>
+                                    <option value="none">No Action</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="label" for="max_active_downloads">
+                                    <span class="font-medium">Maximum Active Downloads</span>
+                                </label>
+                                <input type="number" class="input w-full" name="max_active_downloads"
+                                       id="max_active_downloads" min="1" placeholder="5">
+                                <span class="text-sm opacity-70">Shared active limit for torrent and NZB downloads</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="tab-content hidden" data-tab-content="providers">
                     <div class="space-y-6">
                         <h2 class="text-2xl font-bold flex items-center">
@@ -396,9 +391,18 @@
                                                     <span class="font-medium">Max Connections Per File</span>
                                                 </label>
                                                 <input type="number" class="input w-full" name="usenet.max_connections"
-                                                       id="usenet.max_connections" min="1" placeholder="10">
-                                                <span class="text-sm opacity-70">Connections per file for parsing and
-                                                    streaming (default: 10)</span>
+                                                       id="usenet.max_connections" min="1" placeholder="15">
+                                                <span class="text-sm opacity-70">Connections per streaming file (default: 15)</span>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="usenet.processing_max_connections">
+                                                    <span class="font-medium">Processing Connections Per File</span>
+                                                </label>
+                                                <input type="number" class="input w-full"
+                                                       name="usenet.processing_max_connections"
+                                                       id="usenet.processing_max_connections" min="1"
+                                                       placeholder="15">
+                                                <span class="text-sm opacity-70">Connections per file for parsing and NZB downloads</span>
                                             </div>
                                             <div>
                                                 <label class="label" for="usenet.read_ahead">
@@ -420,24 +424,25 @@
                                             </div>
                                             <div>
                                                 <label class="label" for="usenet.availability_sample_percent">
-                                                    <span class="font-medium">Availability Sample %</span>
+                                                    <span class="font-medium">Repair Availability Sample %</span>
                                                 </label>
                                                 <input type="number" class="input w-full"
                                                        name="usenet.availability_sample_percent"
                                                        id="usenet.availability_sample_percent" min="1" max="100"
                                                        placeholder="10">
-                                                <span class="text-sm opacity-70">Percentage of segments to check for
-                                                    availability (1-100, default: 10)</span>
+                                                <span class="text-sm opacity-70">Percentage of segments to check during
+                                                    repairs (1-100, default: 10)</span>
                                             </div>
                                             <div>
-                                                <label class="label" for="usenet.max_concurrent_nzb">
-                                                    <span class="font-medium">Max Concurrent NZB Processing</span>
+                                                <label class="label" for="usenet.import_availability_sample_percent">
+                                                    <span class="font-medium">NZB Import Availability Sample %</span>
                                                 </label>
                                                 <input type="number" class="input w-full"
-                                                       name="usenet.max_concurrent_nzb" id="usenet.max_concurrent_nzb"
-                                                       min="1" placeholder="2">
-                                                <span class="text-sm opacity-70">How many NZBs to parse in parallel
-                                                    (default: 2)</span>
+                                                       name="usenet.import_availability_sample_percent"
+                                                       id="usenet.import_availability_sample_percent" min="1" max="100"
+                                                       placeholder="1">
+                                                <span class="text-sm opacity-70">Percentage of segments to check when
+                                                    adding an NZB (1-100, default: 1)</span>
                                             </div>
                                             <div>
                                                 <label class="label" for="usenet.disk_buffer_path">
@@ -447,6 +452,16 @@
                                                        name="usenet.disk_buffer_path" id="usenet.disk_buffer_path"
                                                        placeholder="/cache">
                                                 <span class="text-sm opacity-70">Path for disk buffering during streaming</span>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="usenet.buffer_memory">
+                                                    <span class="font-medium">Buffer Memory</span>
+                                                </label>
+                                                <input type="text" class="input w-full"
+                                                       name="usenet.buffer_memory" id="usenet.buffer_memory"
+                                                       placeholder="512MB">
+                                                <span class="text-sm opacity-70">Total RAM for usenet streaming buffers
+                                                    across all open streams (e.g., 512MB, 1GB)</span>
                                             </div>
                                         </div>
                                     </div>
@@ -563,16 +578,57 @@
 
                 <div class="tab-content hidden" data-tab-content="arrs">
                     <div class="space-y-6">
-                        <div class="flex justify-between items-center">
-                            <h2 class="text-2xl font-bold flex items-center">
-                                <i class="bi bi-collection mr-3 text-warning"></i>Arr Applications
-                            </h2>
-                            <button type="button" id="addArrBtn" class="btn btn-warning">
+                        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <h2 class="text-2xl font-bold flex items-center">
+                                    <i class="bi bi-collection mr-3 text-warning"></i>Arr Applications
+                                </h2>
+                                <p class="text-sm opacity-70 mt-1">Configure each connected Arr service and its import behavior.</p>
+                            </div>
+                            <button type="button" id="addArrBtn" class="btn btn-warning sm:shrink-0">
                                 <i class="bi bi-plus mr-2"></i>Add Arr Service
                             </button>
                         </div>
 
-                        <div id="arrConfigs" class="space-y-4">
+                        <div id="arrConfigs" class="grid grid-cols-2 gap-4">
+                        </div>
+
+                        <div class="rounded-box border border-base-300 bg-base-200/30 p-4 space-y-4">
+                            <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                                <div>
+                                    <h3 class="text-lg font-semibold flex items-center">
+                                        <i class="bi bi-funnel mr-2 text-warning"></i>Queue Cleanup Actions
+                                    </h3>
+                                    <p class="text-sm opacity-70 mt-1 max-w-4xl">
+                                        These actions apply to configured Arr services. Unmatched warnings stay in the queue,
+                                        and changes apply on the next cleanup cycle.
+                                    </p>
+                                </div>
+                                <span class="badge badge-outline badge-warning lg:shrink-0">Global policy</span>
+                            </div>
+
+                            <div class="grid grid-cols-1 xl:grid-cols-5 gap-4">
+                                <div class="xl:col-span-3 rounded-box border border-base-300 bg-base-100 overflow-hidden">
+                                    <div class="px-3 py-2 border-b border-base-300">
+                                        <h4 class="font-medium text-sm">Known issues</h4>
+                                        <p class="text-xs opacity-60 mt-1">Choose the action for each built-in queue warning.</p>
+                                    </div>
+                                    <div id="queueCleanupCatalog" class="divide-y divide-base-200"></div>
+                                </div>
+
+                                <div class="xl:col-span-2 rounded-box border border-base-300 bg-base-100 p-3 space-y-3">
+                                    <div class="flex items-center justify-between gap-3">
+                                        <div>
+                                            <h4 class="font-medium text-sm">Custom rules</h4>
+                                            <p class="text-xs opacity-60 mt-1">Match status-message text after known issues.</p>
+                                        </div>
+                                        <button type="button" id="addQueueCleanupRuleBtn" class="btn btn-sm btn-ghost shrink-0">
+                                            <i class="bi bi-plus mr-1"></i>Add
+                                        </button>
+                                    </div>
+                                    <div id="queueCleanupCustom" class="space-y-2"></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -812,6 +868,16 @@
                                                        id="mount.dfs.disk_cache_size" placeholder="5GB">
                                                 <span class="text-sm opacity-70">Maximum disk cache size (e.g., 5GB,
                                                     10GB)</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.dfs.buffer_memory">
+                                                    <span class="font-medium">Buffer Memory</span>
+                                                </label>
+                                                <input type="text" class="input w-full" name="mount.dfs.buffer_memory"
+                                                       id="mount.dfs.buffer_memory" placeholder="512MB">
+                                                <span class="text-sm opacity-70">Total RAM for DFS streaming buffers
+                                                    across all open files (e.g., 512MB, 1GB)</span>
                                             </div>
 
                                             <div>
@@ -1366,11 +1432,6 @@
                                 <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
                                        id="repair.skip_nzb_repair" name="repair.skip_nzb_repair">
                                 <span class="label-text font-medium">Skip NZB repair</span>
-                            </label>
-                            <label class="label cursor-pointer justify-start gap-3">
-                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
-                                       id="repair.notify_on_complete" name="repair.notify_on_complete">
-                                <span class="label-text font-medium">Notify on completion</span>
                             </label>
                         </div>
                     </div>

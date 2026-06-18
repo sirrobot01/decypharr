@@ -2,8 +2,6 @@ package config
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/sirrobot01/decypharr/internal/config"
@@ -19,12 +17,25 @@ type FuseConfig struct {
 	CacheDiskSize        int64 // in bytes
 	CacheCleanupInterval time.Duration
 
+	// BufferMemory is the RAM budget (bytes) for the DFS streaming-buffer pool,
+	// shared across all open files. 0 disables the cap.
+	BufferMemory int64
+
 	CacheExpiry time.Duration
 
 	// Performance settings
 	ChunkSize     int64
 	ReadAheadSize int64
 	DaemonTimeout time.Duration
+
+	// DropBehindMargin, when > 0, makes the read path release the disk file's
+	// page cache for data more than this many bytes behind the current read
+	// offset (keeping the trailing margin resident so readahead/short
+	// seek-backs are unaffected, and keeping the bytes on disk so a longer
+	// seek-back re-reads locally rather than re-downloading). 0 disables it —
+	// the default, since the page cache it trims is reclaimable and only worth
+	// dropping under a tight memory cap.
+	DropBehindMargin int64
 
 	Retries int
 
@@ -41,15 +52,15 @@ func DefaultFuseConfig() *FuseConfig {
 		DaemonTimeout:        time.Second * 10, // Longer timeout for reliability
 		CacheExpiry:          24 * time.Hour,   // Longer cache for popular content
 		CacheCleanupInterval: 5 * time.Minute,  // More frequent cleanup
-		ChunkSize:            4 * 1024 * 1024,  // 4MB chunk size (balance latency vs throughput)
-		ReadAheadSize:        16 * 1024 * 1024, // 16MB read-ahead (4 chunks prefetch)
+		ChunkSize:     4 * 1024 * 1024,  // 4MB chunks (matches beta baseline)
+		ReadAheadSize: 16 * 1024 * 1024, // 16MB read-ahead (4 chunks ahead)
 
 		Retries: 3,
 
 		// File system defaults
-		UID:                1000,
-		GID:                1000,
-		Umask:              0022,
+		UID:   1000,
+		GID:   1000,
+		Umask: 0022,
 	}
 }
 
@@ -58,13 +69,11 @@ func ParseFuseConfig() *FuseConfig {
 	fuseConfig := DefaultFuseConfig()
 	mainCfg := config.Get()
 	cfg := mainCfg.Mount.DFS
-	totalDebrids := len(mainCfg.Debrids)
-	if totalDebrids == 0 {
-		totalDebrids = 1
-	}
 
 	fuseConfig.CacheDir = cfg.CacheDir
 	fuseConfig.MountPath = mainCfg.Mount.MountPath
+	fuseConfig.BufferMemory = cfg.BufferMemoryBytes()
+	fuseConfig.BufferMemory = cfg.BufferMemoryBytes()
 
 	if cfg.DaemonTimeout != "" {
 		timeout, err := utils.ParseDuration(cfg.DaemonTimeout)
@@ -74,9 +83,12 @@ func ParseFuseConfig() *FuseConfig {
 
 	}
 	if cfg.DiskCacheSize != "" {
-		size, err := parseSize(cfg.DiskCacheSize)
+		// The DFS mount uses a single shared on-disk cache (one CacheDir, one
+		// vfs.Cache), so the configured size is the cache budget verbatim. Do
+		// not divide by the number of debrid providers.
+		size, err := config.ParseSize(cfg.DiskCacheSize)
 		if err == nil {
-			fuseConfig.CacheDiskSize = size / int64(totalDebrids)
+			fuseConfig.CacheDiskSize = size
 		}
 	}
 
@@ -88,7 +100,7 @@ func ParseFuseConfig() *FuseConfig {
 	}
 
 	if cfg.ChunkSize != "" {
-		size, err := parseSize(cfg.ChunkSize)
+		size, err := config.ParseSize(cfg.ChunkSize)
 		if err == nil {
 			fuseConfig.ChunkSize = size
 		}
@@ -102,9 +114,15 @@ func ParseFuseConfig() *FuseConfig {
 	}
 
 	if cfg.ReadAheadSize != "" {
-		size, err := parseSize(cfg.ReadAheadSize)
+		size, err := config.ParseSize(cfg.ReadAheadSize)
 		if err == nil {
 			fuseConfig.ReadAheadSize = size
+		}
+	}
+	if cfg.DropBehindMargin != "" {
+		size, err := config.ParseSize(cfg.DropBehindMargin)
+		if err == nil {
+			fuseConfig.DropBehindMargin = size
 		}
 	}
 	// Otherwise keep the default (4) from DefaultFuseConfig()
@@ -131,40 +149,6 @@ func parseUmask(umaskStr string) (uint32, error) {
 		return 0, fmt.Errorf("invalid umask format: %s", umaskStr)
 	}
 	return umask, nil
-}
-
-func parseSize(sizeStr string) (int64, error) {
-	sizeStr = strings.TrimSpace(strings.ToUpper(sizeStr))
-
-	var multiplier int64 = 1
-	var numStr string
-
-	switch {
-	case strings.HasSuffix(sizeStr, "TB"):
-		multiplier = 1024 * 1024 * 1024 * 1024
-		numStr = strings.TrimSuffix(sizeStr, "TB")
-	case strings.HasSuffix(sizeStr, "GB"):
-		multiplier = 1024 * 1024 * 1024
-		numStr = strings.TrimSuffix(sizeStr, "GB")
-	case strings.HasSuffix(sizeStr, "MB"):
-		multiplier = 1024 * 1024
-		numStr = strings.TrimSuffix(sizeStr, "MB")
-	case strings.HasSuffix(sizeStr, "KB"):
-		multiplier = 1024
-		numStr = strings.TrimSuffix(sizeStr, "KB")
-	case strings.HasSuffix(sizeStr, "B"):
-		multiplier = 1
-		numStr = strings.TrimSuffix(sizeStr, "B")
-	default:
-		numStr = sizeStr
-	}
-
-	num, err := strconv.ParseInt(numStr, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid size format: %s", sizeStr)
-	}
-
-	return num * multiplier, nil
 }
 
 // StreamingStats tracks streaming-specific performance metrics

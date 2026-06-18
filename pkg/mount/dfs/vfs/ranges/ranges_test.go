@@ -68,6 +68,43 @@ func TestRangesInsert(t *testing.T) {
 	}
 }
 
+func TestRangesRemove(t *testing.T) {
+	// Straddling removal splits a range into head + tail.
+	var rs Ranges
+	rs.Insert(Range{Pos: 0, Size: 100})
+	rs.Remove(Range{Pos: 40, Size: 20}) // remove [40,60)
+	if len(rs) != 2 || rs[0] != (Range{0, 40}) || rs[1] != (Range{60, 40}) {
+		t.Fatalf("split: expected [(0,40),(60,40)], got %+v", rs)
+	}
+	if rs.Present(Range{Pos: 45, Size: 5}) {
+		t.Fatalf("removed bytes still reported present")
+	}
+
+	// Fully-contained range is dropped entirely.
+	rs = Ranges{}
+	rs.Insert(Range{Pos: 10, Size: 10})
+	rs.Insert(Range{Pos: 40, Size: 10})
+	rs.Remove(Range{Pos: 0, Size: 30}) // covers the first range, not the second
+	if len(rs) != 1 || rs[0] != (Range{40, 10}) {
+		t.Fatalf("drop: expected [(40,10)], got %+v", rs)
+	}
+
+	// Overlapping the leading edge trims the front.
+	rs = Ranges{}
+	rs.Insert(Range{Pos: 50, Size: 50}) // [50,100)
+	rs.Remove(Range{Pos: 30, Size: 40}) // [30,70) -> trims to [70,100)
+	if len(rs) != 1 || rs[0] != (Range{70, 30}) {
+		t.Fatalf("trim-front: expected [(70,30)], got %+v", rs)
+	}
+
+	// No-op cases.
+	rs.Remove(Range{Pos: 0, Size: 0})
+	rs.Remove(Range{Pos: 200, Size: 10})
+	if len(rs) != 1 || rs[0] != (Range{70, 30}) {
+		t.Fatalf("no-op removal changed ranges: %+v", rs)
+	}
+}
+
 func TestRangesPresent(t *testing.T) {
 	var rs Ranges
 	rs.Insert(Range{Pos: 0, Size: 100})

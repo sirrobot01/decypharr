@@ -95,6 +95,8 @@ func (s *Server) WebRoutes() http.Handler {
 			// Config/Auth
 			r.Get("/config", s.handleGetConfig)
 			r.Post("/config", s.handleUpdateConfig)
+			r.Post("/mount/cache/cleanup", s.handleRunMountCacheCleanup)
+			r.Post("/mount/cache/purge", s.handlePurgeMountCache)
 			r.Post("/refresh-token", s.handleRefreshAPIToken)
 			r.Post("/update-auth", s.handleUpdateAuth)
 		})

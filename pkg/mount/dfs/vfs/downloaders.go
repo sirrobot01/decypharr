@@ -1162,6 +1162,14 @@ func (dl *downloader) streamChunk(start, end int64) (int64, error) {
 		"DFS",
 	)
 
+	// Always drain the coalescing buffer — partial trailing bytes from the
+	// stream still need to land on disk and in info.Rs before we return so
+	// readers see them.
+	flushErr := writer.flush()
+	if err == nil {
+		err = flushErr
+	}
+
 	if err != nil {
 		if dl.ctx.Err() != nil {
 			return writer.written, dl.ctx.Err()
@@ -1280,17 +1288,34 @@ func (dl *downloader) retryAttempts() int {
 	return dl.dls.retries
 }
 
-// cacheWriter writes to the sparse cache, tracking progress
+// cacheWriter writes streamed body bytes straight through to the cache item.
+//
+// Earlier iterations buffered writes here into a 4–16 MB scratch slice
+// before flushing — the idea being to amortize sparse-file WriteAt syscalls.
+// That was the right optimization *before* the cache item had a real block
+// cache underneath. With the buffer.Buffer in place, the buffer's 1 MB
+// blocks already batch small writes into block-sized disk writes at the
+// correct layer; a second coalescer in front of WriteAtNoOverwrite only
+// delays when bytes become visible to waiting readers (a 16 MB buffer
+// pushes the first-byte latency for a player by seconds at typical NNTP
+// throughput, since the waiter is only woken when the buffer flushes).
+//
+// So Write goes directly to WriteAtNoOverwrite. The buffer underneath does
+// the actual write batching — at the right granularity, with the right
+// liveness, and without holding bytes hostage from readers.
 type cacheWriter struct {
 	dl      *downloader
 	item    *CacheItem
-	offset  int64
+	offset  int64 // next write offset; advances with Write
 	written int64
 	// onProgress is called whenever bytes are consumed from the stream.
 	onProgress func(int)
 }
 
 func (w *cacheWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
 	n, skipped, err := w.item.WriteAtNoOverwrite(p, w.offset)
 	if err != nil {
 		return n, err
@@ -1300,19 +1325,16 @@ func (w *cacheWriter) Write(p []byte) (int, error) {
 	}
 
 	w.dl.mu.Lock()
-	// Track skipped bytes
 	if skipped == n {
 		w.dl.skipped += int64(skipped)
 	} else {
 		w.dl.skipped = 0
 	}
 	w.dl.offset += int64(n)
-
-	// Stop if skipping too much (seeking happened elsewhere)
 	if w.dl.skipped > maxSkipBytes {
 		w.dl.stopped = true
 		w.dl.mu.Unlock()
-		return n, io.EOF // Signal to stop streaming
+		return n, io.EOF
 	}
 	w.dl.mu.Unlock()
 
@@ -1320,13 +1342,15 @@ func (w *cacheWriter) Write(p []byte) (int, error) {
 	actuallyWritten := int64(n - skipped)
 	w.written += actuallyWritten
 
-	// Track total bytes downloaded
 	if actuallyWritten > 0 {
 		w.dl.dls.item.cache.AddDownloadedBytes(actuallyWritten)
 		if w.dl.dls.waiterCount.Load() > 0 {
 			w.dl.dls.kickWaiters()
 		}
 	}
-
 	return n, nil
 }
+
+// flush is a no-op shim kept so streamChunk's existing call site stays
+// legible. The coalescer is gone; nothing buffers.
+func (w *cacheWriter) flush() error { return nil }

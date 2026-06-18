@@ -22,12 +22,11 @@ import (
 )
 
 type Downloader struct {
-	manager      *Manager
-	strmURL      string
-	mountPath    string
-	dest         string
-	logger       zerolog.Logger
-	maxDownloads int
+	manager   *Manager
+	strmURL   string
+	mountPath string
+	dest      string
+	logger    zerolog.Logger
 }
 
 const (
@@ -66,12 +65,11 @@ func NewDownloadManager(manager *Manager) *Downloader {
 		strmURL = fmt.Sprintf("http://%s:%s", bindAddress, cfg.Port)
 	}
 	return &Downloader{
-		manager:      manager,
-		strmURL:      strmURL,
-		mountPath:    cfg.Mount.MountPath,
-		logger:       manager.logger.With().Str("component", "downloader").Logger(),
-		dest:         cfg.DownloadFolder,
-		maxDownloads: cfg.MaxDownloads,
+		manager:   manager,
+		strmURL:   strmURL,
+		mountPath: cfg.Mount.MountPath,
+		logger:    manager.logger.With().Str("component", "downloader").Logger(),
+		dest:      cfg.DownloadFolder,
 	}
 }
 
@@ -208,7 +206,10 @@ func (d *Downloader) processSymlink(entry *storage.Entry, mountPath string) erro
 	}
 
 	// Warm the mount cache for the first few files so a subsequent import scan is fast
-	if !d.manager.config.SkipPreCache && len(filePaths) > 0 {
+	// Usenet parsing/probing deliberately avoids the streaming read-ahead
+	// setting. A large playback window can turn a small import probe into a
+	// substantial background download and hold an active slot unnecessarily.
+	if !entry.IsNZB() && !d.manager.config.SkipPreCache && len(filePaths) > 0 {
 		probeFiles := filePaths
 		if len(probeFiles) > MaxNZBPreCacheFiles {
 			probeFiles = probeFiles[:MaxNZBPreCacheFiles]
@@ -522,9 +523,6 @@ func (d *Downloader) processTorrentDownload(entry *storage.Entry) error {
 	}
 
 	p := pool.New().WithErrors().WithFirstError()
-	if d.maxDownloads > 0 {
-		p = p.WithMaxGoroutines(d.maxDownloads)
-	}
 	for _, task := range tasks {
 		p.Go(func() error {
 			if err := d.localDownloader(
@@ -578,9 +576,6 @@ func (d *Downloader) processUsenetDownload(entry *storage.Entry) error {
 	fileProgress := make(map[string]int64)
 
 	p := pool.New().WithErrors().WithFirstError()
-	if d.maxDownloads > 0 {
-		p = p.WithMaxGoroutines(d.maxDownloads)
-	}
 	for _, file := range files {
 		p.Go(func() error {
 			destPath := filepath.Join(downloadedFolder, file.Name)

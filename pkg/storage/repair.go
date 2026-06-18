@@ -10,6 +10,7 @@ import (
 
 	json "github.com/bytedance/sonic"
 	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/pkg/storage/hybrid"
 )
 
 // RepairStrategy controls how the probe groups files for a single entry.
@@ -286,7 +287,9 @@ func (s *Storage) SaveEntryHealth(state *EntryHealth) error {
 	if err != nil {
 		return err
 	}
-	return s.repairState.Put(state.EntryName, data, nil)
+	// Index the status so CountEntryHealthByStatus can build its histogram
+	// straight from the in-memory index without decoding every record.
+	return s.repairState.Put(state.EntryName, data, &hybrid.EntryMeta{Status: string(state.Status)})
 }
 
 func (s *Storage) GetEntryHealth(entryName string) (*EntryHealth, error) {
@@ -384,20 +387,66 @@ func (s *Storage) MarkEntryDirty(entryName string, protocol config.Protocol, rea
 	_ = s.SaveEntryHealth(state)
 }
 
+// healthCountsTTL bounds how often CountEntryHealthByStatus scans the entire
+// repair-state store. The histogram is consumed by the stats dashboard, so a
+// few seconds of staleness is acceptable; the alternative is a full scan +
+// JSON-unmarshal per call, which dominated heap churn at scale.
+const healthCountsTTL = 30 * time.Second
+
 // CountEntryHealthByStatus returns a per-status histogram without loading full
-// EntryHealth payloads.
+// EntryHealth payloads. The result is cached for healthCountsTTL and
+// invalidated whenever repair state mutates.
 func (s *Storage) CountEntryHealthByStatus() map[HealthStatus]int {
-	counts := make(map[HealthStatus]int)
-	_ = s.repairState.ForEach(func(_ string, value []byte) error {
-		var stub struct {
-			Status HealthStatus `json:"status"`
+	s.healthCountsMu.Lock()
+	if s.healthCounts != nil && time.Since(s.healthCountsBuiltAt) < healthCountsTTL {
+		out := make(map[HealthStatus]int, len(s.healthCounts))
+		for k, v := range s.healthCounts {
+			out[k] = v
 		}
-		if err := json.Unmarshal(value, &stub); err == nil && stub.Status != "" {
-			counts[stub.Status]++
+		s.healthCountsMu.Unlock()
+		return out
+	}
+	s.healthCountsMu.Unlock()
+
+	counts := make(map[HealthStatus]int)
+	// Fast path: read the status straight from the index (no disk read, no
+	// JSON decode). Records persisted before the status was indexed have an
+	// empty meta.Status; collect those and decode them after the iteration so
+	// we never call Get (which RLocks) while ForEachMeta holds the read lock.
+	// This self-heals: the next SaveEntryHealth (every sweep) populates the
+	// index, so the fallback set shrinks to zero.
+	var needDecode []string
+	_ = s.repairState.ForEachMeta(func(key string, meta *hybrid.IndexEntry) error {
+		if meta.Status != "" {
+			counts[HealthStatus(meta.Status)]++
+		} else {
+			needDecode = append(needDecode, key)
 		}
 		return nil
 	})
-	return counts
+	for _, key := range needDecode {
+		data, err := s.repairState.Get(key)
+		if err != nil {
+			continue
+		}
+		var stub struct {
+			Status HealthStatus `json:"status"`
+		}
+		if json.Unmarshal(data, &stub) == nil && stub.Status != "" {
+			counts[stub.Status]++
+		}
+	}
+
+	s.healthCountsMu.Lock()
+	s.healthCounts = counts
+	s.healthCountsBuiltAt = time.Now()
+	s.healthCountsMu.Unlock()
+
+	out := make(map[HealthStatus]int, len(counts))
+	for k, v := range counts {
+		out[k] = v
+	}
+	return out
 }
 
 // EntryItemRepairFingerprint produces a deterministic hash of the file set

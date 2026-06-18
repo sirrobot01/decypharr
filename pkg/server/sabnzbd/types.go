@@ -3,6 +3,7 @@ package sabnzbd
 import (
 	"fmt"
 
+	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
@@ -228,6 +229,9 @@ func convertToSABnzbdNZB(e *storage.Entry) NZB {
 
 	// Map storage state to SABnzbd status
 	status := mapStorageStateToSABStatus(e.State)
+	if e.Status == debridTypes.TorrentStatusQueued {
+		status = StatusQueued
+	}
 
 	var completedOn int64
 	if e.CompletedAt != nil {
@@ -270,10 +274,12 @@ func getNZBFiles(e *storage.Entry) []File {
 
 	// Determine file status based on job state
 	fileStatus := "queued"
-	switch e.State {
-	case storage.EntryStateDownloading:
+	switch {
+	case e.Status == debridTypes.TorrentStatusQueued:
+		fileStatus = "queued"
+	case e.State == storage.EntryStateDownloading:
 		fileStatus = "active"
-	case storage.EntryStatePausedUP:
+	case e.State == storage.EntryStatePausedUP:
 		fileStatus = "finished"
 	}
 	idx := 0

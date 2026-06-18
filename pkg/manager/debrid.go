@@ -9,6 +9,7 @@ import (
 	debrid "github.com/sirrobot01/decypharr/pkg/debrid/common"
 	"github.com/sirrobot01/decypharr/pkg/debrid/providers/alldebrid"
 	"github.com/sirrobot01/decypharr/pkg/debrid/providers/debridlink"
+	"github.com/sirrobot01/decypharr/pkg/debrid/providers/premiumize"
 	"github.com/sirrobot01/decypharr/pkg/debrid/providers/realdebrid"
 	"github.com/sirrobot01/decypharr/pkg/debrid/providers/torbox"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
@@ -64,6 +65,8 @@ func (m *Manager) createClient(dc config.Debrid) (debrid.Client, error) {
 		client, err = torbox.New(dc, rateLimits)
 	case "debridlink":
 		client, err = debridlink.New(dc, rateLimits)
+	case "premiumize":
+		client, err = premiumize.New(dc, rateLimits)
 	default:
 		return nil, ErrUnsupportedDebridProvider
 	}

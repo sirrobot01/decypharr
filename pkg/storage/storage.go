@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -27,7 +28,14 @@ type Storage struct {
 	repairRuns  *hybrid.Store
 	dir         string
 	logger      zerolog.Logger
+
+	healthCountsMu      sync.Mutex
+	healthCounts        map[HealthStatus]int
+	healthCountsBuiltAt time.Time
 }
+
+
+
 
 func createItemStores(baseDir string, baseConfig hybrid.Config) (map[string]*hybrid.Store, error) {
 	items := make(map[string]*hybrid.Store)

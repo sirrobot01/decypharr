@@ -48,6 +48,37 @@ class ConfigManager {
         this.refs.addArrBtn.addEventListener('click', () => this.addArrConfig());
         this.refs.addVirtualFolderBtn.addEventListener('click', () => this.addVirtualFolder());
         this.refs.addUsenetProviderBtn.addEventListener('click', () => this.addUsenetProvider());
+
+        const addRuleBtn = document.getElementById('addQueueCleanupRuleBtn');
+        if (addRuleBtn) addRuleBtn.addEventListener('click', () => this.addQueueCleanupCustomRow());
+    }
+
+    // Display labels for the built-in queue-cleanup catalog. IDs MUST match
+    // config.DefaultQueueCleanupRules / catalogMatchers on the backend.
+    get queueCleanupCatalog() {
+        return [
+            {id: 'failed_download', label: 'Failed download'},
+            {id: 'title_mismatch', label: 'Title mismatch (automatic import not possible)'},
+            {id: 'matched_by_id', label: 'Release matched to series/movie by ID'},
+            {id: 'unable_to_parse', label: 'Unable to parse download'},
+            {id: 'no_eligible_files', label: 'No files eligible for import'},
+            {id: 'episodes_missing', label: 'Episodes missing / not imported from release'},
+            {id: 'file_empty', label: 'Downloaded file is empty'},
+            {id: 'invalid_local_path', label: 'Invalid local path (remote path mapping)'},
+            {id: 'not_grabbed', label: 'Not grabbed by the arr / no category'},
+        ];
+    }
+
+    queueCleanupActionOptions(selected) {
+        const opts = [
+            {value: '', label: 'Ignore (leave in queue)'},
+            {value: 'import', label: 'Force import'},
+            {value: 'blacklist', label: 'Blacklist only'},
+            {value: 'blacklist_research', label: 'Blacklist + research'},
+        ];
+        return opts.map(o =>
+            `<option value="${o.value}" ${o.value === (selected || '') ? 'selected' : ''}>${o.label}</option>`
+        ).join('');
     }
 
     async loadConfiguration() {
@@ -69,6 +100,7 @@ class ConfigManager {
     populateForm(config) {
         // Load general settings
         this.populateGeneralSettings(config);
+        this.populateDownloadSettings(config);
 
         // Load debrid configs
         if (config.debrids && Array.isArray(config.debrids)) {
@@ -89,6 +121,9 @@ class ConfigManager {
         if (config.arrs && Array.isArray(config.arrs)) {
             config.arrs.forEach(arr => this.addArrConfig(arr));
         }
+
+        // Load queue cleanup rules
+        this.populateQueueCleanup(config.queue_cleanup);
 
         // Load rclone config
         this.populateMountSettings(config.mount);
@@ -130,7 +165,6 @@ class ConfigManager {
         if ($('repair.strategy')) $('repair.strategy').value = repair.strategy || 'per_entry';
         if ($('repair.auto_repair')) $('repair.auto_repair').checked = !!repair.auto_repair;
         if ($('repair.skip_nzb_repair')) $('repair.skip_nzb_repair').checked = !!repair.skip_nzb_repair;
-        if ($('repair.notify_on_complete')) $('repair.notify_on_complete').checked = !!repair.notify_on_complete;
     }
 
     collectRepairConfig() {
@@ -149,7 +183,6 @@ class ConfigManager {
             strategy: $('repair.strategy')?.value || 'per_entry',
             auto_repair: $('repair.auto_repair')?.checked || false,
             skip_nzb_repair: $('repair.skip_nzb_repair')?.checked || false,
-            notify_on_complete: $('repair.notify_on_complete')?.checked || false,
             arrs,
         };
     }
@@ -157,11 +190,8 @@ class ConfigManager {
     populateGeneralSettings(config) {
         const fields = [
             'log_level', 'url_base', 'bind_address', 'port',
-            'min_file_size', 'max_file_size', 'remove_stalled_after',
-            'nzb_user_agent', 'download_folder', 'refresh_interval',
-            'max_downloads', 'skip_pre_cache', 'always_rm_tracker_urls',
-            'folder_naming', 'refresh_dirs', 'disable_webdav',
-            'default_download_action', 'app_url'
+            'min_file_size', 'max_file_size', 'folder_naming',
+            'refresh_dirs', 'disable_webdav', 'app_url'
         ];
 
         fields.forEach(field => {
@@ -180,25 +210,25 @@ class ConfigManager {
         if (config.allowed_file_types && Array.isArray(config.allowed_file_types)) {
             document.querySelector('[name="allowed_file_types"]').value = config.allowed_file_types.join(', ');
         }
-
-        // Set up downloader section toggle
-        this.setupDownloaderToggle();
     }
 
-    setupDownloaderToggle() {
-        const actionSelect = document.getElementById('default_download_action');
-        if (!actionSelect) return;
+    populateDownloadSettings(config) {
+        const fields = [
+            'remove_stalled_after', 'nzb_user_agent', 'download_folder',
+            'refresh_interval', 'max_active_downloads', 'skip_pre_cache',
+            'always_rm_tracker_urls', 'default_download_action'
+        ];
 
-        const toggleDownloaderOptions = () => {
-            const isDownload = actionSelect.value === 'download';
-            document.querySelectorAll('.downloader-option').forEach(el => {
-                el.disabled = !isDownload;
-                el.closest('div').classList.toggle('opacity-50', !isDownload);
-            });
-        };
-
-        actionSelect.addEventListener('change', toggleDownloaderOptions);
-        toggleDownloaderOptions();
+        fields.forEach(field => {
+            const element = document.querySelector(`[name="${field}"]`);
+            if (element && config[field] !== undefined) {
+                if (element.type === 'checkbox') {
+                    element.checked = config[field];
+                } else {
+                    element.value = config[field];
+                }
+            }
+        });
     }
 
     populateNotificationSettings(notificationsConfig) {
@@ -287,7 +317,7 @@ class ConfigManager {
         if (!dfsConfig) return;
 
         const fields = [
-            'cache_dir', 'disk_cache_size', 'cache_expiry', 'cache_cleanup_interval',
+            'cache_dir', 'disk_cache_size', 'buffer_memory', 'cache_expiry', 'cache_cleanup_interval',
             'chunk_size', 'read_ahead_size', 'daemon_timeout',
             'uid', 'gid', 'umask'
         ];
@@ -413,6 +443,7 @@ class ConfigManager {
                                 <option value="alldebrid">AllDebrid</option>
                                 <option value="debridlink">Debrid Link</option>
                                 <option value="torbox">Torbox</option>
+                                <option value="premiumize">Premiumize</option>
                             </select>
                         </div>
                         
@@ -951,15 +982,15 @@ class ConfigManager {
 
         return `
             <div class="card bg-base-100 border border-base-300 shadow-sm arr-config ${isAutoDetected ? 'border-info' : ''}" data-index="${index}">
-                <div class="card-body">
-                    <div class="flex justify-between items-start mb-4">
-                        <h3 class="card-title text-lg">
-                            <i class="bi bi-collection mr-2 text-warning"></i>
-                            Arr Service #${index + 1}
-                            ${isAutoDetected ? '<div class="badge badge-info badge-sm ml-2">Auto-detected</div>' : ''}
+                <div class="card-body p-4 gap-4">
+                    <div class="flex items-start justify-between gap-3">
+                        <h3 class="card-title text-base leading-tight min-w-0">
+                            <i class="bi bi-collection text-warning shrink-0"></i>
+                            <span class="min-w-0 break-words">Arr Service #${index + 1}</span>
+                            ${isAutoDetected ? '<span class="badge badge-info badge-sm shrink-0">Auto-detected</span>' : ''}
                         </h3>
                         ${!isAutoDetected ? `
-                            <button type="button" class="btn btn-error btn-sm" onclick="this.closest('.arr-config').remove();">
+                            <button type="button" class="btn btn-error btn-sm btn-square shrink-0" onclick="this.closest('.arr-config').remove();">
                                 <i class="bi bi-trash"></i>
                             </button>
                         ` : ''}
@@ -967,10 +998,10 @@ class ConfigManager {
 
                     <input type="hidden" name="arr[${index}].source" value="${data.source || ''}">
 
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 gap-3">
                         <div>
                             <label class="label" for="arr[${index}].name">
-                                <span class=" font-medium">Service Name</span>
+                                <span class="font-medium">Service Name</span>
                             </label>
                             <input type="text" class="input ${isAutoDetected ? 'input-disabled' : ''}"
                                    name="arr[${index}].name" id="arr[${index}].name"
@@ -980,7 +1011,7 @@ class ConfigManager {
 
                         <div>
                             <label class="label" for="arr[${index}].host">
-                                <span class=" font-medium">Host URL</span>
+                                <span class="font-medium">Host URL</span>
                             </label>
                             <input type="url" class="input ${isAutoDetected ? 'input-disabled' : ''}"
                                    name="arr[${index}].host" id="arr[${index}].host"
@@ -990,7 +1021,7 @@ class ConfigManager {
 
                         <div>
                             <label class="label" for="arr[${index}].token">
-                                <span class=" font-medium">API Token</span>
+                                <span class="font-medium">API Token</span>
                             </label>
                             <div class="password-toggle-container">
                                 <input type="password" class="input input-has-toggle ${isAutoDetected ? 'input-disabled' : ''}"
@@ -1005,7 +1036,7 @@ class ConfigManager {
 
                         <div>
                             <label class="label" for="arr[${index}].selected_debrid">
-                                <span class=" font-medium">Preferred Provider</span>
+                                <span class="font-medium">Preferred Provider</span>
                             </label>
                             <select class="select w-full" name="arr[${index}].selected_debrid" id="arr[${index}].selected_debrid">
                                 <option value="">Auto Select</option>
@@ -1015,28 +1046,20 @@ class ConfigManager {
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-3 gap-4">
-                        <div>
-                            <label class="label cursor-pointer justify-start gap-2">
-                                <input type="checkbox" class="checkbox checkbox-sm checkbox-primary"
-                                       name="arr[${index}].cleanup" id="arr[${index}].cleanup">
-                                <span class=" text-sm">Cleanup Queue</span>
-                            </label>
-                        </div>
-
-                        <div>
-                            <label class="label cursor-pointer justify-start gap-2">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <div class="rounded-box bg-base-200/50 px-3 py-2">
+                            <label class="label cursor-pointer justify-start gap-2 p-0">
                                 <input type="checkbox" class="checkbox checkbox-sm checkbox-primary"
                                        name="arr[${index}].skip_repair" id="arr[${index}].skip_repair">
-                                <span class=" text-sm">Skip Repair</span>
+                                <span class="text-sm leading-tight">Skip Repair</span>
                             </label>
                         </div>
 
-                        <div>
-                            <label class="label cursor-pointer justify-start gap-2">
+                        <div class="rounded-box bg-base-200/50 px-3 py-2">
+                            <label class="label cursor-pointer justify-start gap-2 p-0">
                                 <input type="checkbox" class="checkbox checkbox-sm checkbox-primary"
                                        name="arr[${index}].download_uncached" id="arr[${index}].download_uncached">
-                                <span class=" text-sm">Download Uncached</span>
+                                <span class="text-sm leading-tight">Download Uncached</span>
                             </label>
                         </div>
                     </div>
@@ -1071,12 +1094,25 @@ class ConfigManager {
                 throw new Error(errorText || 'Failed to save configuration');
             }
 
-            window.decypharrUtils.createToast('Configuration saved successfully! Services are restarting...', 'success');
+            let restarted = true;
+            try {
+                const result = await response.json();
+                restarted = result.restarted !== false;
+            } catch (_) {
+                // Older backends return no body; assume a restart happened.
+            }
 
-            // Reload page after a delay to allow services to restart
-            setTimeout(() => {
-                window.location.reload();
-            }, 2000);
+            if (restarted) {
+                window.decypharrUtils.createToast('Configuration saved successfully! Services are restarting...', 'success');
+                // Reload page after a delay to allow services to restart
+                setTimeout(() => {
+                    window.location.reload();
+                }, 2000);
+            } else {
+                // Applied live — no restart, no disruptive reload.
+                window.decypharrUtils.createToast('Configuration saved and applied.', 'success');
+                this.refs.loadingOverlay.classList.add('hidden');
+            }
 
         } catch (error) {
             console.error('Error saving configuration:', error);
@@ -1149,7 +1185,7 @@ class ConfigManager {
             download_folder: document.querySelector('[name="download_folder"]').value,
             refresh_interval: document.querySelector('[name="refresh_interval"]').value || "30s",
             default_download_action: document.querySelector('[name="default_download_action"]')?.value || "symlink",
-            max_downloads: parseInt(document.querySelector('[name="max_downloads"]').value) || 0,
+            max_active_downloads: parseInt(document.querySelector('[name="max_active_downloads"]').value) || 5,
             skip_pre_cache: document.querySelector('[name="skip_pre_cache"]').checked,
             always_rm_tracker_urls: document.querySelector('[name="always_rm_tracker_urls"]').checked,
             folder_naming: document.querySelector('[name="folder_naming"]')?.value || "",
@@ -1162,6 +1198,9 @@ class ConfigManager {
 
             // Arr configurations
             arrs: this.collectArrConfigs(),
+
+            // Global arr queue-cleanup policy
+            queue_cleanup: this.collectQueueCleanup(),
 
             // Mount configuration
             mount: this.collectMountConfig(),
@@ -1213,6 +1252,7 @@ class ConfigManager {
             const sslInput = getField('ssl');
             const maxConnectionsInput = getField('max_connections');
             const priorityInput = getField('priority');
+            const backupInput = getField('backup');
 
             if (!hostInput || !portInput || !usernameInput || !passwordInput || !backboneInput || !sslInput || !maxConnectionsInput || !priorityInput) {
                 return;
@@ -1226,7 +1266,11 @@ class ConfigManager {
                 backbone: backboneInput.value.trim(),
                 ssl: sslInput.checked,
                 max_connections: parseInt(maxConnectionsInput.value) || 100,
-                priority: parseInt(priorityInput.value) || 0
+                priority: parseInt(priorityInput.value) || 0,
+                // Backup is optional and defaults false — old form versions
+                // (or missing inputs after a hot-reload) shouldn't accidentally
+                // turn a primary into a backup.
+                backup: backupInput ? backupInput.checked : false
             };
 
             if (provider.host && provider.username && provider.password) {
@@ -1236,12 +1280,16 @@ class ConfigManager {
 
         return {
             providers: providers,
-            max_connections: parseInt(document.querySelector('[name="usenet.max_connections"]')?.value) || 10,
-            read_ahead: document.querySelector('[name="usenet.read_ahead"]').value || "32MB",
+            max_connections: parseInt(document.querySelector('[name="usenet.max_connections"]')?.value) || 15,
+            processing_max_connections: parseInt(document.querySelector('[name="usenet.processing_max_connections"]')?.value)
+                || parseInt(document.querySelector('[name="usenet.max_connections"]')?.value)
+                || 15,
+            read_ahead: document.querySelector('[name="usenet.read_ahead"]').value || "16MB",
             processing_timeout: document.querySelector('[name="usenet.processing_timeout"]')?.value || "5m",
             availability_sample_percent: parseInt(document.querySelector('[name="usenet.availability_sample_percent"]')?.value) || 10,
-            max_concurrent_nzb: parseInt(document.querySelector('[name="usenet.max_concurrent_nzb"]')?.value) || 2,
-            disk_buffer_path: document.querySelector('[name="usenet.disk_buffer_path"]')?.value || ""
+            import_availability_sample_percent: parseInt(document.querySelector('[name="usenet.import_availability_sample_percent"]')?.value) || 1,
+            disk_buffer_path: document.querySelector('[name="usenet.disk_buffer_path"]')?.value || "",
+            buffer_memory: document.querySelector('[name="usenet.buffer_memory"]')?.value || ""
         };
     }
 
@@ -1320,13 +1368,12 @@ class ConfigManager {
             const nameInput = getField('name');
             const hostInput = getField('host');
             const tokenInput = getField('token');
-            const cleanupInput = getField('cleanup');
             const skipRepairInput = getField('skip_repair');
             const downloadUncachedInput = getField('download_uncached');
             const selectedDebridInput = getField('selected_debrid');
             const sourceInput = getField('source');
 
-            if (!nameInput || !hostInput || !tokenInput || !cleanupInput || !skipRepairInput || !downloadUncachedInput || !selectedDebridInput || !sourceInput) {
+            if (!nameInput || !hostInput || !tokenInput || !skipRepairInput || !downloadUncachedInput || !selectedDebridInput || !sourceInput) {
                 return;
             }
 
@@ -1334,7 +1381,6 @@ class ConfigManager {
                 name: nameInput.value,
                 host: hostInput.value,
                 token: tokenInput.value,
-                cleanup: cleanupInput.checked,
                 skip_repair: skipRepairInput.checked,
                 download_uncached: downloadUncachedInput.checked,
                 selected_debrid: selectedDebridInput.value,
@@ -1347,6 +1393,79 @@ class ConfigManager {
         });
 
         return arrs;
+    }
+
+    populateQueueCleanup(queueCleanup) {
+        const catalogEl = document.getElementById('queueCleanupCatalog');
+        const customEl = document.getElementById('queueCleanupCustom');
+        if (!catalogEl || !customEl) return;
+
+        const rules = (queueCleanup && Array.isArray(queueCleanup.rules)) ? queueCleanup.rules : [];
+
+        // Saved actions for catalog rules, keyed by id.
+        const savedActions = {};
+        const customRules = [];
+        rules.forEach(r => {
+            if (r && r.id) {
+                savedActions[r.id] = r.action || '';
+            } else if (r && (r.match || '').trim()) {
+                customRules.push(r);
+            }
+        });
+
+        const esc = window.decypharrUtils.escapeHtml;
+        catalogEl.innerHTML = this.queueCleanupCatalog.map(c => {
+            const action = c.id in savedActions ? savedActions[c.id] : '';
+            return `
+                <div class="grid grid-cols-1 md:grid-cols-5 gap-2 md:items-center px-3 py-3 even:bg-base-200/40" data-rule-id="${c.id}">
+                    <span class="md:col-span-3 text-sm leading-snug min-w-0">${esc(c.label)}</span>
+                    <select class="md:col-span-2 select select-sm w-full queue-cleanup-action">
+                        ${this.queueCleanupActionOptions(action)}
+                    </select>
+                </div>`;
+        }).join('');
+
+        customEl.innerHTML = '';
+        customRules.forEach(r => this.addQueueCleanupCustomRow(r.match, r.action));
+    }
+
+    addQueueCleanupCustomRow(match = '', action = '') {
+        const customEl = document.getElementById('queueCleanupCustom');
+        if (!customEl) return;
+        const esc = window.decypharrUtils.escapeHtml;
+        const row = document.createElement('div');
+        row.className = 'grid grid-cols-1 md:grid-cols-12 gap-2 queue-cleanup-custom-row';
+        row.innerHTML = `
+            <input type="text" class="md:col-span-7 input input-sm w-full min-w-0 queue-cleanup-match"
+                   placeholder="text in status message, e.g. stalled"
+                   value="${esc(match)}">
+            <select class="md:col-span-4 select select-sm w-full queue-cleanup-action">
+                ${this.queueCleanupActionOptions(action)}
+            </select>
+            <button type="button" class="md:col-span-1 btn btn-sm btn-square btn-ghost text-error queue-cleanup-remove" aria-label="Remove custom queue cleanup rule" title="Remove rule">
+                <i class="bi bi-trash"></i>
+            </button>`;
+        row.querySelector('.queue-cleanup-remove').addEventListener('click', () => row.remove());
+        customEl.appendChild(row);
+    }
+
+    collectQueueCleanup() {
+        const rules = [];
+
+        document.querySelectorAll('#queueCleanupCatalog [data-rule-id]').forEach(rowEl => {
+            const id = rowEl.getAttribute('data-rule-id');
+            const action = rowEl.querySelector('.queue-cleanup-action')?.value || '';
+            rules.push({id, action});
+        });
+
+        document.querySelectorAll('#queueCleanupCustom .queue-cleanup-custom-row').forEach(rowEl => {
+            const match = (rowEl.querySelector('.queue-cleanup-match')?.value || '').trim();
+            if (!match) return;
+            const action = rowEl.querySelector('.queue-cleanup-action')?.value || '';
+            rules.push({match, action});
+        });
+
+        return {rules};
     }
 
     collectMountConfig() {
@@ -1432,6 +1551,7 @@ class ConfigManager {
         return {
             cache_dir: getElementValue('cache_dir'),
             disk_cache_size: getElementValue('disk_cache_size'),
+            buffer_memory: getElementValue('buffer_memory'),
             cache_expiry: getElementValue('cache_expiry'),
             cache_cleanup_interval: getElementValue('cache_cleanup_interval'),
             chunk_size: getElementValue('chunk_size'),
@@ -1663,11 +1783,13 @@ class ConfigManager {
         // Populate stream settings
         const streamFields = {
             'max_connections': usenet.max_connections,
+            'processing_max_connections': usenet.processing_max_connections,
             'read_ahead': usenet.read_ahead,
             'processing_timeout': usenet.processing_timeout,
             'availability_sample_percent': usenet.availability_sample_percent,
-            'max_concurrent_nzb': usenet.max_concurrent_nzb,
-            'disk_buffer_path': usenet.disk_buffer_path
+            'import_availability_sample_percent': usenet.import_availability_sample_percent,
+            'disk_buffer_path': usenet.disk_buffer_path,
+            'buffer_memory': usenet.buffer_memory
         };
 
         Object.entries(streamFields).forEach(([id, value]) => {
@@ -1798,12 +1920,19 @@ class ConfigManager {
                     </div>
                 </div>
 
-                <div class="flex gap-4 mt-4">
+                <div class="flex flex-wrap gap-4 mt-4">
                     <label class="flex items-center gap-2 cursor-pointer">
                         <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
                                name="usenet.providers[${index}].ssl"
                                id="usenet_provider_${index}_ssl">
                         <span class="text-sm">Use SSL</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer"
+                           title="Only used when every non-backup provider is excluded (article not found, connection errors). Not used just because primary pools are busy — requests wait for a primary slot instead. Use this for block providers you only want to bill for completion.">
+                        <input type="checkbox" class="checkbox checkbox-warning checkbox-sm"
+                               name="usenet.providers[${index}].backup"
+                               id="usenet_provider_${index}_backup">
+                        <span class="text-sm">Backup provider (fallback only)</span>
                     </label>
                 </div>
             </div>

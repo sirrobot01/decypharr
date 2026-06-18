@@ -1,6 +1,6 @@
 module github.com/sirrobot01/decypharr
 
-go 1.25.5
+go 1.26.0
 
 require (
 	github.com/Tensai75/nzbparser v0.1.0
@@ -15,7 +15,6 @@ require (
 	github.com/hanwen/go-fuse/v2 v2.8.0
 	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/javi11/sevenzip v1.6.2-0.20251026160715-ca961b7f1239
-	github.com/melbahja/got v0.7.0
 	github.com/puzpuzpuz/xsync/v3 v3.5.1
 	github.com/puzpuzpuz/xsync/v4 v4.1.0
 	github.com/robfig/cron/v3 v3.0.1

@@ -38,6 +38,16 @@ Configuration is stored in `config.json`. Most settings can be managed via the W
 
 Password is bcrypt-hashed. API token is auto-generated.
 
+## Downloads
+
+```json
+{
+  "max_active_downloads": 5
+}
+```
+
+`max_active_downloads` is the shared active-processing limit for torrent and NZB downloads. Additional imports remain queued until an active download completes.
+
 ## Debrid Providers
 
 Array of Debrid services:
@@ -66,25 +76,25 @@ Array of Debrid services:
 
 ### Provider Fields
 
-| Field                             | Type   | Description                                                      | Default                         |
-|-----------------------------------|--------|------------------------------------------------------------------|---------------------------------|
-| `provider`                        | string | Provider type: `realdebrid`, `alldebrid`, `debridlink`, `torbox` | **Required**                    |
-| `name`                            | string | Display name                                                     | Provider type                   |
-| `api_key`                         | string | API key from provider dashboard                                  | **Required**                    |
-| `download_api_keys`               | array  | Additional keys for download rotation                            | `[api_key]`                     |
-| `download_uncached`               | bool   | Download torrents not in provider cache                          | `false`                         |
-| `rate_limit`                      | string | API rate limit (`200/minute`, `10/second`)                       | `200/minute`                    |
-| `repair_rate_limit`               | string | Separate limit for repair operations                             | Same as `rate_limit`            |
-| `download_rate_limit`             | string | Separate limit for downloads                                     | Same as `rate_limit`            |
-| `proxy`                           | string | HTTP(S) proxy URL                                                | `""`                            |
-| `unpack_rar`                      | bool   | Auto-extract RAR archives                                        | `true`                          |
-| `minimum_free_slot`               | int    | Minimum free torrent slots to use this provider                  | `0`                             |
-| `limit`                           | int    | Max torrents allowed on this provider                            | `0` (unlimited)                 |
-| `workers`                         | int    | Concurrent API workers                                           | Auto (CPU * 50 / num_providers) |
-| `torrents_refresh_interval`       | string | How often to refresh torrent list                                | `5m`                            |
-| `download_links_refresh_interval` | string | How often to refresh download links                              | `10m`                           |
-| `auto_expire_links_after`         | string | Auto-remove links after duration                                 | `24h`                           |
-| `user_agent`                      | string | Custom User-Agent header                                         | Default                         |
+| Field                             | Type   | Description                                                                    | Default                         |
+|-----------------------------------|--------|--------------------------------------------------------------------------------|---------------------------------|
+| `provider`                        | string | Provider type: `realdebrid`, `alldebrid`, `debridlink`, `torbox`, `premiumize` | **Required**                    |
+| `name`                            | string | Display name                                                                   | Provider type                   |
+| `api_key`                         | string | API key from provider dashboard                                                | **Required**                    |
+| `download_api_keys`               | array  | Additional keys for download rotation                                          | `[api_key]`                     |
+| `download_uncached`               | bool   | Download torrents not in provider cache                                        | `false`                         |
+| `rate_limit`                      | string | API rate limit (`200/minute`, `10/second`)                                     | `200/minute`                    |
+| `repair_rate_limit`               | string | Separate limit for repair operations                                           | Same as `rate_limit`            |
+| `download_rate_limit`             | string | Separate limit for downloads                                                   | Same as `rate_limit`            |
+| `proxy`                           | string | HTTP(S) proxy URL                                                              | `""`                            |
+| `unpack_rar`                      | bool   | Auto-extract RAR archives                                                      | `true`                          |
+| `minimum_free_slot`               | int    | Minimum free torrent slots to use this provider                                | `0`                             |
+| `limit`                           | int    | Max torrents allowed on this provider                                          | `0` (unlimited)                 |
+| `workers`                         | int    | Concurrent API workers                                                         | Auto (CPU * 50 / num_providers) |
+| `torrents_refresh_interval`       | string | How often to refresh torrent list                                              | `5m`                            |
+| `download_links_refresh_interval` | string | How often to refresh download links                                            | `10m`                           |
+| `auto_expire_links_after`         | string | Auto-remove links after duration                                               | `24h`                           |
+| `user_agent`                      | string | Custom User-Agent header                                                       | Default                         |
 
 ## Usenet
 
@@ -104,10 +114,11 @@ Array of Debrid services:
       }
     ],
     "max_connections": 15,
+    "processing_max_connections": 15,
     "read_ahead": "16MB",
     "processing_timeout": "10m",
     "availability_sample_percent": 10,
-    "max_concurrent_nzb": 2,
+    "import_availability_sample_percent": 1,
     "disk_buffer_path": "/cache/usenet/streams"
   }
 }
@@ -118,11 +129,12 @@ Array of Debrid services:
 | Field                         | Type   | Description                     | Default                      |
 |-------------------------------|--------|---------------------------------|------------------------------|
 | `providers`                   | array  | NNTP server configurations      | `[]`                         |
-| `max_connections`             | int    | Max connections per file/stream | `15`                         |
+| `max_connections`             | int    | Max connections per streaming file | `15`                      |
+| `processing_max_connections`  | int    | Max connections per file for parsing and NZB downloads | Same as `max_connections` |
 | `read_ahead`                  | string | Prefetch buffer size            | `16MB`                       |
 | `processing_timeout`          | string | Max time for NZB processing     | `10m`                        |
-| `availability_sample_percent` | int    | % of segments to check (1-100)  | `10`                         |
-| `max_concurrent_nzb`          | int    | Parallel NZB processing limit   | `2`                          |
+| `availability_sample_percent` | int    | % of segments to check during repairs (1-100) | `10`             |
+| `import_availability_sample_percent` | int | % of segments to check when adding an NZB (1-100) | `1`         |
 | `disk_buffer_path`            | string | Disk buffer location            | `{main_path}/usenet/streams` |
 
 ### Provider Fields
@@ -276,7 +288,6 @@ Connect to an existing Rclone instance's RC API.
 | `arrs`                    | Optional Arr filter when `source=arr`. Empty = all eligible                | `[]`        |
 | `auto_repair`             | When `true`, brokens are repaired in-sweep. When `false`, detect-only      | `false`     |
 | `skip_nzb_repair`         | Skip NZB / Usenet entries during scheduled repair sweeps                   | `false`     |
-| `notify_on_complete`      | Send a notification when a sweep finishes                                  | `false`     |
 | `nntp_connection_percent` | Share of NNTP connections probes may use, to avoid starving downloads      | `20`        |
 
 See the [Health Checker & Repair guide](/guides/repair/) for the full model, API, and Browse-page integration.
@@ -290,7 +301,6 @@ See the [Health Checker & Repair guide](/guides/repair/) for the full model, API
       "name": "Sonarr",
       "host": "http://sonarr:8989",
       "token": "API_TOKEN",
-      "cleanup": true,
       "skip_repair": false,
       "download_uncached": false,
       "selected_debrid": ""
@@ -304,11 +314,62 @@ See the [Health Checker & Repair guide](/guides/repair/) for the full model, API
 | `name`              | Display name                     | Required    |
 | `host`              | Arr URL                          | Required    |
 | `token`             | Arr API key                      | Required    |
-| `cleanup`           | Auto-remove completed downloads  | `true`      |
 | `skip_repair`       | Skip repair for this Arr         | `false`     |
 | `download_uncached` | Download uncached torrents       | `false`     |
 | `selected_debrid`   | Force specific Debrid provider   | `""` (auto) |
 | `source`            | Config source (`auto`, `config`) | `config`    |
+
+## Queue Cleanup
+
+Decypharr periodically scans each connected Arr's **Activity → Queue** and acts on stuck or
+failed downloads based on a global, rules-driven policy. This is configured once (not per-Arr)
+under **Settings → Arrs → Queue Cleanup Actions** in the Web UI, and stored in the
+`queue_cleanup` block of `config.json`. See the [Arrs guide](../arrs/#queue-cleanup) for a
+walkthrough.
+
+```json
+{
+  "queue_cleanup": {
+    "rules": [
+      { "id": "failed_download", "action": "blacklist_research" },
+      { "id": "title_mismatch", "action": "import" },
+      { "id": "no_eligible_files", "action": "blacklist_research" },
+      { "match": "stalled with no connections", "action": "blacklist" }
+    ]
+  }
+}
+```
+
+Each rule resolves a queue issue to one **action**:
+
+| Action               | Effect                                                                    |
+|----------------------|---------------------------------------------------------------------------|
+| `""` (ignore)        | Leave the item in the queue, do nothing                                    |
+| `import`             | Force a manual import of the downloaded files                             |
+| `blacklist`          | Blocklist the release and remove it, **without** searching for a new one  |
+| `blacklist_research` | Blocklist the release, remove it, and trigger a re-search                  |
+
+Rules are evaluated top-to-bottom, **first match wins**. Built-in catalog rules (those with an
+`id`) always run before custom rules (those with a `match`), and unmatched warnings/errors are
+left untouched. Changes apply on the next cleanup cycle — **no restart required**.
+
+### Built-in catalog rules
+
+| `id`                 | Triggered by                                            | Default action       |
+|----------------------|---------------------------------------------------------|----------------------|
+| `failed_download`    | Download reported as failed                             | `blacklist_research` |
+| `title_mismatch`     | Title mismatch; automatic import not possible           | `import`             |
+| `matched_by_id`      | Release matched to series/movie by ID                   | `import`             |
+| `unable_to_parse`    | Unable to parse the download                            | `blacklist_research` |
+| `no_eligible_files`  | No files eligible for import                            | `blacklist_research` |
+| `episodes_missing`   | Episodes not imported / missing from the release        | `blacklist_research` |
+| `file_empty`         | Downloaded file is empty                                | `blacklist_research` |
+| `invalid_local_path` | Invalid local path (needs a Remote Path Mapping)        | `""` (ignore)        |
+| `not_grabbed`        | Not grabbed by the Arr / no category                    | `""` (ignore)        |
+
+For catalog rules you only set `action`; the match text is fixed. **Custom rules** use a
+`match` field instead of an `id` — a case-insensitive substring tested against the queue
+item's status message text (e.g. `"stalled with no connections"`).
 
 ## Environment Variables
 

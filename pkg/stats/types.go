@@ -20,8 +20,21 @@ type Snapshot struct {
 }
 
 type SystemStats struct {
-	HeapAllocMB   string `json:"heap_alloc_mb"`
-	MemoryUsed    string `json:"memory_used"`
+	// MemoryUsed is the process's real heap footprint: memory committed from
+	// the OS that has not been released back (Sys - HeapReleased). This is the
+	// number that tracks RSS, not Sys — most of Sys is reserved-but-released
+	// address space.
+	MemoryUsed string `json:"memory_used"`
+	// HeapAllocMB is the live heap (HeapAlloc): bytes of in-use, reachable
+	// objects. Fluctuates between GC cycles up to NextGC.
+	HeapAllocMB string `json:"heap_alloc_mb"`
+	// HeapInuseMB is the bytes in heap spans currently in use (HeapInuse).
+	HeapInuseMB string `json:"heap_inuse_mb"`
+	// HeapReleasedMB is heap memory already returned to the OS (HeapReleased).
+	HeapReleasedMB string `json:"heap_released_mb"`
+	// SysMB is the total address space reserved from the OS (Sys). Includes
+	// released memory, so it is NOT a measure of real usage.
+	SysMB         string `json:"sys_mb"`
 	GCCycles      uint32 `json:"gc_cycles"`
 	Goroutines    int    `json:"goroutines"`
 	NumCPU        int    `json:"num_cpu"`
@@ -55,6 +68,7 @@ type StorageStats struct {
 
 type QueueStats struct {
 	Pending int `json:"pending"`
+	Active  int `json:"active"`
 }
 
 type ArrStats struct {

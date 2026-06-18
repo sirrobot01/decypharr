@@ -2,58 +2,69 @@ package reader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
+
+	"github.com/sirrobot01/decypharr/internal/buffer"
 )
 
-// SegmentCache provides disk storage for segment data with a pin/unpin mechanism
-// to prevent eviction during reads.
+// SegmentCache is a usenet-segment-aware view over a buffer.Buffer.
 //
-// Key design:
-//   - Segments are pinned while being read, preventing eviction
-//   - When unpinned with refcount=0, segments become evictable
-//   - Disk pressure evicts oldest unpinned segments (LRU via access timestamps)
-//   - Evicted segments are re-downloaded on next access
-//   - Single sparse file for disk storage (better locality than per-segment files)
+// The storage layer is the buffer: it owns the sparse disk file, the
+// in-RAM block cache, the page-cache discipline, the hole punching, and
+// the bookkeeping for what bytes are present anywhere. SegmentCache adds
+// the usenet-specific policy on top:
+//
+//   - State machine per segment (Empty / Fetching / OnDisk / Failed)
+//   - Pin counts so in-flight reads can't race against eviction
+//   - Per-segment access timestamps driving the sliding-window evictor
+//   - "Last byte delivered to a client" high-water mark for the sliding
+//     window's distance test
+//   - Hard-disk budget backstop on top of the proactive sweeper
+//
+// All the actual byte movement (write, read, hole-punch) goes through the
+// buffer. That's the entire integration boundary.
 type SegmentCache struct {
 	// Segment metadata
 	segments   []SegmentMeta
 	segCount   int
-	segOffsets []int64 // Cumulative byte offsets for segment lookup
+	segOffsets []int64 // cumulative byte offsets for binary-search lookup
 	totalSize  int64
-	segLengths []atomic.Int64 // Actual bytes stored per segment
+	segLengths []atomic.Int64 // bytes actually stored per segment
 
-	// Per-segment state and data
-	states    []atomic.Uint32         // SegmentState per segment
-	pinCounts []atomic.Int32          // Reference counts for pinning
-	errors    []atomic.Pointer[error] // Error for failed segments
-
-	// Disk storage
-	diskPath string
-	diskFile *os.File
-	onDisk   []atomic.Bool // Whether segment is on disk
-
-	// Eviction tracking: per-segment last-access timestamp (unix nano).
-	// Lock-free replacement for container/list LRU — no mutex, no heap allocs.
+	// Per-segment state
+	states     []atomic.Uint32
+	pinCounts  []atomic.Int32
+	errors     []atomic.Pointer[error]
 	accessTime []atomic.Int64
 
-	// Size tracking and limits
-	maxDisk int64
-	curDisk atomic.Int64
+	// Storage layer.
+	buf      *buffer.Buffer
+	diskPath string // remembered for RemoveAll on Close
 
-	// Async eviction — keeps eviction off the hot write path.
+	// Hard-disk budget. The sliding-window sweeper does the routine eviction
+	// work; drainOverBudget is the backstop if pinned-segment count or burst
+	// inflow pushes curDisk past maxDisk anyway.
+	maxDisk     int64
+	curDisk     atomic.Int64
 	evictSignal chan struct{}
 	evictWg     sync.WaitGroup
 
-	// Sharded conditions for waiting
+	// Sliding-window state. See sweepWindow for the policy.
+	maxConsumedOff atomic.Int64
+	sweepWg        sync.WaitGroup
+
+	// Sharded waiters: readers blocking on WaitForSegment park on one of
+	// numShards condition variables to avoid global wakeup storms.
 	shardMu   [numShards]sync.Mutex
 	shardCond [numShards]*sync.Cond
 
@@ -63,16 +74,51 @@ type SegmentCache struct {
 	closed atomic.Bool
 	logger zerolog.Logger
 
-	// Stats
 	stats *ReaderStats
 }
 
 const (
 	numShards = 64
 	shardMask = numShards - 1
+
+	// Sliding-window eviction tunables. Hardcoded — the cache is internal
+	// temporary storage; exposing knobs invites mis-tuning.
+	//
+	// backWindowBytes keeps a generous slice of recently-played history
+	// pinned so brief scrub-back gestures don't trigger a re-fetch. ~170
+	// segments at 750 KB each ≈ 25 s of 1080p / 12 s of 4K — covers
+	// typical "10 second rewind" buttons in media players with margin.
+	backWindowBytes = 128 << 20
+
+	// segmentMinRetentionAge is the minimum time a segment must be
+	// untouched before it is eligible for window-based eviction. Defends
+	// against the pause-and-resume case: even if a segment is technically
+	// "behind" the last delivered offset, we keep it for a moment because
+	// the player may still be drawing from the same area.
+	segmentMinRetentionAge = 30 * time.Second
+
+	// segmentSweepInterval is how often the proactive sliding-window
+	// evictor wakes.
+	segmentSweepInterval = 5 * time.Second
+
+	// segmentSweepBatch caps how many segments a single sweep evicts so
+	// a large jump in playback position doesn't punch holes for thousands
+	// of segments in one burst. Sweeps are cheap; the next tick picks up
+	// the rest.
+	segmentSweepBatch = 128
+
+	// bufferMemorySize is the per-stream RAM ceiling for the underlying buffer:
+	// forward prefetch + recent reads. 32 MB covers ~40 segments hot in RAM —
+	// enough headroom that a bursty download or a seek-back within the window
+	// doesn't stall playback or force a re-download. Aggregate RAM across many
+	// concurrent streams is bounded separately by the global buffer budget
+	// (buffer.SetGlobalMemoryBudget), so this can stay generous without the
+	// per-stream-size x concurrency blowup that a small ceiling was guarding.
+	bufferMemorySize = 32 << 20
 )
 
-// NewSegmentCache creates a new segment cache.
+// NewSegmentCache creates a new segment cache backed by a freshly-created
+// buffer.Buffer on a sparse disk file under config.DiskPath (or a temp dir).
 func NewSegmentCache(
 	ctx context.Context,
 	segments []SegmentMeta,
@@ -83,14 +129,14 @@ func NewSegmentCache(
 	ctx, cancel := context.WithCancel(ctx)
 	segCount := len(segments)
 
-	// Compute cumulative offsets for O(log n) segment lookup
 	offsets := computeOffsets(segments)
 	totalSize := int64(0)
 	if len(offsets) > 0 {
 		totalSize = offsets[len(offsets)-1]
 	}
 
-	// Create disk storage directory
+	// Resolve a fresh per-cache disk directory. We own it for the cache's
+	// lifetime and remove it on Close. The buffer's disk file lives inside.
 	diskPath := config.DiskPath
 	if diskPath == "" {
 		var err error
@@ -100,11 +146,10 @@ func NewSegmentCache(
 			return nil, fmt.Errorf("create temp dir: %w", err)
 		}
 	} else {
-		if err := os.MkdirAll(diskPath, 0755); err != nil {
+		if err := os.MkdirAll(diskPath, 0o755); err != nil {
 			cancel()
 			return nil, fmt.Errorf("create cache dir: %w", err)
 		}
-		// Create unique subdirectory
 		var err error
 		diskPath, err = os.MkdirTemp(diskPath, "cache-*")
 		if err != nil {
@@ -113,26 +158,31 @@ func NewSegmentCache(
 		}
 	}
 
-	// Create sparse disk file
-	diskFilePath := filepath.Join(diskPath, "segments.bin")
-	diskFile, err := os.OpenFile(diskFilePath, os.O_RDWR|os.O_CREATE, 0600)
+	// sc is referenced by the buffer's OnEvict closure; assigned just below
+	// before any read/write can trigger a pool-driven punch.
+	var sc *SegmentCache
+
+	buf, err := usenetBufferPool().NewBuffer(buffer.Config{
+		MemorySize: bufferMemorySize,
+		DiskPath:   filepath.Join(diskPath, "segments.bin"),
+		TotalSize:  totalSize,
+		// Only fires if the usenet pool is given a disk limit (off by default —
+		// usenet bounds disk via its own sliding-window sweep). If a pool-driven
+		// punch ever does happen, mark the covered segments Empty so they
+		// re-fetch instead of pointing at a hole.
+		OnEvict: func(off, length int64) {
+			if sc != nil {
+				sc.onBufferEvict(off, length)
+			}
+		},
+	})
 	if err != nil {
 		cancel()
 		_ = os.RemoveAll(diskPath)
-		return nil, fmt.Errorf("create disk file: %w", err)
+		return nil, fmt.Errorf("create buffer: %w", err)
 	}
 
-	// Pre-extend file to total size for sparse writes
-	if totalSize > 0 {
-		if err := diskFile.Truncate(totalSize); err != nil {
-			_ = diskFile.Close()
-			_ = os.RemoveAll(diskPath)
-			cancel()
-			return nil, fmt.Errorf("truncate disk file: %w", err)
-		}
-	}
-
-	sc := &SegmentCache{
+	sc = &SegmentCache{
 		segments:    segments,
 		segCount:    segCount,
 		segOffsets:  offsets,
@@ -141,10 +191,9 @@ func NewSegmentCache(
 		states:      make([]atomic.Uint32, segCount),
 		pinCounts:   make([]atomic.Int32, segCount),
 		errors:      make([]atomic.Pointer[error], segCount),
-		diskPath:    diskPath,
-		diskFile:    diskFile,
-		onDisk:      make([]atomic.Bool, segCount),
 		accessTime:  make([]atomic.Int64, segCount),
+		buf:         buf,
+		diskPath:    diskPath,
 		maxDisk:     config.MaxDisk,
 		evictSignal: make(chan struct{}, 1),
 		ctx:         ctx,
@@ -153,14 +202,19 @@ func NewSegmentCache(
 		stats:       stats,
 	}
 
-	// Initialize shard conditions
 	for i := 0; i < numShards; i++ {
 		sc.shardCond[i] = sync.NewCond(&sc.shardMu[i])
 	}
 
-	// Start background evictor
+	// Hard-budget backstop. The sliding-window sweeper does the routine
+	// eviction work — see sweepLoop.
 	sc.evictWg.Add(1)
 	go sc.evictLoop()
+
+	// Proactive sliding-window evictor: this is what keeps the cache tight
+	// to actual playback instead of growing to the file size.
+	sc.sweepWg.Add(1)
+	go sc.sweepLoop()
 
 	return sc, nil
 }
@@ -168,8 +222,6 @@ func NewSegmentCache(
 // computeOffsets calculates cumulative byte offsets for segment lookup.
 func computeOffsets(segments []SegmentMeta) []int64 {
 	offsets := make([]int64, len(segments)+1)
-
-	// Check if segments have explicit offsets
 	if len(segments) > 0 && segments[0].EndOffset > 0 {
 		for i, seg := range segments {
 			offsets[i] = seg.StartOffset
@@ -178,101 +230,116 @@ func computeOffsets(segments []SegmentMeta) []int64 {
 			offsets[len(segments)] = segments[len(segments)-1].EndOffset + 1
 		}
 	} else {
-		// Compute from segment sizes
 		cumulative := int64(0)
 		for i, seg := range segments {
 			offsets[i] = cumulative
 			size := seg.Bytes
 			if size <= 0 {
-				size = 750 * 1024 // Typical usenet segment size
+				size = 750 * 1024
 			}
 			cumulative += size
 		}
 		offsets[len(segments)] = cumulative
 	}
-
 	return offsets
 }
 
-// Get returns segment data, loading from disk if necessary.
-// Returns nil, false if segment is not cached.
-// The segment should be pinned before calling Get to prevent eviction.
+// Get returns segment data, loading via the buffer.
+// Returns nil, false if the segment isn't cached. Pin before calling.
 func (sc *SegmentCache) Get(segIdx int) ([]byte, bool) {
 	if segIdx < 0 || segIdx >= sc.segCount {
 		return nil, false
 	}
-
-	state := SegmentState(sc.states[segIdx].Load())
-
-	if state == StateOnDisk {
-		data, err := sc.loadFromDisk(segIdx)
-		if err != nil {
-			sc.logger.Warn().Err(err).Int("segment", segIdx).Msg("failed to load from disk")
-			sc.stats.CacheMisses.Add(1)
-			return nil, false
-		}
-		sc.stats.CacheHits.Add(1)
-		return data, true
+	if SegmentState(sc.states[segIdx].Load()) != StateOnDisk {
+		sc.stats.CacheMisses.Add(1)
+		return nil, false
 	}
 
-	sc.stats.CacheMisses.Add(1)
-	return nil, false
+	off := sc.segOffsets[segIdx]
+	size := sc.SegmentDataSize(segIdx)
+	data := make([]byte, size)
+	if _, err := sc.buf.ReadAt(data, off); err != nil {
+		if !errors.Is(err, buffer.ErrNotPresent) {
+			sc.logger.Warn().Err(err).Int("segment", segIdx).Msg("buffer read failed")
+		}
+		sc.stats.CacheMisses.Add(1)
+		return nil, false
+	}
+	sc.stats.CacheHits.Add(1)
+	return data, true
 }
 
-// ReadInto reads segment data into the provided buffer, avoiding allocation.
-// Returns the number of bytes read and whether the segment was available.
-// buf must be at least SegmentDataSize(segIdx) bytes.
-func (sc *SegmentCache) ReadInto(segIdx int, buf []byte) (int, bool) {
+// ReadInto reads the full segment into buf. buf must be at least
+// SegmentDataSize(segIdx) bytes.
+func (sc *SegmentCache) ReadInto(segIdx int, dst []byte) (int, bool) {
 	if segIdx < 0 || segIdx >= sc.segCount {
 		return 0, false
 	}
-
-	state := SegmentState(sc.states[segIdx].Load())
-
-	if state == StateOnDisk {
-		n, err := sc.loadFromDiskInto(segIdx, buf)
-		if err != nil {
-			sc.logger.Warn().Err(err).Int("segment", segIdx).Msg("failed to load from disk")
-			sc.stats.CacheMisses.Add(1)
-			return 0, false
-		}
-		sc.stats.CacheHits.Add(1)
-		return n, true
-	}
-
-	sc.stats.CacheMisses.Add(1)
-	return 0, false
-}
-
-// ReadRangeInto reads only [segOffset, segOffset+length) of a segment directly
-// into buf, skipping the rest of the segment entirely.
-//
-// This is the zero-amplification read path: callers that only need a slice of
-// a segment should use this instead of ReadInto (which reads the full segment).
-// buf must be at least length bytes.
-func (sc *SegmentCache) ReadRangeInto(segIdx int, segOffset, length int64, buf []byte) (int, bool) {
-	if segIdx < 0 || segIdx >= sc.segCount {
+	if SegmentState(sc.states[segIdx].Load()) != StateOnDisk {
+		sc.stats.CacheMisses.Add(1)
 		return 0, false
 	}
 
-	state := SegmentState(sc.states[segIdx].Load())
-
-	if state == StateOnDisk {
-		n, err := sc.loadRangeFromDiskInto(segIdx, segOffset, length, buf)
-		if err != nil {
-			sc.logger.Warn().Err(err).Int("segment", segIdx).Msg("failed to read segment range from disk")
-			sc.stats.CacheMisses.Add(1)
-			return 0, false
-		}
-		sc.stats.CacheHits.Add(1)
-		return n, true
+	off := sc.segOffsets[segIdx]
+	size := sc.SegmentDataSize(segIdx)
+	if int64(len(dst)) < size {
+		sc.stats.CacheMisses.Add(1)
+		return 0, false
 	}
-
-	sc.stats.CacheMisses.Add(1)
-	return 0, false
+	n, err := sc.buf.ReadAt(dst[:size], off)
+	if err != nil {
+		if !errors.Is(err, buffer.ErrNotPresent) {
+			sc.logger.Warn().Err(err).Int("segment", segIdx).Msg("buffer read failed")
+		}
+		sc.stats.CacheMisses.Add(1)
+		return 0, false
+	}
+	sc.stats.CacheHits.Add(1)
+	return n, true
 }
 
-// SegmentDataSize returns the stored or expected size of a segment's data.
+// ReadRangeInto is the zero-amplification read path: copies only the
+// requested [segOffset, segOffset+length) slice of the segment.
+func (sc *SegmentCache) ReadRangeInto(segIdx int, segOffset, length int64, dst []byte) (int, bool) {
+	if segIdx < 0 || segIdx >= sc.segCount {
+		return 0, false
+	}
+	if SegmentState(sc.states[segIdx].Load()) != StateOnDisk {
+		sc.stats.CacheMisses.Add(1)
+		return 0, false
+	}
+	if segOffset < 0 || length < 0 || int64(len(dst)) < length {
+		sc.stats.CacheMisses.Add(1)
+		return 0, false
+	}
+
+	size := sc.SegmentDataSize(segIdx)
+	if segOffset > size {
+		sc.stats.CacheMisses.Add(1)
+		return 0, false
+	}
+	if segOffset+length > size {
+		length = size - segOffset
+	}
+	if length <= 0 {
+		sc.stats.CacheHits.Add(1)
+		return 0, true
+	}
+
+	absoluteOffset := sc.segOffsets[segIdx] + segOffset
+	n, err := sc.buf.ReadAt(dst[:length], absoluteOffset)
+	if err != nil {
+		if !errors.Is(err, buffer.ErrNotPresent) {
+			sc.logger.Warn().Err(err).Int("segment", segIdx).Msg("buffer read failed")
+		}
+		sc.stats.CacheMisses.Add(1)
+		return 0, false
+	}
+	sc.stats.CacheHits.Add(1)
+	return n, true
+}
+
+// SegmentDataSize returns the stored or expected size of a segment.
 func (sc *SegmentCache) SegmentDataSize(segIdx int) int64 {
 	if segIdx < 0 || segIdx >= sc.segCount {
 		return 0
@@ -287,7 +354,7 @@ func (sc *SegmentCache) SegmentDataSize(segIdx int) int64 {
 	return size
 }
 
-// Put writes segment data directly to disk (for streaming writes).
+// Put writes segment data through the buffer.
 func (sc *SegmentCache) Put(segIdx int, data []byte) error {
 	if segIdx < 0 || segIdx >= sc.segCount {
 		return fmt.Errorf("segment index out of range: %d", segIdx)
@@ -296,63 +363,48 @@ func (sc *SegmentCache) Put(segIdx int, data []byte) error {
 		return io.ErrClosedPipe
 	}
 
-	// Determine offset in the sparse file
-	offset := sc.segOffsets[segIdx]
-
-	// Backpressure: if already over budget, reclaim space synchronously before
-	// adding more so a fast download burst can't overshoot maxDisk into an
-	// ENOSPC before the async evictor catches up.
-	if sc.curDisk.Load() > sc.maxDisk {
+	if sc.maxDisk > 0 && sc.curDisk.Load() > sc.maxDisk {
 		sc.drainOverBudget()
 	}
 
-	// Write to disk — pwrite at non-overlapping offsets is safe to call concurrently.
-	_, err := sc.diskFile.WriteAt(data, offset)
-
-	if err != nil {
-		return fmt.Errorf("write segment %d to disk: %w", segIdx, err)
+	off := sc.segOffsets[segIdx]
+	if _, err := sc.buf.WriteAt(data, off); err != nil {
+		return fmt.Errorf("write segment %d: %w", segIdx, err)
 	}
 
-	sc.onDisk[segIdx].Store(true)
 	sc.curDisk.Add(int64(len(data)))
 	sc.segLengths[segIdx].Store(int64(len(data)))
 	sc.states[segIdx].Store(uint32(StateOnDisk))
 	sc.touchSegment(segIdx)
-
-	// Wake any waiters
 	sc.wakeWaiters(segIdx)
-
 	sc.signalEvict()
 	return nil
 }
 
-// segmentWriter is the contract doFetch uses to stream a segment body into the
-// disk tier. Exactly one of Finalize/Discard is called per writer: Finalize on
-// a successful download (commit), Discard on failure/abort.
+// segmentWriter is the contract doFetch uses to stream a segment body into
+// the cache. Exactly one of Finalize/Discard is called per writer.
 type segmentWriter interface {
 	Write(p []byte) (int, error)
 	Finalize()
 	Discard()
 }
 
-// StreamWriter returns a disk-backed segmentWriter for the segment.
+// StreamWriter returns a buffer-backed writer for the segment. The writer
+// skips the yEnc dataStart header and caps writes at the segment's max
+// expected size.
 func (sc *SegmentCache) StreamWriter(segIdx int) segmentWriter {
 	if segIdx < 0 || segIdx >= sc.segCount {
 		return nil
 	}
 
-	seg := sc.segments[segIdx]
-	offset := sc.segOffsets[segIdx]
-
-	// Backpressure: drain before streaming a new segment in so a download
-	// burst can't overshoot maxDisk into ENOSPC while the async evictor lags.
-	if sc.curDisk.Load() > sc.maxDisk {
+	if sc.maxDisk > 0 && sc.curDisk.Load() > sc.maxDisk {
 		sc.drainOverBudget()
 	}
 
-	return &diskStreamWriter{
-		file:      sc.diskFile,
-		offset:    offset,
+	seg := sc.segments[segIdx]
+	return &bufferStreamWriter{
+		buf:       sc.buf,
+		offset:    sc.segOffsets[segIdx],
 		dataStart: seg.SegmentDataStart,
 		maxBytes:  seg.Bytes,
 		cache:     sc,
@@ -360,26 +412,26 @@ func (sc *SegmentCache) StreamWriter(segIdx int) segmentWriter {
 	}
 }
 
-// diskStreamWriter writes streamed segment data directly to disk.
-type diskStreamWriter struct {
-	file      *os.File
-	offset    int64 // Segment start offset in file
-	dataStart int64 // Bytes to skip at start of stream (yEnc header)
-	maxBytes  int64 // Maximum bytes to write
-	skipped   int64 // Bytes skipped so far
-	written   int64 // Bytes written to disk
+// bufferStreamWriter pipes decoded body bytes from NNTP into the buffer at
+// the segment's reserved offset. Writes that exceed maxBytes are silently
+// dropped (the decoder may include some trailing padding).
+type bufferStreamWriter struct {
+	buf       *buffer.Buffer
+	offset    int64
+	dataStart int64
+	maxBytes  int64
+	skipped   int64
+	written   int64
 	cache     *SegmentCache
 	segIdx    int
 }
 
-func (w *diskStreamWriter) Write(p []byte) (int, error) {
+func (w *bufferStreamWriter) Write(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-
 	consumed := 0
 
-	// Skip dataStart bytes (yEnc header, etc.)
 	if w.skipped < w.dataStart {
 		skip := min(w.dataStart-w.skipped, int64(len(p)))
 		w.skipped += skip
@@ -390,139 +442,51 @@ func (w *diskStreamWriter) Write(p []byte) (int, error) {
 		}
 	}
 
-	// Check if we've written enough
 	if w.written >= w.maxBytes {
 		return consumed + len(p), nil
 	}
 
-	// Limit to remaining bytes allowed
 	remaining := w.maxBytes - w.written
 	writeLen := int64(len(p))
 	if writeLen > remaining {
 		writeLen = remaining
 	}
 
-	// Write to disk at the correct offset.
-	// pwrite at non-overlapping segment offsets is safe to call concurrently.
-	writeOffset := w.offset + w.written
-	n, err := w.file.WriteAt(p[:writeLen], writeOffset)
-
+	n, err := w.buf.WriteAt(p[:writeLen], w.offset+w.written)
 	if err != nil {
 		return consumed + n, err
 	}
-
 	w.written += int64(n)
 	return consumed + len(p), nil
 }
 
-// Discard is a no-op for the disk writer: a failed/partial sparse write is
-// simply overwritten on the next attempt, so there is nothing to release.
-func (w *diskStreamWriter) Discard() {}
+// Discard is a no-op for the buffer writer: the buffer slot is fixed-offset
+// and gets overwritten in place on the next attempt, so there's nothing
+// to release on a failed/partial write.
+func (w *bufferStreamWriter) Discard() {}
 
-// Finalize marks the segment as written and updates cache state.
-func (w *diskStreamWriter) Finalize() {
-	if w.cache != nil && w.segIdx >= 0 && w.written > 0 {
-		w.cache.onDisk[w.segIdx].Store(true)
-		w.cache.curDisk.Add(w.written)
-		w.cache.segLengths[w.segIdx].Store(w.written)
-		w.cache.states[w.segIdx].Store(uint32(StateOnDisk))
-		w.cache.touchSegment(w.segIdx)
-		w.cache.wakeWaiters(w.segIdx)
-		w.cache.signalEvict()
+// Finalize commits the segment to the cache: state to OnDisk, length
+// recorded, waiters woken.
+func (w *bufferStreamWriter) Finalize() {
+	if w.cache == nil || w.segIdx < 0 || w.written <= 0 {
+		return
 	}
-}
-
-// loadFromDisk loads segment data from the sparse file.
-func (sc *SegmentCache) loadFromDisk(segIdx int) ([]byte, error) {
-	if !sc.onDisk[segIdx].Load() {
-		return nil, fmt.Errorf("segment %d not on disk", segIdx)
-	}
-
-	seg := sc.segments[segIdx]
-	offset := sc.segOffsets[segIdx]
-	size := sc.segLengths[segIdx].Load()
-	if size <= 0 {
-		size = seg.Bytes
-		if size <= 0 {
-			// Calculate from offsets
-			size = sc.segOffsets[segIdx+1] - offset
-		}
-	}
-
-	data := make([]byte, size)
-	// pread at non-overlapping offsets is safe without a mutex.
-	n, err := sc.diskFile.ReadAt(data, offset)
-
-	if err != nil && err != io.EOF {
-		return nil, fmt.Errorf("read segment %d from disk: %w", segIdx, err)
-	}
-
-	return data[:n], nil
-}
-
-// loadFromDiskInto reads segment data from disk into the provided buffer.
-func (sc *SegmentCache) loadFromDiskInto(segIdx int, buf []byte) (int, error) {
-	if !sc.onDisk[segIdx].Load() {
-		return 0, fmt.Errorf("segment %d not on disk", segIdx)
-	}
-
-	offset := sc.segOffsets[segIdx]
-	size := sc.SegmentDataSize(segIdx)
-
-	if int64(len(buf)) < size {
-		return 0, fmt.Errorf("buffer too small for segment %d: need %d, have %d", segIdx, size, len(buf))
-	}
-
-	// pread at non-overlapping offsets is safe without a mutex.
-	n, err := sc.diskFile.ReadAt(buf[:size], offset)
-
-	if err != nil && err != io.EOF {
-		return 0, fmt.Errorf("read segment %d from disk: %w", segIdx, err)
-	}
-
-	return n, nil
-}
-
-func (sc *SegmentCache) loadRangeFromDiskInto(segIdx int, segOffset, length int64, buf []byte) (int, error) {
-	if !sc.onDisk[segIdx].Load() {
-		return 0, fmt.Errorf("segment %d not on disk", segIdx)
-	}
-	if segOffset < 0 || length < 0 {
-		return 0, fmt.Errorf("invalid segment range: offset=%d length=%d", segOffset, length)
-	}
-	if int64(len(buf)) < length {
-		return 0, fmt.Errorf("buffer too small for segment %d range: need %d, have %d", segIdx, length, len(buf))
-	}
-
-	size := sc.SegmentDataSize(segIdx)
-	if segOffset > size {
-		return 0, fmt.Errorf("segment offset %d beyond size %d for segment %d", segOffset, size, segIdx)
-	}
-	if segOffset+length > size {
-		length = size - segOffset
-	}
-
-	absoluteOffset := sc.segOffsets[segIdx] + segOffset
-	// pread at non-overlapping offsets is safe without a mutex.
-	n, err := sc.diskFile.ReadAt(buf[:length], absoluteOffset)
-
-	if err != nil && err != io.EOF {
-		return 0, fmt.Errorf("read segment %d range from disk: %w", segIdx, err)
-	}
-
-	return n, nil
+	w.cache.curDisk.Add(w.written)
+	w.cache.segLengths[w.segIdx].Store(w.written)
+	w.cache.states[w.segIdx].Store(uint32(StateOnDisk))
+	w.cache.touchSegment(w.segIdx)
+	w.cache.wakeWaiters(w.segIdx)
+	w.cache.signalEvict()
 }
 
 // PinRange marks segments as in-use, preventing eviction.
-// CRITICAL: Must be called before reading segments to prevent the race condition.
 func (sc *SegmentCache) PinRange(start, end int) {
 	for i := start; i <= end && i < sc.segCount; i++ {
 		sc.pinCounts[i].Add(1)
 	}
 }
 
-// UnpinRange decrements pin count, allowing eviction when count reaches 0.
-// CRITICAL: Must be called after reading segments to allow cleanup.
+// UnpinRange decrements the pin count for the range.
 func (sc *SegmentCache) UnpinRange(start, end int) {
 	for i := start; i <= end && i < sc.segCount; i++ {
 		sc.pinCounts[i].Add(-1)
@@ -553,8 +517,8 @@ func (sc *SegmentCache) SetState(segIdx int, state SegmentState) {
 	sc.states[segIdx].Store(uint32(state))
 }
 
-// MarkFetching atomically transitions Empty → Fetching.
-// Returns true if the transition succeeded (caller should fetch).
+// MarkFetching atomically transitions Empty → Fetching. Returns true if
+// the transition succeeded (caller owns the fetch).
 func (sc *SegmentCache) MarkFetching(segIdx int) bool {
 	if segIdx < 0 || segIdx >= sc.segCount {
 		return false
@@ -562,7 +526,7 @@ func (sc *SegmentCache) MarkFetching(segIdx int) bool {
 	return sc.states[segIdx].CompareAndSwap(uint32(StateEmpty), uint32(StateFetching))
 }
 
-// MarkFailed marks a segment as failed with the given error.
+// MarkFailed records a permanent fetch failure.
 func (sc *SegmentCache) MarkFailed(segIdx int, err error) {
 	if segIdx < 0 || segIdx >= sc.segCount {
 		return
@@ -592,13 +556,13 @@ func (sc *SegmentCache) ResetState(segIdx int) {
 	sc.errors[segIdx].Store(nil)
 }
 
-// WaitForSegment blocks until the segment is available or an error occurs.
+// WaitForSegment blocks until the segment is OnDisk, fails, or the context
+// is canceled.
 func (sc *SegmentCache) WaitForSegment(ctx context.Context, segIdx int) error {
 	if segIdx < 0 || segIdx >= sc.segCount {
 		return fmt.Errorf("segment index out of range: %d", segIdx)
 	}
 
-	// Fast path: check state without locking
 	state := SegmentState(sc.states[segIdx].Load())
 	switch state {
 	case StateOnDisk:
@@ -610,12 +574,10 @@ func (sc *SegmentCache) WaitForSegment(ctx context.Context, segIdx int) error {
 		return fmt.Errorf("segment %d failed", segIdx)
 	}
 
-	// Slow path: wait on shard condition
 	shardIdx := segIdx & shardMask
 	cond := sc.shardCond[shardIdx]
 	mu := &sc.shardMu[shardIdx]
 
-	// Context cancellation watchers
 	wakeShard := func() {
 		mu.Lock()
 		cond.Broadcast()
@@ -663,7 +625,7 @@ func (sc *SegmentCache) WaitForSegment(ctx context.Context, segIdx int) error {
 	}
 }
 
-// wakeWaiters wakes all goroutines waiting for the given segment.
+// wakeWaiters wakes any WaitForSegment callers parked on this segment's shard.
 func (sc *SegmentCache) wakeWaiters(segIdx int) {
 	shardIdx := segIdx & shardMask
 	sc.shardMu[shardIdx].Lock()
@@ -672,13 +634,11 @@ func (sc *SegmentCache) wakeWaiters(segIdx int) {
 }
 
 // touchSegment records the current time as the last access for a segment.
-// Lock-free replacement for touchLRU — no mutex, no heap allocation.
 func (sc *SegmentCache) touchSegment(segIdx int) {
 	sc.accessTime[segIdx].Store(time.Now().UnixNano())
 }
 
-// signalEvict notifies the background evictor that disk usage may have exceeded
-// the budget. Non-blocking: if a signal is already pending this is a no-op.
+// signalEvict pokes the background evictor (non-blocking).
 func (sc *SegmentCache) signalEvict() {
 	select {
 	case sc.evictSignal <- struct{}{}:
@@ -686,8 +646,9 @@ func (sc *SegmentCache) signalEvict() {
 	}
 }
 
-// evictLoop is the background goroutine that drains disk usage when over budget.
-// Running eviction asynchronously keeps it off the hot write path.
+// evictLoop runs the budget-backstop evictor. The proactive sliding-window
+// sweeper does the routine work; this only runs if curDisk exceeds maxDisk
+// despite the sweeper (e.g. burst of pinned segments).
 func (sc *SegmentCache) evictLoop() {
 	defer sc.evictWg.Done()
 	for {
@@ -700,28 +661,28 @@ func (sc *SegmentCache) evictLoop() {
 	}
 }
 
-// drainOverBudget evicts oldest unpinned on-disk segments until disk usage is
-// back under maxDisk, or nothing more is evictable (everything still in budget
-// is pinned by in-flight reads). Safe for concurrent callers: evictFromDisk
-// uses CAS to claim each segment exactly once, and findEvictable returning -1
-// guarantees the loop terminates rather than spinning when all is pinned.
+// drainOverBudget is the hard-disk backstop.
 func (sc *SegmentCache) drainOverBudget() {
+	if sc.maxDisk <= 0 {
+		return
+	}
 	for sc.curDisk.Load() > sc.maxDisk {
-		idx := sc.findEvictable()
-		if idx < 0 {
+		batch := sc.findEvictableBatch(segmentSweepBatch)
+		if len(batch) == 0 {
 			break
 		}
-		sc.evictFromDisk(idx)
+		sc.evictBatch(batch)
 	}
 }
 
-// findEvictable returns the index of the oldest unpinned on-disk segment,
-// or -1 if none is evictable. Lock-free O(n) scan over access timestamps.
-// For typical Usenet files (50–500 segments) this is faster than walking a
-// linked list under a global mutex.
-func (sc *SegmentCache) findEvictable() int {
-	oldest := int64(math.MaxInt64)
-	result := -1
+// findEvictableBatch returns up to maxN unpinned OnDisk segments, sorted
+// oldest-first by access time. Used by drainOverBudget only.
+func (sc *SegmentCache) findEvictableBatch(maxN int) []int {
+	type cand struct {
+		idx int
+		t   int64
+	}
+	cands := make([]cand, 0, maxN*2)
 	for i := 0; i < sc.segCount; i++ {
 		if sc.pinCounts[i].Load() > 0 {
 			continue
@@ -729,71 +690,214 @@ func (sc *SegmentCache) findEvictable() int {
 		if SegmentState(sc.states[i].Load()) != StateOnDisk {
 			continue
 		}
-		if t := sc.accessTime[i].Load(); t < oldest {
-			oldest = t
-			result = i
-		}
+		cands = append(cands, cand{i, sc.accessTime[i].Load()})
 	}
-	return result
+	if len(cands) == 0 {
+		return nil
+	}
+	sort.Slice(cands, func(a, b int) bool { return cands[a].t < cands[b].t })
+	if len(cands) > maxN {
+		cands = cands[:maxN]
+	}
+	out := make([]int, len(cands))
+	for i, c := range cands {
+		out[i] = c.idx
+	}
+	return out
 }
 
-// evictFromDisk removes a segment from the logical disk cache.
+// MarkConsumed records that bytes in [off, off+length) have been delivered
+// to a client. Monotonic high-water mark used by the sliding-window
+// evictor; backward seeks don't lower it because the back-window already
+// absorbs them.
+func (sc *SegmentCache) MarkConsumed(off, length int64) {
+	if length <= 0 {
+		return
+	}
+	end := off + length
+	for {
+		cur := sc.maxConsumedOff.Load()
+		if end <= cur {
+			return
+		}
+		if sc.maxConsumedOff.CompareAndSwap(cur, end) {
+			// Plumb the cursor into the buffer's eviction policy: blocks
+			// behind the consumed offset are safe to evict (we're done
+			// with them), blocks ahead are the active window the reader
+			// will still hit. Cheap atomic store, no buffer lock.
+			//
+			// Skip the back-window margin (we keep some history pinned at
+			// the SegmentCache level for scrub-back); the buffer can be
+			// stricter — anything we've explicitly consumed past is fair
+			// game for promotion to evict.
+			if sc.buf != nil {
+				sc.buf.SetReadHead(end)
+			}
+			return
+		}
+	}
+}
+
+// sweepLoop runs the proactive sliding-window evictor.
+func (sc *SegmentCache) sweepLoop() {
+	defer sc.sweepWg.Done()
+	ticker := time.NewTicker(segmentSweepInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-sc.ctx.Done():
+			return
+		case <-ticker.C:
+			sc.sweepWindow()
+		}
+	}
+}
+
+// sweepWindow picks segments that are both:
 //
-// Uses CAS to atomically claim the segment (OnDisk → Empty) and rechecks
-// pin count to close the TOCTOU window between findEvictable and eviction.
-func (sc *SegmentCache) evictFromDisk(segIdx int) bool {
-	// Recheck pin — may have been acquired since findEvictable returned.
-	if sc.pinCounts[segIdx].Load() > 0 {
-		return false
+//  1. Behind the back-window (segEnd < maxConsumedOff - backWindowBytes), and
+//  2. Untouched for at least segmentMinRetentionAge.
+//
+// Both conditions must hold — see the package comment in cache.go for the
+// rationale behind each.
+func (sc *SegmentCache) sweepWindow() {
+	consumedHi := sc.maxConsumedOff.Load()
+	if consumedHi <= 0 {
+		return
 	}
-	// Atomically transition OnDisk → Empty. If another goroutine beat us
-	// (concurrent evictor, or segment was re-fetched), skip cleanly.
-	if !sc.states[segIdx].CompareAndSwap(uint32(StateOnDisk), uint32(StateEmpty)) {
-		return false
+	cutoffOff := consumedHi - backWindowBytes
+	if cutoffOff <= 0 {
+		return
 	}
-	size := sc.segLengths[segIdx].Load()
-	if size <= 0 {
-		size = sc.segments[segIdx].Bytes
-		if size <= 0 {
-			size = sc.segOffsets[segIdx+1] - sc.segOffsets[segIdx]
-		}
-	}
-	sc.onDisk[segIdx].Store(false)
-	sc.curDisk.Add(-size)
-	sc.stats.Evictions.Add(1)
+	cutoffAccessNs := time.Now().Add(-segmentMinRetentionAge).UnixNano()
 
-	// Physically release the region so the space is actually returned to the
-	// filesystem. Without this the bytes linger in segments.bin until Close;
-	// on tmpfs/ramdisk those are RAM pages, so a file streamed through a small
-	// maxDisk would still grow memory toward the whole file size. Best-effort:
-	// the per-segment offset is fixed and a re-fetch just rewrites here, so a
-	// failed punch only forgoes the reclaim — it never breaks correctness.
-	if err := punchHole(sc.diskFile, sc.segOffsets[segIdx], size); err != nil {
-		sc.logger.Debug().Err(err).Int("segment", segIdx).Msg("hole punch on evict failed")
+	indices := make([]int, 0, segmentSweepBatch)
+	for i := 0; i < sc.segCount && len(indices) < segmentSweepBatch; i++ {
+		if SegmentState(sc.states[i].Load()) != StateOnDisk {
+			continue
+		}
+		if sc.pinCounts[i].Load() > 0 {
+			continue
+		}
+		segEnd := sc.segOffsets[i+1]
+		if segEnd > cutoffOff {
+			continue
+		}
+		if sc.accessTime[i].Load() > cutoffAccessNs {
+			continue
+		}
+		indices = append(indices, i)
 	}
-	return true
+	if len(indices) == 0 {
+		return
+	}
+	sc.evictBatch(indices)
 }
 
-// SegmentsForRange returns the segment indices that cover the byte range.
+// evictBatch transitions the given segments out of the cache and releases
+// their byte ranges through the buffer. Adjacent ranges are coalesced into
+// fewer Discard calls — for sequential playback eviction, ~dozen segments
+// merge into one buffer.Discard (and thus one fallocate(PUNCH_HOLE)).
+//
+// State changes happen first so concurrent readers see the segments as
+// gone before their disk regions are released.
+func (sc *SegmentCache) evictBatch(indices []int) {
+	type rng struct {
+		off  int64
+		size int64
+	}
+	pieces := make([]rng, 0, len(indices))
+
+	for _, idx := range indices {
+		if sc.pinCounts[idx].Load() > 0 {
+			continue
+		}
+		if !sc.states[idx].CompareAndSwap(uint32(StateOnDisk), uint32(StateEmpty)) {
+			continue
+		}
+		size := sc.segLengths[idx].Load()
+		if size <= 0 {
+			size = sc.segments[idx].Bytes
+			if size <= 0 {
+				size = sc.segOffsets[idx+1] - sc.segOffsets[idx]
+			}
+		}
+		sc.curDisk.Add(-size)
+		sc.stats.Evictions.Add(1)
+		pieces = append(pieces, rng{sc.segOffsets[idx], size})
+	}
+	if len(pieces) == 0 {
+		return
+	}
+
+	sort.Slice(pieces, func(a, b int) bool { return pieces[a].off < pieces[b].off })
+
+	// Coalesce adjacent ranges into the fewest possible Discard calls.
+	merged := pieces[:1]
+	for _, r := range pieces[1:] {
+		last := &merged[len(merged)-1]
+		if last.off+last.size == r.off {
+			last.size += r.size
+		} else {
+			merged = append(merged, r)
+		}
+	}
+	for _, r := range merged {
+		if err := sc.buf.Discard(r.off, r.size); err != nil {
+			sc.logger.Debug().
+				Err(err).
+				Int64("offset", r.off).
+				Int64("size", r.size).
+				Msg("buffer discard failed; slot will be overwritten on next fetch")
+		}
+	}
+}
+
+// onBufferEvict is invoked by the buffer pool after it punches a hole behind
+// the read head (only when the usenet pool is configured with a disk limit —
+// off by default). It marks every segment fully inside the reclaimed range
+// Empty so a later read re-fetches it rather than reading a hole. Segments that
+// only partially overlap are left alone; the pool only punches present ranges,
+// so a partial overlap means the segment straddles the back-window boundary and
+// should be kept.
+func (sc *SegmentCache) onBufferEvict(off, length int64) {
+	end := off + length
+	startIdx, endIdx := sc.SegmentsForRange(off, length)
+	for idx := startIdx; idx <= endIdx && idx < sc.segCount; idx++ {
+		segStart := sc.segOffsets[idx]
+		segEnd := sc.segOffsets[idx+1]
+		if segStart < off || segEnd > end {
+			continue // not fully contained
+		}
+		if sc.pinCounts[idx].Load() > 0 {
+			continue
+		}
+		if !sc.states[idx].CompareAndSwap(uint32(StateOnDisk), uint32(StateEmpty)) {
+			continue
+		}
+		size := sc.segLengths[idx].Load()
+		if size <= 0 {
+			size = segEnd - segStart
+		}
+		sc.curDisk.Add(-size)
+		sc.stats.Evictions.Add(1)
+	}
+}
+
+// SegmentsForRange returns the segment indices covering [offset, offset+length).
 func (sc *SegmentCache) SegmentsForRange(offset, length int64) (int, int) {
 	if sc.segCount == 0 {
 		return 0, 0
 	}
-
 	endOffset := offset + length - 1
-
-	// Binary search for first segment containing offset
 	startIdx := sc.binarySearchSegment(offset)
 	if startIdx >= sc.segCount {
 		startIdx = sc.segCount - 1
 	}
-
-	// Binary search for last segment containing endOffset
 	endIdx := sc.binarySearchSegment(endOffset)
 	if endIdx >= sc.segCount {
 		endIdx = sc.segCount - 1
 	}
-
 	return startIdx, endIdx
 }
 
@@ -820,14 +924,10 @@ func (sc *SegmentCache) GetSegment(segIdx int) *SegmentMeta {
 }
 
 // SegmentCount returns the total number of segments.
-func (sc *SegmentCache) SegmentCount() int {
-	return sc.segCount
-}
+func (sc *SegmentCache) SegmentCount() int { return sc.segCount }
 
 // TotalSize returns the total size of all segments.
-func (sc *SegmentCache) TotalSize() int64 {
-	return sc.totalSize
-}
+func (sc *SegmentCache) TotalSize() int64 { return sc.totalSize }
 
 // SegmentOffset returns the byte offset of a segment.
 func (sc *SegmentCache) SegmentOffset(segIdx int) int64 {
@@ -842,26 +942,22 @@ func (sc *SegmentCache) Close() error {
 	if sc.closed.Swap(true) {
 		return nil
 	}
-
 	sc.cancel()
 
-	// Wake all waiters
 	for i := 0; i < numShards; i++ {
 		sc.shardMu[i].Lock()
 		sc.shardCond[i].Broadcast()
 		sc.shardMu[i].Unlock()
 	}
 
-	// Wait for background evictor to exit
 	sc.evictWg.Wait()
+	sc.sweepWg.Wait()
 
-	// Close disk file and remove directory
-	if sc.diskFile != nil {
-		_ = sc.diskFile.Close()
+	if sc.buf != nil {
+		_ = sc.buf.Close()
 	}
 	if sc.diskPath != "" {
 		_ = os.RemoveAll(sc.diskPath)
 	}
-
 	return nil
 }

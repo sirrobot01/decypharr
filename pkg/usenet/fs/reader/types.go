@@ -124,7 +124,8 @@ func DefaultConfig() Config {
 // config.Usenet.ReadAhead) into a segment count for the given segments.
 // This is what makes the configured read-ahead actually take effect — the
 // window was previously hardcoded to 8 segments (~6MB) regardless of config,
-// which was far too shallow to absorb provider jitter during playback.
+// which was far too shallow to absorb provider jitter during playback. A zero
+// size explicitly disables read-ahead for parsing and other probe-style reads.
 func PrefetchAheadSegments(readAheadBytes int64, segments []SegmentMeta) int {
 	const (
 		fallbackSegBytes = 750 * 1024 // typical usenet segment
@@ -132,7 +133,7 @@ func PrefetchAheadSegments(readAheadBytes int64, segments []SegmentMeta) int {
 		maxAhead         = 256 // matches the prefetch channel depth
 	)
 	if readAheadBytes <= 0 {
-		return DefaultConfig().PrefetchAhead
+		return 0
 	}
 	segBytes := int64(fallbackSegBytes)
 	if len(segments) > 0 && segments[0].Bytes > 0 {

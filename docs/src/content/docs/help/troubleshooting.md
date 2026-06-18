@@ -219,7 +219,7 @@ Increase timeout:
 {
   "usenet": {
     "processing_timeout": "20m",
-    "availability_sample_percent": 5
+    "import_availability_sample_percent": 1
   }
 }
 ```

@@ -106,6 +106,16 @@ type DownloadLink struct {
 	Error *errorResponse `json:"error"`
 }
 
+type LinkInfosResponse struct {
+	Status string `json:"status"`
+	Data   struct {
+		Infos []struct {
+			Error *errorResponse `json:"error"`
+		} `json:"infos"`
+	} `json:"data"`
+	Error *errorResponse `json:"error"`
+}
+
 // UnmarshalJSON implements custom unmarshaling for Magnets type
 // It can handle both an array of magnetInfo objects or a map with string keys.
 // If the input is an array, it will be unmarshaled directly into the Magnets slice.

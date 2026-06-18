@@ -49,6 +49,10 @@ func main() {
 	config.SetConfigPath(configPath)
 	config.Get()
 
+	// Buffer pools are owned by their subsystems: the DFS cache (vfs.NewCache)
+	// and the usenet reader each create a buffer.Pool with their own configured
+	// RAM budget and disk limit.
+
 	// Start pprof server if enabled
 	if pprofAddr != "" && enablePprof {
 		go func() {

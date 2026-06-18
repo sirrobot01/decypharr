@@ -10,12 +10,14 @@ import (
 	"net/url"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	json "github.com/bytedance/sonic"
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/customerror"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
@@ -30,6 +32,7 @@ type AllDebrid struct {
 	accountsManager       *account.Manager
 	autoExpiresLinksAfter time.Duration
 	client                *request.Client
+	repairClient          *request.Client
 	Profile               *types.Profile `json:"profile"`
 	logger                zerolog.Logger
 	config                config.Debrid
@@ -54,17 +57,27 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*AllDebrid,
 	if dc.Proxy != "" {
 		opts = append(opts, request.WithProxy(dc.Proxy))
 	}
+	repairOpts := []request.ClientOption{
+		request.WithHeaders(headers),
+		request.WithRateLimiter(ratelimits["repair"]),
+		request.WithMaxRetries(4),
+		request.WithRetryableStatus(http.StatusTooManyRequests),
+	}
+	if dc.Proxy != "" {
+		repairOpts = append(repairOpts, request.WithProxy(dc.Proxy))
+	}
 
 	autoExpiresLinksAfter, err := utils.ParseDuration(dc.AutoExpireLinksAfter)
 	if autoExpiresLinksAfter == 0 || err != nil {
 		autoExpiresLinksAfter = 48 * time.Hour
 	}
 	ad := &AllDebrid{
-		Host:                  "http://api.alldebrid.com/v4.1",
+		Host:                  "https://api.alldebrid.com/v4.1",
 		APIKey:                dc.APIKey,
 		accountsManager:       account.NewManager(dc, ratelimits["download"], _log),
 		autoExpiresLinksAfter: autoExpiresLinksAfter,
 		client:                request.New(opts...),
+		repairClient:          request.New(repairOpts...),
 		logger:                _log,
 		config:                dc,
 	}
@@ -513,7 +526,43 @@ func (ad *AllDebrid) RefreshDownloadLinks() error {
 	return ad.accountsManager.RefreshLinks(ad.fetchDownloadLinks)
 }
 
-func (ad *AllDebrid) CheckFile(ctx context.Context, infohash, link string) error {
+func (ad *AllDebrid) CheckFile(ctx context.Context, _, link string) error {
+	form := url.Values{}
+	form.Add("link[]", link)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ad.Host+"/link/infos", strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := ad.repairClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("alldebrid API error: Status: %d", resp.StatusCode)
+	}
+
+	var data LinkInfosResponse
+	if err := json.ConfigDefault.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return err
+	}
+	if data.Status != "success" {
+		message := "unknown error"
+		if data.Error != nil {
+			message = data.Error.Message
+		}
+		return fmt.Errorf("alldebrid API error: %s", message)
+	}
+	if len(data.Data.Infos) != 1 {
+		return fmt.Errorf("alldebrid API error: expected one link info, got %d", len(data.Data.Infos))
+	}
+	if linkErr := data.Data.Infos[0].Error; linkErr != nil {
+		return fmt.Errorf("%w: %s: %s", customerror.HosterUnavailableError, linkErr.Code, linkErr.Message)
+	}
 	return nil
 }
 
@@ -658,5 +707,5 @@ func (ad *AllDebrid) SpeedTest(ctx context.Context) types.SpeedTestResult {
 }
 
 func (ad *AllDebrid) SupportsCheck() bool {
-	return false
+	return true
 }

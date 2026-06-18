@@ -76,7 +76,7 @@ func (s *SABnzbd) modeContext(next http.Handler) http.Handler {
 
 		// Create a default Arr instance for the category
 		downloadUncached := false
-		a := arr.New(category, "", "", false, false, &downloadUncached, "", "auto")
+		a := arr.New(category, "", "", false, &downloadUncached, "", "auto")
 
 		ctx := context.WithValue(r.Context(), modeKey, strings.TrimSpace(mode))
 		ctx = context.WithValue(ctx, arrKey, a)
@@ -117,7 +117,7 @@ func (s *SABnzbd) authenticate(category, username, password string) (*arr.Arr, e
 				break
 			}
 		}
-		a = arr.New(category, username, password, false, false, downloadUncached, "", "auto")
+		a = arr.New(category, username, password, false, downloadUncached, "", "auto")
 	}
 	arrValidated := false // This is a flag to indicate if arr validation was successful
 	if (username == "" || password == "") && cfg.UseAuth {

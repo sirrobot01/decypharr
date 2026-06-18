@@ -412,6 +412,7 @@ func (e *Entry) MarkAsCompleted(contentPath string) {
 // MarkAsError marks the torrent as errored
 func (e *Entry) MarkAsError(err error) {
 	e.State = EntryStateError
+	e.Status = debridTypes.TorrentStatusError
 	e.IsDownloading = false
 	e.LastError = err.Error()
 	e.ErrorCount++

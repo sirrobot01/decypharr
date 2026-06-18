@@ -258,6 +258,36 @@ func (rs Ranges) FindMissing(r Range) (rout Range) {
 	return rout
 }
 
+// Remove subtracts r from rs: any present bytes within [r.Pos, r.End()) are
+// dropped, splitting a straddling range into the surviving head/tail. Used when
+// the buffer pool punches a hole behind the read head so the persisted metadata
+// stops claiming bytes that are no longer on disk.
+func (rs *Ranges) Remove(r Range) {
+	if r.IsEmpty() || len(*rs) == 0 {
+		return
+	}
+	end := r.End()
+	// Fresh slice: a straddling segment splits into two outputs, so we can't
+	// safely reuse the backing array (it could overwrite unread input).
+	out := make(Ranges, 0, len(*rs)+1)
+	for _, seg := range *rs {
+		// No overlap: keep the segment whole.
+		if seg.End() <= r.Pos || seg.Pos >= end {
+			out = append(out, seg)
+			continue
+		}
+		// Surviving head [seg.Pos, r.Pos).
+		if seg.Pos < r.Pos {
+			out = append(out, Range{Pos: seg.Pos, Size: r.Pos - seg.Pos})
+		}
+		// Surviving tail [end, seg.End()).
+		if seg.End() > end {
+			out = append(out, Range{Pos: end, Size: seg.End() - end})
+		}
+	}
+	*rs = out
+}
+
 // Clear removes all ranges
 func (rs *Ranges) Clear() {
 	*rs = (*rs)[:0]

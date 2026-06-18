@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -63,19 +64,17 @@ type QBitTorrent struct {
 	Categories          []string `json:"categories,omitempty"`
 	RefreshInterval     int      `json:"refresh_interval,omitempty"`
 	SkipPreCache        bool     `json:"skip_pre_cache,omitempty"`
-	MaxDownloads        int      `json:"max_downloads,omitempty"`
 	AlwaysRmTrackerUrls bool     `json:"always_rm_tracker_urls,omitempty"`
 }
 
 func (q QBitTorrent) IsZero() bool {
-	return q.DownloadFolder == "" && len(q.Categories) == 0 && q.RefreshInterval == 0 && !q.SkipPreCache && q.MaxDownloads == 0 && !q.AlwaysRmTrackerUrls
+	return q.DownloadFolder == "" && len(q.Categories) == 0 && q.RefreshInterval == 0 && !q.SkipPreCache && !q.AlwaysRmTrackerUrls
 }
 
 type Arr struct {
 	Name             string `json:"name,omitempty"`
 	Host             string `json:"host,omitempty"`
 	Token            string `json:"token,omitempty"`
-	Cleanup          bool   `json:"cleanup,omitempty"`
 	SkipRepair       bool   `json:"skip_repair,omitempty"`
 	DownloadUncached *bool  `json:"download_uncached,omitempty"`
 	SelectedDebrid   string `json:"selected_debrid,omitempty"`
@@ -83,7 +82,91 @@ type Arr struct {
 }
 
 func (a Arr) IsZero() bool {
-	return a.Name == "" && a.Host == "" && a.Token == "" && !a.Cleanup && !a.SkipRepair && a.DownloadUncached == nil && a.SelectedDebrid == "" && a.Source == ""
+	return a.Name == "" && a.Host == "" && a.Token == "" && !a.SkipRepair && a.DownloadUncached == nil && a.SelectedDebrid == "" && a.Source == ""
+}
+
+// QueueCleanup is the global policy that drives CleanupQueue. It maps
+// Sonarr/Radarr queue warnings/errors to an action.
+type QueueCleanup struct {
+	Rules []QueueCleanupRule `json:"rules,omitempty"`
+}
+
+// QueueCleanupRule maps a queue issue to a cleanup action.
+//
+// Catalog rules carry a non-empty ID whose match semantics are hardcoded in the
+// arr package (keyed by ID) — for these the user only customizes Action, and
+// Match is informational/display only. Custom rules have an empty ID and match
+// Match as a case-insensitive substring of the queue item's statusMessages text.
+type QueueCleanupRule struct {
+	ID     string `json:"id,omitempty"`     // catalog key; "" = user custom rule
+	Match  string `json:"match,omitempty"`  // custom: substring; catalog: display text
+	Action string `json:"action,omitempty"` // "" (ignore) | "import" | "blacklist" | "blacklist_research"
+}
+
+// DefaultQueueCleanupRules returns the built-in catalog of known Servarr queue
+// issues with sensible default actions. The order is significant: resolution is
+// first-match-wins, so more specific entries should precede broader ones.
+func DefaultQueueCleanupRules() []QueueCleanupRule {
+	return []QueueCleanupRule{
+		{ID: "failed_download", Match: "Failed download", Action: "blacklist_research"},
+		{ID: "title_mismatch", Match: "Title mismatch; automatic import is not possible", Action: "import"},
+		{ID: "matched_by_id", Match: "Matched to series/movie by ID", Action: "import"},
+		{ID: "unable_to_parse", Match: "Unable to parse download", Action: "blacklist_research"},
+		{ID: "no_eligible_files", Match: "No files found are eligible for import", Action: "blacklist_research"},
+		{ID: "episodes_missing", Match: "Episodes not imported or missing from the release", Action: "blacklist_research"},
+		{ID: "file_empty", Match: "Downloaded file is empty", Action: "blacklist_research"},
+		{ID: "invalid_local_path", Match: "Not a valid local path (remote path mapping)", Action: ""},
+		{ID: "not_grabbed", Match: "Not grabbed by the arr / no category", Action: ""},
+	}
+}
+
+// mergeQueueCleanupRules reconciles a stored rule set with the current catalog.
+// An empty set is seeded with the defaults. Otherwise the user's action choices
+// for existing catalog IDs and all custom rules are preserved, while any catalog
+// entries the user has never seen (e.g. added in a newer release) are appended
+// with their default action. Catalog display text is refreshed from the catalog.
+func mergeQueueCleanupRules(rules []QueueCleanupRule) []QueueCleanupRule {
+	defaults := DefaultQueueCleanupRules()
+	if len(rules) == 0 {
+		return defaults
+	}
+
+	stored := make(map[string]QueueCleanupRule, len(rules))
+	out := make([]QueueCleanupRule, 0, len(rules)+len(defaults))
+	for _, r := range rules {
+		if r.ID == "" {
+			// Custom rule: keep as-is (drop empties defensively).
+			if strings.TrimSpace(r.Match) != "" {
+				out = append(out, r)
+			}
+			continue
+		}
+		stored[r.ID] = r
+	}
+
+	// Emit the catalog in canonical order, preserving stored actions.
+	for _, d := range defaults {
+		if s, ok := stored[d.ID]; ok {
+			d.Action = s.Action
+		}
+		out = append(out, d)
+	}
+
+	// out currently holds [customs..., catalog...]; reorder so catalog rules
+	// come first. First-match-wins then favors the specific known issues over
+	// broad user substrings.
+	catalogFirst := make([]QueueCleanupRule, 0, len(out))
+	for _, r := range out {
+		if r.ID != "" {
+			catalogFirst = append(catalogFirst, r)
+		}
+	}
+	for _, r := range out {
+		if r.ID == "" {
+			catalogFirst = append(catalogFirst, r)
+		}
+	}
+	return catalogFirst
 }
 
 type CustomFolders struct {
@@ -118,13 +201,12 @@ type RepairConfig struct {
 	Arrs                  []string     `json:"arrs,omitempty"`
 	AutoRepair            bool         `json:"auto_repair,omitempty"`
 	SkipNZBRepair         bool         `json:"skip_nzb_repair,omitempty"`
-	NotifyOnComplete      bool         `json:"notify_on_complete,omitempty"`
 }
 
 func (r RepairConfig) IsZero() bool {
 	return !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
 		r.NNTPConnectionPercent == 0 && r.Strategy == "" && r.RecheckInterval == "" && len(r.Arrs) == 0 &&
-		!r.AutoRepair && !r.SkipNZBRepair && !r.NotifyOnComplete
+		!r.AutoRepair && !r.SkipNZBRepair
 }
 
 type Config struct {
@@ -166,7 +248,7 @@ type Config struct {
 	// Manager settings
 	DownloadFolder        string                   `json:"download_folder,omitempty"`
 	RefreshInterval       string                   `json:"refresh_interval,omitempty"`
-	MaxDownloads          int                      `json:"max_downloads,omitempty"`
+	MaxActiveDownloads    int                      `json:"max_active_downloads,omitempty"`
 	SkipPreCache          bool                     `json:"skip_pre_cache,omitempty"`
 	SkipMultiSeason       bool                     `json:"skip_multi_season,omitempty"`
 	AlwaysRmTrackerUrls   bool                     `json:"always_rm_tracker_urls,omitempty"`
@@ -180,6 +262,9 @@ type Config struct {
 	SkipAutoMove bool   `json:"skip_auto_move,omitempty"`
 
 	Repair RepairConfig `json:"repair,omitzero"`
+
+	// QueueCleanup is the global arr queue-cleanup policy (see CleanupQueue).
+	QueueCleanup QueueCleanup `json:"queue_cleanup,omitempty"`
 }
 
 func (c *Config) JsonFile() string {
@@ -351,10 +436,6 @@ func (c *Config) migrateQBitTorrentToManager() {
 		c.SkipPreCache = c.QBitTorrent.SkipPreCache
 	}
 
-	if c.MaxDownloads == 0 && c.QBitTorrent.MaxDownloads > 0 {
-		c.MaxDownloads = c.QBitTorrent.MaxDownloads
-	}
-
 	if !c.AlwaysRmTrackerUrls && c.QBitTorrent.AlwaysRmTrackerUrls {
 		c.AlwaysRmTrackerUrls = c.QBitTorrent.AlwaysRmTrackerUrls
 	}
@@ -403,6 +484,9 @@ func (c *Config) setDefaults() {
 
 	if c.DefaultDownloadAction == "" {
 		c.DefaultDownloadAction = DownloadActionSymlink
+	}
+	if c.MaxActiveDownloads <= 0 {
+		c.MaxActiveDownloads = 5
 	}
 
 	for i, debrid := range c.Debrids {
@@ -457,6 +541,8 @@ func (c *Config) setDefaults() {
 	if c.Retries == 0 {
 		c.Retries = 3 // Default to 3 consecutive errors before switching
 	}
+
+	c.QueueCleanup.Rules = mergeQueueCleanupRules(c.QueueCleanup.Rules)
 
 	// Basic defaults
 	if c.URLBase == "" {
@@ -594,6 +680,96 @@ func (c *Config) Save() error {
 func Reset() {
 	once = sync.Once{}
 	instance = nil
+}
+
+// clearHotFields zeroes every field that can be applied at runtime without a
+// full service restart. It is used by RequiresRestart so that only the
+// remaining ("cold") fields participate in the change comparison.
+//
+// IMPORTANT: any new Config field defaults to "cold" (restart-required) unless
+// it is added here. That is deliberate — it is always safe to fall back to a
+// restart, but never safe to skip one for a field that needs it.
+func clearHotFields(c *Config) {
+	// Auth lives in auth.json and is preserved separately by the caller.
+	c.Auth = nil
+
+	// AppURL is only read live (e.g. STRM URL generation in the downloader);
+	// it is never cached in a service struct, so it applies without a restart.
+	c.AppURL = ""
+
+	// Auth toggles are evaluated live per-request by every auth middleware
+	// (main app, qbit, sabnzbd, and webdav), so they apply without a restart.
+	c.UseAuth = false
+	c.EnableWebdavAuth = false
+
+	// Manager / processing settings — read live via config.Get() on the
+	// relevant code paths, or applied lazily on the next natural restart.
+	c.Arrs = nil
+	c.AllowedExt = nil
+	c.AllowSamples = false
+	c.MinFileSize = ""
+	c.MaxFileSize = ""
+	c.RemoveStalledAfter = ""
+	c.NZBUserAgent = ""
+	c.Notifications = Notifications{}
+	c.DiscordWebhook = ""
+	c.CallbackURL = ""
+	c.DownloadFolder = ""
+	c.RefreshInterval = ""
+	c.MaxActiveDownloads = 0
+	c.SkipPreCache = false
+	c.SkipMultiSeason = false
+	c.AlwaysRmTrackerUrls = false
+	c.Categories = nil
+	c.FolderNaming = ""
+	c.CustomFolders = nil
+	c.DefaultDownloadAction = ""
+	c.RefreshDirs = ""
+	c.Retries = 0
+	c.SkipAutoMove = false
+	c.Repair = RepairConfig{}
+
+	// Queue cleanup rules are read live via config.Get() inside CleanupQueue,
+	// so changes apply on the next cleanup cycle without a restart.
+	c.QueueCleanup = QueueCleanup{}
+
+	// Deprecated, migrated into Manager fields above.
+	c.QBitTorrent = QBitTorrent{}
+
+	// Usenet is mostly cold (providers, connection pool sizing, socket buffers,
+	// and the streaming buffer pool are all established at startup). But the
+	// availability sampling percentages are read live on each repair/import
+	// check (see Usenet.CheckFile / checkNZBAvailability), so they apply without
+	// a restart. Everything else in Usenet stays restart-required.
+	c.Usenet.AvailabilitySamplePercent = 0
+	c.Usenet.ImportAvailabilitySamplePercent = 0
+}
+
+// RequiresRestart reports whether applying n on top of c needs a full service
+// restart (re-binding the HTTP listener, recreating debrid/usenet clients, or
+// re-mounting the filesystem). It returns false when only runtime-applicable
+// ("hot") fields changed, in which case the caller can use ApplyRuntime to
+// update the live config in place without tearing anything down.
+//
+// Both configs are compared after their defaults have been applied (see
+// setDefaults / Save), so callers should persist n before calling this.
+func (c *Config) RequiresRestart(n *Config) bool {
+	a, b := *c, *n
+	clearHotFields(&a)
+	clearHotFields(&b)
+	return !reflect.DeepEqual(a, b)
+}
+
+// ApplyRuntime copies n into the live config in place, preserving the in-memory
+// Auth pointer. Because every holder of the *Config singleton shares this
+// struct, the updated values become visible everywhere without a restart.
+//
+// Only call this when RequiresRestart(n) is false: the cold fields are then
+// identical between c and n, so this effectively updates just the hot fields.
+func (c *Config) ApplyRuntime(n *Config) {
+	auth := c.Auth
+	*c = *n
+	c.Auth = auth
 }
 
 func (c *Config) createConfig() error {

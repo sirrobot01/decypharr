@@ -9,6 +9,8 @@ config.json
 *.db
 *.log
 *.log.*
+*.test
+/nntpmock
 dist/
 tmp/**
 torrents.json

@@ -128,6 +128,20 @@ func (m *Manager) Stats() map[string]interface{} {
 	return stats
 }
 
+func (m *Manager) CleanupCache() (map[string]interface{}, error) {
+	if m.vfs == nil {
+		return nil, fmt.Errorf("VFS manager is not initialized")
+	}
+	return m.vfs.CleanupCache(), nil
+}
+
+func (m *Manager) PurgeCache() (map[string]interface{}, error) {
+	if m.vfs == nil {
+		return nil, fmt.Errorf("VFS manager is not initialized")
+	}
+	return m.vfs.PurgeCache(), nil
+}
+
 func (m *Manager) Type() string {
 	return "dfs"
 }

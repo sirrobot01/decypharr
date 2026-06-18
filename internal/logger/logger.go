@@ -15,6 +15,9 @@ import (
 var (
 	once   sync.Once
 	logger zerolog.Logger
+
+	rotatingLogFileOnce sync.Once
+	rotatingLogFile     *lumberjack.Logger
 )
 
 func GetLogPath() string {
@@ -29,16 +32,26 @@ func GetLogPath() string {
 	return logsDir
 }
 
+// sharedRotatingLogFile returns the process-wide lumberjack writer. All
+// component loggers share one rotator so they don't race on the same file
+// (each *lumberjack.Logger runs its own mill goroutine and rotation cycle).
+func sharedRotatingLogFile() *lumberjack.Logger {
+	rotatingLogFileOnce.Do(func() {
+		rotatingLogFile = &lumberjack.Logger{
+			Filename:   filepath.Join(GetLogPath(), "decypharr.log"),
+			MaxSize:    10,
+			MaxAge:     15,
+			MaxBackups: 10,
+			Compress:   true,
+		}
+	})
+	return rotatingLogFile
+}
+
 func New(prefix string) zerolog.Logger {
 	level := config.Get().LogLevel
 
-	rotatingLogFile := &lumberjack.Logger{
-		Filename:   filepath.Join(GetLogPath(), "decypharr.log"),
-		MaxSize:    10,
-		MaxAge:     15,
-		MaxBackups: 10, // Limit backup files to prevent disk fill-up
-		Compress:   true,
-	}
+	rotatingLogFile := sharedRotatingLogFile()
 
 	consoleWriter := zerolog.ConsoleWriter{
 		Out:        os.Stdout,

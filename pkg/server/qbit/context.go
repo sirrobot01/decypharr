@@ -156,7 +156,7 @@ func (q *QBit) authenticate(category, username, password string) (*arr.Arr, erro
 				break
 			}
 		}
-		a = arr.New(category, username, password, false, false, downloadUncached, "", "auto")
+		a = arr.New(category, username, password, false, downloadUncached, "", "auto")
 	}
 	arrValidated := false // This is a flag to indicate if arr validation was successful
 	if (username == "" || password == "") && cfg.UseAuth {

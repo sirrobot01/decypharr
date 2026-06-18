@@ -59,20 +59,18 @@ type Arr struct {
 	Token string `json:"token"`
 
 	Type             Type   `json:"type"`
-	Cleanup          bool   `json:"cleanup"`
 	SkipRepair       bool   `json:"skip_repair"`
 	DownloadUncached *bool  `json:"download_uncached"`
 	SelectedDebrid   string `json:"selected_debrid,omitempty"` // The debrid service selected for this arr
 	Source           Source `json:"source,omitempty"`          // The source of the arr, e.g. "auto", "manual". Auto means it was automatically detected from the arr
 }
 
-func New(name, host, token string, cleanup, skipRepair bool, downloadUncached *bool, selectedDebrid, source string) *Arr {
+func New(name, host, token string, skipRepair bool, downloadUncached *bool, selectedDebrid, source string) *Arr {
 	return &Arr{
 		Name:             name,
 		Host:             host,
 		Token:            strings.TrimSpace(token),
 		Type:             inferType(host, name),
-		Cleanup:          cleanup,
 		SkipRepair:       skipRepair,
 		DownloadUncached: downloadUncached,
 		SelectedDebrid:   selectedDebrid,
@@ -179,7 +177,7 @@ func NewStorage() *Storage {
 			continue // Skip if host or token is not set
 		}
 		name := a.Name
-		as := New(name, a.Host, a.Token, a.Cleanup, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid, a.Source)
+		as := New(name, a.Host, a.Token, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid, a.Source)
 		if utils.ValidateURL(as.Host) != nil {
 			continue
 		}
@@ -206,7 +204,7 @@ func (s *Storage) GetOrCreate(name string) *Arr {
 	}
 	arr, exists := s.arrs.Load(name)
 	if !exists {
-		return New(name, "", "", false, false, nil, "", "manual")
+		return New(name, "", "", false, nil, "", "manual")
 	}
 	return arr
 }
@@ -247,7 +245,6 @@ func (s *Storage) SyncToConfig() []config.Arr {
 				exists.Host = arr.Host
 			}
 			exists.Token = cmp.Or(exists.Token, arr.Token)
-			exists.Cleanup = arr.Cleanup
 			exists.SkipRepair = arr.SkipRepair
 			exists.DownloadUncached = arr.DownloadUncached
 			exists.SelectedDebrid = arr.SelectedDebrid
@@ -258,7 +255,6 @@ func (s *Storage) SyncToConfig() []config.Arr {
 				Name:             arr.Name,
 				Host:             arr.Host,
 				Token:            arr.Token,
-				Cleanup:          arr.Cleanup,
 				SkipRepair:       arr.SkipRepair,
 				DownloadUncached: arr.DownloadUncached,
 				SelectedDebrid:   arr.SelectedDebrid,
@@ -278,7 +274,7 @@ func (s *Storage) SyncToConfig() []config.Arr {
 func (s *Storage) SyncFromConfig(arrs []config.Arr) {
 	newMaps := xsync.NewMap[string, *Arr]()
 	for _, a := range arrs {
-		newMaps.Store(a.Name, New(a.Name, a.Host, a.Token, a.Cleanup, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid, a.Source))
+		newMaps.Store(a.Name, New(a.Name, a.Host, a.Token, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid, a.Source))
 	}
 
 	// AddOrUpdate or update arrs from config

@@ -14,6 +14,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/customerror"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
@@ -28,6 +29,7 @@ type DebridLink struct {
 	accountsManager  *account.Manager
 	DownloadUncached bool
 	client           *request.Client
+	repairClient     *request.Client
 
 	autoExpiresLinksAfter time.Duration
 	logger                zerolog.Logger
@@ -56,6 +58,15 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*DebridLink
 	if dc.Proxy != "" {
 		opts = append(opts, request.WithProxy(dc.Proxy))
 	}
+	repairOpts := []request.ClientOption{
+		request.WithHeaders(headers),
+		request.WithRateLimiter(ratelimits["repair"]),
+		request.WithMaxRetries(4),
+		request.WithRetryableStatus(http.StatusTooManyRequests),
+	}
+	if dc.Proxy != "" {
+		repairOpts = append(repairOpts, request.WithProxy(dc.Proxy))
+	}
 
 	autoExpiresLinksAfter, err := utils.ParseDuration(dc.AutoExpireLinksAfter)
 	if autoExpiresLinksAfter == 0 || err != nil {
@@ -68,6 +79,7 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*DebridLink
 		DownloadUncached:      dc.DownloadUncached,
 		autoExpiresLinksAfter: autoExpiresLinksAfter,
 		client:                request.New(opts...),
+		repairClient:          request.New(repairOpts...),
 		logger:                log,
 		config:                dc,
 	}
@@ -596,7 +608,25 @@ func (dl *DebridLink) getTorrents(page, perPage int) ([]*types.Torrent, error) {
 	return torrents, nil
 }
 
-func (dl *DebridLink) CheckFile(ctx context.Context, infohash, link string) error {
+func (dl *DebridLink) CheckFile(ctx context.Context, _, link string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Range", "bytes=0-0")
+
+	resp, err := dl.repairClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
+		return customerror.HosterUnavailableError
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("debridlink file check error: Status: %d", resp.StatusCode)
+	}
 	return nil
 }
 
@@ -746,5 +776,5 @@ func (dl *DebridLink) SpeedTest(ctx context.Context) types.SpeedTestResult {
 }
 
 func (dl *DebridLink) SupportsCheck() bool {
-	return false
+	return true
 }

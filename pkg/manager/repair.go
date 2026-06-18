@@ -476,7 +476,7 @@ func (r *Repair) finalizeRun(run *storage.RepairRun, status storage.RepairRunSta
 	}
 	_ = r.manager.storage.PruneRepairRuns(repairHistoryRetained)
 
-	if r.cfg().NotifyOnComplete && r.manager.Notifications != nil {
+	if r.manager.Notifications != nil {
 		if event := notificationEventFor(status); event != "" {
 			r.manager.Notifications.Notify(notifications.Event{
 				Type:    event,

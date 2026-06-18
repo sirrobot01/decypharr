@@ -41,6 +41,7 @@ type Index struct {
 	sortedDirty bool
 }
 
+
 // newIndex creates a new empty index
 func newIndex() *Index {
 	return &Index{
@@ -114,22 +115,27 @@ func (idx *Index) KeysSortedByOffset() []string {
 		return result
 	}
 
-	// Rebuild sorted keys
-	idx.sortedKeys = make([]string, 0, idx.entries.Size())
+	// Rebuild sorted keys. Snapshot (key, offset) pairs in a single Range so
+	// the sort compares cached offsets instead of doing two map loads per
+	// comparison (which dominated for large stores: ~2·n·log(n) lookups).
+	type keyOffset struct {
+		key string
+		off int64
+	}
+	pairs := make([]keyOffset, 0, idx.entries.Size())
 	idx.entries.Range(func(k string, v *IndexEntry) bool {
-		idx.sortedKeys = append(idx.sortedKeys, k)
+		pairs = append(pairs, keyOffset{key: k, off: v.Offset})
 		return true
 	})
 
-	// Sort by offset for sequential disk reads
-	sort.Slice(idx.sortedKeys, func(i, j int) bool {
-		ei, _ := idx.entries.Load(idx.sortedKeys[i])
-		ej, _ := idx.entries.Load(idx.sortedKeys[j])
-		if ei == nil || ej == nil {
-			return false
-		}
-		return ei.Offset < ej.Offset
+	sort.Slice(pairs, func(i, j int) bool {
+		return pairs[i].off < pairs[j].off
 	})
+
+	idx.sortedKeys = make([]string, len(pairs))
+	for i := range pairs {
+		idx.sortedKeys[i] = pairs[i].key
+	}
 
 	idx.sortedDirty = false
 
