@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/mount/dfs/vfs"
 	"github.com/winfsp/cgofuse/fuse"
 )
+
 
 // FS implements the cgofuse FileSystemInterface
 type FS struct {
@@ -139,7 +141,7 @@ func (f *FS) Readdir(path string, fill func(name string, stat *fuse.Stat_t, ofst
 		_, children := f.vfs.GetManager().GetEntryChildren(groupOrTorrent)
 		if children == nil {
 			// Try as a direct torrent directory
-			_, children = f.vfs.GetManager().GetTorrentChildren(groupOrTorrent)
+			_, children = f.vfs.GetManager().GetTorrentChildrenWithSidecars(groupOrTorrent)
 		}
 		for _, child := range children {
 			fill(child.Name(), f.entryStat(&child), 0)
@@ -152,7 +154,7 @@ func (f *FS) Readdir(path string, fill func(name string, stat *fuse.Stat_t, ofst
 	torrentName := parts[1]
 
 	// get the torrent's children (files)
-	_, children := f.vfs.GetManager().GetTorrentChildren(torrentName)
+	_, children := f.vfs.GetManager().GetTorrentChildrenWithSidecars(torrentName)
 	for _, child := range children {
 		fill(child.Name(), f.entryStat(&child), 0)
 	}
@@ -189,8 +191,22 @@ func (f *FS) entryStat(info *manager.FileInfo) *fuse.Stat_t {
 	return stat
 }
 
-// CreateEx is required by fuse.FileSystemOpenEx but this is a read-only filesystem
+// CreateEx intercepts subtitle file creation and routes to sidecar injection.
 func (f *FS) CreateEx(path string, mode uint32, fi *fuse.FileInfo_t) int {
+	parts := splitPath(path)
+	// Only allow subtitle writes at depth 2+ (inside a torrent folder)
+	if len(parts) >= 2 && manager.IsSubtitleFile(parts[len(parts)-1]) {
+		torrentName := parts[len(parts)-2]
+		filename := parts[len(parts)-1]
+		mgr := f.vfs.GetManager()
+		infoHash := mgr.GetInfoHashByName(torrentName)
+		if infoHash == "" {
+			return -fuse.ENOENT
+		}
+		fi.Fh = f.handles.CreateSidecar(infoHash, filename, mgr)
+		fi.DirectIo = true
+		return 0
+	}
 	return -fuse.EACCES
 }
 
@@ -214,6 +230,17 @@ func (f *FS) OpenEx(path string, fi *fuse.FileInfo_t) int {
 	}
 
 	var reader *vfs.StreamingFile
+
+	// Open sidecar file once here; Read will use the stored fd.
+	if info.IsSidecar() {
+		fd, err := os.Open(info.SidecarPath())
+		if err != nil {
+			return -fuse.ENOENT
+		}
+		fi.DirectIo = true
+		fi.Fh = f.handles.CreateWithSidecarFd(info, fd)
+		return 0
+	}
 
 	// get reader/stream for remote files
 	if info.IsRemote() {
@@ -246,7 +273,7 @@ func (f *FS) Open(path string, flags int) (int, uint64) {
 func (f *FS) Read(path string, buff []byte, off int64, fh uint64) int {
 
 	handle := f.handles.Get(fh)
-	if handle == nil {
+	if handle == nil || handle.info == nil {
 		return -fuse.EBADF
 	}
 
@@ -261,8 +288,7 @@ func (f *FS) Read(path string, buff []byte, off int64, fh uint64) int {
 		size = int(handle.info.Size() - off)
 	}
 
-	// Static content (e.g. version.txt): serve from in-memory buffer. These
-	// files have no reader because IsRemote() is false when content is set.
+	// Static content (e.g. version.txt): serve from in-memory buffer.
 	if content := handle.info.Content(); len(content) > 0 {
 		if off >= int64(len(content)) {
 			return 0
@@ -272,6 +298,12 @@ func (f *FS) Read(path string, buff []byte, off int64, fh uint64) int {
 			end = int64(len(content))
 		}
 		return copy(buff, content[off:end])
+	}
+
+	// Sidecar file (e.g. subtitle): serve from the pre-opened fd.
+	if handle.sidecarFd != nil {
+		n, _ := handle.sidecarFd.ReadAt(buff[:size], off)
+		return n
 	}
 
 	if handle.reader == nil {
@@ -301,12 +333,45 @@ func (f *FS) Read(path string, buff []byte, off int64, fh uint64) int {
 	return n
 }
 
+// Write handles writes for sidecar (subtitle) files
+func (f *FS) Write(path string, buff []byte, off int64, fh uint64) int {
+	handle := f.handles.Get(fh)
+	if handle == nil || handle.sidecar == nil {
+		return -fuse.EBADF
+	}
+	sc := handle.sidecar
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	end := int(off) + len(buff)
+	if end > len(sc.buf) {
+		newBuf := make([]byte, end)
+		copy(newBuf, sc.buf)
+		sc.buf = newBuf
+	}
+	copy(sc.buf[off:], buff)
+	return len(buff)
+}
+
 // Release closes a file handle
 func (f *FS) Release(path string, fh uint64) int {
-
 	handle := f.handles.Get(fh)
 	if handle != nil {
-		f.releaseHandleResources(handle)
+		if handle.sidecarFd != nil {
+			_ = handle.sidecarFd.Close()
+		} else if handle.sidecar != nil {
+			sc := handle.sidecar
+			sc.mu.Lock()
+			content := make([]byte, len(sc.buf))
+			copy(content, sc.buf)
+			sc.mu.Unlock()
+			if len(content) > 0 {
+				if err := sc.mgr.InjectSidecarFile(sc.infoHash, sc.filename, content); err != nil {
+					f.logger.Error().Err(err).Str("infohash", sc.infoHash).Str("file", sc.filename).Msg("Failed to inject sidecar")
+				}
+			}
+		} else {
+			f.releaseHandleResources(handle)
+		}
 	}
 	f.handles.Delete(fh)
 	return 0
@@ -464,6 +529,11 @@ func (f *FS) releaseHandleResources(handle *FileHandle) {
 		return
 	}
 
+	if handle.sidecarFd != nil {
+		_ = handle.sidecarFd.Close()
+		handle.sidecarFd = nil
+	}
+
 	if handle.reader != nil && handle.info != nil {
 		if err := handle.reader.Close(); err != nil && !customerror.IsSilentError(err) {
 			f.logger.Debug().Err(err).Msg("Failed to close VFS reader")
@@ -481,8 +551,19 @@ type HandleManager struct {
 
 // FileHandle represents an open file
 type FileHandle struct {
-	info   *manager.FileInfo
-	reader *vfs.StreamingFile
+	info       *manager.FileInfo
+	reader     *vfs.StreamingFile
+	sidecar    *SidecarHandle
+	sidecarFd  *os.File // open fd for reading a committed sidecar
+}
+
+// SidecarHandle buffers writes for subtitle injection
+type SidecarHandle struct {
+	infoHash string
+	filename string
+	mgr      *manager.Manager
+	mu       sync.Mutex
+	buf      []byte
 }
 
 // NewHandleManager creates a new handle manager
@@ -494,6 +575,17 @@ func NewHandleManager() *HandleManager {
 	return hm
 }
 
+// CreateWithSidecarFd creates a read handle for a committed sidecar file.
+func (h *HandleManager) CreateWithSidecarFd(info *manager.FileInfo, fd *os.File) uint64 {
+	fh := h.nextFH.Load()
+	h.nextFH.Add(1)
+	h.handles.Store(fh, &FileHandle{
+		info:      info,
+		sidecarFd: fd,
+	})
+	return fh
+}
+
 // Create creates a new handle
 func (h *HandleManager) Create(info *manager.FileInfo, reader *vfs.StreamingFile) uint64 {
 	fh := h.nextFH.Load()
@@ -501,6 +593,20 @@ func (h *HandleManager) Create(info *manager.FileInfo, reader *vfs.StreamingFile
 	h.handles.Store(fh, &FileHandle{
 		info:   info,
 		reader: reader,
+	})
+	return fh
+}
+
+// CreateSidecar creates a handle for buffered subtitle injection
+func (h *HandleManager) CreateSidecar(infoHash, filename string, mgr *manager.Manager) uint64 {
+	fh := h.nextFH.Load()
+	h.nextFH.Add(1)
+	h.handles.Store(fh, &FileHandle{
+		sidecar: &SidecarHandle{
+			infoHash: infoHash,
+			filename: filename,
+			mgr:      mgr,
+		},
 	})
 	return fh
 }

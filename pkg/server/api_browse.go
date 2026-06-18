@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
 	"sort"
@@ -19,14 +20,13 @@ import (
 
 // BrowseEntry represents a file or folder in the browse view
 type BrowseEntry struct {
-	Infohash     string `json:"infohash,omitempty"`
 	Name         string `json:"name"`
 	Path         string `json:"path"`
 	Size         int64  `json:"size"`
 	ModTime      string `json:"mod_time"`
 	IsDir        bool   `json:"is_dir"`
-	InfoHash     string `json:"info_hash,omitempty"`  // For torrent folders
-	CanDelete    bool   `json:"can_delete,omitempty"` // Whether this can be deleted
+	InfoHash     string `json:"info_hash,omitempty"`
+	CanDelete    bool   `json:"can_delete,omitempty"`
 	ActiveDebrid string `json:"active_debrid"`
 }
 
@@ -413,6 +413,86 @@ func (s *Server) handleTorrentDownload(w http.ResponseWriter, r *http.Request, e
 	w.Header().Set("X-Accel-Redirect", link.DownloadLink)
 	w.Header().Set("X-Accel-Buffering", "no")
 	http.Redirect(w, r, link.DownloadLink, http.StatusFound)
+}
+
+func (s *Server) handleRenameEntry(w http.ResponseWriter, r *http.Request) {
+	hash := chi.URLParam(r, "hash")
+	var body struct {
+		Name string `json:"name"`
+	}
+	bodyBytes, _ := io.ReadAll(r.Body)
+	if err := json.Unmarshal(bodyBytes, &body); err != nil || body.Name == "" {
+		http.Error(w, "name required", http.StatusBadRequest)
+		return
+	}
+	entry, err := s.manager.GetEntry(hash)
+	if err != nil || entry == nil {
+		http.Error(w, "entry not found", http.StatusNotFound)
+		return
+	}
+	// Use the new name exactly as provided — strip .nzb suffix if present
+	// entry.Name is used directly as folder name (folder_naming=filename)
+	baseName := body.Name
+	if strings.HasSuffix(strings.ToLower(baseName), ".nzb") {
+		baseName = baseName[:len(baseName)-4]
+	}
+	entry.Name = baseName
+
+	// Rename the file inside entry.Files only for single-file entries (movie or single episode)
+	// Season packs have multiple files — only rename the folder
+	if len(entry.Files) == 1 {
+		for oldKey, f := range entry.Files {
+			// Get extension from the existing file name
+			ext := ""
+			if dotIdx := strings.LastIndex(f.Name, "."); dotIdx >= 0 {
+				ext = f.Name[dotIdx:]
+			}
+			newFileName := baseName + ext
+			delete(entry.Files, oldKey)
+			f.Name = newFileName
+			if f.OriginalName == "" {
+				f.OriginalName = oldKey // Preserve original RD filename for link resolution fallback
+			}
+			entry.Files[newFileName] = f
+			// Also rename in each ProviderEntry
+			for _, pe := range entry.Providers {
+				if pf, ok := pe.Files[oldKey]; ok {
+					delete(pe.Files, oldKey)
+					pe.Files[newFileName] = pf
+				}
+			}
+			break
+		}
+	}
+
+	if err := s.manager.AddOrUpdate(entry, nil); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.manager.RefreshEntries(true)
+	s.logger.Info().Str("hash", hash).Str("name", body.Name).Msg("Entry renamed")
+	w.WriteHeader(http.StatusOK)
+}
+
+const maxSidecarBytes = 32 << 20 // 32 MB
+
+func (s *Server) handleInjectSidecarFile(w http.ResponseWriter, r *http.Request) {
+	infoHash := utils.PathUnescape(chi.URLParam(r, "hash"))
+	file := utils.PathUnescape(chi.URLParam(r, "file"))
+
+	content, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSidecarBytes))
+	if err != nil {
+		http.Error(w, "failed to read body (too large?)", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.manager.InjectSidecarFile(infoHash, file, content); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.logger.Info().Str("infohash", infoHash).Str("file", file).Int("bytes", len(content)).Msg("Sidecar file injected")
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) handleUsenetDownload(w http.ResponseWriter, r *http.Request, entryName string, file *storage.File) {

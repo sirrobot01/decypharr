@@ -87,6 +87,7 @@ type Manager struct {
 
 	// Notifications service
 	Notifications *notifications.Service
+
 }
 
 // New creates a new Manager instance
@@ -153,6 +154,7 @@ func New() *Manager {
 		debridSpeedTestResults: xsync.NewMap[string, debridTypes.SpeedTestResult](),
 		activeStreams:          xsync.NewMap[string, *ActiveStream](),
 		processingEntries:      xsync.NewMap[string, struct{}](),
+
 	}
 
 	instance.init()
@@ -606,6 +608,8 @@ func (m *Manager) DeleteEntry(infohash string, removePlacements bool) error {
 	if err := m.storage.Delete(infohash); err != nil {
 		return err
 	}
+	// Remove any sidecar files stored for this entry
+	m.deleteSidecars(infohash)
 	// Refresh entry cache
 	m.RefreshEntries(true)
 	return nil

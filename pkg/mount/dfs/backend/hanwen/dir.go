@@ -198,7 +198,7 @@ func (d *Dir) listChildren() ([]manager.FileInfo, syscall.Errno) {
 		return children, 0
 
 	case LevelFile:
-		_, children := d.vfs.GetManager().GetTorrentChildren(d.name)
+		_, children := d.vfs.GetManager().GetTorrentChildrenWithSidecars(d.name)
 		if children == nil {
 			return nil, 0
 		}

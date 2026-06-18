@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -27,6 +28,7 @@ var (
 type Handle struct {
 	file       *File
 	streamFile *vfs.StreamingFile
+	sidecarFd  *os.File // pre-opened fd for sidecar reads
 	closed     atomic.Bool
 	logger     *logger.RateLimitedEvent
 	lastAccess atomic.Int64
@@ -41,11 +43,15 @@ func (fh *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRe
 	}
 
 	// Static content (e.g. version.txt): serve from the in-memory buffer.
-	// Check this first — streamFile is nil for static files, so dereferencing
-	// it below would panic.
 	if len(fh.file.content) > 0 {
 		data := fh.readFromStaticContent(off, int64(len(dest)))
 		return fuse.ReadResultData(data), 0
+	}
+
+	// Sidecar file (e.g. subtitle): serve from the pre-opened fd.
+	if fh.sidecarFd != nil {
+		n, _ := fh.sidecarFd.ReadAt(dest, off)
+		return fuse.ReadResultData(dest[:n]), 0
 	}
 
 	if fh.streamFile == nil {
@@ -96,6 +102,11 @@ func (fh *Handle) readFromStaticContent(offset, size int64) []byte {
 func (fh *Handle) Release(ctx context.Context) syscall.Errno {
 	if !fh.closed.CompareAndSwap(false, true) {
 		return 0
+	}
+
+	if fh.sidecarFd != nil {
+		_ = fh.sidecarFd.Close()
+		fh.sidecarFd = nil
 	}
 
 	if fh.streamFile != nil {

@@ -190,13 +190,14 @@ func (e *EntryItem) GetActiveFiles() []*File {
 }
 
 type File struct {
-	Name      string    `msgpack:"name" json:"name"`
-	Path      string    `msgpack:"path,omitempty" json:"path,omitempty"`
-	AddedOn   time.Time `msgpack:"added_on" json:"added_on"`
-	Size      int64     `msgpack:"size" json:"size"`
-	ByteRange *[2]int64 `msgpack:"byte_range,omitempty" json:"byte_range,omitempty"`
-	Deleted   bool      `msgpack:"deleted" json:"deleted"`
-	InfoHash  string    `msgpack:"infohash,omitempty" json:"infohash,omitempty"` // Parent infohash(might be an nzb or torrent)
+	Name         string    `msgpack:"name" json:"name"`
+	OriginalName string    `msgpack:"original_name,omitempty" json:"original_name,omitempty"` // Set on rename — original RD filename before renaming
+	Path         string    `msgpack:"path,omitempty" json:"path,omitempty"`
+	AddedOn      time.Time `msgpack:"added_on" json:"added_on"`
+	Size         int64     `msgpack:"size" json:"size"`
+	ByteRange    *[2]int64 `msgpack:"byte_range,omitempty" json:"byte_range,omitempty"`
+	Deleted      bool      `msgpack:"deleted" json:"deleted"`
+	InfoHash     string    `msgpack:"infohash,omitempty" json:"infohash,omitempty"` // Parent infohash(might be an nzb or torrent)
 }
 
 // ProviderFile represents debrid-specific file information
