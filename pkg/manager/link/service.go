@@ -330,6 +330,11 @@ func (s *Service) getPlacementFile(entry *storage.Entry, filename string) (*stor
 		}
 
 		placementFile = placement.Files[filename]
+		if (placementFile == nil || (placementFile.Link == "" && placementFile.Id == "")) && file.OriginalName != "" {
+			// File was renamed — placement was rebuilt from RD with original filename as key.
+			// Fall back to the original RD filename to resolve the provider link.
+			placementFile = placement.Files[file.OriginalName]
+		}
 		if placementFile == nil || (placementFile.Link == "" && placementFile.Id == "") {
 			return nil, NewPermanentError(
 				fmt.Errorf("file %s not available after refresh", filename),

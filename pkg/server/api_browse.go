@@ -450,6 +450,9 @@ func (s *Server) handleRenameEntry(w http.ResponseWriter, r *http.Request) {
 			newFileName := baseName + ext
 			delete(entry.Files, oldKey)
 			f.Name = newFileName
+			if f.OriginalName == "" {
+				f.OriginalName = oldKey // Preserve original RD filename for link resolution fallback
+			}
 			entry.Files[newFileName] = f
 			// Also rename in each ProviderEntry
 			for _, pe := range entry.Providers {
