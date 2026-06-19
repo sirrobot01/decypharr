@@ -274,8 +274,12 @@ func (sr *StreamingReader) readFromCache(ctx context.Context, p []byte, off int6
 			// pinned segments (pinCounts[idx] > 0 check), closing the race.
 			const maxRefetchAttempts = 10
 			for attempt := 1; ; attempt++ {
-				sr.logger.Warn().Int("segment", segIdx).Int("attempt", attempt).
-					Msg("segment data missing after wait, re-fetching")
+				// Attempt 1 almost always succeeds (benign eviction/hole-punch
+				// churn), so only warn from attempt 2 onward to avoid log flooding.
+				if attempt > 1 {
+					sr.logger.Warn().Int("segment", segIdx).Int("attempt", attempt).
+						Msg("segment data missing after wait, re-fetching")
+				}
 
 				// Pin FIRST so evictBatch cannot Discard this segment's buffer
 				// region between our Fetch write and our ReadRangeInto.

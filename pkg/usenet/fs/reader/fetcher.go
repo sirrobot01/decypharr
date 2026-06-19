@@ -239,6 +239,23 @@ func (sf *SegmentFetcher) doFetch(ctx context.Context, segIdx int) error {
 			}
 		}
 
+		// DIAGNOSTIC: compare what StreamBody decoded against the declared
+		// segment size, to tell whether a short segment is a decode truncation
+		// or a genuinely-short article on the server.
+		if bw, ok := writer.(*bufferStreamWriter); ok {
+			declared := sf.cache.segments[segIdx].Bytes
+			if bw.written != declared {
+				sf.cache.logger.Warn().
+					Int("segment", segIdx).
+					Int64("streambody_returned", n).
+					Int64("written", bw.written).
+					Int64("declared_bytes", declared).
+					Int64("data_start", bw.dataStart).
+					Int64("max_bytes", bw.maxBytes).
+					Msg("DIAG: decode size mismatch (StreamBody vs declared)")
+			}
+		}
+
 		return nil
 	})
 
