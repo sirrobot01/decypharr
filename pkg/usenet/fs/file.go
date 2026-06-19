@@ -184,7 +184,7 @@ func (vf *File) getOrCreateStreamingReader() *reader.StreamingReader {
 				reader.WithMaxConnections(readerConfig.MaxConnections),
 				reader.WithPrefetchAhead(readerConfig.PrefetchAhead),
 				reader.WithDiskPath(readerConfig.DiskPath),
-				reader.WithLogger(vf.logger),
+				reader.WithLogger(vf.logger.With().Str("file", vf.volume.Name).Logger()),
 			)
 		} else {
 			r, err = reader.NewStreamingReader(
@@ -195,7 +195,7 @@ func (vf *File) getOrCreateStreamingReader() *reader.StreamingReader {
 				reader.WithMaxConnections(readerConfig.MaxConnections),
 				reader.WithPrefetchAhead(readerConfig.PrefetchAhead),
 				reader.WithDiskPath(readerConfig.DiskPath),
-				reader.WithLogger(vf.logger),
+				reader.WithLogger(vf.logger.With().Str("file", vf.volume.Name).Logger()),
 			)
 		}
 
@@ -284,7 +284,7 @@ func (vf *File) newReaderForRange(start, end int64) (io.ReadCloser, error) {
 			reader.WithMaxConnections(readerConfig.MaxConnections),
 			reader.WithPrefetchAhead(readerConfig.PrefetchAhead),
 			reader.WithDiskPath(readerConfig.DiskPath),
-			reader.WithLogger(vf.logger),
+			reader.WithLogger(vf.logger.With().Str("file", vf.volume.Name).Logger()),
 		)
 	} else {
 		r, err = reader.NewStreamingReader(
@@ -295,7 +295,7 @@ func (vf *File) newReaderForRange(start, end int64) (io.ReadCloser, error) {
 			reader.WithMaxConnections(readerConfig.MaxConnections),
 			reader.WithPrefetchAhead(readerConfig.PrefetchAhead),
 			reader.WithDiskPath(readerConfig.DiskPath),
-			reader.WithLogger(vf.logger),
+			reader.WithLogger(vf.logger.With().Str("file", vf.volume.Name).Logger()),
 		)
 	}
 

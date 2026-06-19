@@ -305,19 +305,42 @@ func (sc *SegmentCache) ReadRangeInto(segIdx int, segOffset, length int64, dst [
 		return 0, false
 	}
 	if SegmentState(sc.states[segIdx].Load()) != StateOnDisk {
-		sc.logger.Warn().Int("segment", segIdx).Uint32("state", sc.states[segIdx].Load()).Int64("seg_data_size", sc.SegmentDataSize(segIdx)).Msg("DIAG: ReadRangeInto state not OnDisk")
 		sc.stats.CacheMisses.Add(1)
 		return 0, false
 	}
 	if segOffset < 0 || length < 0 || int64(len(dst)) < length {
-		sc.logger.Warn().Int("segment", segIdx).Int64("seg_offset", segOffset).Int64("length", length).Int("dst_len", len(dst)).Msg("DIAG: ReadRangeInto BAD PARAMS")
 		sc.stats.CacheMisses.Add(1)
 		return 0, false
 	}
 
 	size := sc.SegmentDataSize(segIdx)
 	if segOffset > size {
-		sc.logger.Warn().Int("segment", segIdx).Int64("seg_offset", segOffset).Int64("size", size).Int64("seg_length_stored", sc.segLengths[segIdx].Load()).Int64("seg_bytes", sc.segments[segIdx].Bytes).Msg("DIAG: ReadRangeInto segOffset PAST END")
+		// The requested offset is past the actual decoded size of this
+		// segment. This happens when a segment's decoded payload is smaller
+		// than the size declared in the NZB (segments[idx].Bytes): the file
+		// offset table is built from declared sizes, but the real committed
+		// data is shorter. If the offset still falls within the DECLARED
+		// extent of the segment, treat the missing tail as zero-filled so
+		// playback survives the small gap instead of failing forever. Only
+		// the genuinely-out-of-range case (beyond declared size too) is a
+		// real error.
+		declared := sc.segments[segIdx].Bytes
+		if declared > size && segOffset < declared {
+			zeroLen := length
+			if segOffset+zeroLen > declared {
+				zeroLen = declared - segOffset
+			}
+			if zeroLen <= 0 {
+				sc.stats.CacheHits.Add(1)
+				return 0, true
+			}
+			for i := int64(0); i < zeroLen; i++ {
+				dst[i] = 0
+			}
+			sc.logger.Debug().Int("segment", segIdx).Int64("seg_offset", segOffset).Int64("actual_size", size).Int64("declared", declared).Int64("zero_filled", zeroLen).Msg("segment decoded shorter than declared; zero-filling tail gap")
+			sc.stats.CacheHits.Add(1)
+			return int(zeroLen), true
+		}
 		sc.stats.CacheMisses.Add(1)
 		return 0, false
 	}
@@ -334,17 +357,6 @@ func (sc *SegmentCache) ReadRangeInto(segIdx int, segOffset, length int64, dst [
 	if err != nil {
 		if !errors.Is(err, buffer.ErrNotPresent) {
 			sc.logger.Warn().Err(err).Int("segment", segIdx).Msg("buffer read failed")
-		} else {
-			// DIAGNOSTIC: surface the otherwise-silent ErrNotPresent so we can
-			// see when state says OnDisk but the buffer range is absent.
-			sc.logger.Warn().Int("segment", segIdx).
-				Int64("abs_offset", absoluteOffset).
-				Int64("length", length).
-				Int64("seg_offset", sc.segOffsets[segIdx]).
-				Int64("seg_data_size", size).
-				Uint32("state", sc.states[segIdx].Load()).
-				Int64("seg_length_stored", sc.segLengths[segIdx].Load()).
-				Msg("DIAG: ReadRangeInto ErrNotPresent - state OnDisk but buffer range absent")
 		}
 		sc.stats.CacheMisses.Add(1)
 		return 0, false
