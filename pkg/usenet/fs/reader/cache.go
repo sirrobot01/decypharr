@@ -305,6 +305,7 @@ func (sc *SegmentCache) ReadRangeInto(segIdx int, segOffset, length int64, dst [
 		return 0, false
 	}
 	if SegmentState(sc.states[segIdx].Load()) != StateOnDisk {
+		sc.logger.Warn().Int("segment", segIdx).Uint32("state", sc.states[segIdx].Load()).Int64("seg_data_size", sc.SegmentDataSize(segIdx)).Msg("DIAG: ReadRangeInto state not OnDisk")
 		sc.stats.CacheMisses.Add(1)
 		return 0, false
 	}
