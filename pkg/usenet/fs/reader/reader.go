@@ -290,6 +290,12 @@ func (sr *StreamingReader) readFromCache(ctx context.Context, p []byte, off int6
 				fetchErr := sr.fetcher.Fetch(ctx, segIdx)
 				if fetchErr != nil {
 					sr.cache.UnpinRange(segIdx, segIdx)
+					// If all providers confirmed the article is missing/corrupt,
+					// propagate the ArticleNotFound error unwrapped so the repair
+					// system can detect it and queue a replacement download.
+					if nntp.IsArticleNotFoundError(fetchErr) {
+						return totalRead, fetchErr
+					}
 					return totalRead, fmt.Errorf("re-fetch segment %d: %w", segIdx, fetchErr)
 				}
 
