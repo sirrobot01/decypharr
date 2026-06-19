@@ -331,6 +331,17 @@ func (sc *SegmentCache) ReadRangeInto(segIdx int, segOffset, length int64, dst [
 	if err != nil {
 		if !errors.Is(err, buffer.ErrNotPresent) {
 			sc.logger.Warn().Err(err).Int("segment", segIdx).Msg("buffer read failed")
+		} else {
+			// DIAGNOSTIC: surface the otherwise-silent ErrNotPresent so we can
+			// see when state says OnDisk but the buffer range is absent.
+			sc.logger.Warn().Int("segment", segIdx).
+				Int64("abs_offset", absoluteOffset).
+				Int64("length", length).
+				Int64("seg_offset", sc.segOffsets[segIdx]).
+				Int64("seg_data_size", size).
+				Uint32("state", sc.states[segIdx].Load()).
+				Int64("seg_length_stored", sc.segLengths[segIdx].Load()).
+				Msg("DIAG: ReadRangeInto ErrNotPresent - state OnDisk but buffer range absent")
 		}
 		sc.stats.CacheMisses.Add(1)
 		return 0, false
