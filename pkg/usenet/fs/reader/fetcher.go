@@ -225,8 +225,19 @@ func (sf *SegmentFetcher) doFetch(ctx context.Context, segIdx int) error {
 			}
 		}
 
-		// Commit (updates cache state to StateOnDisk).
-		writer.Finalize()
+		// Commit (updates cache state to StateOnDisk). Finalize returns false
+		// when there was no payload to commit — e.g. the decoded article is
+		// all yEnc header and no body (a corrupt/truncated article). StreamBody
+		// reports n>0 in that case (header bytes were processed), so the n==0
+		// check above doesn't catch it. Treat a non-committing Finalize as a
+		// missing article so it fails fast and the repair system can act on it
+		// instead of looping re-fetch forever.
+		if !writer.Finalize() {
+			return &nntp.Error{
+				Type:    nntp.ErrorTypeArticleNotFound,
+				Message: "article committed no payload (header-only/corrupt body)",
+			}
+		}
 
 		return nil
 	})
