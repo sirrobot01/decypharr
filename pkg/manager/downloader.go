@@ -17,6 +17,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/nntp"
+	"github.com/sirrobot01/decypharr/pkg/manager/link"
 	"github.com/sirrobot01/decypharr/pkg/notifications"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sourcegraph/conc/pool"
@@ -208,8 +209,12 @@ func (d *Downloader) processSymlink(entry *storage.Entry, mountPath string) erro
 		return err
 	}
 
-	// Run ffprobe on files to warm cache and trigger imports
-	if !d.manager.config.SkipPreCache && len(filePaths) > 0 {
+	// Run ffprobe on files to warm cache and trigger imports.
+	// Skip for NZB entries: their FUSE files are served on-demand from NNTP,
+	// so ffprobe blocks on a D-state kernel read and cmd.Wait() never returns,
+	// preventing completeEntry from being called. PreCache in usenet.go handles
+	// cache warming for NZB via head/tail segment pre-fetch instead.
+	if !d.manager.config.SkipPreCache && len(filePaths) > 0 && !entry.IsNZB() {
 		probeFiles := filePaths
 		if len(probeFiles) > MaxNZBPreCacheFiles {
 			probeFiles = probeFiles[:MaxNZBPreCacheFiles]
@@ -502,24 +507,38 @@ func (d *Downloader) processTorrentDownload(entry *storage.Entry) error {
 		_ = d.manager.queue.Update(entry)
 	}
 
-	// Resolve download links before spawning goroutines
+	// Resolve all download links before spawning goroutines.
+	// Transient GetLink failures abort the entire batch so the scheduler retries.
+	// Permanent failures (file gone from debrid) mark the file Deleted so the
+	// arr client imports whatever did resolve and re-searches for the rest.
 	type downloadTask struct {
 		file *storage.File
 		link string
 	}
 	var tasks []downloadTask
+	permanentFailures := 0
 	for _, file := range files {
 		downloadLink, err := d.manager.linkService.GetLink(context.Background(), entry, file.Name)
 		if err != nil {
-			d.logger.Error().Msgf("Failed to get download link for %s: %v", file.Name, err)
-			continue
+			if linkErr := link.GetLinkError(err); linkErr != nil && linkErr.IsPermanent() {
+				file.Deleted = true
+				permanentFailures++
+				d.logger.Warn().Msgf("File permanently unavailable on debrid, marking deleted: %s", file.Name)
+				continue
+			}
+			return fmt.Errorf("failed to get download link for %s: %w", file.Name, err)
 		}
 		tasks = append(tasks, downloadTask{file: file, link: downloadLink.DownloadLink})
 	}
 
 	// If no valid download links were obtained, return error instead of panic
 	if len(tasks) == 0 {
-		return fmt.Errorf("no valid download links available for %s", entry.Name)
+		return fmt.Errorf("no files available for download for %s", entry.Name)
+	}
+
+	if permanentFailures > 0 {
+		d.logger.Info().Msgf("Partial download: %d/%d files available for %s", len(tasks), len(files), entry.Name)
+		_ = d.manager.queue.Update(entry)
 	}
 
 	p := pool.New().WithErrors().WithFirstError()
