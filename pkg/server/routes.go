@@ -61,6 +61,7 @@ func (s *Server) WebRoutes() http.Handler {
 			r.Patch("/torrents/{hash}/label", s.handleUpdateTorrentLabel)
 			r.Delete("/torrents/{category}/{hash}", s.handleDeleteTorrent)
 			r.Delete("/torrents", s.handleDeleteTorrents) // Fixed trailing slash
+			r.Post("/torrents/{hash}/retry", s.handleRetryTorrent)
 
 			// Browse - WebDAV-style hierarchical file browser
 			r.Route("/browse", func(r chi.Router) {

@@ -290,9 +290,12 @@ func (d *Downloader) processTorrentDownload(entry *storage.Entry) error {
 		tasks = append(tasks, downloadTask{file: file, link: downloadLink.DownloadLink})
 	}
 
-	// If no valid download links were obtained, return error instead of panic
+	// If no valid download links were obtained, mark as error and return
 	if len(tasks) == 0 {
-		return fmt.Errorf("no valid download links available for %s", entry.Name)
+		err := fmt.Errorf("no valid download links available for %s", entry.Name)
+		entry.MarkAsError(err)
+		_ = d.manager.queue.Update(entry)
+		return err
 	}
 
 	p := pool.New().WithErrors().WithFirstError()
@@ -316,7 +319,10 @@ func (d *Downloader) processTorrentDownload(entry *storage.Entry) error {
 	}
 
 	if err := p.Wait(); err != nil {
-		return fmt.Errorf("download failed: %w", err)
+		wrappedErr := fmt.Errorf("download failed: %w", err)
+		entry.MarkAsError(wrappedErr)
+		_ = d.manager.queue.Update(entry)
+		return wrappedErr
 	}
 	d.markAsCompleted(entry)
 	d.logger.Info().Msgf("Downloaded all files for %s", entry.Name)
@@ -744,7 +750,9 @@ func (d *Downloader) logDownloadCompletion(filename string, startTime time.Time,
 		speedMBps = float64(bytesDownloaded) / elapsed.Seconds() / (1024 * 1024)
 	}
 
-	d.logger.Info().
+	level, msg := statusToLogInfo(meta.statusCode)
+
+	d.logger.WithLevel(level).
 		Str("file", filepath.Base(filename)).
 		Str("request_host", meta.requestHost).
 		Str("final_host", meta.finalHost).
@@ -758,7 +766,22 @@ func (d *Downloader) logDownloadCompletion(filename string, startTime time.Time,
 		Int64("bytes", bytesDownloaded).
 		Dur("duration", elapsed).
 		Float64("speed_mbps", speedMBps).
-		Msg("download transfer completed")
+		Msg(msg)
+}
+
+func statusToLogInfo(statusCode int) (zerolog.Level, string) {
+	switch {
+	case statusCode == 200 || statusCode == 206:
+		return zerolog.InfoLevel, "download transfer completed"
+	case statusCode == 429:
+		return zerolog.WarnLevel, "download transfer rate limited"
+	case statusCode >= 400 && statusCode < 500:
+		return zerolog.WarnLevel, "download transfer client error"
+	case statusCode >= 500 && statusCode < 600:
+		return zerolog.ErrorLevel, "download transfer server error"
+	default:
+		return zerolog.InfoLevel, "download transfer completed"
+	}
 }
 
 func multipartPartSize(totalSize int64) int64 {

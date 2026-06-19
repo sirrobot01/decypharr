@@ -764,3 +764,31 @@ func (s *Server) handleUpdateAuth(w http.ResponseWriter, r *http.Request) {
 		"message": "Authentication settings updated successfully",
 	}, http.StatusOK)
 }
+
+func (s *Server) handleRetryTorrent(w http.ResponseWriter, r *http.Request) {
+	hash := chi.URLParam(r, "hash")
+	if hash == "" {
+		http.Error(w, "No hash provided", http.StatusBadRequest)
+		return
+	}
+
+	err := s.manager.RetryEntry(hash)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if strings.Contains(err.Error(), "not in error state") {
+			utils.JSONResponse(w, map[string]string{"error": err.Error()}, http.StatusConflict)
+			return
+		}
+		s.logger.Error().Err(err).Str("hash", hash).Msg("Failed to retry torrent")
+		http.Error(w, "Failed to retry torrent: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	utils.JSONResponse(w, map[string]string{
+		"status": "retrying",
+		"hash":   hash,
+	}, http.StatusOK)
+}

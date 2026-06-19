@@ -12,6 +12,7 @@ import (
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/debrid/common"
 	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"github.com/sirrobot01/decypharr/pkg/notifications"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sirrobot01/decypharr/pkg/usenet"
 )
@@ -228,9 +229,6 @@ func (m *Manager) processQueuedTorrent(entry *storage.Entry) {
 }
 
 func (m *Manager) processAction(entry *storage.Entry) {
-	entry.Status = debridTypes.TorrentStatusDownloaded
-	entry.UpdatedAt = time.Now()
-	_ = m.queue.Update(entry)
 	m.logger.Info().
 		Str("name", entry.Name).
 		Str("action", string(entry.Action)).
@@ -243,20 +241,35 @@ func (m *Manager) processAction(entry *storage.Entry) {
 		entry = storage.HandleExistingEntryMerge(existing, entry)
 	}
 
-	// Now add entry to the main storage
-	if err := m.AddOrUpdate(entry, func(t *storage.Entry) {
-		m.RefreshEntries(true)
-	}); err != nil {
-		return
-	}
 	err := m.downloader.download(entry)
 	if err != nil {
+		if entry.State != storage.EntryStateError {
+			entry.MarkAsError(err)
+		}
+		_ = m.queue.Update(entry)
+
+		// Send error notification
+		msg := fmt.Sprintf("Download failed: %s [%s] - %s", entry.Name, entry.Category, err.Error())
+		if m.Notifications != nil {
+			m.Notifications.Notify(notifications.Event{
+				Type:    config.EventDownloadFailed,
+				Status:  "error",
+				Entry:   entry,
+				Message: msg,
+				Error:   err,
+			})
+		}
+
 		m.logger.Error().
 			Err(err).
 			Str("name", entry.Name).
 			Msg("Error running post-download action")
 		return
 	}
+
+	// On success: persist to main storage
+	entry.Status = debridTypes.TorrentStatusDownloaded
+	entry.UpdatedAt = time.Now()
 	if err := m.AddOrUpdate(entry, func(t *storage.Entry) {
 		m.RefreshEntries(true)
 	}); err != nil {
@@ -266,6 +279,30 @@ func (m *Manager) processAction(entry *storage.Entry) {
 			Msg("Error saving completed entry")
 		return
 	}
+}
+
+// RetryEntry resets an errored entry back to downloading state and
+// triggers a re-download asynchronously.
+func (m *Manager) RetryEntry(infohash string) error {
+	entry, err := m.queue.GetTorrent(infohash)
+	if err != nil {
+		return fmt.Errorf("entry not found: %w", err)
+	}
+	if entry.State != storage.EntryStateError {
+		return fmt.Errorf("Entry is not in error state")
+	}
+	// Reset state for retry
+	entry.State = storage.EntryStateDownloading
+	entry.LastError = ""
+	entry.Progress = 0
+	entry.IsDownloading = false
+	entry.UpdatedAt = time.Now()
+	if err := m.queue.Update(entry); err != nil {
+		return fmt.Errorf("failed to update entry: %w", err)
+	}
+	// Trigger re-download asynchronously
+	go m.processAction(entry)
+	return nil
 }
 
 // processTorrent handles the complete torrent lifecycle

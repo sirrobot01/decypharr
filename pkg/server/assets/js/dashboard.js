@@ -343,6 +343,13 @@ class TorrentDashboard {
                         ${this.renderStateBadge(torrent.state)}
                     </td>
                     <td>
+                        ${torrent.state === 'error' ? `
+                        <button class="btn btn-ghost btn-xs text-warning"
+                                title="Retry Download"
+                                onclick="window.dashboard.retryTorrent('${torrent.info_hash}');">
+                            <i class="bi bi-arrow-repeat"></i>
+                        </button>
+                        ` : ''}
                         <button class="btn btn-ghost btn-xs text-info"
                                 title="Edit Label"
                                 onclick="window.dashboard.editLabel('${torrent.info_hash}', '${this.escapeAttr(torrent.category || '')}');">
@@ -532,6 +539,34 @@ class TorrentDashboard {
         } catch (error) {
             console.error('Error deleting torrent:', error);
             window.decypharrUtils.createToast('Failed to delete entry', 'error');
+        }
+    }
+
+    async retryTorrent(hash) {
+        if (!confirm('Retry this failed download?')) return;
+
+        try {
+            const response = await window.decypharrUtils.fetcher(`${window.urlBase}api/torrents/${encodeURIComponent(hash)}/retry`, {
+                method: 'POST'
+            });
+
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                if (response.status === 409) {
+                    window.decypharrUtils.createToast(data.error || 'Entry is not in error state', 'warning');
+                } else if (response.status === 404) {
+                    window.decypharrUtils.createToast('Entry not found', 'error');
+                } else {
+                    throw new Error(data.error || 'Failed to retry download');
+                }
+                return;
+            }
+
+            window.decypharrUtils.createToast('Download retry initiated', 'success');
+            this.loadTorrents();
+        } catch (error) {
+            console.error('Error retrying download:', error);
+            window.decypharrUtils.createToast(`Failed to retry: ${error.message}`, 'error');
         }
     }
 
