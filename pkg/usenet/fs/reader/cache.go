@@ -310,12 +310,14 @@ func (sc *SegmentCache) ReadRangeInto(segIdx int, segOffset, length int64, dst [
 		return 0, false
 	}
 	if segOffset < 0 || length < 0 || int64(len(dst)) < length {
+		sc.logger.Warn().Int("segment", segIdx).Int64("seg_offset", segOffset).Int64("length", length).Int("dst_len", len(dst)).Msg("DIAG: ReadRangeInto BAD PARAMS")
 		sc.stats.CacheMisses.Add(1)
 		return 0, false
 	}
 
 	size := sc.SegmentDataSize(segIdx)
 	if segOffset > size {
+		sc.logger.Warn().Int("segment", segIdx).Int64("seg_offset", segOffset).Int64("size", size).Int64("seg_length_stored", sc.segLengths[segIdx].Load()).Int64("seg_bytes", sc.segments[segIdx].Bytes).Msg("DIAG: ReadRangeInto segOffset PAST END")
 		sc.stats.CacheMisses.Add(1)
 		return 0, false
 	}
