@@ -244,16 +244,15 @@ func (sf *SegmentFetcher) doFetch(ctx context.Context, segIdx int) error {
 		// or a genuinely-short article on the server.
 		if bw, ok := writer.(*bufferStreamWriter); ok {
 			declared := sf.cache.segments[segIdx].Bytes
-			if bw.written != declared {
-				sf.cache.logger.Warn().
-					Int("segment", segIdx).
-					Int64("streambody_returned", n).
-					Int64("written", bw.written).
-					Int64("declared_bytes", declared).
-					Int64("data_start", bw.dataStart).
-					Int64("max_bytes", bw.maxBytes).
-					Msg("DIAG: decode size mismatch (StreamBody vs declared)")
-			}
+			// TEMP: log EVERY segment (not just mismatches) to see whether the
+			// decoded-vs-declared gap is universal (yEnc overhead) or only on
+			// segments whose decoded size exceeds 1 MiB.
+			sf.cache.logger.Warn().
+				Int("segment", segIdx).
+				Int64("written", bw.written).
+				Int64("declared_bytes", declared).
+				Int64("gap", declared-bw.written).
+				Msg("DIAG: every-segment size")
 		}
 
 		return nil
