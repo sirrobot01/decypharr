@@ -503,9 +503,14 @@ func (e *Entry) IsValid() bool {
 	return activePlacement.IsValid()
 }
 
-// DownloadPath returns the expected download/symlink path for this entry
+// DownloadPath returns the expected download/symlink path for this entry.
+// The name component is truncated to 255 bytes (Linux NAME_MAX) to handle
+// torrents with extremely long names (e.g. Cyrillic titles where each character
+// is 2 bytes in UTF-8).
 func (e *Entry) DownloadPath() string {
-	return filepath.Join(e.SavePath, utils.RemoveExtension(e.Name))
+	const nameMax = 255
+	name := utils.TruncateName(utils.RemoveExtension(e.Name), nameMax)
+	return filepath.Join(e.SavePath, name)
 }
 
 // SwitcherJob tracks the progress of a migration operation

@@ -46,6 +46,13 @@ func (e *Error) IsPermanent() bool {
 	return e.permanent
 }
 
+func (e *Error) StatusCode() int {
+	if e.statusCode == 0 {
+		return http.StatusInternalServerError
+	}
+	return e.statusCode
+}
+
 func (e *Error) IsSilent() bool {
 	if e.err == nil {
 		return false
@@ -132,6 +139,7 @@ func NewArticleNotFoundError(err error) *Error {
 		err = errors.New("article not found")
 	}
 	return (&Error{
-		err: err,
+		err:        err,
+		statusCode: http.StatusGone,
 	}).Permanent()
 }

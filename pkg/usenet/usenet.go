@@ -544,15 +544,68 @@ func (u *Usenet) Close() error {
 }
 
 func (u *Usenet) getFile(nzoID, filename string) (*storage.NZBFile, error) {
-	files, err := u.getFiles(nzoID, []string{filename})
+	nzb, err := u.nzbStorage.GetNZB(nzoID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("metadata load failed: %w", err)
 	}
-	file := files[filename]
-	if file == nil {
-		return nil, fmt.Errorf("file %s not found in NZB %s", filename, nzoID)
+	for i := range nzb.Files {
+		source := nzb.Files[i]
+		if source.Name != filename {
+			continue
+		}
+		if source.IsDeleted {
+			return nil, customerror.NewArticleNotFoundError(
+				fmt.Errorf("file %s is permanently unavailable on Usenet", filename),
+			)
+		}
+		file := source
+		if file.NzbID == "" {
+			file.NzbID = nzoID
+		}
+		return &file, nil
 	}
-	return file, nil
+	return nil, fmt.Errorf("file %s not found in NZB %s", filename, nzoID)
+}
+
+// markNZBFileDeleted marks a specific NZB file as permanently deleted in storage so the
+// article-not-found status survives process restarts.
+func (u *Usenet) markNZBFileDeleted(nzoID, filename string) {
+	nzb, err := u.nzbStorage.GetNZB(nzoID)
+	if err != nil {
+		u.logger.Warn().Err(err).Str("nzo_id", nzoID).Str("file", filename).Msg("Failed to load NZB to mark file as deleted")
+		return
+	}
+	for i := range nzb.Files {
+		if nzb.Files[i].Name == filename {
+			nzb.Files[i].IsDeleted = true
+			if err := u.nzbStorage.AddNZB(nzb); err != nil {
+				u.logger.Warn().Err(err).Str("nzo_id", nzoID).Str("file", filename).Msg("Failed to persist deleted file status")
+			}
+			return
+		}
+	}
+}
+
+// IsFilePermanentlyFailed returns a non-nil error if the file is known to be permanently
+// unavailable on Usenet, allowing callers to short-circuit before writing HTTP response headers.
+func (u *Usenet) IsFilePermanentlyFailed(nzoID, filename string) error {
+	key := fsKey(nzoID, filename)
+	if cause, ok := u.failedFiles.Load(key); ok {
+		return customerror.NewArticleNotFoundError(cause)
+	}
+	// Check persistent storage so the status survives restarts
+	nzb, err := u.nzbStorage.GetNZB(nzoID)
+	if err != nil {
+		return nil // Can't determine status, let streaming proceed
+	}
+	for _, f := range nzb.Files {
+		if f.Name == filename && f.IsDeleted {
+			permanentErr := fmt.Errorf("file %s is permanently unavailable on Usenet", filename)
+			u.failedFiles.Store(key, permanentErr) // Populate cache to avoid future disk reads
+			return customerror.NewArticleNotFoundError(permanentErr)
+		}
+	}
+	return nil
 }
 
 func (u *Usenet) getFiles(nzoID string, filenames []string) (map[string]*storage.NZBFile, error) {
@@ -661,8 +714,8 @@ func (u *Usenet) Stream(ctx context.Context, nzoID, filename string, start, end 
 
 	// Mark file as failed if article not found (permanent error)
 	if err != nil && nntp.IsArticleNotFoundError(err) {
-		u.failedFiles.Store(key, err) // Reuse pre-computed key
-		// Wrap error to mark as permanent
+		u.failedFiles.Store(key, err)
+		u.markNZBFileDeleted(nzoID, filename) // Persist so status survives restarts
 		return customerror.NewArticleNotFoundError(err)
 	}
 

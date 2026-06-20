@@ -292,6 +292,13 @@ func (m *Manager) streamUsenet(ctx context.Context, entry *storage.Entry, filena
 		return retry.Unrecoverable(fmt.Errorf("file not found in entry: %s", filename))
 	}
 
+	// Check for permanent article-not-found failures BEFORE writing HTTP response headers.
+	// This lets the caller return a non-retryable status (410 Gone) instead of starting a
+	// response that the client will retry after the connection drops.
+	if err := m.usenet.IsFilePermanentlyFailed(entry.InfoHash, filename); err != nil {
+		return err
+	}
+
 	contentLength := end - start + 1
 
 	// Only build headers if onReady callback is provided (avoids allocations for DFS streaming)
@@ -367,6 +374,16 @@ func (m *Manager) doRequest(ctx context.Context, url string, start, end int64) (
 					return doErr
 				}
 				return retry.Unrecoverable(StreamError{Err: doErr, Retryable: true})
+			}
+
+			// A 5xx from the CDN is a transient upstream failure, not a
+			// connection error, so doErr is nil and the retry loop would exit
+			// without retrying. Treat it as retryable here so retry.Do fires.
+			if resp.StatusCode >= 500 {
+				status := resp.StatusCode
+				resp.Body.Close()
+				resp = nil
+				return fmt.Errorf("CDN returned HTTP %d", status)
 			}
 			return nil
 		},

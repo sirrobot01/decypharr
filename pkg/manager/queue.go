@@ -168,6 +168,14 @@ func (q *Queue) Delete(infohash string, cleanup func(t *storage.Entry) error) er
 	return q.storage.DeleteQueued(infohash, q.wrapCleanupWithFileDelete(cleanup))
 }
 
+// DeleteEntryOnly removes a queued entry without deleting its downloaded files.
+// Use this when the download client receives a remove-without-cleanup signal
+// (e.g. qBittorrent deleteFiles=false) so locally downloaded files remain
+// accessible for a subsequent import attempt.
+func (q *Queue) DeleteEntryOnly(infohash string) error {
+	return q.storage.DeleteQueued(infohash, nil)
+}
+
 func (q *Queue) DeleteWhere(category string, protocol config.Protocol, state storage.TorrentState, hashes []string, cleanup func(t *storage.Entry) error) error {
 	return q.storage.DeleteWhereQueued(q.ListFilterFunc(category, protocol, state, hashes), q.wrapCleanupWithFileDelete(cleanup))
 }

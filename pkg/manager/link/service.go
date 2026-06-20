@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/rs/zerolog"
@@ -19,6 +20,11 @@ import (
 
 const (
 	MaxReinsertionAttempt = 3
+
+	// Retry config for transient errors (429, 502, 503, 504) during link validation.
+	maxRetryableAttempts = 5
+	retryableBaseDelay   = 2 * time.Second
+	retryableMaxDelay    = 30 * time.Second
 )
 
 var (
@@ -107,6 +113,13 @@ func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, fi
 	// Check if we've already validated this link
 	if validationErr, exists := s.validated.Load(link.DownloadLink); exists {
 		if validationErr == nil {
+			// Re-fetch if the cached CDN URL has passed its declared expiry.
+			// Without this check a 3-hour TorBox CDN URL would be served from
+			// s.validated forever — bypassing the HEAD validation that would
+			// otherwise catch the expired URL.
+			if !link.ExpiresAt.IsZero() && time.Now().After(link.ExpiresAt) {
+				return s.invalidateAndRefetch(ctx, entry, link, attempt)
+			}
 			return link, nil // Already validated successfully
 		}
 		// Previous validation failed - check if we should retry
@@ -119,8 +132,40 @@ func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, fi
 		return emptyDownloadLink, validationErr
 	}
 
-	// Validate the link
-	validationErr := s.validateLink(ctx, &link)
+	// Validate the link, retrying on transient errors (429, 502, 503, 504)
+	// with exponential backoff so that rate-limiting from the debrid CDN does
+	// not propagate up as a permanent failure and cause Sonarr/Radarr to
+	// blocklist a perfectly valid release.
+	var validationErr error
+	delay := retryableBaseDelay
+	for retryAttempt := 0; retryAttempt <= maxRetryableAttempts; retryAttempt++ {
+		validationErr = s.validateLink(ctx, &link)
+		if validationErr == nil {
+			break
+		}
+		if linkErr := GetLinkError(validationErr); linkErr != nil && linkErr.ShouldRetry() {
+			if retryAttempt < maxRetryableAttempts {
+				s.logger.Warn().
+					Err(validationErr).
+					Str("file", filename).
+					Str("debrid", link.Debrid).
+					Int("retryAttempt", retryAttempt+1).
+					Dur("backoff", delay).
+					Msg("Transient link validation error, retrying")
+				select {
+				case <-ctx.Done():
+					return emptyDownloadLink, ctx.Err()
+				case <-time.After(delay):
+				}
+				delay *= 2
+				if delay > retryableMaxDelay {
+					delay = retryableMaxDelay
+				}
+				continue
+			}
+		}
+		break
+	}
 
 	if validationErr != nil {
 		// Handle link error categories
@@ -145,8 +190,13 @@ func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, fi
 		}
 	}
 
-	// Store validation result
-	s.validated.Store(link.DownloadLink, validationErr)
+	// Only cache permanent/refetchable failures and successes.
+	// Retryable errors (502, 503, 429) must not be cached: a single transient
+	// failure would block all future reads for the file until the cache is
+	// explicitly cleared (account-disable or restart).
+	if linkErr := GetLinkError(validationErr); linkErr == nil || !linkErr.ShouldRetry() {
+		s.validated.Store(link.DownloadLink, validationErr)
+	}
 
 	if validationErr == nil {
 		return link, nil
