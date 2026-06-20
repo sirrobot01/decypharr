@@ -153,7 +153,13 @@ func (a *Arr) CleanupQueue() error {
 	for _, q := range queue {
 		switch queueFilter(q) {
 		case QueueActionBlocklist:
-			blacklists[q.Id] = true
+			// Only auto-blocklist when the user explicitly enables cleanup.
+			// Without this guard, any transient "failed" status in Sonarr/Radarr
+			// would trigger removeFromClient=true, causing Decypharr to delete
+			// locally downloaded files before the arr can import them (#298).
+			if a.Cleanup {
+				blacklists[q.Id] = true
+			}
 		case QueueActionImport:
 			manualImports[q.DownloadId] = true
 		}
