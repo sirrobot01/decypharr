@@ -62,11 +62,20 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Torbox, er
 	}
 	_log := logger.New(dc.Name)
 
+	// TorBox enforces a hard cap of 300 req/min per API key, applied
+	// synchronously across all servers since v8.4 (Feb 2026, GAP-002).
+	// Default to that limit if the user has not configured one explicitly.
+	mainRL := ratelimits["main"]
+	if mainRL == nil {
+		mainRL = ratelimit.New(300, ratelimit.Per(time.Minute), ratelimit.WithSlack(30))
+	}
+
 	opts := []request.ClientOption{
 		request.WithHeaders(headers),
-		request.WithRateLimiter(ratelimits["main"]),
+		request.WithRateLimiter(mainRL),
 		request.WithMaxRetries(cfg.Retries),
 		request.WithRetryableStatus(http.StatusTooManyRequests, http.StatusBadGateway),
+		request.WithLogger(_log),
 	}
 	if dc.Proxy != "" {
 		opts = append(opts, request.WithProxy(dc.Proxy))
