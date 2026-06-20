@@ -510,13 +510,14 @@ func (d *Downloader) processTorrentDownload(entry *storage.Entry) error {
 	for _, file := range files {
 		downloadLink, err := d.manager.linkService.GetLink(context.Background(), entry, file.Name)
 		if err != nil {
-			d.logger.Error().Msgf("Failed to get download link for %s: %v", file.Name, err)
-			continue
+			// A partial link failure means the download would be incomplete.
+			// Return an error so the arr client knows to retry rather than
+			// marking the torrent as fully downloaded with missing files.
+			return fmt.Errorf("failed to get download link for %s: %w", file.Name, err)
 		}
 		tasks = append(tasks, downloadTask{file: file, link: downloadLink.DownloadLink})
 	}
 
-	// If no valid download links were obtained, return error instead of panic
 	if len(tasks) == 0 {
 		return fmt.Errorf("no valid download links available for %s", entry.Name)
 	}
