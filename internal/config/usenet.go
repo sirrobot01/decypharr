@@ -90,6 +90,13 @@ func (c *Config) updateUsenetProvider(index int, u UsenetProvider) UsenetProvide
 	if u.Priority == 0 {
 		u.Priority = index + 1 // Default priority based on order
 	}
+	// Auto-enable TLS for ports that only speak implicit TLS.
+	// Users who set port 563 (NNTPS) or 443 without ssl:true get a
+	// plain-TCP connection; the server waits for a TLS ClientHello and
+	// never sends the greeting, causing a 10-second i/o timeout.
+	if !u.SSL && (u.Port == 563 || u.Port == 443) {
+		u.SSL = true
+	}
 	return u
 }
 
