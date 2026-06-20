@@ -77,6 +77,8 @@ func (m *Manager) RunFFprobe(filePaths []string) error {
 			defer cancel()
 			cmd := exec.CommandContext(ctx, "ffprobe",
 				"-v", "quiet",
+				"-probesize", "50M",
+				"-analyzeduration", "0",
 				"-print_format", "json",
 				"-show_format",
 				"-show_streams",
