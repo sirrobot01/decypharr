@@ -280,8 +280,9 @@ func (m *Manager) processNewTorrent(torrent *storage.Entry, debridTorrent *debri
 	torrent.ActiveProvider = debridTorrent.Debrid
 	torrent.Bytes = debridTorrent.GetSize()
 	torrent.Size = debridTorrent.GetSize()
-	torrent.Name = debridTorrent.Name
+	torrent.Name = m.resolveEntryName(debridTorrent.Name)
 	torrent.OriginalFilename = debridTorrent.OriginalFilename
+	torrent.ContentPath = torrent.DownloadPath() // re-sync after name resolution
 	torrent.UpdatedAt = time.Now()
 	// AddOrUpdate files here
 	for _, file := range debridTorrent.Files {
