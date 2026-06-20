@@ -678,9 +678,9 @@ func (tb *Torbox) GetProfile() (*types.Profile, error) {
 	case 1:
 		profile.Type = "essential"
 	case 2:
-		profile.Type = "pro"
-	case 3:
 		profile.Type = "standard"
+	case 3:
+		profile.Type = "pro"
 	default:
 		profile.Type = "free"
 	}
