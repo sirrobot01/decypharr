@@ -4,7 +4,22 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 )
+
+// TruncateName truncates a filesystem name component to maxBytes bytes while
+// preserving valid UTF-8. Linux NAME_MAX is 255 bytes; pass 255 for safety.
+func TruncateName(name string, maxBytes int) string {
+	if len(name) <= maxBytes {
+		return name
+	}
+	b := []byte(name)[:maxBytes]
+	// Walk back until the byte slice is valid UTF-8 (avoids splitting multibyte runes).
+	for len(b) > 0 && !utf8.Valid(b) {
+		b = b[:len(b)-1]
+	}
+	return strings.TrimRight(string(b), " ")
+}
 
 func PathUnescape(path string) string {
 	// try to use url.PathUnescape

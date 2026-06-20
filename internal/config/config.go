@@ -179,6 +179,14 @@ type Config struct {
 	SkipAutoMove bool   `json:"skip_auto_move,omitempty"`
 
 	Repair RepairConfig `json:"repair,omitzero"`
+
+	// PreferASCIIName controls whether decypharr extracts the ASCII/Western title
+	// from a raw torrent name (e.g. picking "Percy Jackson" out of a mixed
+	// Cyrillic or CJK release name) and builds a compact canonical directory name.
+	// Disable only if your library is intentionally non-Western and you want the
+	// raw name preserved (byte-safe truncated to 255 bytes if needed).
+	// Default: true
+	PreferASCIIName *bool `json:"prefer_ascii_name,omitempty"`
 }
 
 func (c *Config) JsonFile() string {
