@@ -341,19 +341,8 @@ func (ad *AllDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 	return t, nil
 }
 
-func (ad *AllDebrid) UpdateTorrent(t *types.Torrent) error {
-	var res TorrentInfoResponse
-
-	resp, err := ad.doRequest("/magnet/status", map[string]string{"id": t.Id}, &res)
-	if err != nil {
-		return err
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("alldebrid API error: Status: %d", resp.StatusCode)
-	}
-
-	data := res.Data.Magnets
+// populateTorrentFromStatus copies an AllDebrid /magnet/status response onto t.
+func (ad *AllDebrid) populateTorrentFromStatus(t *types.Torrent, data magnetInfo) {
 	status := getAlldebridStatus(data.StatusCode)
 	name := data.Filename
 	t.Name = name
@@ -378,16 +367,56 @@ func (ad *AllDebrid) UpdateTorrent(t *types.Torrent) error {
 		}
 		t.Speed = data.DownloadSpeed
 	}
+}
+
+func (ad *AllDebrid) UpdateTorrent(t *types.Torrent) error {
+	var res TorrentInfoResponse
+
+	resp, err := ad.doRequest("/magnet/status", map[string]string{"id": t.Id}, &res)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("alldebrid API error: Status: %d", resp.StatusCode)
+	}
+
+	ad.populateTorrentFromStatus(t, res.Data.Magnets)
 	return nil
 }
 
-func (ad *AllDebrid) CheckStatus(torrent *types.Torrent) (*types.Torrent, error) {
-	for {
-		err := ad.UpdateTorrent(torrent)
+// alldebridRetryableStatusCodes are AllDebrid magnet statusCodes that frequently resolve on
+// their own shortly after first being reported (a temporary stall finding peers, or a transient
+// tracker-contact failure) rather than representing a permanently dead torrent. Unlike a hard
+// failure (e.g. "Deleted on the hoster website"), giving these a few more checks before treating
+// them as terminal avoids deleting torrents that the source has plenty of seeders for.
+//   - 7:  "Not downloaded in 20 min" (download stalled/timed out, often transient)
+//   - 14: "Error while contacting tracker" (transient network/tracker issue)
+var alldebridRetryableStatusCodes = map[int]bool{
+	7:  true,
+	14: true,
+}
 
-		if err != nil || torrent == nil {
+func (ad *AllDebrid) CheckStatus(torrent *types.Torrent) (*types.Torrent, error) {
+	const (
+		maxStatusRetries = 3
+		statusRetryDelay = 2 * time.Minute
+	)
+
+	retries := 0
+	for {
+		var res TorrentInfoResponse
+		resp, err := ad.doRequest("/magnet/status", map[string]string{"id": torrent.Id}, &res)
+		if err != nil {
 			return torrent, err
 		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return torrent, fmt.Errorf("alldebrid API error: Status: %d", resp.StatusCode)
+		}
+
+		data := res.Data.Magnets
+		ad.populateTorrentFromStatus(torrent, data)
+
 		switch torrent.Status {
 		case types.TorrentStatusDownloaded:
 			ad.logger.Info().Msgf("Torrent: %s downloaded", torrent.Name)
@@ -398,6 +427,13 @@ func (ad *AllDebrid) CheckStatus(torrent *types.Torrent) (*types.Torrent, error)
 			}
 			return torrent, nil
 		case types.TorrentStatusError:
+			if alldebridRetryableStatusCodes[data.StatusCode] && retries < maxStatusRetries {
+				retries++
+				ad.logger.Warn().Msgf("Torrent: %s reported transient AllDebrid status %d (%s), retrying (%d/%d) in %s",
+					torrent.Name, data.StatusCode, data.Status, retries, maxStatusRetries, statusRetryDelay)
+				time.Sleep(statusRetryDelay)
+				continue
+			}
 			return torrent, fmt.Errorf("torrent: %s has error", torrent.Name)
 		default:
 			return torrent, fmt.Errorf("torrent: %s has error", torrent.Name)
