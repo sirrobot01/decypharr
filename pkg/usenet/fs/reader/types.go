@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
@@ -106,6 +107,10 @@ type Config struct {
 
 	// RetryDelay is the delay between retry attempts (default: 1s).
 	RetryDelay time.Duration
+
+	// Logger is the zerolog logger for debug/warn output inside the reader.
+	// Defaults to zerolog.Nop() (silent) if not set.
+	Logger zerolog.Logger
 }
 
 // DefaultConfig returns a ReaderConfig with sensible defaults.
@@ -184,6 +189,14 @@ func WithPrefetchAhead(n int) Option {
 func WithDownloadTimeout(d time.Duration) Option {
 	return func(c *Config) {
 		c.DownloadTimeout = d
+	}
+}
+
+// WithLogger sets the zerolog logger for the StreamingReader.
+// Without this, the reader logs nothing (zerolog.Nop()).
+func WithLogger(l zerolog.Logger) Option {
+	return func(c *Config) {
+		c.Logger = l
 	}
 }
 

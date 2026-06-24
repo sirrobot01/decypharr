@@ -207,18 +207,38 @@ func (sf *SegmentFetcher) doFetch(ctx context.Context, segIdx int) error {
 			return ctxErr
 		}
 
-		// Treat zero-byte articles as missing — the article exists on the
-		// server but its body is empty/corrupted after yEnc decoding.
+		// Treat zero-byte articles as a transient connection error rather
+		// than ArticleNotFound. A zero-byte yEnc decode can result from a
+		// partial/interrupted transfer, not necessarily a missing article —
+		// repair consistently finds these segments healthy on the provider.
+		// Using ErrorTypeArticleNotFound here causes ExecuteWithFailover to
+		// permanently exclude the whole backbone group and mark the segment
+		// StateFailed with no further retries, even though a fresh connection
+		// to the same or a different provider would succeed. Treating it as
+		// ErrorTypeConnection instead lets the normal retry+failover path
+		// recover from the transient failure without poisoning the backbone.
 		if n == 0 {
 			writer.Discard()
 			return &nntp.Error{
-				Type:    nntp.ErrorTypeArticleNotFound,
-				Message: "article produced no data after decoding",
+				Type:    nntp.ErrorTypeConnection,
+				Message: "article produced no data after decoding (transient empty body)",
 			}
 		}
 
-		// Commit (updates cache state to StateOnDisk).
-		writer.Finalize()
+		// Commit (updates cache state to StateOnDisk). Finalize returns false
+		// when there was no payload to commit — e.g. the decoded article is
+		// all yEnc header and no body (a corrupt/truncated article). StreamBody
+		// reports n>0 in that case (header bytes were processed), so the n==0
+		// check above doesn't catch it. Treat a non-committing Finalize as a
+		// missing article so it fails fast and the repair system can act on it
+		// instead of looping re-fetch forever.
+		if !writer.Finalize() {
+			return &nntp.Error{
+				Type:    nntp.ErrorTypeArticleNotFound,
+				Message: "article committed no payload (header-only/corrupt body)",
+			}
+		}
+
 
 		return nil
 	})

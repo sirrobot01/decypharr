@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/crypto"
@@ -92,7 +93,7 @@ func NewStreamingReader(
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
-	logger := zerolog.Nop() // Use logger from config if available
+	logger := config.Logger // Use caller-supplied logger; zero value is zerolog.Nop()
 
 	stats := &ReaderStats{}
 
@@ -261,14 +262,58 @@ func (sr *StreamingReader) readFromCache(ctx context.Context, p []byte, off int6
 		// No intermediate scratch buffer — zero extra allocation, zero amplification.
 		n, ok := sr.cache.ReadRangeInto(segIdx, segDataOffset, copyLen, p[outOffset:outOffset+copyLen])
 		if !ok {
-			// Segment was evicted between WaitForSegment and the read. Re-fetch.
-			sr.logger.Warn().Int("segment", segIdx).Msg("segment data missing after wait, re-fetching")
-			if err := sr.fetcher.Fetch(ctx, segIdx); err != nil {
-				return totalRead, fmt.Errorf("re-fetch segment %d: %w", segIdx, err)
-			}
-			n, ok = sr.cache.ReadRangeInto(segIdx, segDataOffset, copyLen, p[outOffset:outOffset+copyLen])
-			if !ok {
-				return totalRead, fmt.Errorf("segment %d still missing after re-fetch", segIdx)
+			// Segment was evicted between WaitForSegment and the read.
+			//
+			// Root cause: evictBatch does CAS (StateOnDisk->StateEmpty) then
+			// calls buf.Discard to hole-punch the disk region. A re-fetch that
+			// races between those two steps re-downloads the segment and sets
+			// StateOnDisk, but evictBatch's Discard then hole-punches the fresh
+			// data, leaving StateOnDisk with ErrNotPresent in the buffer.
+			//
+			// Fix: pin BEFORE resetting state and fetching. evictBatch skips
+			// pinned segments (pinCounts[idx] > 0 check), closing the race.
+			const maxRefetchAttempts = 10
+			for attempt := 1; ; attempt++ {
+				// Attempt 1 almost always succeeds (benign eviction/hole-punch
+				// churn), so only warn from attempt 2 onward to avoid log flooding.
+				if attempt > 1 {
+					sr.logger.Warn().Int("segment", segIdx).Int("attempt", attempt).
+						Msg("segment data missing after wait, re-fetching")
+				}
+
+				// Pin FIRST so evictBatch cannot Discard this segment's buffer
+				// region between our Fetch write and our ReadRangeInto.
+				sr.cache.PinRange(segIdx, segIdx)
+
+				// Reset state so Fetch's MarkFetching CAS fires and triggers a
+				// real re-download rather than a fast-path no-op.
+				if sr.cache.GetState(segIdx) != StateFetching {
+					sr.cache.ResetState(segIdx)
+				}
+
+				fetchErr := sr.fetcher.Fetch(ctx, segIdx)
+				if fetchErr != nil {
+					sr.cache.UnpinRange(segIdx, segIdx)
+					// If all providers confirmed the article is missing/corrupt,
+					// propagate the ArticleNotFound error unwrapped so the repair
+					// system can detect it and queue a replacement download.
+					if nntp.IsArticleNotFoundError(fetchErr) {
+						return totalRead, fetchErr
+					}
+					return totalRead, fmt.Errorf("re-fetch segment %d: %w", segIdx, fetchErr)
+				}
+
+				n, ok = sr.cache.ReadRangeInto(segIdx, segDataOffset, copyLen, p[outOffset:outOffset+copyLen])
+				sr.cache.UnpinRange(segIdx, segIdx)
+
+				if ok {
+					break
+				}
+				if attempt >= maxRefetchAttempts {
+					return totalRead, fmt.Errorf("segment %d still missing after %d re-fetch attempts", segIdx, maxRefetchAttempts)
+				}
+				// Brief pause before retrying to let any concurrent eviction settle.
+				time.Sleep(100 * time.Millisecond)
 			}
 		}
 
