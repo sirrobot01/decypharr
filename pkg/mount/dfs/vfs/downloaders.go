@@ -74,7 +74,13 @@ type Downloaders struct {
 	adaptiveEnd              int64
 	adaptiveChunkSize        int64
 	adaptiveSuccessfulChunks int
-	nextDownloaderID         int64 // protected by dls.mu; used only for trace correlation
+
+	// Read-pattern state is used to keep tiny probe/random reads from expanding
+	// into full read-ahead fetches. Once a caller proves sustained forward
+	// reading, small reads are promoted back to the bulk path.
+	lastReadEnd         int64
+	sequentialReadBytes int64
+	nextDownloaderID    int64 // protected by dls.mu; used only for trace correlation
 
 	mu         sync.Mutex
 	dls        []*downloader
@@ -352,15 +358,85 @@ const (
 	// atom / MKV cues near EOF). For sequential playback this only matters at
 	// the very end, where read-ahead is clipped anyway — negligible cost.
 	probeTailZone = 64 * 1024 * 1024
+
+	// probeReadMaxSize is the largest individual read that may be treated as a
+	// probe/random access. Media scanners often issue many 4 KiB-128 KiB reads;
+	// expanding each one into tens of MiB of read-ahead wastes bandwidth and
+	// NNTP/debrid connections.
+	probeReadMaxSize = 1 * 1024 * 1024
+
+	// sequentialReadAheadPromotionBytes is how much contiguous forward reading a
+	// caller must perform before small reads are allowed to use the bulk
+	// read-ahead path. This keeps ffprobe/header scans cheap while still letting
+	// real playback ramp quickly.
+	sequentialReadAheadPromotionBytes = 2 * 1024 * 1024
+
+	// readPatternGapTolerance allows small gaps/overlap in OS/player read
+	// patterns without resetting sequential detection.
+	readPatternGapTolerance = 512 * 1024
 )
 
-// isProbeRead reports whether a read looks like a media-probe access pattern
-// (near-EOF), which should be prioritized over bulk sequential prefetch.
+// isProbeRead reports whether a read is statelessly known to look like a
+// media-probe access pattern (near-EOF). Stateful small/random read
+// classification is handled by shouldPrioritizeRead.
 func isProbeRead(off, length, fileSize int64) bool {
 	if fileSize <= 0 || length <= 0 {
 		return false
 	}
 	return off+length >= fileSize-probeTailZone
+}
+
+// shouldPrioritizeRead returns true when a read should avoid bulk read-ahead
+// and use a small, dedicated downloader instead. This protects probe/random
+// reads from causing large upstream range fetches, but promotes sustained
+// forward reading back to the normal bulk path once enough contiguous bytes
+// have been requested.
+func (dls *Downloaders) shouldPrioritizeRead(r ranges.Range) bool {
+	r.Clip(dls.item.info.Size)
+	if r.IsEmpty() {
+		return false
+	}
+
+	// Tail probes stay priority regardless of read history.
+	if isProbeRead(r.Pos, r.Size, dls.item.info.Size) {
+		dls.recordReadPattern(r)
+		return true
+	}
+
+	sequentialBytes := dls.recordReadPattern(r)
+	if r.Size > probeReadMaxSize {
+		return false
+	}
+	return sequentialBytes < sequentialReadAheadPromotionBytes
+}
+
+// recordReadPattern records whether r continues the current forward-read
+// stream and returns the number of contiguous forward bytes seen so far.
+func (dls *Downloaders) recordReadPattern(r ranges.Range) int64 {
+	dls.mu.Lock()
+	defer dls.mu.Unlock()
+	return dls.recordReadPatternLocked(r)
+}
+
+func (dls *Downloaders) recordReadPatternLocked(r ranges.Range) int64 {
+	end := r.End()
+	if end < r.Pos {
+		end = r.Pos
+	}
+
+	// Treat overlapping reads and small forward gaps as one sequential stream.
+	sequential := r.Pos <= dls.lastReadEnd+readPatternGapTolerance && end+readPatternGapTolerance >= dls.lastReadEnd
+	if !sequential {
+		dls.lastReadEnd = end
+		dls.sequentialReadBytes = r.Size
+		return dls.sequentialReadBytes
+	}
+
+	if advance := end - dls.lastReadEnd; advance > 0 {
+		dls.sequentialReadBytes += advance
+		dls.lastReadEnd = end
+	}
+	return dls.sequentialReadBytes
 }
 
 // DownloadWithRetry blocks until r is available, re-attempting transient
@@ -627,6 +703,7 @@ func (dls *Downloaders) newDownloaderLocked(r ranges.Range, targetEnd int64, pri
 			Int64("base_chunk_size", dl.baseChunkSize).
 			Int64("current_chunk_size", dl.currentChunkSize).
 			Int("successful_chunks", dl.successfulChunks).
+			Bool("priority", dl.priority).
 			Msg("dfs downloader created")
 	}
 

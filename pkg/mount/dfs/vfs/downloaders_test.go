@@ -35,6 +35,74 @@ func TestCurrentKickerInterval(t *testing.T) {
 	}
 }
 
+func TestShouldPrioritizeRead_TinyInitialReadsStayPriority(t *testing.T) {
+	dls := &Downloaders{
+		item: &CacheItem{info: ItemInfo{Size: 256 * testMiB}},
+	}
+
+	reads := []ranges.Range{
+		{Pos: 0, Size: 128 * testKiB},
+		{Pos: 128 * testKiB, Size: 128 * testKiB},
+	}
+	for _, r := range reads {
+		if !dls.shouldPrioritizeRead(r) {
+			t.Fatalf("expected small unproven read at %d to stay priority", r.Pos)
+		}
+	}
+}
+
+func TestShouldPrioritizeRead_PromotesSustainedSequentialSmallReads(t *testing.T) {
+	dls := &Downloaders{
+		item: &CacheItem{info: ItemInfo{Size: 256 * testMiB}},
+	}
+
+	var promoted bool
+	for off := int64(0); off < 4*testMiB; off += 128 * testKiB {
+		priority := dls.shouldPrioritizeRead(ranges.Range{Pos: off, Size: 128 * testKiB})
+		if off < sequentialReadAheadPromotionBytes-128*testKiB && !priority {
+			t.Fatalf("read at %d promoted before threshold", off)
+		}
+		if !priority {
+			promoted = true
+			break
+		}
+	}
+
+	if !promoted {
+		t.Fatal("expected sustained sequential small reads to promote to bulk path")
+	}
+}
+
+func TestShouldPrioritizeRead_RandomSmallSeekResetsToPriority(t *testing.T) {
+	dls := &Downloaders{
+		item: &CacheItem{info: ItemInfo{Size: 512 * testMiB}},
+	}
+
+	for off := int64(0); off < 4*testMiB; off += 256 * testKiB {
+		_ = dls.shouldPrioritizeRead(ranges.Range{Pos: off, Size: 256 * testKiB})
+	}
+
+	if !dls.shouldPrioritizeRead(ranges.Range{Pos: 128 * testMiB, Size: 128 * testKiB}) {
+		t.Fatal("expected random small seek to reset and stay priority")
+	}
+}
+
+func TestShouldPrioritizeRead_TailProbeAlwaysPriority(t *testing.T) {
+	dls := &Downloaders{
+		item: &CacheItem{info: ItemInfo{Size: 512 * testMiB}},
+	}
+
+	// Seed enough sequential reading to promote normal small reads.
+	for off := int64(0); off < 4*testMiB; off += 256 * testKiB {
+		_ = dls.shouldPrioritizeRead(ranges.Range{Pos: off, Size: 256 * testKiB})
+	}
+
+	tail := ranges.Range{Pos: dls.item.info.Size - 4*testKiB, Size: 4 * testKiB}
+	if !dls.shouldPrioritizeRead(tail) {
+		t.Fatal("expected near-EOF tail probe to remain priority")
+	}
+}
+
 func TestAdaptiveStateForNewDownloader_InheritsExactContiguousState(t *testing.T) {
 	const (
 		baseChunk     = 16 * testMiB

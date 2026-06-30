@@ -790,7 +790,20 @@ func (item *CacheItem) ReadAtContext(ctx context.Context, p []byte, off int64) (
 
 	r := ranges.Range{Pos: off, Size: readSize}
 
-	// Track cache hit/miss: check if data is already present before downloading
+	// Ensure the download coordinator is available before classifying the read.
+	item.dlMu.Lock()
+	dls := item.downloaders
+	item.dlMu.Unlock()
+	if dls == nil {
+		return 0, errors.New("downloaders closed")
+	}
+
+	// Prioritize probe/random reads so they do not queue behind, or trigger, bulk
+	// prefetch. Sustained forward reads are promoted back to bulk read-ahead once
+	// they prove real playback.
+	priority := dls.shouldPrioritizeRead(r)
+
+	// Track cache hit/miss: check if data is already present before downloading.
 	alreadyCached := item.HasRange(r)
 	if alreadyCached {
 		item.cache.RecordCacheHit()
@@ -805,20 +818,11 @@ func (item *CacheItem) ReadAtContext(ctx context.Context, p []byte, off int64) (
 			Int64("offset", off).
 			Int64("size", readSize).
 			Int64("file_size", item.info.Size).
+			Bool("priority", priority).
 			Msg("dfs cache miss")
 	}
 
-	// Ensure data is on disk (may block until downloaded or ctx canceled)
-	item.dlMu.Lock()
-	dls := item.downloaders
-	item.dlMu.Unlock()
-	if dls == nil {
-		return 0, errors.New("downloaders closed")
-	}
-	// Prioritize media-probe-style near-EOF reads so they don't queue behind
-	// bulk prefetch, and retry transient failures a few times before surfacing
-	// EIO — ffprobe treats a single read error as fatal.
-	priority := isProbeRead(off, readSize, item.info.Size)
+	// Ensure data is on disk (may block until downloaded or ctx canceled).
 	if err := dls.DownloadWithRetry(ctx, r, priority); err != nil {
 		return 0, fmt.Errorf("download failed: %w", err)
 	}
