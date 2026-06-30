@@ -249,6 +249,26 @@ Mount configuration determines how files are exposed on the filesystem.
 
 Connect to an existing Rclone instance's RC API.
 
+## Download Behaviour
+
+```json
+{
+  "max_downloads": 4,
+  "download_folder": "/downloads",
+  "default_download_action": "symlink",
+  "rate_limit_retries": 3
+}
+```
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `max_downloads` | int | Max concurrent file downloads | `0` (unlimited) |
+| `download_folder` | string | Destination for downloaded files | Required when action is `download` |
+| `default_download_action` | string | `symlink`, `download`, `strm`, or `none` | `symlink` |
+| `rate_limit_retries` | int | How many times to retry a `GetLink` call that returns HTTP 429 before failing the whole job. Between retries the entry is reported as **paused** to the arr (so it does not remove or re-grab the item). Backoff: 30 s → 60 s → 120 s, capped at 5 min. Set to `0` to disable retry and fail immediately on 429. | `3` |
+
+**Environment variable:** `DECYPHARR_RATE_LIMIT_RETRIES=3`
+
 ## Health Checker
 
 ```json

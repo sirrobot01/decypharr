@@ -75,6 +75,11 @@ func (c *Config) applyEnvOverrides() {
 			c.Retries = v
 		}
 	}
+	if val := getEnv("RATE_LIMIT_RETRIES"); val != "" {
+		if v, err := strconv.Atoi(val); err == nil {
+			c.RateLimitRetries = v
+		}
+	}
 
 	if val := getEnv("SKIP_AUTO_MOVE"); val != "" {
 		c.SkipAutoMove = parseBool(val)

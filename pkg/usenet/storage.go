@@ -1,6 +1,7 @@
 package usenet
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,10 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"google.golang.org/protobuf/proto"
 )
+
+// ErrNZBNotFound is returned when NZB metadata for an entry cannot be located on disk.
+// It indicates the NZB was never stored or has been deleted, and is a permanent (non-retriable) error.
+var ErrNZBNotFound = errors.New("nzb not found")
 
 const (
 	metaFileExtension = ".meta"
@@ -143,7 +148,7 @@ func (s *NZBStorage) GetNZB(id string) (*storage.NZB, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("nzb not found: %s", id)
+			return nil, fmt.Errorf("%w: %s", ErrNZBNotFound, id)
 		}
 		return nil, fmt.Errorf("failed to read NZB meta file: %w", err)
 	}

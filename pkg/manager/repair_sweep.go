@@ -20,6 +20,7 @@ import (
 	"github.com/sirrobot01/decypharr/internal/customerror"
 	"github.com/sirrobot01/decypharr/pkg/arr"
 	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/sirrobot01/decypharr/pkg/usenet"
 )
 
 // candidate is the unit of work for a sweep. One per entry-folder.
@@ -289,7 +290,10 @@ func (r *Repair) probeNZBFile(ctx context.Context, entry *storage.Entry, name st
 		res.healthy = true
 		return res
 	}
-	if errors.Is(err, customerror.UsenetSegmentMissingError) {
+	if errors.Is(err, usenet.ErrNZBNotFound) {
+		res.broken = true
+		res.reason = "nzb_not_found"
+	} else if errors.Is(err, customerror.UsenetSegmentMissingError) {
 		res.broken = true
 		res.reason = "usenet_segment_missing"
 	} else {

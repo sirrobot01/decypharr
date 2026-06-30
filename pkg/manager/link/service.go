@@ -145,8 +145,13 @@ func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, fi
 		}
 	}
 
-	// Store validation result
-	s.validated.Store(link.DownloadLink, validationErr)
+	// Only cache the validation result when it is worth remembering across calls.
+	// Retryable errors (HTTP 429) are transient — caching them would cause
+	// subsequent GetLink calls to return immediately with a stale error instead
+	// of re-validating the CDN URL after the rate-limit window has cleared.
+	if validationErr == nil || !isRetryableValidationError(validationErr) {
+		s.validated.Store(link.DownloadLink, validationErr)
+	}
 
 	if validationErr == nil {
 		return link, nil
@@ -343,7 +348,7 @@ func (s *Service) getPlacementFile(entry *storage.Entry, filename string) (*stor
 	return placementFile, nil
 }
 
-// validateLink validates a download link by making a HEAD request
+// validateLink validates a download link by making a HEAD request.
 func (s *Service) validateLink(ctx context.Context, link *types.DownloadLink) error {
 	if link == nil {
 		return NewPermanentError(ErrEmptyLink, "empty_link")
@@ -369,16 +374,37 @@ func (s *Service) validateLink(ctx context.Context, link *types.DownloadLink) er
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusOK {
+	switch resp.StatusCode {
+	case http.StatusOK:
 		return nil
+	case http.StatusTooManyRequests:
+		return NewRetryableError(Err429, "429")
+	case http.StatusServiceUnavailable:
+		return NewRetryableError(Err503, "503")
+	case http.StatusUnauthorized:
+		return NewPermanentError(ErrUnauthorized, "401")
+	case http.StatusNotFound:
+		return NewPermanentError(Err404, "404")
+	case http.StatusBadRequest, http.StatusForbidden, http.StatusGone:
+		// Presigned CDN URLs (TorBox, RD, etc.) return 400, 403, or 410 when the
+		// URL has expired. Treat these as refetchable so invalidateAndRefetch is
+		// triggered and a fresh URL is obtained from the debrid API.
+		return NewRefetchableError(ErrLinkExpired, strconv.Itoa(resp.StatusCode))
+	default:
+		errorCode := resp.Header.Get("X-Error")
+		if errorCode == "" {
+			errorCode = strconv.Itoa(resp.StatusCode)
+		}
+		return ErrorCodeToLinkError(errorCode)
 	}
+}
 
-	errorCode := resp.Header.Get("X-Error")
-	if errorCode == "" {
-		errorCode = strconv.Itoa(resp.StatusCode)
-	}
-
-	return ErrorCodeToLinkError(errorCode)
+// isRetryableValidationError returns true when the error should not be cached
+// in the validated map — i.e. it is transient and should be re-checked on the
+// next GetLink call rather than short-circuiting with a stale result.
+func isRetryableValidationError(err error) bool {
+	le := GetLinkError(err)
+	return le != nil && le.ShouldRetry()
 }
 
 // disableLinkAccount handles errors that require disabling an account

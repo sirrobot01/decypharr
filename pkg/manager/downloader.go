@@ -16,18 +16,21 @@ import (
 	grab "github.com/cavaliergopher/grab/v3"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"github.com/sirrobot01/decypharr/pkg/manager/link"
 	"github.com/sirrobot01/decypharr/pkg/notifications"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sourcegraph/conc/pool"
 )
 
 type Downloader struct {
-	manager      *Manager
-	strmURL      string
-	mountPath    string
-	dest         string
-	logger       zerolog.Logger
-	maxDownloads int
+	manager          *Manager
+	strmURL          string
+	mountPath        string
+	dest             string
+	logger           zerolog.Logger
+	maxDownloads     int
+	rateLimitRetries int
 }
 
 const (
@@ -66,12 +69,13 @@ func NewDownloadManager(manager *Manager) *Downloader {
 		strmURL = fmt.Sprintf("http://%s:%s", bindAddress, cfg.Port)
 	}
 	return &Downloader{
-		manager:      manager,
-		strmURL:      strmURL,
-		mountPath:    cfg.Mount.MountPath,
-		logger:       manager.logger.With().Str("component", "downloader").Logger(),
-		dest:         cfg.DownloadFolder,
-		maxDownloads: cfg.MaxDownloads,
+		manager:          manager,
+		strmURL:          strmURL,
+		mountPath:        cfg.Mount.MountPath,
+		logger:           manager.logger.With().Str("component", "downloader").Logger(),
+		dest:             cfg.DownloadFolder,
+		maxDownloads:     cfg.MaxDownloads,
+		rateLimitRetries: cfg.RateLimitRetries,
 	}
 }
 
@@ -501,22 +505,57 @@ func (d *Downloader) processTorrentDownload(entry *storage.Entry) error {
 		_ = d.manager.queue.Update(entry)
 	}
 
-	// Resolve download links before spawning goroutines
+	// Resolve download links before spawning goroutines.
+	// If any GetLink call returns HTTP 429 (rate-limited), the entry is reported
+	// as "paused" to the arr so it holds the item in queue, then the request is
+	// retried after an exponential backoff. The validated-link cache is cleared
+	// before each retry so that a CDN URL that expired during the pause is
+	// re-fetched from the debrid provider rather than re-validated stale.
 	type downloadTask struct {
 		file *storage.File
 		link string
 	}
 	var tasks []downloadTask
 	for _, file := range files {
-		downloadLink, err := d.manager.linkService.GetLink(context.Background(), entry, file.Name)
-		if err != nil {
-			d.logger.Error().Msgf("Failed to get download link for %s: %v", file.Name, err)
-			continue
+		var dlLink types.DownloadLink
+		var lastErr error
+		for attempt := 0; ; attempt++ {
+			dlLink, lastErr = d.manager.linkService.GetLink(context.Background(), entry, file.Name)
+			if lastErr == nil {
+				break
+			}
+			le := link.GetLinkError(lastErr)
+			if le == nil || !le.ShouldRetry() || attempt >= d.rateLimitRetries {
+				// Non-retryable error or retries exhausted — abort the whole job.
+				// A partial link failure means the download would be incomplete;
+				// the arr keeps the entry in queue and will retry.
+				return fmt.Errorf("failed to get download link for %s: %w", file.Name, lastErr)
+			}
+			backoff := rateLimitBackoff(attempt)
+			d.logger.Warn().
+				Str("file", file.Name).
+				Int("attempt", attempt+1).
+				Int("max_retries", d.rateLimitRetries).
+				Dur("backoff", backoff).
+				Msg("GetLink rate-limited (429), pausing download before retry")
+			entry.State = storage.EntryStatePausedDL
+			_ = d.manager.queue.Update(entry)
+			select {
+			case <-time.After(backoff):
+			case <-d.operationContext().Done():
+				return d.operationContext().Err()
+			}
+			// Clear the validation cache so the next attempt re-validates the CDN
+			// URL rather than re-using a stale 429 result. If the CDN URL expired
+			// during the pause, re-validation will detect a 400/403 and trigger a
+			// fresh link fetch from the debrid API automatically.
+			d.manager.linkService.Clear()
+			entry.State = storage.EntryStateDownloading
+			_ = d.manager.queue.Update(entry)
 		}
-		tasks = append(tasks, downloadTask{file: file, link: downloadLink.DownloadLink})
+		tasks = append(tasks, downloadTask{file: file, link: dlLink.DownloadLink})
 	}
 
-	// If no valid download links were obtained, return error instead of panic
 	if len(tasks) == 0 {
 		return fmt.Errorf("no valid download links available for %s", entry.Name)
 	}
@@ -800,6 +839,21 @@ func (d *Downloader) buildDownloadLogMeta(req *http.Request, resp *http.Response
 	}
 	meta.statusCode = resp.StatusCode
 	return meta
+}
+
+// rateLimitBackoff returns the delay before the (attempt+1)-th retry on a 429
+// response. Backoff doubles each attempt starting at 30 s, capped at 5 minutes.
+func rateLimitBackoff(attempt int) time.Duration {
+	const base = 30 * time.Second
+	const cap_ = 5 * time.Minute
+	d := base
+	for i := 0; i < attempt; i++ {
+		d *= 2
+		if d > cap_ {
+			return cap_
+		}
+	}
+	return d
 }
 
 func (d *Downloader) logDownloadCompletion(filename string, startTime time.Time, downloaded *atomic.Int64, meta downloadLogMeta) {

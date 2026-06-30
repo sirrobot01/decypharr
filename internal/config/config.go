@@ -178,6 +178,14 @@ type Config struct {
 	Retries      int    `json:"retries,omitempty"`
 	SkipAutoMove bool   `json:"skip_auto_move,omitempty"`
 
+	// RateLimitRetries controls how many times processTorrentDownload will retry
+	// a GetLink call that returns HTTP 429 (Too Many Requests) before failing the
+	// whole job. Each retry waits with exponential backoff (30 s, 60 s, 120 s …
+	// capped at 5 min) and reports the entry as "paused" to the arr client during
+	// the wait so the arr does not remove or re-grab the item.
+	// Set to 0 to disable the retry behaviour and fail immediately on 429.
+	RateLimitRetries int `json:"rate_limit_retries,omitempty"`
+
 	Repair RepairConfig `json:"repair,omitzero"`
 }
 
@@ -455,6 +463,10 @@ func (c *Config) setDefaults() {
 	// Set default error threshold for multi-debrid switching
 	if c.Retries == 0 {
 		c.Retries = 3 // Default to 3 consecutive errors before switching
+	}
+
+	if c.RateLimitRetries == 0 {
+		c.RateLimitRetries = 3 // Default: retry up to 3 times on HTTP 429 with 30s/60s/120s backoff
 	}
 
 	// Basic defaults

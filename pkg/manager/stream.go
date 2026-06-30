@@ -15,6 +15,7 @@ import (
 	"github.com/sirrobot01/decypharr/internal/retry"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/sirrobot01/decypharr/pkg/usenet"
 )
 
 const (
@@ -316,7 +317,13 @@ func (m *Manager) streamUsenet(ctx context.Context, entry *storage.Entry, filena
 	}
 
 	// Stream NZB content directly into writer
-	return m.usenet.Stream(ctx, entry.InfoHash, filename, start, end, writer)
+	streamErr := m.usenet.Stream(ctx, entry.InfoHash, filename, start, end, writer)
+	if streamErr != nil && errors.Is(streamErr, usenet.ErrNZBNotFound) {
+		// NZB metadata is permanently gone — flag the entry for the next repair sweep
+		// so Radarr/Sonarr will be notified and can trigger a re-search.
+		m.storage.MarkEntryDirty(entry.Name, config.ProtocolNZB, "nzb_not_found")
+	}
+	return streamErr
 }
 
 func normalizeStreamRange(size, start, end int64) (int64, int64, error) {
