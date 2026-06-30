@@ -252,6 +252,103 @@ func TestFindDownloaderForPosLocked_ReusesNearbyDownloaderOutsideAssignedRange(t
 	}
 }
 
+func TestFindDownloaderForRangeLocked_ReusesOverlappingAssignedRange(t *testing.T) {
+	const chunkSize = 8 * testMiB
+
+	dl := &downloader{
+		start:     16 * testMiB,
+		offset:    18 * testMiB,
+		maxOffset: 32 * testMiB,
+	}
+
+	dls := &Downloaders{
+		chunkSize: chunkSize,
+		dls:       []*downloader{dl},
+	}
+
+	req := ranges.Range{Pos: 18 * testMiB, Size: 8 * testMiB}
+	if got := dls.findDownloaderForRangeLocked(req, req.End(), false); got != dl {
+		t.Fatal("expected overlapping assigned range to reuse existing downloader")
+	}
+}
+
+func TestFindDownloaderForRangeLocked_ReusesAdjacentBulkDownloader(t *testing.T) {
+	const chunkSize = 8 * testMiB
+
+	dl := &downloader{
+		start:     0,
+		offset:    8 * testMiB,
+		maxOffset: 16 * testMiB,
+	}
+
+	dls := &Downloaders{
+		chunkSize: chunkSize,
+		dls:       []*downloader{dl},
+	}
+
+	req := ranges.Range{Pos: 18 * testMiB, Size: 512 * testKiB}
+	if got := dls.findDownloaderForRangeLocked(req, req.End(), false); got != dl {
+		t.Fatal("expected adjacent bulk range inside match window to reuse existing downloader")
+	}
+}
+
+func TestFindDownloaderForRangeLocked_PriorityAvoidsDistantBulkDownloader(t *testing.T) {
+	bulk := &downloader{
+		start:     0,
+		offset:    0,
+		maxOffset: 64 * testMiB,
+		priority:  false,
+	}
+
+	dls := &Downloaders{
+		chunkSize: 4 * testMiB,
+		dls:       []*downloader{bulk},
+	}
+
+	req := ranges.Range{Pos: 32 * testMiB, Size: 128 * testKiB}
+	if got := dls.findDownloaderForRangeLocked(req, req.End(), true); got != nil {
+		t.Fatal("expected priority read to avoid queueing behind distant bulk downloader")
+	}
+}
+
+func TestFindDownloaderForRangeLocked_PriorityReusesNearbyBulkDownloader(t *testing.T) {
+	bulk := &downloader{
+		start:     0,
+		offset:    8 * testMiB,
+		maxOffset: 64 * testMiB,
+		priority:  false,
+	}
+
+	dls := &Downloaders{
+		chunkSize: 4 * testMiB,
+		dls:       []*downloader{bulk},
+	}
+
+	req := ranges.Range{Pos: 8*testMiB + 512*testKiB, Size: 128 * testKiB}
+	if got := dls.findDownloaderForRangeLocked(req, req.End(), true); got != bulk {
+		t.Fatal("expected priority read near active bulk offset to reuse existing downloader")
+	}
+}
+
+func TestFindDownloaderForRangeLocked_PriorityReusesPriorityDownloader(t *testing.T) {
+	probe := &downloader{
+		start:     100 * testMiB,
+		offset:    100 * testMiB,
+		maxOffset: 101 * testMiB,
+		priority:  true,
+	}
+
+	dls := &Downloaders{
+		chunkSize: 4 * testMiB,
+		dls:       []*downloader{probe},
+	}
+
+	req := ranges.Range{Pos: 100*testMiB + 512*testKiB, Size: 128 * testKiB}
+	if got := dls.findDownloaderForRangeLocked(req, req.End(), true); got != probe {
+		t.Fatal("expected overlapping priority read to reuse priority downloader")
+	}
+}
+
 func TestEnsureDownloaderLocked_ExtendsMissByReadAhead(t *testing.T) {
 	const (
 		reqPos    = 10 * testMiB

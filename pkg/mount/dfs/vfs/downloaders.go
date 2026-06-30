@@ -514,9 +514,12 @@ func (dls *Downloaders) ensureDownloaderLocked(r ranges.Range, priority bool) er
 		return fmt.Errorf("too many errors (%d): last error: %w", dls.errorCount, dls.lastErr)
 	}
 
-	// Look for existing downloader in range
+	// Look for existing downloader covering or close enough to this missing
+	// range. Matching on the whole range, not just r.Pos, prevents duplicate
+	// downloaders when concurrent reads overlap an already-assigned future
+	// segment or arrive just ahead of active playback.
 	dls.removeClosed()
-	if dl := dls.findDownloaderForPosLocked(r.Pos); dl != nil {
+	if dl := dls.findDownloaderForRangeLocked(r, targetEnd, priority); dl != nil {
 		start, offset, maxOffset := dl.getRange()
 
 		if dls.item.cache != nil {
@@ -525,14 +528,17 @@ func (dls *Downloaders) ensureDownloaderLocked(r ranges.Range, priority bool) er
 				Str("key", dls.item.key).
 				Int64("downloader_id", dl.id).
 				Int64("requested_pos", r.Pos).
-				Int64("target_end", targetEnd).
+				Int64("requested_end", targetEnd).
 				Int64("start", start).
 				Int64("offset", offset).
 				Int64("max_offset_before", maxOffset).
+				Bool("request_priority", priority).
+				Bool("downloader_priority", dl.priority).
 				Msg("dfs downloader reused")
 		}
 
-		// Extend existing downloader
+		// Extend existing downloader. setMaxOffset only grows the assigned end, so
+		// reusing a downloader for an overlapping subrange cannot shrink its work.
 		dl.setMaxOffset(targetEnd)
 		return nil
 	}
@@ -585,20 +591,54 @@ func (dls *Downloaders) downloaderMatchWindowLocked() int64 {
 }
 
 func (dls *Downloaders) findDownloaderForPosLocked(pos int64) *downloader {
+	return dls.findDownloaderForRangeLocked(ranges.Range{Pos: pos, Size: 1}, pos+1, false)
+}
+
+func (dls *Downloaders) findDownloaderForRangeLocked(r ranges.Range, targetEnd int64, priority bool) *downloader {
+	if targetEnd < r.Pos {
+		targetEnd = r.Pos
+	}
 	window := dls.downloaderMatchWindowLocked()
 	for _, dl := range dls.dls {
 		start, offset, maxOffset := dl.getRange()
-
-		matchEnd := offset + window
-		if maxOffset > matchEnd {
-			matchEnd = maxOffset
+		// A downloader cannot move backwards. Match against the not-yet-written
+		// active assignment from its current offset forward, not its original start.
+		// If the missing range begins before offset, a new downloader is required to
+		// fill that head gap.
+		assignedStart := offset
+		if assignedStart < start {
+			assignedStart = start
+		}
+		assignedEnd := maxOffset
+		if assignedEnd < assignedStart {
+			assignedEnd = assignedStart
 		}
 
-		if pos >= start && pos < matchEnd {
+		// Priority reads are latency-sensitive. They may reuse another priority
+		// downloader, or a bulk downloader that is already close to the requested
+		// bytes, but they should not queue behind a distant bulk read-ahead range.
+		matchWindow := window
+		if priority && !dl.priority {
+			matchWindow = probeChunkSize
+			assignedStart = offset
+			assignedEnd = offset + probeChunkSize
+		}
+
+		if rangesOverlapOrNear(r.Pos, targetEnd, assignedStart, assignedEnd, matchWindow) {
 			return dl
 		}
 	}
 	return nil
+}
+
+func rangesOverlapOrNear(start, end, otherStart, otherEnd, gap int64) bool {
+	if end < start {
+		end = start
+	}
+	if otherEnd < otherStart {
+		otherEnd = otherStart
+	}
+	return start <= otherEnd+gap && otherStart <= end+gap
 }
 
 // kickExistingDownloaderLocked kicks a nearby downloader to prevent idle timeout.
