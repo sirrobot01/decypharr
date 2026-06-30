@@ -523,6 +523,7 @@ func (dls *Downloaders) ensureDownloaderLocked(r ranges.Range, priority bool) er
 		start, offset, maxOffset := dl.getRange()
 
 		if dls.item.cache != nil {
+			dls.item.cache.RecordDownloaderReused(priority, dl.priority)
 			dls.item.cache.logger.Trace().
 				Str("event", "dfs_downloader_reuse").
 				Str("key", dls.item.key).
@@ -532,6 +533,7 @@ func (dls *Downloaders) ensureDownloaderLocked(r ranges.Range, priority bool) er
 				Int64("start", start).
 				Int64("offset", offset).
 				Int64("max_offset_before", maxOffset).
+				Int("active_downloader_count", len(dls.dls)).
 				Bool("request_priority", priority).
 				Bool("downloader_priority", dl.priority).
 				Msg("dfs downloader reused")
@@ -733,6 +735,7 @@ func (dls *Downloaders) newDownloaderLocked(r ranges.Range, targetEnd int64, pri
 
 	dls.dls = append(dls.dls, dl)
 	if dls.item.cache != nil {
+		dls.item.cache.RecordDownloaderCreated(priority)
 		dls.item.cache.logger.Trace().
 			Str("event", "dfs_downloader_new").
 			Str("key", dls.item.key).
@@ -742,7 +745,9 @@ func (dls *Downloaders) newDownloaderLocked(r ranges.Range, targetEnd int64, pri
 			Int64("max_offset", dl.maxOffset).
 			Int64("base_chunk_size", dl.baseChunkSize).
 			Int64("current_chunk_size", dl.currentChunkSize).
+			Int64("read_ahead_size", dls.readAheadSize).
 			Int("successful_chunks", dl.successfulChunks).
+			Int("active_downloader_count", len(dls.dls)).
 			Bool("priority", dl.priority).
 			Msg("dfs downloader created")
 	}

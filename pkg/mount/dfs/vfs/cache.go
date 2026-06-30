@@ -67,8 +67,20 @@ type Cache struct {
 	threshold   int64
 
 	// Stats counters
-	cacheHits       atomic.Int64
-	cacheMisses     atomic.Int64
+	cacheHits   atomic.Int64
+	cacheMisses atomic.Int64
+
+	// DFS read-path observability counters. These are intentionally cheap atomics
+	// so field diagnostics can distinguish scanner/probe behavior from sustained
+	// playback without turning on verbose trace logs.
+	priorityReads                  atomic.Int64
+	bulkReads                      atomic.Int64
+	priorityDownloadersCreated     atomic.Int64
+	bulkDownloadersCreated         atomic.Int64
+	priorityDownloaderReuses       atomic.Int64
+	bulkDownloaderReuses           atomic.Int64
+	priorityToBulkDownloaderReuses atomic.Int64
+
 	activeDownloads atomic.Int32
 	totalDownloaded atomic.Int64
 	downloadSpeed   atomic.Int64 // bytes per second, updated periodically
@@ -487,6 +499,36 @@ func (c *Cache) RecordCacheMiss() {
 	c.cacheMisses.Add(1)
 }
 
+// RecordReadClassification increments the DFS priority/bulk read counters.
+func (c *Cache) RecordReadClassification(priority bool) {
+	if priority {
+		c.priorityReads.Add(1)
+		return
+	}
+	c.bulkReads.Add(1)
+}
+
+// RecordDownloaderCreated increments the DFS downloader creation counters.
+func (c *Cache) RecordDownloaderCreated(priority bool) {
+	if priority {
+		c.priorityDownloadersCreated.Add(1)
+		return
+	}
+	c.bulkDownloadersCreated.Add(1)
+}
+
+// RecordDownloaderReused increments the DFS downloader reuse counters.
+func (c *Cache) RecordDownloaderReused(requestPriority, downloaderPriority bool) {
+	if requestPriority {
+		c.priorityDownloaderReuses.Add(1)
+		if !downloaderPriority {
+			c.priorityToBulkDownloaderReuses.Add(1)
+		}
+		return
+	}
+	c.bulkDownloaderReuses.Add(1)
+}
+
 // AddDownloadedBytes adds to the total downloaded byte counter.
 func (c *Cache) AddDownloadedBytes(n int64) {
 	c.totalDownloaded.Add(n)
@@ -551,18 +593,25 @@ func (c *Cache) GetStats() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"type":             "vfs",
-		"total_size":       c.totalSize.Load(),
-		"max_size":         c.config.CacheDiskSize,
-		"item_count":       c.itemCount.Load(),
-		"utilization":      utilization,
-		"cache_hits":       hits,
-		"cache_misses":     misses,
-		"cache_hit_rate":   hitRate,
-		"active_downloads": c.activeDownloads.Load(),
-		"total_downloaded": c.totalDownloaded.Load(),
-		"download_speed":   c.downloadSpeed.Load(),
-		"circuit_breakers": c.circuitBreakers.Load(),
+		"type":                               "vfs",
+		"total_size":                         c.totalSize.Load(),
+		"max_size":                           c.config.CacheDiskSize,
+		"item_count":                         c.itemCount.Load(),
+		"utilization":                        utilization,
+		"cache_hits":                         hits,
+		"cache_misses":                       misses,
+		"cache_hit_rate":                     hitRate,
+		"priority_reads":                     c.priorityReads.Load(),
+		"bulk_reads":                         c.bulkReads.Load(),
+		"priority_downloaders_created":       c.priorityDownloadersCreated.Load(),
+		"bulk_downloaders_created":           c.bulkDownloadersCreated.Load(),
+		"priority_downloader_reuses":         c.priorityDownloaderReuses.Load(),
+		"bulk_downloader_reuses":             c.bulkDownloaderReuses.Load(),
+		"priority_to_bulk_downloader_reuses": c.priorityToBulkDownloaderReuses.Load(),
+		"active_downloads":                   c.activeDownloads.Load(),
+		"total_downloaded":                   c.totalDownloaded.Load(),
+		"download_speed":                     c.downloadSpeed.Load(),
+		"circuit_breakers":                   c.circuitBreakers.Load(),
 	}
 }
 
@@ -802,6 +851,7 @@ func (item *CacheItem) ReadAtContext(ctx context.Context, p []byte, off int64) (
 	// prefetch. Sustained forward reads are promoted back to bulk read-ahead once
 	// they prove real playback.
 	priority := dls.shouldPrioritizeRead(r)
+	item.cache.RecordReadClassification(priority)
 
 	// Track cache hit/miss: check if data is already present before downloading.
 	alreadyCached := item.HasRange(r)

@@ -149,3 +149,45 @@ func TestCleanupItems_ForceZeroOpenClosesRecentItems(t *testing.T) {
 		t.Fatal("expected cache file to be closed after forced cleanup")
 	}
 }
+
+func TestDFSReadPathStatsExposePriorityAndBulkCounters(t *testing.T) {
+	c := newTestCache(t.TempDir())
+
+	c.RecordReadClassification(true)
+	c.RecordReadClassification(false)
+	c.RecordReadClassification(false)
+	c.RecordDownloaderCreated(true)
+	c.RecordDownloaderCreated(false)
+	c.RecordDownloaderReused(true, true)
+	c.RecordDownloaderReused(true, false)
+	c.RecordDownloaderReused(false, false)
+
+	stats := c.GetStats()
+	assertStatInt64(t, stats, "priority_reads", 1)
+	assertStatInt64(t, stats, "bulk_reads", 2)
+	assertStatInt64(t, stats, "priority_downloaders_created", 1)
+	assertStatInt64(t, stats, "bulk_downloaders_created", 1)
+	assertStatInt64(t, stats, "priority_downloader_reuses", 2)
+	assertStatInt64(t, stats, "bulk_downloader_reuses", 1)
+	assertStatInt64(t, stats, "priority_to_bulk_downloader_reuses", 1)
+}
+
+func assertStatInt64(t *testing.T, stats map[string]interface{}, key string, want int64) {
+	t.Helper()
+	got, ok := stats[key]
+	if !ok {
+		t.Fatalf("expected stat %q to be present", key)
+	}
+	switch v := got.(type) {
+	case int64:
+		if v != want {
+			t.Fatalf("stat %s: got %d, want %d", key, v, want)
+		}
+	case int32:
+		if int64(v) != want {
+			t.Fatalf("stat %s: got %d, want %d", key, v, want)
+		}
+	default:
+		t.Fatalf("stat %s has unexpected type %T", key, got)
+	}
+}
