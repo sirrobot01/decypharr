@@ -159,7 +159,7 @@ class ConfigManager {
             'log_level', 'url_base', 'bind_address', 'port',
             'min_file_size', 'max_file_size', 'remove_stalled_after',
             'nzb_user_agent', 'download_folder', 'refresh_interval',
-            'max_downloads', 'skip_pre_cache', 'always_rm_tracker_urls',
+            'max_downloads', 'allow_samples', 'skip_pre_cache', 'always_rm_tracker_urls',
             'folder_naming', 'refresh_dirs', 'disable_webdav',
             'default_download_action', 'app_url'
         ];
@@ -559,17 +559,6 @@ class ConfigManager {
                             <div>
                                 <span class="font-medium">Download Uncached</span>
                                 <div class="label-text-alt">Download uncached files</div>
-                            </div>
-                        </label>
-                    </div>
-
-                    <div>
-                        <label class="label cursor-pointer justify-start gap-2">
-                            <input type="checkbox" class="checkbox checkbox-primary" 
-                                   name="debrid[${index}].add_samples" id="debrid[${index}].add_samples">
-                             <div>
-                                <span class=" font-medium">Add Samples</span>
-                                <div class="label-text-alt">Include sample files</div>
                             </div>
                         </label>
                     </div>
@@ -1071,12 +1060,16 @@ class ConfigManager {
                 throw new Error(errorText || 'Failed to save configuration');
             }
 
-            window.decypharrUtils.createToast('Configuration saved successfully! Services are restarting...', 'success');
-
-            // Reload page after a delay to allow services to restart
-            setTimeout(() => {
-                window.location.reload();
-            }, 2000);
+            const result = await response.json();
+            if (result.restart_required) {
+                window.decypharrUtils.createToast('Configuration saved successfully! Services are restarting...', 'success');
+                setTimeout(() => {
+                    window.location.reload();
+                }, 2000);
+            } else {
+                window.decypharrUtils.createToast('Configuration saved successfully!', 'success');
+                this.refs.loadingOverlay.classList.add('hidden');
+            }
 
         } catch (error) {
             console.error('Error saving configuration:', error);
@@ -1150,6 +1143,7 @@ class ConfigManager {
             refresh_interval: document.querySelector('[name="refresh_interval"]').value || "30s",
             default_download_action: document.querySelector('[name="default_download_action"]')?.value || "symlink",
             max_downloads: parseInt(document.querySelector('[name="max_downloads"]').value) || 0,
+            allow_samples: document.querySelector('[name="allow_samples"]').checked,
             skip_pre_cache: document.querySelector('[name="skip_pre_cache"]').checked,
             always_rm_tracker_urls: document.querySelector('[name="always_rm_tracker_urls"]').checked,
             folder_naming: document.querySelector('[name="folder_naming"]')?.value || "",
@@ -1262,7 +1256,6 @@ class ConfigManager {
             const proxyInput = getField('proxy');
             const downloadUncachedInput = getField('download_uncached');
             const unpackRarInput = getField('unpack_rar');
-            const addSamplesInput = getField('add_samples');
             const userAgentInput = getField('user_agent');
             const downloadKeysTextarea = getField('download_api_keys');
             const torrentsRefreshIntervalInput = getField('torrents_refresh_interval');
@@ -1270,7 +1263,7 @@ class ConfigManager {
             const autoExpireLinksAfterInput = getField('auto_expire_links_after');
 
             if (!nameInput || !providerInput || !apiKeyInput || !rateLimitInput || !repairRateLimitInput || !downloadRateLimitInput ||
-                !minimumFreeSlotInput || !proxyInput || !downloadUncachedInput || !unpackRarInput || !addSamplesInput ||
+                !minimumFreeSlotInput || !proxyInput || !downloadUncachedInput || !unpackRarInput ||
                 !userAgentInput || !torrentsRefreshIntervalInput || !downloadLinksRefreshIntervalInput || !autoExpireLinksAfterInput) {
                 return;
             }
@@ -1286,7 +1279,6 @@ class ConfigManager {
                 proxy: proxyInput.value,
                 download_uncached: downloadUncachedInput.checked,
                 unpack_rar: unpackRarInput.checked,
-                add_samples: addSamplesInput.checked,
                 user_agent: userAgentInput.value
             };
 

@@ -58,6 +58,9 @@ func (c *Config) applyEnvOverrides() {
 	if val := getEnv("ALWAYS_RM_TRACKER_URLS"); val != "" {
 		c.AlwaysRmTrackerUrls = parseBool(val)
 	}
+	if val := getEnv("ALLOW_SAMPLES"); val != "" {
+		c.AllowSamples = parseBool(val)
+	}
 	if val := getEnv("MIN_FILE_SIZE"); val != "" {
 		c.MinFileSize = val
 	}

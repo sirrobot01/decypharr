@@ -465,9 +465,6 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	newConfig.Arrs = validArrs
 
-	// Sync arr storage with the new configuration
-	s.manager.Arr().SyncFromConfig(newConfig.Arrs)
-
 	// Save the updated config
 	if err := newConfig.Save(); err != nil {
 		s.logger.Error().Err(err).Msg("Failed to save config")
@@ -475,10 +472,22 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Restart services asynchronously
-	go s.Restart()
+	restartRequired := currentConfig.RequiresRestart(&newConfig)
+	if restartRequired {
+		go s.Restart()
+	} else {
+		s.manager.Arr().SyncFromConfig(newConfig.Arrs)
+		if err := s.ApplyRuntime(&newConfig); err != nil {
+			s.logger.Error().Err(err).Msg("Failed to apply config at runtime")
+			http.Error(w, "Saved, but failed to apply config: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 
-	utils.JSONResponse(w, map[string]string{"status": "success"}, http.StatusOK)
+	utils.JSONResponse(w, map[string]interface{}{
+		"status":           "success",
+		"restart_required": restartRequired,
+	}, http.StatusOK)
 }
 
 func (s *Server) handleGetRepairConfig(w http.ResponseWriter, r *http.Request) {

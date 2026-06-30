@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -102,12 +103,13 @@ func New(mgr *manager.Manager) *Server {
 	statsCollector := stats.New(mgr)
 
 	s := &Server{
-		logger:    l,
-		manager:   mgr,
-		stats:     statsCollector,
-		cookie:    cookieStore,
-		templates: templates,
-		urlBase:   cfg.URLBase,
+		logger:       l,
+		manager:      mgr,
+		stats:        statsCollector,
+		cookie:       cookieStore,
+		templates:    templates,
+		nzbUserAgent: cfg.NZBUserAgent,
+		urlBase:      cfg.URLBase,
 	}
 
 	qb := qbit.New(mgr)
@@ -169,6 +171,30 @@ func (s *Server) Restart() {
 	} else {
 		s.logger.Warn().Msg("Restart function not set")
 	}
+}
+
+func (s *Server) ApplyRuntime(cfg *config.Config) error {
+	if cfg == nil {
+		return nil
+	}
+	current := config.Get()
+	notificationsChanged := !reflect.DeepEqual(current.Notifications, cfg.Notifications)
+	repairChanged := !reflect.DeepEqual(current.Repair, cfg.Repair)
+
+	current.ApplyRuntime(cfg)
+	s.nzbUserAgent = current.NZBUserAgent
+
+	if notificationsChanged && s.manager != nil && s.manager.Notifications != nil {
+		s.manager.Notifications.Reload(&current.Notifications)
+	}
+	if repairChanged && s.manager != nil {
+		if svc := s.manager.Repair(); svc != nil {
+			if err := svc.ApplyConfig(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Server) Start(ctx context.Context) error {

@@ -17,6 +17,7 @@ type Debrid struct {
 	DownloadRateLimit            string   `json:"download_rate_limit,omitempty"`
 	Proxy                        string   `json:"proxy,omitempty"`
 	UnpackRar                    bool     `json:"unpack_rar,omitempty"`
+	AddSamples                   bool     `json:"add_samples,omitempty"`       // Deprecated. Use root allow_samples instead.
 	MinimumFreeSlot              int      `json:"minimum_free_slot,omitempty"` // Minimum active pots to use this debrid
 	Limit                        int      `json:"limit,omitempty"`             // Maximum number of total torrents
 	TorrentsRefreshInterval      string   `json:"torrents_refresh_interval,omitempty"`

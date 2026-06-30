@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -263,6 +264,17 @@ func GetMainPath() string {
 	return configPath
 }
 
+func (c *Config) ensureConfigDir() error {
+	mainPath := GetMainPath()
+	if strings.TrimSpace(mainPath) == "" {
+		return nil
+	}
+	if err := os.MkdirAll(mainPath, 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+	return nil
+}
+
 func Get() *Config {
 	once.Do(func() {
 		instance = &Config{} // Initialize instance first
@@ -322,6 +334,9 @@ func (c *Config) SaveAuth(auth *Auth) error {
 	c.Auth = auth
 	data, err := json.Marshal(auth)
 	if err != nil {
+		return err
+	}
+	if err := c.ensureConfigDir(); err != nil {
 		return err
 	}
 	return os.WriteFile(c.AuthFile(), data, 0644)
@@ -396,10 +411,20 @@ func (c *Config) migrateNotifications() {
 	}
 }
 
+func (c *Config) migrateLegacySamples() {
+	for i := range c.Debrids {
+		if c.Debrids[i].AddSamples {
+			c.AllowSamples = true
+			c.Debrids[i].AddSamples = false
+		}
+	}
+}
+
 func (c *Config) setDefaults() {
 	// Migrate deprecated fields to Manager (backward compatibility)
 	c.migrateQBitTorrentToManager()
 	c.migrateNotifications()
+	c.migrateLegacySamples()
 
 	if c.DefaultDownloadAction == "" {
 		c.DefaultDownloadAction = DownloadActionSymlink
@@ -584,11 +609,47 @@ func (c *Config) Save() error {
 	if err != nil {
 		return err
 	}
+	if err := c.ensureConfigDir(); err != nil {
+		fmt.Printf("Failed to create config directory: %v\n", err)
+		return err
+	}
 	if err := os.WriteFile(c.JsonFile(), data, 0644); err != nil {
 		fmt.Printf("Failed to write config file: %v\n", err)
 		return err
 	}
 	return nil
+}
+
+func (c Config) restartSnapshot() Config {
+	c.Auth = nil
+	c.AllowedExt = nil
+	c.AllowSamples = false
+	c.MinFileSize = ""
+	c.MaxFileSize = ""
+	c.NZBUserAgent = ""
+	c.Notifications = Notifications{}
+	c.Repair = RepairConfig{}
+	return c
+}
+
+func (c *Config) RequiresRestart(next *Config) bool {
+	if c == nil || next == nil {
+		return true
+	}
+	return !reflect.DeepEqual(c.restartSnapshot(), next.restartSnapshot())
+}
+
+func (c *Config) ApplyRuntime(next *Config) {
+	if c == nil || next == nil {
+		return
+	}
+	c.AllowedExt = append([]string(nil), next.AllowedExt...)
+	c.AllowSamples = next.AllowSamples
+	c.MinFileSize = next.MinFileSize
+	c.MaxFileSize = next.MaxFileSize
+	c.NZBUserAgent = next.NZBUserAgent
+	c.Notifications = next.Notifications
+	c.Repair = next.Repair
 }
 
 func Reset() {
@@ -598,8 +659,8 @@ func Reset() {
 
 func (c *Config) createConfig() error {
 	// Create the directory if it doesn't exist
-	if err := os.MkdirAll(GetMainPath(), 0755); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
+	if err := c.ensureConfigDir(); err != nil {
+		return err
 	}
 	c.URLBase = "/"
 	c.Port = DefaultPort

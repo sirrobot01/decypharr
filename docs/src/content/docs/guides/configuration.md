@@ -38,6 +38,28 @@ Configuration is stored in `config.json`. Most settings can be managed via the W
 
 Password is bcrypt-hashed. API token is auto-generated.
 
+## Global Import Settings
+
+```json
+{
+  "allow_samples": false,
+  "allowed_file_types": ["mkv", "mp4"],
+  "min_file_size": "10MB",
+  "max_file_size": "50GB",
+  "nzb_user_agent": "Sabnzbd/3.0.0"
+}
+```
+
+| Field                | Type   | Description                                      | Default              |
+|----------------------|--------|--------------------------------------------------|----------------------|
+| `allow_samples`      | bool   | Include files detected as samples or extras      | `false`              |
+| `allowed_file_types` | array  | File extensions Decypharr may import             | Built-in media list  |
+| `min_file_size`      | string | Minimum file size to import                      | `""` (no minimum)    |
+| `max_file_size`      | string | Maximum file size to import                      | `""` (no maximum)    |
+| `nzb_user_agent`     | string | User-Agent header used when downloading NZB URLs | `""` (Go default)    |
+
+Legacy `debrids[].add_samples` values are migrated to the root-level `allow_samples` setting.
+
 ## Debrid Providers
 
 Array of Debrid services:
