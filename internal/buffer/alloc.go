@@ -53,10 +53,10 @@ const maxReuseBlocks = 8
 // of the small reuse window, so memory tracks the live working set closely
 // without relying on GC pacing or GOMEMLIMIT.
 //
-// Get/Put are called both with and without the owning Buffer's mu held
-// (the promote path allocates before locking), so the allocator carries its
-// own mutex. Lock order is always Buffer.mu -> blockAllocator.mu; the
-// allocator never reaches back for Buffer.mu, so this can't deadlock.
+// get/put are currently only called with the owning Buffer's mu held, but the
+// allocator carries its own mutex so that contract isn't load-bearing. Lock
+// order is always Buffer.mu -> blockAllocator.mu; the allocator never reaches
+// back for Buffer.mu, so this can't deadlock.
 type blockAllocator struct {
 	mu      sync.Mutex
 	free    []*[]byte

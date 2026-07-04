@@ -93,13 +93,23 @@ func NewSegmentFetcher(
 // Fetch downloads a segment synchronously, with deduplication.
 // Multiple goroutines calling Fetch for the same segment will share the download.
 func (sf *SegmentFetcher) Fetch(ctx context.Context, segIdx int) error {
-	// Fast path: already cached
-	state := sf.cache.GetState(segIdx)
-	switch state {
-	case StateOnDisk:
-		return nil
-	case StateFailed:
-		return sf.cache.GetError(segIdx)
+	// Fast path: already cached, or wait out an in-progress eviction so we
+	// don't dedup/fetch against a segment whose disk range is mid-punch.
+	for {
+		state := sf.cache.GetState(segIdx)
+		if state == StateEvicting {
+			if err := sf.cache.WaitForEvictionRelease(ctx, segIdx); err != nil {
+				return err
+			}
+			continue // slot is Empty now; re-evaluate
+		}
+		switch state {
+		case StateOnDisk:
+			return nil
+		case StateFailed:
+			return sf.cache.GetError(segIdx)
+		}
+		break
 	}
 
 	// Check if someone else is already fetching
@@ -154,6 +164,14 @@ func (sf *SegmentFetcher) doFetch(ctx context.Context, segIdx int) error {
 		case StateFetching:
 			// Wait for the other fetcher
 			return sf.cache.WaitForSegment(ctx, segIdx)
+		case StateEvicting:
+			// An evictor grabbed the slot between Fetch's check and here.
+			// Wait for the punch to finish, then retry the fetch into the
+			// released range.
+			if err := sf.cache.WaitForEvictionRelease(ctx, segIdx); err != nil {
+				return err
+			}
+			return sf.doFetch(ctx, segIdx)
 		}
 	}
 
@@ -162,10 +180,10 @@ func (sf *SegmentFetcher) doFetch(ctx context.Context, segIdx int) error {
 	case sf.semaphore <- struct{}{}:
 		defer func() { <-sf.semaphore }()
 	case <-ctx.Done():
-		sf.cache.ResetState(segIdx)
+		sf.cache.ReleaseFetching(segIdx)
 		return ctx.Err()
 	case <-sf.ctx.Done():
-		sf.cache.ResetState(segIdx)
+		sf.cache.ReleaseFetching(segIdx)
 		return sf.ctx.Err()
 	}
 
@@ -226,7 +244,7 @@ func (sf *SegmentFetcher) doFetch(ctx context.Context, segIdx int) error {
 	if err != nil {
 		sf.stats.DownloadErrors.Add(1)
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			sf.cache.ResetState(segIdx)
+			sf.cache.ReleaseFetching(segIdx)
 			return err
 		}
 		sf.cache.MarkFailed(segIdx, err)
@@ -325,8 +343,9 @@ func (sf *SegmentFetcher) fetchWithRetry(ctx context.Context, segIdx int) error 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			// Clear the failed state so the segment can be re-fetched, then
-			// back off briefly before retrying.
-			sf.cache.ResetState(segIdx)
+			// back off briefly before retrying. ResetFailed is a CAS: if a
+			// concurrent reader fetched the segment meanwhile it stays OnDisk.
+			sf.cache.ResetFailed(segIdx)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -364,9 +383,13 @@ func (sf *SegmentFetcher) retryBackoff(attempt int) time.Duration {
 }
 
 // Close stops all workers and waits for them to finish.
+//
+// prefetchCh is deliberately never closed: QueuePrefetch can race Close (a
+// ReadAtContext already past the reader's closed check), and a send on a
+// closed channel panics even inside a select. Workers exit via sf.ctx instead,
+// and the channel is garbage-collected with the fetcher.
 func (sf *SegmentFetcher) Close() {
 	sf.cancel()
-	close(sf.prefetchCh)
 	sf.prefetchWg.Wait()
 }
 

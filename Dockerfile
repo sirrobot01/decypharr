@@ -41,21 +41,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go build -trimpath -ldflags="-w -s" \
     -o /healthcheck cmd/healthcheck/main.go
 
-# Stage 1.5: Download static ffprobe binary
-FROM alpine:latest AS ffprobe-extractor
-ARG TARGETARCH
-WORKDIR /tmp
-RUN apk add --no-cache curl unzip && \
-    case "$TARGETARCH" in \
-        amd64) PLATFORM="linux-64" ;; \
-        arm64) PLATFORM="linux-arm-64" ;; \
-        *) echo "Unsupported arch: $TARGETARCH" && exit 1 ;; \
-    esac && \
-    curl -L "https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v6.1/ffprobe-6.1-${PLATFORM}.zip" -o ffprobe.zip && \
-    unzip ffprobe.zip && \
-    chmod +x ffprobe && \
-    mv ffprobe /ffprobe
-
 # Stage 2: Final image
 FROM alpine:latest
 
@@ -87,7 +72,6 @@ RUN apk add --no-cache fuse3 ca-certificates su-exec shadow curl unzip tzdata &&
 # Copy binaries and entrypoint
 COPY --from=builder /decypharr /usr/bin/decypharr
 COPY --from=builder /healthcheck /usr/bin/healthcheck
-COPY --from=ffprobe-extractor /ffprobe /usr/bin/ffprobe
 COPY scripts/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

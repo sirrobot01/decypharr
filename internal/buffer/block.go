@@ -10,13 +10,14 @@ package buffer
 // new write so we never persist arbitrary block contents — only bytes
 // that have actually been written.
 //
-// Block memory comes from the package-level blockPool (sync.Pool).
+// Block memory comes from the owning Buffer's blockAllocator (mmap-backed
+// on Linux; see alloc.go).
 type block struct {
 	off  int64  // block-aligned start offset within the buffer
 	data []byte // exactly blockSize bytes
 
-	// bufPtr is the exact *[]byte returned by blockPool.Get() so that
-	// dropBlockLocked can Put it back unambiguously. Storing it avoids
+	// bufPtr is the exact *[]byte returned by blockAllocator.get() so that
+	// dropBlockLocked can put it back unambiguously. Storing it avoids
 	// the &blk.data trick, which puts a pointer-to-struct-field into
 	// the pool and only happens to work because the underlying array
 	// stays alive — fragile to layout changes.

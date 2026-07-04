@@ -439,8 +439,12 @@ func (p *NZBParser) groupProcessedFiles(allFiles []contentResult) map[string]*Fi
 			group.ActualFilename = item.actualFilename
 		}
 
-		// Update filename
-		item.file.Filename = item.actualFilename
+		// Update the filename only when content detection produced one; a
+		// content-detected file whose yEnc header carried no name must keep
+		// its subject-derived filename (it may be the only extension source).
+		if item.actualFilename != "" {
+			item.file.Filename = item.actualFilename
+		}
 
 		group.Files = append(group.Files, item.file)
 		for _, g := range item.file.Groups {
@@ -788,6 +792,16 @@ func (p *NZBParser) processMediaFile(group *FileGroup, password string) *storage
 	currentOffset := int64(0)
 	for index, nzbFile := range group.Files {
 		totalSize, segments := getNZBSegments(index, nzbFile, group)
+		if len(segments) == 0 && len(nzbFile.Segments) > 0 {
+			// getNZBSegments rejected the sub-file (missing/duplicate segment
+			// numbers). Silently dropping it would splice a hole into the
+			// middle of the merged stream; fail the whole file instead.
+			p.logger.Warn().
+				Str("group", group.BaseName).
+				Str("file", nzbFile.Filename).
+				Msg("Incomplete or inconsistent segment numbering; rejecting media file")
+			return nil
+		}
 		file.Segments = append(file.Segments, segments...)
 		currentOffset += totalSize
 	}
@@ -887,8 +901,9 @@ func (p *NZBParser) detectFileTypeFromContent(data []byte) storage.NZBFileType {
 
 	// Check for Transport Stream (TS files)
 	if len(data) >= 1 && data[0] == 0x47 {
-		// Additional validation for TS files
-		if len(data) >= 188 && data[188] == 0x47 {
+		// Additional validation: TS packets are 188 bytes, so the next
+		// sync byte sits at index 188 (requires at least 189 bytes).
+		if len(data) > 188 && data[188] == 0x47 {
 			return storage.NZBFileTypeMedia
 		}
 	}

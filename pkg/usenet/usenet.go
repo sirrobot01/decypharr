@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -64,12 +65,37 @@ type fsEntry struct {
 	lastAccessed  atomic.Int64 // Unix timestamp
 }
 
+// fsEntryTombstone marks an entry claimed for teardown. Once refCount holds
+// this value no new stream can acquire the entry (see acquire), which is what
+// makes cleanup safe against a concurrent Stream that already Load()ed the
+// entry from the map.
+const fsEntryTombstone = int32(-1 << 30)
+
 func (fe *fsEntry) cleanup() {
 	if fe.readerCleanup != nil {
 		fe.readerCleanup()
 		fe.readerCleanup = nil
 		fe.reader = nil
 	}
+}
+
+// acquire takes a reference unless the entry has been claimed for teardown.
+func (fe *fsEntry) acquire() bool {
+	for {
+		n := fe.refCount.Load()
+		if n < 0 {
+			return false
+		}
+		if fe.refCount.CompareAndSwap(n, n+1) {
+			return true
+		}
+	}
+}
+
+// claimForCleanup atomically claims an idle (refCount == 0) entry for
+// teardown, fencing out any future acquire.
+func (fe *fsEntry) claimForCleanup() bool {
+	return fe.refCount.CompareAndSwap(0, fsEntryTombstone)
 }
 
 // getOrCreateReader returns the shared reader, creating it lazily on first use.
@@ -109,6 +135,11 @@ func (fe *fsEntry) getOrCreateReader() (fs.PrefetchableReaderAt, int64, error) {
 
 	if fe.readerErr != nil {
 		return nil, 0, fe.readerErr
+	}
+	// cleanup() nils the reader after the Once has fired; a caller racing a
+	// shutdown-path cleanup must get an error, not a nil interface.
+	if fe.reader == nil {
+		return nil, 0, fmt.Errorf("reader has been closed")
 	}
 	return fe.reader, fe.readerSize, nil
 }
@@ -223,6 +254,15 @@ func New() (*Usenet, error) {
 		return nil, fmt.Errorf("failed to create NZB storage: %w", err)
 	}
 
+	// One-time (idempotent) upgrade of any legacy protobuf meta files to the v2
+	// codec. Runs in the background so it never blocks startup; atomic rewrites
+	// keep concurrent reads safe throughout.
+	go func() {
+		if _, err := nzbStorage.MigrateLegacy(); err != nil {
+			nzbStorage.logger.Warn().Err(err).Msg("Legacy NZB meta migration failed")
+		}
+	}()
+
 	// Create NNTP client with retry configuration
 	client, err := nntp.NewClient(cfg)
 	if err != nil {
@@ -296,9 +336,11 @@ func (u *Usenet) createEntry(file *storage.NZBFile) (*fsEntry, error) {
 func (u *Usenet) getOrCreateEntry(ctx context.Context, nzoID, filename string) (*fsEntry, string, error) {
 	key := fsKey(nzoID, filename)
 
-	// Fast path: entry already exists
-	if entry, ok := u.fs.Load(key); ok {
-		entry.refCount.Add(1)
+	// Fast path: entry already exists and isn't being torn down. acquire() (a
+	// CAS, not a blind Add) is what closes the race against cleanupIdleFS:
+	// once the janitor claims an idle entry no new reference can be taken, so
+	// a stream can never end up on an entry whose reader is being closed.
+	if entry, ok := u.fs.Load(key); ok && entry.acquire() {
 		entry.lastAccessed.Store(utils.NowUnix())
 		return entry, key, nil
 	}
@@ -320,19 +362,28 @@ func (u *Usenet) getOrCreateEntry(ctx context.Context, nzoID, filename string) (
 	}
 
 	// Atomically store only if key doesn't exist (prevents race condition)
-	actual, loaded := u.fs.LoadOrStore(key, newEntry)
-	if loaded {
-		// Another goroutine created the entry first - use theirs
-		// Our newEntry was never used, cleanup will happen via GC
-		actual.refCount.Add(1)
-		actual.lastAccessed.Store(utils.NowUnix())
-		return actual, key, nil
+	for {
+		actual, loaded := u.fs.LoadOrStore(key, newEntry)
+		if !loaded {
+			// We won the race - use our new entry
+			newEntry.refCount.Add(1)
+			newEntry.lastAccessed.Store(utils.NowUnix())
+			return newEntry, key, nil
+		}
+		// Another goroutine created the entry first - use theirs.
+		// Our newEntry was never used (readers are lazy), GC reclaims it.
+		if actual.acquire() {
+			actual.lastAccessed.Store(utils.NowUnix())
+			return actual, key, nil
+		}
+		// The mapped entry is claimed for teardown; the janitor removes it
+		// from the map immediately after claiming, so retry until our entry
+		// can be stored.
+		if err := ctx.Err(); err != nil {
+			return nil, key, err
+		}
+		runtime.Gosched()
 	}
-
-	// We won the race - use our new entry
-	newEntry.refCount.Add(1)
-	newEntry.lastAccessed.Store(utils.NowUnix())
-	return newEntry, key, nil
 }
 
 // releaseFS releases an fs entry using a pre-computed key (avoids redundant allocation).
@@ -362,9 +413,15 @@ func (u *Usenet) cleanupIdleFS() {
 			if entry.refCount.Load() == 0 {
 				lastUsed := entry.lastAccessed.Load()
 				if now-lastUsed > idleThreshold {
-					// Cleanup
-					entry.cleanup()
-					u.fs.Delete(key)
+					// Claim before touching anything: the CAS fences out a
+					// concurrent Stream that already Load()ed this entry from
+					// the map (it will fail acquire() and create a fresh
+					// entry). Delete from the map before the (potentially
+					// slow) cleanup so waiting creators aren't stalled.
+					if entry.claimForCleanup() {
+						u.fs.Delete(key)
+						entry.cleanup()
+					}
 				}
 			}
 			return true
@@ -404,7 +461,7 @@ func (u *Usenet) ParseWithID(ctx context.Context, id, name string, content []byt
 	nzb.Category = category
 	nzb.Status = NZBStatusParsing
 	// Save NZB file to disk
-	nzbPath, err := u.saveNZBFile(name, content)
+	nzbPath, err := u.saveNZBFile(nzb.ID, content)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -412,10 +469,15 @@ func (u *Usenet) ParseWithID(ctx context.Context, id, name string, content []byt
 
 	// Mark as processing
 	if err := u.markAsProcessing(nzb); err != nil {
+		// Don't leave the source file orphaned; an un-marked .nzb would be
+		// re-claimed by the refresh watcher on every scan.
+		_ = os.Remove(nzbPath)
 		return nil, nil, fmt.Errorf("failed to mark NZB as processing: %w", err)
 	}
 
 	if err := u.nzbStorage.AddNZB(nzb); err != nil {
+		_ = os.Remove(nzbPath + ".processing")
+		_ = os.Remove(nzbPath)
 		return nil, nil, fmt.Errorf("failed to save NZB to storage: %w", err)
 	}
 
@@ -508,34 +570,38 @@ func (u *Usenet) checkNZBAvailability(ctx context.Context, nzb *storage.NZB) err
 // gated by the NNTP client's repair bank so concurrent probes don't starve
 // streaming traffic.
 func (u *Usenet) CheckFile(ctx context.Context, nzoID, filename string) error {
-	file, err := u.getFile(nzoID, filename)
+	// Repair/availability probes only need a sample of one file's message ids.
+	// Decode just those (no numeric columns, no NZBSegment structs, no other
+	// files) so a full sweep doesn't hold whole segment maps in memory.
+	samplePercent := config.Get().Usenet.AvailabilitySamplePercent
+	messageIDs, err := u.nzbStorage.SampleFileMessageIDs(nzoID, filename, samplePercent)
 	if err != nil {
-		return fmt.Errorf("failed to get file: %w", err)
+		return fmt.Errorf("failed to sample file segments: %w", err)
 	}
-	if len(file.Segments) == 0 {
+	if len(messageIDs) == 0 {
 		return fmt.Errorf("file has no Segments: %s", filename)
 	}
-
-	cfg := config.Get()
-	samplePercent := cfg.Usenet.AvailabilitySamplePercent
-	err = u.CheckFileAvailability(ctx, file, samplePercent)
-	file.Segments = nil
-	return err
+	return u.checkAvailability(ctx, filename, messageIDs)
 }
 
 func (u *Usenet) CheckFileAvailability(ctx context.Context, file *storage.NZBFile, samplePercent int) error {
-	// Sample segments based on configured percentage
-	messageIDs := u.sampleSegments(file.Segments, samplePercent)
+	return u.checkAvailability(ctx, file.Name, u.sampleSegments(file.Segments, samplePercent))
+}
 
-	// Batch STAT checks. The NNTP client gates each worker through its internal
-	// repair bank so concurrent availability checks don't starve streaming
-	// connections.
+// checkAvailability batch-STATs the given sampled message ids. The NNTP client
+// gates each worker through its internal repair bank so concurrent availability
+// checks don't starve streaming connections.
+func (u *Usenet) checkAvailability(ctx context.Context, fileName string, messageIDs []string) error {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+
 	result, err := u.nntp.BatchStat(ctx, messageIDs)
 	if err != nil {
 		// Connection/system error - log and continue (don't fail availability check)
 		u.logger.Warn().
 			Err(err).
-			Str("file", file.Name).
+			Str("file", fileName).
 			Msg("Non-fatal error during availability check, ignoring")
 		return nil
 	}
@@ -554,8 +620,8 @@ func (u *Usenet) CheckFileAvailability(ctx context.Context, file *storage.NZBFil
 		}
 		// At least some segments are definitively missing.
 		u.logger.Warn().
-			Str("file", file.Name).
-			Int("total_segments", len(file.Segments)).
+			Str("file", fileName).
+			Int("sampled_segments", len(messageIDs)).
 			Int("available_segments", result.FoundCount).
 			Int("missing_segments", notFoundCount).
 			Int("error_count", result.ErrorCount).
@@ -566,62 +632,19 @@ func (u *Usenet) CheckFileAvailability(ctx context.Context, file *storage.NZBFil
 	return nil
 }
 
-// sampleSegments returns a sample of segment message IDs based on the given percentage.
-// Always includes first and last segments, then uniformly samples from the middle.
+// sampleSegments returns a sample of segment message IDs based on the given
+// percentage. Always includes first and last segments, then uniformly samples
+// from the middle (see sampleIndices).
 func (u *Usenet) sampleSegments(segments []storage.NZBSegment, percent int) []string {
-	total := len(segments)
-	if total == 0 {
+	idx := sampleIndices(len(segments), percent)
+	if len(idx) == 0 {
 		return nil
 	}
-
-	// 100% = check all
-	if percent >= 100 {
-		messageIDs := make([]string, total)
-		for i, seg := range segments {
-			messageIDs[i] = seg.MessageID
-		}
-		return messageIDs
+	out := make([]string, len(idx))
+	for i, j := range idx {
+		out[i] = segments[j].MessageID
 	}
-
-	// Calculate target sample size (minimum 2 for first+last)
-	targetCount := (total * percent) / 100
-	if targetCount < 2 {
-		targetCount = 2
-	}
-	if targetCount > total {
-		targetCount = total
-	}
-
-	// For very small files, just check all
-	if total <= 3 {
-		messageIDs := make([]string, total)
-		for i, seg := range segments {
-			messageIDs[i] = seg.MessageID
-		}
-		return messageIDs
-	}
-
-	// Always include first and last
-	sampled := make([]string, 0, targetCount)
-	sampled = append(sampled, segments[0].MessageID)
-
-	// Uniformly sample from the middle (excluding first and last)
-	middleCount := targetCount - 2 // Reserve 2 for first and last
-	if middleCount > 0 {
-		middleSegments := segments[1 : total-1]
-		step := float64(len(middleSegments)) / float64(middleCount+1)
-
-		for i := 0; i < middleCount; i++ {
-			idx := int(step * float64(i+1))
-			if idx >= len(middleSegments) {
-				idx = len(middleSegments) - 1
-			}
-			sampled = append(sampled, middleSegments[idx].MessageID)
-		}
-	}
-
-	sampled = append(sampled, segments[total-1].MessageID)
-	return sampled
+	return out
 }
 
 func (u *Usenet) Stop() {
@@ -930,6 +953,13 @@ func (u *Usenet) GetNZB(id string) (*storage.NZB, error) {
 	return u.nzbStorage.GetNZB(id)
 }
 
+// GetNZBHeader returns NZB metadata without its segment map. Use this when only
+// scalar fields or the file list are needed (status, path, sizes); it avoids
+// decoding/allocating the multi-megabyte segment data.
+func (u *Usenet) GetNZBHeader(id string) (*storage.NZB, error) {
+	return u.nzbStorage.GetNZBHeader(id)
+}
+
 // ForEachNZB iterates over all NZBs
 func (u *Usenet) ForEachNZB(fn func(*storage.NZB) error) error {
 	return u.nzbStorage.ForEachNZB(fn)
@@ -974,8 +1004,14 @@ func (u *Usenet) GetSpeedTestResults() map[string]nntp.SpeedTestResult {
 	return u.nntp.GetSpeedTestResults()
 }
 
-func (u *Usenet) saveNZBFile(name string, content []byte) (string, error) {
-	path := filepath.Join(u.metadataDir, name)
+func (u *Usenet) saveNZBFile(id string, content []byte) (string, error) {
+	// Store the raw source keyed by the bounded NZB ID rather than the
+	// (untrusted, arbitrarily long) display name. ext4 caps a path component at
+	// 255 bytes; a long release name plus a ".processing"/".importing"/".queued"
+	// marker suffix blew past that limit, which failed the rename, wedged the
+	// refresh watcher, and left truncated fragment files behind. The UUID keeps
+	// every derived name comfortably under the cap.
+	path := filepath.Join(u.metadataDir, id+".nzb")
 	if err := os.WriteFile(path, content, 0644); err != nil {
 		return "", fmt.Errorf("failed to save NZB file to disk: %w", err)
 	}
@@ -1057,7 +1093,7 @@ func (u *Usenet) markAsFailed(nzb *storage.NZB, err error) error {
 }
 
 func (u *Usenet) Delete(nzoID string) error {
-	nzb, err := u.nzbStorage.GetNZB(nzoID)
+	nzb, err := u.nzbStorage.GetNZBHeader(nzoID)
 	if err != nil {
 		return fmt.Errorf("failed to get NZB: %w", err)
 	}
@@ -1120,7 +1156,12 @@ func (u *Usenet) ClaimNewNZBs() ([]PendingNZB, error) {
 				if os.IsNotExist(err) {
 					continue
 				}
-				return nil, fmt.Errorf("failed to claim NZB %s: %w", name, err)
+				// Skip this entry instead of aborting the whole scan. A single
+				// poison file (e.g. a name so long that appending ".importing"
+				// exceeds the filesystem limit) previously failed every refresh
+				// and permanently blocked all other pending NZBs.
+				u.logger.Error().Err(err).Str("name", name).Msg("Failed to claim NZB; skipping")
+				continue
 			}
 		}
 

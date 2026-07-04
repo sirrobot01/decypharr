@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -173,9 +174,27 @@ func (q *JobQueue) worker(id int) {
 			Msg("Processing job")
 
 		q.active.Add(1)
-		q.processFunc(q.ctx, job)
+		q.runJob(job)
 		q.active.Add(-1)
 	}
+}
+
+// runJob executes a single job, recovering from panics so that one bad job
+// cannot permanently kill a worker goroutine. With a fixed worker pool, an
+// unrecovered panic per worker silently drained the pool to zero — leaving
+// every queued download stuck at 0% while the healthcheck still passed.
+func (q *JobQueue) runJob(job *Job) {
+	defer func() {
+		if r := recover(); r != nil {
+			q.logger.Error().
+				Str("job_id", job.ID).
+				Str("type", string(job.Type)).
+				Interface("panic", r).
+				Bytes("stack", debug.Stack()).
+				Msg("Recovered from panic while processing job")
+		}
+	}()
+	q.processFunc(q.ctx, job)
 }
 
 // pop removes and returns the next job, blocking if queue is empty.

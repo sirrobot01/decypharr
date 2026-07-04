@@ -181,8 +181,9 @@ func (m *Manager) processQueuedEntries() {
 
 func (m *Manager) processQueuedNZB(entry *storage.Entry) {
 	defer m.processingEntries.Delete(entry.InfoHash)
-	// Check if the nzb is already processed
-	metadata, err := m.usenet.GetNZB(entry.InfoHash)
+	// Check if the nzb is already processed. Only header fields (status, file
+	// list) are needed here; processNZB does not touch the segment map.
+	metadata, err := m.usenet.GetNZBHeader(entry.InfoHash)
 	if err != nil {
 		m.logger.Error().Err(err).Str("name", entry.Name).Msg("Error getting NZB metadata")
 		entry.MarkAsError(err)

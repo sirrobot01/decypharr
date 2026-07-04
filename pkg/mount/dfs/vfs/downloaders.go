@@ -76,6 +76,13 @@ type Downloaders struct {
 	// It blocks the idle-restart path from spinning up a fresh kicker before
 	// the previous one has fully exited and the new ctx is installed.
 	stopping bool
+	// stopCond is broadcast when StopAll finishes tearing down a session
+	// (stopping goes false and a fresh ctx is installed). Download waits on
+	// it instead of proceeding mid-teardown: a downloader spawned on the old,
+	// already-canceled ctx exits instantly and fails every pending waiter
+	// with a spurious "context canceled" read error. Lazily initialized under
+	// mu via stopCondLocked.
+	stopCond *sync.Cond
 	// idle is true when all downloaders have stopped. Guarded by mu so that
 	// the restart decision in Download() and the teardown in StopAll() are
 	// serialized with kicker lifecycle changes.
@@ -275,15 +282,19 @@ func (dls *Downloaders) DownloadWithPriority(ctx context.Context, r ranges.Range
 	dls.touchActivity()
 
 	dls.mu.Lock()
+	// Wait out an in-flight StopAll: it has (or is about to have) canceled the
+	// current ctx, and anything we start on it dies instantly. StopAll always
+	// clears stopping and broadcasts, so this wait is bounded.
+	for dls.stopping && !dls.closed {
+		dls.stopCondLocked().Wait()
+	}
 	if dls.closed {
 		dls.mu.Unlock()
 		return errors.New("downloaders closed")
 	}
 
-	// Lazy restart: if we went idle, restart the kicker goroutine. Skipped
-	// while stopping so we don't race a new kicker against StopAll()'s wait
-	// on the old kickerDone channel.
-	if dls.idle && !dls.stopping {
+	// Lazy restart: if we went idle, restart the kicker goroutine.
+	if dls.idle {
 		dls.idle = false
 		dls.ensureKickerRunningLocked()
 	}
@@ -525,7 +536,7 @@ func (dls *Downloaders) newDownloaderLocked(r ranges.Range, targetEnd int64, pri
 		defer dls.item.cache.activeDownloads.Add(-1)
 		defer dlCancel() // always release the per-downloader context
 		n, err := dl.run()
-		dl.close(err)
+		dl.close()
 		// Only count real errors. If dl.ctx was canceled (intentional stop/close),
 		// the error is not a network/server failure and must not trip the circuit breaker.
 		if dl.ctx.Err() == nil {
@@ -670,6 +681,9 @@ func (dls *Downloaders) Close(inErr error) error {
 	}
 	dls.closed = true
 	dls.untrackStreamLocked()
+	// An item can die with its breaker open (e.g. idle eviction after a bad
+	// spell); release its slot in the cache-wide gauge or it leaks forever.
+	dls.resetCircuitLocked()
 
 	// Copy slice before unlocking to avoid races while waiting.
 	dlsCopy := make([]*downloader, len(dls.dls))
@@ -728,12 +742,14 @@ func (dls *Downloaders) isCircuitOpen() bool {
 		return false
 	}
 	if time.Now().UnixNano()-openedAt >= int64(circuitCooldownDuration) {
-		// Cooldown expired - reset circuit and clear error budget
+		// Cooldown expired - reset circuit and clear error budget. Go through
+		// resetCircuitLocked so the cache-wide circuit_breakers gauge is
+		// decremented — the previous inline reset skipped that, leaking +1
+		// into the gauge on every cooldown expiry.
 		dls.mu.Lock()
 		openedAt = dls.circuitOpenAt.Load()
 		if openedAt != 0 && time.Now().UnixNano()-openedAt >= int64(circuitCooldownDuration) {
-			dls.circuitOpen.Store(false)
-			dls.circuitOpenAt.Store(0)
+			dls.resetCircuitLocked()
 			dls.errorCount = 0
 			dls.lastErr = nil
 		}
@@ -876,7 +892,17 @@ func (dls *Downloaders) StopAll() {
 		dls.resetCircuitLocked()
 	}
 	dls.stopping = false
+	dls.stopCondLocked().Broadcast() // wake Downloads parked on the teardown
 	dls.mu.Unlock()
+}
+
+// stopCondLocked lazily initializes the teardown condition variable. Caller
+// must hold dls.mu.
+func (dls *Downloaders) stopCondLocked() *sync.Cond {
+	if dls.stopCond == nil {
+		dls.stopCond = sync.NewCond(&dls.mu)
+	}
+	return dls.stopCond
 }
 
 // ensureKickerRunningLocked restarts the kicker goroutine if it has stopped.
@@ -1036,7 +1062,9 @@ func (dl *downloader) downloadChunkWithRetry(start, end int64) (int64, error) {
 	delay := config.DefaultRetryDelay
 	maxDelay := config.DefaultRetryDelayMax
 
-	for attempt := 1; attempt <= attempts; attempt++ {
+	// attempts >= 1 always (retryAttempts floors at 3), so the "last attempt
+	// failed" return inside the loop is the guaranteed exit on failure.
+	for attempt := 1; ; attempt++ {
 		written, err := dl.streamChunk(start, end)
 
 		if err == nil {
@@ -1084,8 +1112,6 @@ func (dl *downloader) downloadChunkWithRetry(start, end int64) (int64, error) {
 			delay = maxDelay
 		}
 	}
-
-	return 0, errors.New("exhausted retries")
 }
 
 // getRange returns the current download range
@@ -1268,7 +1294,7 @@ func (dl *downloader) stop() {
 }
 
 // close marks the downloader as closed
-func (dl *downloader) close(err error) {
+func (dl *downloader) close() {
 	dl.mu.Lock()
 	dl.closed = true
 	dl.mu.Unlock()

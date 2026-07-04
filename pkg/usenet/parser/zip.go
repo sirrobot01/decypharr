@@ -162,13 +162,13 @@ func (p *ZIPParser) parseArchive(ctx context.Context, volumes []*types.Volume) (
 	}
 
 	// Find and parse End of Central Directory record
-	endOfCentralDir, err := p.findEndOfCentralDirectory(endSnippet)
+	endOfCentralDir, eocdPos, err := p.findEndOfCentralDirectory(endSnippet)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find central directory: %w", err)
 	}
 
 	// Parse central directory entries
-	files, err := p.parseCentralDirectory(endSnippet, endOfCentralDir)
+	files, err := p.parseCentralDirectory(endSnippet, endOfCentralDir, eocdPos)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse central directory: %w", err)
 	}
@@ -191,49 +191,38 @@ func (p *ZIPParser) parseArchive(ctx context.Context, volumes []*types.Volume) (
 	return archiveInfo, nil
 }
 
-// fetchVolumeEndSnippet fetches the last 256KB of a volume
+// fetchVolumeEndSnippet fetches the tail of a volume (the last segment,
+// widened backwards by up to three more if that alone is smaller than the
+// snippet target). A failed fetch aborts the parse: silently skipping a
+// segment would splice a hole into the concatenation and shift every central
+// directory offset parsed from it.
 func (p *ZIPParser) fetchVolumeEndSnippet(ctx context.Context, vol *types.Volume) ([]byte, error) {
 	if len(vol.Segments) == 0 {
 		return nil, fmt.Errorf("volume has no segments")
 	}
 
-	// get last segment
-	lastSegment := vol.Segments[len(vol.Segments)-1]
+	fetch := func(messageID string) ([]byte, error) {
+		var body []byte
+		err := p.manager.ExecuteWithFailover(ctx, func(conn *nntp.Connection) error {
+			data, e := conn.GetDecodedBody(messageID)
+			body = data
+			return e
+		})
+		return body, err
+	}
 
-	// Fetch the entire last segment (ZIP central dir is at end)
-	var body []byte
-	err := p.manager.ExecuteWithFailover(ctx, func(conn *nntp.Connection) error {
-		data, e := conn.GetDecodedBody(lastSegment.MessageID)
-		body = data
-		return e
-	})
+	last := len(vol.Segments) - 1
+	body, err := fetch(vol.Segments[last].MessageID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch segment: %w", err)
 	}
 
-	// If we need more data, fetch previous segments too
-	if len(body) < defaultZIPEndSnippetSize && len(vol.Segments) > 1 {
-		// Fetch a few more segments to get enough data
-		segmentsNeeded := min(3, len(vol.Segments)-1)
-		allData := make([]byte, 0, defaultZIPEndSnippetSize)
-
-		for i := len(vol.Segments) - segmentsNeeded - 1; i < len(vol.Segments); i++ {
-			seg := vol.Segments[i]
-			var data []byte
-			err := p.manager.ExecuteWithFailover(ctx, func(conn *nntp.Connection) error {
-				d, e := conn.GetDecodedBody(seg.MessageID)
-				data = d
-				return e
-			})
-			if err != nil {
-				continue
-			}
-			allData = append(allData, data...)
+	for i := last - 1; i >= 0 && len(body) < defaultZIPEndSnippetSize && last-i <= 3; i-- {
+		data, err := fetch(vol.Segments[i].MessageID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch segment %s: %w", vol.Segments[i].MessageID, err)
 		}
-
-		if len(allData) > 0 {
-			body = allData
-		}
+		body = append(data, body...)
 	}
 
 	return body, nil
@@ -250,22 +239,16 @@ type endOfCentralDirRecord struct {
 	commentLength    uint16
 }
 
-// findEndOfCentralDirectory finds and parses the End of Central Directory record
-func (p *ZIPParser) findEndOfCentralDirectory(data []byte) (*endOfCentralDirRecord, error) {
+// findEndOfCentralDirectory finds and parses the End of Central Directory
+// record, returning it together with its byte position within data. The
+// position is what lets the caller anchor the central directory correctly
+// even when the archive has a trailing comment.
+func (p *ZIPParser) findEndOfCentralDirectory(data []byte) (*endOfCentralDirRecord, int, error) {
 	// Search backwards for the signature
 	// EOCD is at the end, but there might be a comment after it
 	for i := len(data) - 22; i >= 0; i-- {
-		if i+4 > len(data) {
-			continue
-		}
-
 		sig := binary.LittleEndian.Uint32(data[i:])
 		if sig == ZIPEndOfCentralDirSig {
-			// Found it! Parse the record
-			if i+22 > len(data) {
-				continue
-			}
-
 			record := &endOfCentralDirRecord{
 				diskNumber:       binary.LittleEndian.Uint16(data[i+4:]),
 				centralDirDisk:   binary.LittleEndian.Uint16(data[i+6:]),
@@ -276,33 +259,56 @@ func (p *ZIPParser) findEndOfCentralDirectory(data []byte) (*endOfCentralDirReco
 				commentLength:    binary.LittleEndian.Uint16(data[i+20:]),
 			}
 
-			return record, nil
+			return record, i, nil
 		}
 	}
 
-	return nil, fmt.Errorf("end of Central Directory signature not found")
+	return nil, 0, fmt.Errorf("end of Central Directory signature not found")
 }
 
-// parseCentralDirectory parses the central directory entries
-func (p *ZIPParser) parseCentralDirectory(data []byte, eocd *endOfCentralDirRecord) ([]*ZIPFileEntry, error) {
-	var files []*ZIPFileEntry
+// parseCentralDirectory parses the central directory entries. eocdPos is the
+// position of the EOCD record within data: the directory ends exactly there
+// (or at the ZIP64 EOCD record for ZIP64 archives), so anchoring on it stays
+// correct when the archive has a trailing comment — the previous end-of-buffer
+// arithmetic was shifted by the comment length and failed on the first entry.
+func (p *ZIPParser) parseCentralDirectory(data []byte, eocd *endOfCentralDirRecord, eocdPos int) ([]*ZIPFileEntry, error) {
+	totalEntries := int64(eocd.totalEntries)
+	centralDirSize := int64(eocd.centralDirSize)
+	dirEnd := int64(eocdPos)
 
-	// Find where central directory starts in our snippet
-	// We fetched from the end, so calculate offset
-	snippetStart := int64(len(data)) - int64(eocd.centralDirSize) - 22 // 22 = EOCD record size
-	if snippetStart < 0 {
-		// Central directory might span across our snippet
-		// Parse what we have
-		snippetStart = 0
+	// ZIP64: 0xFFFF / 0xFFFFFFFF are sentinels meaning "the real value is in
+	// the ZIP64 EOCD record" — mandatory for archives over 4GB, i.e. most
+	// media zips. Without this the sentinel sizes made the anchor arithmetic
+	// garbage and every entry failed to parse.
+	if eocd.totalEntries == 0xFFFF || eocd.centralDirSize == 0xFFFFFFFF || eocd.centralDirOffset == 0xFFFFFFFF {
+		z64Entries, z64Size, z64Pos, ok := findZIP64EndOfCentralDirectory(data, eocdPos)
+		if !ok {
+			return nil, fmt.Errorf("ZIP64 archive but ZIP64 end of central directory record not found in snippet")
+		}
+		totalEntries = z64Entries
+		centralDirSize = z64Size
+		dirEnd = z64Pos
 	}
 
-	r := bytes.NewReader(data[snippetStart:])
+	dirStart := dirEnd - centralDirSize
+	if dirStart < 0 {
+		// Central directory extends beyond our snippet: it starts mid-entry,
+		// so realign to the first entry signature we can find and parse the
+		// (partial) rest.
+		dirStart = 0
+		for dirStart+4 <= dirEnd && binary.LittleEndian.Uint32(data[dirStart:]) != ZIPCentralDirectoryHeaderSig {
+			dirStart++
+		}
+	}
 
-	for i := 0; i < int(eocd.totalEntries); i++ {
+	r := bytes.NewReader(data[dirStart:dirEnd])
+
+	var files []*ZIPFileEntry
+	for i := int64(0); i < totalEntries; i++ {
 		file, err := p.parseCentralDirEntry(r)
 		if err != nil {
 			// If we can't parse, we've likely run out of data
-			p.logger.Debug().Err(err).Int("parsed", i).Msg("Stopped parsing central directory")
+			p.logger.Debug().Err(err).Int64("parsed", i).Msg("Stopped parsing central directory")
 			break
 		}
 
@@ -312,6 +318,32 @@ func (p *ZIPParser) parseCentralDirectory(data []byte, eocd *endOfCentralDirReco
 	}
 
 	return files, nil
+}
+
+// findZIP64EndOfCentralDirectory locates the ZIP64 EOCD record in the tail
+// snippet by signature and returns (totalEntries, centralDirSize, recordPos).
+// The ZIP64 EOCD locator (which precedes the plain EOCD) stores the record's
+// absolute archive offset, which is useless against a tail snippet, so the
+// record is found by scanning instead.
+func findZIP64EndOfCentralDirectory(data []byte, eocdPos int) (int64, int64, int64, bool) {
+	// ZIP64 EOCD record layout (fixed portion, 56 bytes):
+	//  0: signature (4)          12: version made by (2)   24: entries this disk (8)
+	//  4: record size (8)        14: version needed (2)    32: total entries (8)
+	//                            16: disk number (4)       40: central dir size (8)
+	//                            20: central dir disk (4)  48: central dir offset (8)
+	end := eocdPos - 20 // record ends where the 20-byte ZIP64 EOCD locator starts
+	if end < 0 || end > len(data) {
+		end = eocdPos
+	}
+	for i := end - 56; i >= 0; i-- {
+		if binary.LittleEndian.Uint32(data[i:]) != ZIPZIP64EndOfCentralDirSig {
+			continue
+		}
+		totalEntries := int64(binary.LittleEndian.Uint64(data[i+32:]))
+		centralDirSize := int64(binary.LittleEndian.Uint64(data[i+40:]))
+		return totalEntries, centralDirSize, int64(i), true
+	}
+	return 0, 0, 0, false
 }
 
 // parseCentralDirEntry parses a single central directory entry
@@ -362,23 +394,72 @@ func (p *ZIPParser) parseCentralDirEntry(r *bytes.Reader) (*ZIPFileEntry, error)
 	}
 	filename := strings.ToValidUTF8(string(filenameBytes), "")
 
-	// Skip extra field and comment
-	skipLen := int64(header.ExtraFieldLength) + int64(header.CommentLength)
-	if _, err := r.Seek(skipLen, io.SeekCurrent); err != nil {
+	uncompressedSize := int64(header.UncompressedSize)
+	compressedSize := int64(header.CompressedSize)
+	localHeaderOffset := int64(header.LocalHeaderOffset)
+
+	// Parse the extra field: for ZIP64 archives the 32-bit size/offset fields
+	// hold 0xFFFFFFFF sentinels and the real 64-bit values live in the ZIP64
+	// extra record (id 0x0001), in fixed order, present only for the fields
+	// that are saturated in the fixed header.
+	if header.ExtraFieldLength > 0 {
+		extra := make([]byte, header.ExtraFieldLength)
+		if _, err := io.ReadFull(r, extra); err != nil {
+			return nil, err
+		}
+		for len(extra) >= 4 {
+			id := binary.LittleEndian.Uint16(extra)
+			size := int(binary.LittleEndian.Uint16(extra[2:]))
+			extra = extra[4:]
+			if size > len(extra) {
+				break
+			}
+			if id == 0x0001 {
+				f := extra[:size]
+				take := func() (int64, bool) {
+					if len(f) < 8 {
+						return 0, false
+					}
+					v := int64(binary.LittleEndian.Uint64(f))
+					f = f[8:]
+					return v, true
+				}
+				if header.UncompressedSize == 0xFFFFFFFF {
+					if v, ok := take(); ok {
+						uncompressedSize = v
+					}
+				}
+				if header.CompressedSize == 0xFFFFFFFF {
+					if v, ok := take(); ok {
+						compressedSize = v
+					}
+				}
+				if header.LocalHeaderOffset == 0xFFFFFFFF {
+					if v, ok := take(); ok {
+						localHeaderOffset = v
+					}
+				}
+			}
+			extra = extra[size:]
+		}
+	}
+
+	// Skip comment
+	if _, err := r.Seek(int64(header.CommentLength), io.SeekCurrent); err != nil {
 		return nil, err
 	}
 
 	// Check if directory
-	isDir := strings.HasSuffix(filename, "/") || header.UncompressedSize == 0
+	isDir := strings.HasSuffix(filename, "/") || uncompressedSize == 0
 
 	return &ZIPFileEntry{
 		Name:              filename,
-		UncompressedSize:  int64(header.UncompressedSize),
-		CompressedSize:    int64(header.CompressedSize),
+		UncompressedSize:  uncompressedSize,
+		CompressedSize:    compressedSize,
 		Method:            header.Method,
 		IsStored:          header.Method == ZIPStoreMethod,
 		IsDirectory:       isDir,
-		LocalHeaderOffset: int64(header.LocalHeaderOffset),
+		LocalHeaderOffset: localHeaderOffset,
 		CRC32:             header.CRC32,
 	}, nil
 }

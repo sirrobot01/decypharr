@@ -67,6 +67,17 @@ const (
 
 	// StateFailed indicates the segment download failed permanently.
 	StateFailed
+
+	// StateEvicting indicates the evictor has reserved the segment and is
+	// punching its disk range. It is a transient state held only across the
+	// buffer Discard: the slot was OnDisk, will become Empty once the punch
+	// completes. Crucially, MarkFetching only transitions Empty->Fetching, so
+	// while a segment is Evicting no re-fetch can begin writing into the range
+	// being punched. This closes the race where a reader re-downloaded a
+	// segment in the gap between the evictor's state flip and its deferred
+	// Discard, only for the Discard to punch the freshly-written bytes back
+	// out — leaving the slot OnDisk but unreadable.
+	StateEvicting
 )
 
 func (s SegmentState) String() string {
@@ -79,6 +90,8 @@ func (s SegmentState) String() string {
 		return "Fetching"
 	case StateFailed:
 		return "Failed"
+	case StateEvicting:
+		return "Evicting"
 	default:
 		return "Unknown"
 	}

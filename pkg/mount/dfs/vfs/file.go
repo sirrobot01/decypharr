@@ -14,9 +14,13 @@ type StreamingFile struct {
 	closed   atomic.Bool
 }
 
-// NewStreamingFile creates a new streaming file handle
+// NewStreamingFile creates a new streaming file handle. It returns nil when
+// the item has been claimed for teardown by the cache janitor — the caller
+// must fetch a fresh item and try again (see Manager.GetFile).
 func NewStreamingFile(item *CacheItem) *StreamingFile {
-	item.Open() // Increment opens count
+	if !item.Open() { // take an open reference; fails on a claimed item
+		return nil
+	}
 
 	return &StreamingFile{
 		item:     item,

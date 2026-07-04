@@ -136,6 +136,13 @@ func (b *Backend) Mount(ctx context.Context) error {
 		}
 	case <-mountCtx.Done():
 		b.ready.Store(false)
+		// If fs.Mount later succeeds, nobody is left to read the result —
+		// unmount the orphaned server instead of leaking a live mount.
+		go func() {
+			if result := <-fsResultChan; result.server != nil {
+				_ = result.server.Unmount()
+			}
+		}()
 		return fmt.Errorf("timeout creating mount: %w", mountCtx.Err())
 	}
 
@@ -207,13 +214,13 @@ func (b *Backend) Mount(ctx context.Context) error {
 func (b *Backend) Unmount(ctx context.Context) error {
 	b.logger.Info().Msg("Unmounting hanwen backend")
 	if b.unmountFunc != nil {
+		// unmountFunc already closes the VFS manager as part of its teardown;
+		// don't close it a second time here.
 		b.unmountFunc(ctx)
-	} else {
-		// Use force unmount
-		b.forceUnmount(ctx)
+		return nil
 	}
-
-	// Close VFS manager
+	// Mount never completed: force-unmount and close the VFS ourselves.
+	b.forceUnmount(ctx)
 	if b.vfs != nil {
 		if err := b.vfs.Close(); err != nil {
 			b.logger.Warn().Err(err).Msg("Failed to close VFS")

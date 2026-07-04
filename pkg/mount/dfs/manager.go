@@ -119,10 +119,8 @@ func (m *Manager) Stats() map[string]interface{} {
 		"backend": string(m.defaultBackendType),
 	}
 	if m.vfs != nil {
-		if m.vfs != nil {
-			for key, value := range m.vfs.GetStats() {
-				stats[key] = value
-			}
+		for key, value := range m.vfs.GetStats() {
+			stats[key] = value
 		}
 	}
 	return stats

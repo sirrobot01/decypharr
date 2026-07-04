@@ -1,8 +1,8 @@
 package usenet
 
 import (
+	"bytes"
 	"fmt"
-	"strings"
 
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sirrobot01/decypharr/pkg/usenet/types"
@@ -14,12 +14,13 @@ func validateNZB(content []byte) error {
 		return fmt.Errorf("empty NZB content")
 	}
 
-	// Check for basic XML structure
-	if !strings.Contains(string(content), "<nzb") {
+	// Check for basic XML structure (bytes.Contains avoids copying the
+	// multi-MB NZB into a string twice)
+	if !bytes.Contains(content, []byte("<nzb")) {
 		return fmt.Errorf("invalid NZB format: missing <nzb> tag")
 	}
 
-	if !strings.Contains(string(content), "<file") {
+	if !bytes.Contains(content, []byte("<file")) {
 		return fmt.Errorf("invalid NZB format: no files found")
 	}
 

@@ -64,7 +64,7 @@ func (m *Manager) nzbNeedsReprocessing(entry *storage.Entry) bool {
 	if entry == nil || !entry.IsNZB() || m.usenet == nil {
 		return false
 	}
-	meta, err := m.usenet.GetNZB(entry.InfoHash)
+	meta, err := m.usenet.GetNZBHeader(entry.InfoHash)
 	return err == nil && meta != nil && (meta.Status == usenet.NZBStatusParsing || meta.Status == usenet.NZBStatusDownloading)
 }
 
@@ -114,7 +114,7 @@ func (m *Manager) rebuildQueuedNZBJob(entry *storage.Entry) (*Job, error) {
 		return nil, fmt.Errorf("usenet is not configured")
 	}
 	sourcePath := entry.Magnet
-	if meta, err := m.usenet.GetNZB(entry.InfoHash); err == nil && meta != nil && meta.Path != "" {
+	if meta, err := m.usenet.GetNZBHeader(entry.InfoHash); err == nil && meta != nil && meta.Path != "" {
 		sourcePath = meta.Path
 	}
 	content, err := os.ReadFile(sourcePath)

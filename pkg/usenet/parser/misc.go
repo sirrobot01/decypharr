@@ -109,16 +109,26 @@ func getNZBSegments(index int, file nzbparser.NzbFile, group *FileGroup) (int64,
 		return file.Segments[i].Number < file.Segments[j].Number
 	})
 
-	// Find the max segment number to properly size the array
-	maxSegNum := 0
+	// Segment numbers must form one contiguous range (usually 1..N, some
+	// posters number from 0). A file with holes or duplicates cannot produce
+	// a consistent offset map: the old code zero-filled missing slots, which
+	// leaked segments with empty message-ids and offset 0 into the .meta
+	// files, the streaming reader (non-monotonic offset table breaks its
+	// binary search), and Download. Reject such files outright.
+	minSegNum, maxSegNum := file.Segments[0].Number, file.Segments[0].Number
 	for _, seg := range file.Segments {
+		if seg.Number < minSegNum {
+			minSegNum = seg.Number
+		}
 		if seg.Number > maxSegNum {
 			maxSegNum = seg.Number
 		}
 	}
+	if maxSegNum-minSegNum+1 != len(file.Segments) {
+		return 0, nil
+	}
 
-	// Handle case where segment numbers start at 0 or 1
-	nzbSegments := make([]storage.NZBSegment, maxSegNum)
+	nzbSegments := make([]storage.NZBSegment, len(file.Segments))
 
 	currentOffset := int64(0)
 	metadata := group.getMetadata()
@@ -129,6 +139,11 @@ func getNZBSegments(index int, file nzbparser.NzbFile, group *FileGroup) (int64,
 	}
 
 	for idx, segment := range file.Segments {
+		// A segment without a message id can never be fetched; it would also
+		// defeat the empty-slot duplicate check below.
+		if segment.Id == "" {
+			return 0, nil
+		}
 		segSize := metadata.segmentSize
 		if idx == len(file.Segments)-1 {
 			// Last segment may be smaller
@@ -166,11 +181,14 @@ func getNZBSegments(index int, file nzbparser.NzbFile, group *FileGroup) (int64,
 			Group:       group.BaseName,
 		}
 
-		// Bounds check: segment.Number is 1-indexed, array is 0-indexed
-		segIdx := segment.Number - 1
-		if segIdx >= 0 && segIdx < len(nzbSegments) {
-			nzbSegments[segIdx] = seg
+		// Normalize to the range base so 0- and 1-indexed numbering both map
+		// onto a dense array. A duplicate number means the range check above
+		// passed on count alone while another slot stays empty — reject.
+		segIdx := segment.Number - minSegNum
+		if nzbSegments[segIdx].MessageID != "" {
+			return 0, nil
 		}
+		nzbSegments[segIdx] = seg
 		currentOffset += segSize
 	}
 	return currentOffset, nzbSegments
