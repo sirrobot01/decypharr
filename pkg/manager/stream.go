@@ -281,6 +281,18 @@ func (m *Manager) streamHTTP(ctx context.Context, torrent *storage.Entry, filena
 	})
 }
 
+// StreamFailureCause returns a recorded permanent stream failure for an NZB
+// file (e.g. article-not-found from a prior read/prefetch), or nil. Used to
+// surface the real cause when a stream produces no data because the file's
+// bodies are missing, so the circuit breaker and playback-repair escalation
+// classify it correctly instead of seeing a generic error.
+func (m *Manager) StreamFailureCause(entry *storage.Entry, filename string) error {
+	if m.usenet == nil || entry == nil || !entry.IsNZB() {
+		return nil
+	}
+	return m.usenet.FailedFileCause(entry.InfoHash, filename)
+}
+
 // streamUsenet handles streaming for NZB files via usenet
 func (m *Manager) streamUsenet(ctx context.Context, entry *storage.Entry, filename string, start, end int64, writer io.Writer, onReady StreamReadyFunc) error {
 	if m.usenet == nil {

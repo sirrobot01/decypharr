@@ -313,6 +313,13 @@ func (m *Manager) processJob(ctx context.Context, job *Job) {
 		if job.Entry != nil {
 			job.Entry.MarkAsError(err)
 			_ = m.queue.Update(job.Entry)
+			// A failed import (commonly a body-dead re-grab rejected by the
+			// parser) means this release is done and blocklisted. Release any
+			// playback-repair cooldown for it so the next playback can trigger
+			// the next candidate immediately instead of waiting out the timer.
+			if m.repair != nil {
+				m.repair.ClearPlaybackRepairCooldown(job.Entry.Name)
+			}
 		}
 		return
 	}

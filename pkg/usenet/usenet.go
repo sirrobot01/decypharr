@@ -731,6 +731,17 @@ func (u *Usenet) preStreamChecks(file *storage.NZBFile) error {
 	return nil
 }
 
+// FailedFileCause returns the recorded permanent failure for a file (e.g. an
+// article-not-found discovered during a prior read/prefetch), or nil if none.
+// Lets higher layers surface the real cause instead of a generic "no data"
+// error when a stream produces nothing because every segment is missing.
+func (u *Usenet) FailedFileCause(nzoID, filename string) error {
+	if cause, ok := u.failedFiles.Load(fsKey(nzoID, filename)); ok {
+		return cause
+	}
+	return nil
+}
+
 // Stream streams a file using the new streaming system with caching and worker limiting
 func (u *Usenet) Stream(ctx context.Context, nzoID, filename string, start, end int64, writer io.Writer) error {
 	if start < 0 {
