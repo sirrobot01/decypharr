@@ -201,12 +201,21 @@ type RepairConfig struct {
 	Arrs                  []string     `json:"arrs,omitempty"`
 	AutoRepair            bool         `json:"auto_repair,omitempty"`
 	SkipNZBRepair         bool         `json:"skip_nzb_repair,omitempty"`
+
+	// StopSchedule, when set, stops an in-progress repair sweep at this time/interval
+	// (same formats as Schedule: clock time, cron expression, or duration).
+	// A repair sweep still running when StopSchedule fires is cancelled before it
+	// finishes enumerating/probing every candidate. Empty disables the stop
+	// schedule entirely - the repair sweep always runs to completion. When a stop
+	// fires mid-repair-sweep, AutoRepair decides what happens to whatever was
+	// already found broken: repaired if true, left alone if false.
+	StopSchedule string `json:"stop_schedule,omitempty"`
 }
 
 func (r RepairConfig) IsZero() bool {
 	return !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
 		r.NNTPConnectionPercent == 0 && r.Strategy == "" && r.RecheckInterval == "" && len(r.Arrs) == 0 &&
-		!r.AutoRepair && !r.SkipNZBRepair
+		!r.AutoRepair && !r.SkipNZBRepair && r.StopSchedule == ""
 }
 
 type Config struct {

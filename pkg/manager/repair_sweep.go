@@ -83,15 +83,24 @@ type fileResult struct {
 }
 
 // executeSweep is the body of a sweep: enumerate, filter due, probe, repair.
-func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, opts RepairRunOptions) {
+func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, opts RepairRunOptions, stopState *repairStopState) {
 	cfg := r.cfg()
 	log := r.logger.With().Str("run_id", run.ID).Logger()
+
+	// Resolve auto-repair once: when off, the repair sweep is a pure health check —
+	// it probes and records broken state but attempts no debrid re-insert and
+	// no Arr delete/re-search. This also decides what happens to whatever was
+	// found broken so far if a StopSchedule cuts the repair sweep short.
+	autoRepair := cfg.AutoRepair
+	if opts.AutoRepair != nil {
+		autoRepair = *opts.AutoRepair
+	}
 
 	log.Info().Str("source", string(cfg.Source)).Msg("Sweep: selecting candidates")
 	candidates, err := r.enumerateCandidates(ctx, cfg)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			r.finalizeRun(run, storage.RepairRunCancelled, "", "context cancelled during selection")
+			r.finishCancelledRepairSweep(ctx, run, stopState, autoRepair, "context cancelled during selection", nil)
 			return
 		}
 		log.Error().Err(err).Msg("Sweep: enumeration failed")
@@ -99,7 +108,7 @@ func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, opts 
 		return
 	}
 	if ctx.Err() != nil {
-		r.finalizeRun(run, storage.RepairRunCancelled, "", "context cancelled after selection")
+		r.finishCancelledRepairSweep(ctx, run, stopState, autoRepair, "context cancelled after selection", nil)
 		return
 	}
 
@@ -112,24 +121,27 @@ func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, opts 
 	run.Stats.Candidates = len(due)
 	run.Stats.SkippedFresh = skipped
 
-	// Resolve auto-repair once: when off, the sweep is a pure health check —
-	// it probes and records broken state but attempts no debrid re-insert and
-	// no Arr delete/re-search.
-	autoRepair := cfg.AutoRepair
-	if opts.AutoRepair != nil {
-		autoRepair = *opts.AutoRepair
-	}
+	// Order candidates oldest-checked-first (never-checked entries sort
+	// first, since their LastCheckedAt is the zero time). This is what makes
+	// a StopSchedule-truncated repair sweep make guaranteed forward progress: any
+	// entry probed today moves to the back of the queue (its LastCheckedAt
+	// becomes "now"), so tomorrow's truncated repair sweep naturally picks up where
+	// today's left off instead of re-rolling a random subset of `due`.
+	//
+	// This slice also doubles as the candidate list considered by this run,
+	// used to scope a stop-schedule repair pass.
+	names := r.orderCandidatesByLastChecked(due)
 
 	run.Stage = storage.RepairStageProbing
 	r.saveRun(run)
 	log.Info().Int("due", len(due)).Int("skipped_fresh", skipped).Str("protocol", protocolScope).Bool("auto_repair", autoRepair).Msg("Sweep: probing")
 
 	heal := newHealCache()
-	err = r.probeAndHealCandidates(ctx, run, due, heal, opts, autoRepair)
+	err = r.probeAndHealCandidates(ctx, run, due, names, heal, opts, autoRepair)
 	due = nil
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			r.finalizeRun(run, storage.RepairRunCancelled, "", "context cancelled during probing")
+			r.finishCancelledRepairSweep(ctx, run, stopState, autoRepair, "context cancelled during probing", names)
 			return
 		}
 		log.Error().Err(err).Msg("Sweep: probing failed")
@@ -137,7 +149,7 @@ func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, opts 
 		return
 	}
 	if ctx.Err() != nil {
-		r.finalizeRun(run, storage.RepairRunCancelled, "", "context cancelled after probing")
+		r.finishCancelledRepairSweep(ctx, run, stopState, autoRepair, "context cancelled after probing", names)
 		return
 	}
 
@@ -151,16 +163,76 @@ func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, opts 
 		Msg("Sweep: completed")
 }
 
+// finishCancelledRepairSweep is reached whenever the repair sweep's context is cancelled
+// (StopRun, StopSchedule, or process shutdown). When the cancellation came
+// from a StopSchedule firing, the run is finalized as completed (not
+// cancelled) and, when autoRepair is on, a final repair pass runs over
+// whatever this repair sweep found broken among the candidates it considered
+// (names). When autoRepair is off, nothing further happens to those entries.
+//
+// A user-initiated StopRun already wrote RepairRunCancelled to storage before
+// calling cancel; finalizeRun preserves that status regardless of what's
+// passed here, so the StopRun path is unaffected.
+func (r *Repair) finishCancelledRepairSweep(ctx context.Context, run *storage.RepairRun, stopState *repairStopState, autoRepair bool, reason string, names []string) {
+	stopped := stopState != nil && stopState.get()
+	if !stopped {
+		r.finalizeRun(run, storage.RepairRunCancelled, "", reason)
+		return
+	}
+
+	log := r.logger.With().Str("run_id", run.ID).Logger()
+	log.Info().Bool("auto_repair", autoRepair).Msg("Repair sweep: stop schedule fired; finishing run")
+
+	if autoRepair && len(names) > 0 {
+		// Use a fresh, un-cancelled context for the final repair pass: the
+		// probe pass was cut short, but the repair pass over what's already
+		// known-broken is a short, bounded set of Arr calls and should be
+		// allowed to complete. Bound it so a misbehaving Arr can't hang.
+		repairCtx, cancel := context.WithTimeout(detachedRepairContext(ctx, r.parentCtx), repairStopFinalRepairTimeout)
+		defer cancel()
+
+		healths, _ := r.collectBrokenHealths(names, true)
+		if healths.Size() > 0 {
+			run.Stage = storage.RepairStageRepairing
+			r.saveRun(run)
+			r.repairBroken(repairCtx, run, healths)
+		}
+	}
+
+	run.CancelReason = ""
+	r.finalizeRun(run, storage.RepairRunCompleted, "", "stopped by schedule: "+reason)
+}
+
+// detachedRepairContext returns a context that is not already cancelled, for
+// use by the post-stop repair pass. Falls back to the repair service's parent
+// context (or background) when the run's own context has already been
+// cancelled.
+func detachedRepairContext(runCtx, parentCtx context.Context) context.Context {
+	if runCtx.Err() == nil {
+		return runCtx
+	}
+	if parentCtx != nil {
+		return parentCtx
+	}
+	return context.Background()
+}
+
 // probeAndHealCandidates fans out across candidates with cfg.Repair.Workers
 // concurrency. Each entry then probes its own files internally with at most
 // repairFilesPerEntry concurrency, so total file probes in flight = workers × 2.
+//
+// names gives the iteration order (see orderCandidatesByLastChecked):
+// g.Go is called in this order, so with N workers the oldest-checked N
+// candidates start first. If the run is cut short by a StopSchedule, the
+// candidates that didn't get a chance to start remain oldest-first for the
+// next repair sweep.
 //
 // Healing is folded into the per-entry pass: probeEntry runs auto-heal (debrid
 // re-insert) inline, and when an entry is still broken afterwards this kicks
 // off the Arr delete/blocklist/re-search for that one entry — so there's no
 // separate end-of-run repair pass holding every health in memory. All healing
 // is gated on autoRepair.
-func (r *Repair) probeAndHealCandidates(ctx context.Context, run *storage.RepairRun, candidates map[string]*candidate, heal *healCache, opts RepairRunOptions, autoRepair bool) error {
+func (r *Repair) probeAndHealCandidates(ctx context.Context, run *storage.RepairRun, candidates map[string]*candidate, names []string, heal *healCache, opts RepairRunOptions, autoRepair bool) error {
 	// run.Stats has plain int fields, so a single mutex guards every mutation
 	// and the saveRun that follows it.
 	var runMu sync.Mutex
@@ -168,11 +240,16 @@ func (r *Repair) probeAndHealCandidates(ctx context.Context, run *storage.Repair
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(max(1, r.workers()))
 
-	for name, c := range candidates {
+	for _, name := range names {
+		c := candidates[name]
+		if c == nil {
+			continue
+		}
 		g.Go(func() error {
 			if gctx.Err() != nil {
 				return gctx.Err()
 			}
+
 			h := r.probeEntry(gctx, run.ID, c, heal, opts, autoRepair)
 			if h == nil {
 				// Entry vanished or had no files between enumeration and probe;
@@ -936,6 +1013,41 @@ func (r *Repair) filterDueCandidates(in map[string]*candidate, ignoreLastChecked
 	return out, skipped
 }
 
+// orderCandidatesByLastChecked returns the names of `due` sorted by
+// EntryHealth.LastCheckedAt ascending - entries never checked (zero time)
+// sort first, then least-recently-checked, etc. Ties (e.g. multiple
+// never-checked entries) break on name for a stable, deterministic order
+// across runs.
+//
+// This ordering is what lets a StopSchedule-truncated repair sweep make guaranteed
+// forward progress across days: probing an entry updates its LastCheckedAt
+// immediately, so it sorts to the back of tomorrow's queue.
+func (r *Repair) orderCandidatesByLastChecked(due map[string]*candidate) []string {
+	type ordered struct {
+		name          string
+		lastCheckedAt time.Time
+	}
+	items := make([]ordered, 0, len(due))
+	for name := range due {
+		var lastCheckedAt time.Time
+		if h, _ := r.manager.storage.GetEntryHealth(name); h != nil {
+			lastCheckedAt = h.LastCheckedAt
+		}
+		items = append(items, ordered{name: name, lastCheckedAt: lastCheckedAt})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if !items[i].lastCheckedAt.Equal(items[j].lastCheckedAt) {
+			return items[i].lastCheckedAt.Before(items[j].lastCheckedAt)
+		}
+		return items[i].name < items[j].name
+	})
+	out := make([]string, len(items))
+	for i, it := range items {
+		out[i] = it.name
+	}
+	return out
+}
+
 // === Manual rechecks (webhooks + API) ===
 
 func (r *Repair) collectBrokenHealths(names []string, requireArrFile bool) (*xsync.Map[string, *storage.EntryHealth], int) {
@@ -1352,7 +1464,11 @@ func (r *Repair) executeRecheckMedia(ctx context.Context, run *storage.RepairRun
 	r.saveRun(run)
 
 	heal := newHealCache()
-	err := r.probeAndHealCandidates(ctx, run, candidates, heal, RepairRunOptions{}, fix)
+	mediaNames := make([]string, 0, len(candidates))
+	for name := range candidates {
+		mediaNames = append(mediaNames, name)
+	}
+	err := r.probeAndHealCandidates(ctx, run, candidates, mediaNames, heal, RepairRunOptions{}, fix)
 	candidates = nil
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
