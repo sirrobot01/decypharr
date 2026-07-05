@@ -3,6 +3,7 @@ package dfs
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sync/atomic"
 	"time"
 
@@ -110,30 +111,28 @@ func (m *Manager) Refresh(dirs []string) error {
 }
 
 // Stats returns unified statistics across all DFS mounts
-func (m *Manager) Stats() map[string]interface{} {
+func (m *Manager) Stats() map[string]any {
 	// Aggregate stats from all mounts
-	stats := map[string]interface{}{
+	stats := map[string]any{
 		"enabled": true,
 		"ready":   m.ready.Load(),
 		"type":    m.Type(),
 		"backend": string(m.defaultBackendType),
 	}
 	if m.vfs != nil {
-		for key, value := range m.vfs.GetStats() {
-			stats[key] = value
-		}
+		maps.Copy(stats, m.vfs.GetStats())
 	}
 	return stats
 }
 
-func (m *Manager) CleanupCache() (map[string]interface{}, error) {
+func (m *Manager) CleanupCache() (map[string]any, error) {
 	if m.vfs == nil {
 		return nil, fmt.Errorf("VFS manager is not initialized")
 	}
 	return m.vfs.CleanupCache(), nil
 }
 
-func (m *Manager) PurgeCache() (map[string]interface{}, error) {
+func (m *Manager) PurgeCache() (map[string]any, error) {
 	if m.vfs == nil {
 		return nil, fmt.Errorf("VFS manager is not initialized")
 	}

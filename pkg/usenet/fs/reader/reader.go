@@ -289,10 +289,7 @@ func (sr *StreamingReader) readAtEncrypted(ctx context.Context, p []byte, off in
 	alignedStart := (off / crypto.BlockSize) * crypto.BlockSize
 
 	// Determine actual end
-	reqEnd := off + int64(len(p))
-	if reqEnd > sr.totalSize {
-		reqEnd = sr.totalSize
-	}
+	reqEnd := min(off+int64(len(p)), sr.totalSize)
 
 	// Round up to next block
 	alignedEnd := reqEnd
@@ -330,10 +327,7 @@ func (sr *StreamingReader) readAtEncrypted(ctx context.Context, p []byte, off in
 	}
 
 	// Copy requested data to p
-	validDataEnd := int64(n)
-	if validDataEnd > reqEnd-alignedStart {
-		validDataEnd = reqEnd - alignedStart
-	}
+	validDataEnd := min(int64(n), reqEnd-alignedStart)
 
 	startOffset := off - alignedStart
 	if startOffset >= validDataEnd {

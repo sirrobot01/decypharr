@@ -216,9 +216,7 @@ func (s *Store) recover() error {
 
 // startSyncTask periodically syncs the log to disk
 func (s *Store) startSyncTask() {
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		ticker := time.NewTicker(s.config.SyncInterval)
 		defer ticker.Stop()
 
@@ -232,14 +230,12 @@ func (s *Store) startSyncTask() {
 				s.mu.Unlock()
 			}
 		}
-	}()
+	})
 }
 
 // startCompactionTask periodically checks if compaction is needed
 func (s *Store) startCompactionTask() {
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 
@@ -255,7 +251,7 @@ func (s *Store) startCompactionTask() {
 				}
 			}
 		}
-	}()
+	})
 }
 
 // Put stores a key-value pair with optional metadata

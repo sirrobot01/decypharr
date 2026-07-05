@@ -92,7 +92,7 @@ func (ad *AllDebrid) Logger() zerolog.Logger {
 	return ad.logger
 }
 
-func (ad *AllDebrid) doAccountRequest(account *account.Account, endpoint string, queryParams map[string]string, result interface{}) (*http.Response, error) {
+func (ad *AllDebrid) doAccountRequest(account *account.Account, endpoint string, queryParams map[string]string, result any) (*http.Response, error) {
 	u, err := url.Parse(ad.Host + endpoint)
 	if err != nil {
 		return nil, err
@@ -127,7 +127,7 @@ func (ad *AllDebrid) doAccountRequest(account *account.Account, endpoint string,
 }
 
 // doRequest performs a GET request and unmarshals the response
-func (ad *AllDebrid) doRequest(endpoint string, queryParams map[string]string, result interface{}) (*http.Response, error) {
+func (ad *AllDebrid) doRequest(endpoint string, queryParams map[string]string, result any) (*http.Response, error) {
 	u, err := url.Parse(ad.Host + endpoint)
 	if err != nil {
 		return nil, err
@@ -167,7 +167,7 @@ func (ad *AllDebrid) IsAvailable(hashes []string) map[string]bool {
 	return result
 }
 
-func (ad *AllDebrid) doPostFile(endpoint string, fileData []byte, result interface{}) (*http.Response, error) {
+func (ad *AllDebrid) doPostFile(endpoint string, fileData []byte, result any) (*http.Response, error) {
 	u, err := url.Parse(ad.Host + endpoint)
 	if err != nil {
 		return nil, err

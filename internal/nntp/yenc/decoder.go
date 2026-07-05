@@ -228,7 +228,7 @@ func parseYBeginLine(line []byte, meta *DecoderMeta) {
 		rest = strings.TrimSpace(rest[:idx])
 	}
 
-	for _, field := range strings.Fields(rest) {
+	for field := range strings.FieldsSeq(rest) {
 		k, v, ok := strings.Cut(field, "=")
 		if !ok {
 			continue
@@ -262,7 +262,7 @@ func parseYPartLine(line []byte, meta *DecoderMeta) {
 
 	var begin int64
 	var end int64
-	for _, field := range strings.Fields(rest) {
+	for field := range strings.FieldsSeq(rest) {
 		k, v, ok := strings.Cut(field, "=")
 		if !ok {
 			continue
@@ -291,7 +291,7 @@ func parseYEndLine(line []byte, meta *DecoderMeta) {
 	s := strings.TrimSpace(string(line))
 	rest := strings.TrimSpace(strings.TrimPrefix(s, "=yend "))
 
-	for _, field := range strings.Fields(rest) {
+	for field := range strings.FieldsSeq(rest) {
 		k, v, ok := strings.Cut(field, "=")
 		if !ok {
 			continue

@@ -236,10 +236,7 @@ func (a *Arr) batchSearchMissing(ctx context.Context, files []ContentFile) error
 			if ctx != nil && ctx.Err() != nil {
 				return ctx.Err()
 			}
-			end := i + BatchSize
-			if end > len(files) {
-				end = len(files)
-			}
+			end := min(i+BatchSize, len(files))
 			if err := a.searchMissing(ctx, files[i:end]); err != nil {
 				continue
 			}
@@ -270,10 +267,7 @@ func (a *Arr) DeleteFiles(ctx context.Context, files []ContentFile) error {
 			if ctx != nil && ctx.Err() != nil {
 				return ctx.Err()
 			}
-			end := i + BatchSize
-			if end > len(files) {
-				end = len(files)
-			}
+			end := min(i+BatchSize, len(files))
 			if err := a.batchDeleteFiles(ctx, files[i:end]); err != nil {
 				continue
 			}
@@ -309,7 +303,7 @@ func (a *Arr) batchDeleteFiles(ctx context.Context, files []ContentFile) error {
 		return nil
 	}
 
-	var payload interface{}
+	var payload any
 	switch a.Type {
 	case Sonarr:
 		payload = struct {

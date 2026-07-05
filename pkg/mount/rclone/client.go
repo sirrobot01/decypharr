@@ -61,11 +61,11 @@ func (m *Manager) performMount(ctx context.Context) error {
 	}
 
 	// Prepare mount arguments
-	mountArgs := map[string]interface{}{
+	mountArgs := map[string]any{
 		"fs":         FSName,
 		"mountPoint": cfg.MountPath,
 	}
-	mountOpt := map[string]interface{}{
+	mountOpt := map[string]any{
 		"AllowNonEmpty": true,
 		"AllowOther":    true,
 		"DebugFUSE":     false,
@@ -85,7 +85,7 @@ func (m *Manager) performMount(ctx context.Context) error {
 		mountOpt["Transfers"] = cfg.Rclone.Transfers
 	}
 
-	configOpts := make(map[string]interface{})
+	configOpts := make(map[string]any)
 
 	if cfg.Rclone.BufferSize != "" {
 		configOpts["BufferSize"] = cfg.Rclone.BufferSize
@@ -95,7 +95,7 @@ func (m *Manager) performMount(ctx context.Context) error {
 		// Only add _config if there are options to set
 		mountArgs["_config"] = configOpts
 	}
-	vfsOpt := map[string]interface{}{
+	vfsOpt := map[string]any{
 		"CacheMode":    cfg.Rclone.VfsCacheMode,
 		"DirCacheTime": cfg.Rclone.DirCacheTime,
 	}
@@ -225,10 +225,10 @@ func (m *Manager) unmount(ctx context.Context) {
 
 // createConfig creates an rclone config entry for the provider
 func (m *Manager) createConfig() error {
-	args := map[string]interface{}{
+	args := map[string]any{
 		"name": ConfigName,
 		"type": "webdav",
-		"parameters": map[string]interface{}{
+		"parameters": map[string]any{
 			"url":             m.webdavURL,
 			"vendor":          "other",
 			"pacer_min_sleep": "0",

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"sort"
 	"strconv"
 	"time"
@@ -66,7 +67,7 @@ type RepairRun struct {
 	Stage        RepairRunStage   `json:"stage,omitempty"`
 	StartedAt    time.Time        `json:"started_at"`
 	UpdatedAt    time.Time        `json:"updated_at"`
-	CompletedAt  time.Time        `json:"completed_at,omitempty"`
+	CompletedAt  time.Time        `json:"completed_at"`
 	Stats        RepairRunStats   `json:"stats"`
 	Error        string           `json:"error,omitempty"`
 	CancelReason string           `json:"cancel_reason,omitempty"`
@@ -241,11 +242,11 @@ type EntryHealth struct {
 	Dirty       bool   `json:"dirty"`
 	DirtyReason string `json:"dirty_reason,omitempty"`
 
-	LastCheckedAt  time.Time    `json:"last_checked_at,omitempty"`
-	LastOKAt       time.Time    `json:"last_ok_at,omitempty"`
-	LastFailedAt   time.Time    `json:"last_failed_at,omitempty"`
-	LastRepairAt   time.Time    `json:"last_repair_at,omitempty"`
-	NextCheckDueAt time.Time    `json:"next_check_due_at,omitempty"`
+	LastCheckedAt  time.Time    `json:"last_checked_at"`
+	LastOKAt       time.Time    `json:"last_ok_at"`
+	LastFailedAt   time.Time    `json:"last_failed_at"`
+	LastRepairAt   time.Time    `json:"last_repair_at"`
+	NextCheckDueAt time.Time    `json:"next_check_due_at"`
 	ActiveRunID    string       `json:"active_run_id,omitempty"`
 	PreviousStatus HealthStatus `json:"previous_status,omitempty"`
 
@@ -400,9 +401,7 @@ func (s *Storage) CountEntryHealthByStatus() map[HealthStatus]int {
 	s.healthCountsMu.Lock()
 	if s.healthCounts != nil && time.Since(s.healthCountsBuiltAt) < healthCountsTTL {
 		out := make(map[HealthStatus]int, len(s.healthCounts))
-		for k, v := range s.healthCounts {
-			out[k] = v
-		}
+		maps.Copy(out, s.healthCounts)
 		s.healthCountsMu.Unlock()
 		return out
 	}
@@ -443,9 +442,7 @@ func (s *Storage) CountEntryHealthByStatus() map[HealthStatus]int {
 	s.healthCountsMu.Unlock()
 
 	out := make(map[HealthStatus]int, len(counts))
-	for k, v := range counts {
-		out[k] = v
-	}
+	maps.Copy(out, counts)
 	return out
 }
 

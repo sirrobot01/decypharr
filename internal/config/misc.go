@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,12 +67,7 @@ func (c *Config) isNameAllowed(filename string) bool {
 	// Remove the leading dot
 	ext = ext[1:]
 
-	for _, allowed := range c.AllowedExt {
-		if ext == allowed {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(c.AllowedExt, ext)
 }
 
 func getDefaultExtensions() []string {

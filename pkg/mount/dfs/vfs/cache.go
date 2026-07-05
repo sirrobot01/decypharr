@@ -179,7 +179,7 @@ func (c *Cache) GetItem(entryName, filename string, fileSize int64) (*CacheItem,
 	}
 
 	// Slow path: create with singleflight to avoid global lock
-	val, err, _ := c.createGroup.Do(key, func() (interface{}, error) {
+	val, err, _ := c.createGroup.Do(key, func() (any, error) {
 		// A claimed item is about to be deleted from the map by the janitor
 		// (claim and delete are adjacent under cleanupMu); wait the removal
 		// out so we create a fresh item instead of handing back a dying one.
@@ -694,10 +694,7 @@ func (c *Cache) logPurgeSummary(summary purgeRunSummary) {
 }
 
 func (c *Cache) finalizeCleanupSummary(summary cleanupRunSummary) cleanupRunSummary {
-	summary.freedBytes = summary.sizeBefore - summary.sizeAfter
-	if summary.freedBytes < 0 {
-		summary.freedBytes = 0
-	}
+	summary.freedBytes = max(summary.sizeBefore-summary.sizeAfter, 0)
 	summary.result = cleanupResultText(summary.scan.errors, summary.evictionSkipped)
 	if summary.scan.errors > 0 {
 		summary.status = "warning"
@@ -708,8 +705,8 @@ func (c *Cache) finalizeCleanupSummary(summary cleanupRunSummary) cleanupRunSumm
 	return summary
 }
 
-func cleanupResultStats(summary cleanupRunSummary) map[string]interface{} {
-	return map[string]interface{}{
+func cleanupResultStats(summary cleanupRunSummary) map[string]any {
+	return map[string]any{
 		"cleanup_status":              summary.status,
 		"cleanup_result":              summary.result,
 		"cleanup_warning_count":       int64(summary.scan.errors),
@@ -784,12 +781,12 @@ func (c *Cache) evict() cleanupRunSummary {
 
 // RunCleanup executes the same cache cleanup path used by the background loop
 // and returns this run's maintenance result for API callers.
-func (c *Cache) RunCleanup() map[string]interface{} {
+func (c *Cache) RunCleanup() map[string]any {
 	return cleanupResultStats(c.evict())
 }
 
 // PurgeCache removes all cached disk items that are not currently in use.
-func (c *Cache) PurgeCache() map[string]interface{} {
+func (c *Cache) PurgeCache() map[string]any {
 	c.cleanupMu.Lock()
 	defer c.cleanupMu.Unlock()
 
@@ -804,10 +801,7 @@ func (c *Cache) PurgeCache() map[string]interface{} {
 	c.totalSize.Store(totalSize)
 	c.storeDiskStats(scan.candidates, removedKeys)
 
-	freedBytes := sizeBefore - totalSize
-	if freedBytes < 0 {
-		freedBytes = 0
-	}
+	freedBytes := max(sizeBefore-totalSize, 0)
 	status := "healthy"
 	result := "Purged cache"
 	if scan.errors > 0 {
@@ -828,7 +822,7 @@ func (c *Cache) PurgeCache() map[string]interface{} {
 	}
 	c.logPurgeSummary(summary)
 
-	return map[string]interface{}{
+	return map[string]any{
 		"purge_status":              summary.status,
 		"purge_result":              summary.result,
 		"purge_warning_count":       int64(summary.scan.errors),
@@ -897,10 +891,7 @@ func (c *Cache) updateSpeed() {
 	if elapsed <= 0 {
 		return
 	}
-	bps := ((currentBytes - lastBytes) * int64(time.Second)) / elapsed
-	if bps < 0 {
-		bps = 0
-	}
+	bps := max(((currentBytes-lastBytes)*int64(time.Second))/elapsed, 0)
 	c.downloadSpeed.Store(bps)
 }
 
@@ -921,7 +912,7 @@ func (c *Cache) speedSampleLoop() {
 }
 
 // GetStats returns cache statistics
-func (c *Cache) GetStats() map[string]interface{} {
+func (c *Cache) GetStats() map[string]any {
 	maxSize := c.config.CacheDiskSize
 	utilization := 0.0
 	if maxSize > 0 {
@@ -935,7 +926,7 @@ func (c *Cache) GetStats() map[string]interface{} {
 		hitRate = float64(hits) / float64(total)
 	}
 
-	stats := map[string]interface{}{
+	stats := map[string]any{
 		"type":              "vfs",
 		"total_size":        c.totalSize.Load(),
 		"max_size":          c.config.CacheDiskSize,
@@ -1363,7 +1354,7 @@ func buildCacheKey(entryName, filename string) string {
 // decodeJSONFile stream-decodes a JSON file into v, avoiding the intermediate
 // []byte slurp of os.ReadFile + json.Unmarshal. Keeps allocation proportional
 // to the decoded object rather than 2× the file size.
-func decodeJSONFile(path string, v interface{}) error {
+func decodeJSONFile(path string, v any) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err

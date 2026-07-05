@@ -129,7 +129,7 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 	// Handle magnet URLs
 	if urls := r.FormValue("urls"); urls != "" {
 		var urlList []string
-		for _, u := range strings.Split(urls, "\n") {
+		for u := range strings.SplitSeq(urls, "\n") {
 			urlList = append(urlList, strings.TrimSpace(u))
 		}
 		for _, url := range urlList {

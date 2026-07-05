@@ -30,8 +30,8 @@ func (s *Stats) Reset() {
 }
 
 // ToMap converts stats to a map for JSON serialization
-func (s *Stats) ToMap() map[string]interface{} {
-	stats := map[string]interface{}{
+func (s *Stats) ToMap() map[string]any {
+	stats := map[string]any{
 		"cache_dir_size":  s.CacheDirSize.Load(),
 		"cache_dir_limit": s.CacheDirLimit.Load(),
 		"active_reads":    s.ActiveReads.Load(),
@@ -61,8 +61,8 @@ type MountStats struct {
 }
 
 // ToMap converts mount stats to map
-func (m *MountStats) ToMap() map[string]interface{} {
-	stats := map[string]interface{}{
+func (m *MountStats) ToMap() map[string]any {
+	stats := map[string]any{
 		"name":            m.Name,
 		"type":            m.Type,
 		"mounted":         m.Mounted,

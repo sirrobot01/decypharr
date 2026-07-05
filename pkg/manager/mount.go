@@ -26,7 +26,7 @@ const (
 type MountManager interface {
 	Start(ctx context.Context) error
 	Stop() error
-	Stats() map[string]interface{}
+	Stats() map[string]any
 	IsReady() bool
 	Type() string
 	Refresh(dirs []string) error
@@ -111,10 +111,7 @@ func (m *Manager) warmOneFile(ctx context.Context, path string) error {
 		return nil
 	}
 
-	head := int64(cacheWarmHeadSize)
-	if head > size {
-		head = size
-	}
+	head := min(int64(cacheWarmHeadSize), size)
 	if err := drainRange(ctx, f, 0, head); err != nil {
 		return err
 	}
@@ -138,10 +135,7 @@ func drainRange(ctx context.Context, r io.ReaderAt, off, length int64) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		n := length - read
-		if n > chunk {
-			n = chunk
-		}
+		n := min(length-read, chunk)
 		got, err := r.ReadAt(buf[:n], off+read)
 		read += int64(got)
 		if err != nil {
@@ -170,8 +164,8 @@ func (s *stubMountManager) Start(ctx context.Context) error {
 func (s *stubMountManager) Stop() error {
 	return nil
 }
-func (s *stubMountManager) Stats() map[string]interface{} {
-	return map[string]interface{}{
+func (s *stubMountManager) Stats() map[string]any {
+	return map[string]any{
 		"message": "no mount configured",
 	}
 }

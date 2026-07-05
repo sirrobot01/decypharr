@@ -27,7 +27,7 @@
 //   - Discard releases bytes from RAM AND from disk via fallocate(PUNCH_HOLE)
 //     on Linux. On tmpfs this directly returns RAM to the kernel.
 //
-// Range tracker
+// # Range tracker
 //
 // A rangeSet maintains the set of byte ranges that are present anywhere
 // (RAM or disk). ReadAt consults this first: any byte in the requested
@@ -275,10 +275,7 @@ func newBuffer(p *Pool, cfg Config) (*Buffer, error) {
 	}
 	// Size the reuse free list to the working set, capped — a Buffer never
 	// needs to retain more idle blocks than it can hold resident.
-	b.alloc.maxFree = int(b.maxBytes / blockSize)
-	if b.alloc.maxFree > maxReuseBlocks {
-		b.alloc.maxFree = maxReuseBlocks
-	}
+	b.alloc.maxFree = min(int(b.maxBytes/blockSize), maxReuseBlocks)
 	if b.alloc.maxFree < 1 {
 		b.alloc.maxFree = 1
 	}
@@ -1150,4 +1147,3 @@ func (b *Buffer) markStateForBlockLocked(blockOff int64) {
 		slot.Store(stateSlow)
 	}
 }
-

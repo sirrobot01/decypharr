@@ -91,13 +91,13 @@ type UploadFileResponse struct {
 type DownloadLink struct {
 	Status string `json:"status"`
 	Data   struct {
-		Link      string        `json:"link"`
-		Host      string        `json:"host"`
-		Filename  string        `json:"filename"`
-		Streaming []interface{} `json:"streaming"`
-		Paws      bool          `json:"paws"`
-		Filesize  int           `json:"filesize"`
-		Id        string        `json:"id"`
+		Link      string `json:"link"`
+		Host      string `json:"host"`
+		Filename  string `json:"filename"`
+		Streaming []any  `json:"streaming"`
+		Paws      bool   `json:"paws"`
+		Filesize  int    `json:"filesize"`
+		Id        string `json:"id"`
 		Path      []struct {
 			Name string `json:"n"`
 			Size int    `json:"s"`

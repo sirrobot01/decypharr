@@ -79,8 +79,8 @@ func NewHttpFile(url string) (*HttpFile, error) {
 	return file, nil
 }
 
-func (f *HttpFile) doWithRetry(operation func() (interface{}, error)) (interface{}, error) {
-	var result interface{}
+func (f *HttpFile) doWithRetry(operation func() (any, error)) (any, error) {
+	var result any
 
 	err := retry.Do(
 		func() error {
@@ -110,7 +110,7 @@ func (f *HttpFile) doWithRetry(operation func() (interface{}, error)) (interface
 
 // getFileSize gets the total file size from the server
 func (f *HttpFile) getFileSize() (int64, error) {
-	result, err := f.doWithRetry(func() (interface{}, error) {
+	result, err := f.doWithRetry(func() (any, error) {
 		req, err := http.NewRequest(http.MethodHead, f.URL, nil)
 		if err != nil {
 			return int64(0), fmt.Errorf("%w: %v", ErrNetworkError, err)
@@ -166,7 +166,7 @@ func (f *HttpFile) ReadAt(p []byte, off int64) (n int, err error) {
 		}
 	}
 
-	result, err := f.doWithRetry(func() (interface{}, error) {
+	result, err := f.doWithRetry(func() (any, error) {
 		// Create HTTP request with Range header
 		end := off + size - 1
 
@@ -204,10 +204,7 @@ func (f *HttpFile) ReadAt(p []byte, off int64) (n int, err error) {
 				return 0, io.EOF
 			}
 
-			end = off + size
-			if int64(len(fullData)) < end {
-				end = int64(len(fullData))
-			}
+			end = min(int64(len(fullData)), off+size)
 
 			copy(p, fullData[off:end])
 			return int(end - off), nil
@@ -573,16 +570,16 @@ func (r *Reader) parseFileHeader(headerData []byte, position int64) (*File, erro
 		fileNameBytes := headerData[offset : offset+int(nameSize)]
 
 		if headFlags&FlagHasUnicodeName != 0 {
-			zeroPos := bytes.IndexByte(fileNameBytes, 0)
-			if zeroPos != -1 {
+			before, after, ok := bytes.Cut(fileNameBytes, []byte{0})
+			if ok {
 				// Try UTF-8 first
-				asciiPart := fileNameBytes[:zeroPos]
+				asciiPart := before
 				if utf8.Valid(asciiPart) {
 					fileName = string(asciiPart)
 				} else {
 					// Fall back to custom decoder
 					asciiStr := string(asciiPart)
-					unicodePart := fileNameBytes[zeroPos+1:]
+					unicodePart := after
 					fileName = decodeUnicode(asciiStr, unicodePart)
 				}
 			} else {

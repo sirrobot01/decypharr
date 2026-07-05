@@ -212,10 +212,7 @@ func (p *SevenZParser) processRARFilesFromPositions(
 		rarFile := rarFiles[volIndex]
 
 		// Optimization: RAR headers are small - 64KB is usually enough
-		headerSize := int64(64 * 1024)
-		if headerSize > int64(rarFile.Size) {
-			headerSize = int64(rarFile.Size)
-		}
+		headerSize := min(int64(64*1024), int64(rarFile.Size))
 
 		headerData := make([]byte, headerSize)
 		n, err := readerAt.ReadAt(headerData, rarFile.Offset)
@@ -453,15 +450,9 @@ func sliceSegmentsForRange(
 			}
 
 			// Calculate overlap
-			overlapStart := segAbsStart
-			if overlapStart < targetStart {
-				overlapStart = targetStart
-			}
+			overlapStart := max(segAbsStart, targetStart)
 
-			overlapEnd := segAbsEnd
-			if overlapEnd > targetEnd {
-				overlapEnd = targetEnd
-			}
+			overlapEnd := min(segAbsEnd, targetEnd)
 
 			// relStart = where to start reading within this NNTP segment's
 			// decoded data (goes in SegmentDataStart, matching the other

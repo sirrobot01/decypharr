@@ -95,7 +95,7 @@ func (dl *DebridLink) Logger() zerolog.Logger {
 }
 
 // doGet performs a GET request and unmarshals the response
-func (dl *DebridLink) doGet(endpoint string, queryParams map[string]string, result interface{}) (*http.Response, error) {
+func (dl *DebridLink) doGet(endpoint string, queryParams map[string]string, result any) (*http.Response, error) {
 	u, err := url.Parse(dl.Host + endpoint)
 	if err != nil {
 		return nil, err
@@ -133,10 +133,7 @@ func (dl *DebridLink) IsAvailable(hashes []string) map[string]bool {
 	result := make(map[string]bool)
 
 	for i := 0; i < len(hashes); i += 100 {
-		end := i + 100
-		if end > len(hashes) {
-			end = len(hashes)
-		}
+		end := min(i+100, len(hashes))
 
 		validHashes := make([]string, 0, end-i)
 		for _, hash := range hashes[i:end] {

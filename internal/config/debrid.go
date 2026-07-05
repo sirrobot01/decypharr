@@ -88,7 +88,7 @@ func validateDebrids(debrids []Debrid) error {
 
 func (c *Config) applyDebridEnvVars() {
 	// Debrid providers array
-	for i := 0; i < 10; i++ { // Support up to 10 debrid providers
+	for i := range 10 { // Support up to 10 debrid providers
 		prefix := fmt.Sprintf("DEBRIDS__%d__", i)
 		if val := getEnv(prefix + "NAME"); val != "" {
 			// Ensure array is large enough

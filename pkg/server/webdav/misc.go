@@ -59,16 +59,16 @@ func parseRange(s string, size int64) ([]httpRange, error) {
 	}
 
 	var ranges []httpRange
-	for _, ra := range strings.Split(s[len(b):], ",") {
+	for ra := range strings.SplitSeq(s[len(b):], ",") {
 		ra = strings.TrimSpace(ra)
 		if ra == "" {
 			continue
 		}
-		i := strings.Index(ra, "-")
-		if i < 0 {
+		before, after, ok := strings.Cut(ra, "-")
+		if !ok {
 			return nil, fmt.Errorf("invalid range")
 		}
-		start, end := strings.TrimSpace(ra[:i]), strings.TrimSpace(ra[i+1:])
+		start, end := strings.TrimSpace(before), strings.TrimSpace(after)
 		var r httpRange
 		if start == "" {
 			i, err := strconv.ParseInt(end, 10, 64)

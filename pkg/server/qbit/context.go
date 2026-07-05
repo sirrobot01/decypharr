@@ -191,7 +191,7 @@ func createSID(username, password string) string {
 	hash := sha256.Sum256([]byte(combined + cfg.SecretKey()))
 	hashStr := fmt.Sprintf("%x", hash)[:16] // First 16 chars
 	// Base64 encode
-	return base64.URLEncoding.EncodeToString([]byte(fmt.Sprintf("%s|%s", combined, hashStr)))
+	return base64.URLEncoding.EncodeToString(fmt.Appendf(nil, "%s|%s", combined, hashStr))
 }
 
 func extractFromSID(sid string) (string, string, error) {

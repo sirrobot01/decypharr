@@ -153,7 +153,7 @@ func (m *Manager) HasUsenet() bool {
 }
 
 // UsenetStats returns usenet client statistics
-func (m *Manager) UsenetStats() map[string]interface{} {
+func (m *Manager) UsenetStats() map[string]any {
 	if m.usenet == nil {
 		return nil
 	}

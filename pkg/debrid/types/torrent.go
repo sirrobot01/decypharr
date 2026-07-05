@@ -1,6 +1,7 @@
 package types
 
 import (
+	"maps"
 	"os"
 	"sync"
 	"time"
@@ -49,9 +50,7 @@ func (t *Torrent) Copy() *Torrent {
 	defer t.Unlock()
 
 	newFiles := make(map[string]File, len(t.Files))
-	for k, v := range t.Files {
-		newFiles[k] = v
-	}
+	maps.Copy(newFiles, t.Files)
 
 	return &Torrent{
 		Id:               t.Id,

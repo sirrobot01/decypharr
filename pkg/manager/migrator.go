@@ -106,7 +106,7 @@ func (m *Migrator) GetStatus() (*storage.SystemMigrationStatus, error) {
 }
 
 // GetStats returns migration statistics
-func (m *Migrator) GetStats() (map[string]interface{}, error) {
+func (m *Migrator) GetStats() (map[string]any, error) {
 	cachedTorrents, err := m.loadCacheTorrents()
 	if err != nil {
 		return nil, err
@@ -123,7 +123,7 @@ func (m *Migrator) GetStats() (map[string]interface{}, error) {
 		totalCacheFiles += len(list)
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"cache_torrents":     len(cachedTorrents),
 		"cache_files":        totalCacheFiles,
 		"managed_count":      managedCount,

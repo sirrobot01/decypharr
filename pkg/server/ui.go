@@ -16,7 +16,7 @@ func (s *Server) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == "GET" {
-		data := map[string]interface{}{
+		data := map[string]any{
 			"URLBase": cfg.URLBase,
 			"Page":    "login",
 			"Title":   "Login",
@@ -69,7 +69,7 @@ func (s *Server) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	authCfg := cfg.GetAuth()
 
 	if r.Method == "GET" {
-		data := map[string]interface{}{
+		data := map[string]any{
 			"URLBase": cfg.URLBase,
 			"Page":    "register",
 			"Title":   "registerVolume",
@@ -120,7 +120,7 @@ func (s *Server) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) IndexHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
-	data := map[string]interface{}{
+	data := map[string]any{
 		"URLBase":    cfg.URLBase,
 		"Page":       "index",
 		"Title":      "Queues",
@@ -138,7 +138,7 @@ func (s *Server) DownloadHandler(w http.ResponseWriter, r *http.Request) {
 	for _, d := range cfg.Debrids {
 		debrids = append(debrids, d.Name)
 	}
-	data := map[string]interface{}{
+	data := map[string]any{
 		"URLBase":                 cfg.URLBase,
 		"Page":                    "download",
 		"Title":                   "Download",
@@ -156,7 +156,7 @@ func (s *Server) DownloadHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) RepairHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
-	data := map[string]interface{}{
+	data := map[string]any{
 		"URLBase":    cfg.URLBase,
 		"Page":       "repair",
 		"Title":      "Repair",
@@ -170,7 +170,7 @@ func (s *Server) RepairHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) ConfigHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
-	data := map[string]interface{}{
+	data := map[string]any{
 		"URLBase":    cfg.URLBase,
 		"Page":       "config",
 		"Title":      "Config",
@@ -184,7 +184,7 @@ func (s *Server) ConfigHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) StatsHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
-	data := map[string]interface{}{
+	data := map[string]any{
 		"URLBase": cfg.URLBase,
 		"Page":    "stats",
 		"Title":   "Statistics",
@@ -197,7 +197,7 @@ func (s *Server) StatsHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) BrowseHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
-	data := map[string]interface{}{
+	data := map[string]any{
 		"URLBase":    cfg.URLBase,
 		"Page":       "browse",
 		"Title":      "Browse Torrents",

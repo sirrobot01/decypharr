@@ -81,7 +81,7 @@ func New(name, host, token string, skipRepair bool, downloadUncached *bool, sele
 // RequestCtx issues an HTTP request bound to ctx. Cancellation of ctx
 // cancels the in-flight HTTP call — this is what lets the repair pipeline
 // abort long Sonarr enumerations when a user presses Stop.
-func (a *Arr) RequestCtx(ctx context.Context, method, endpoint string, payload interface{}, res any) (*http.Response, error) {
+func (a *Arr) RequestCtx(ctx context.Context, method, endpoint string, payload any, res any) (*http.Response, error) {
 	if a.Token == "" || a.Host == "" {
 		return nil, fmt.Errorf("arr not configured")
 	}
@@ -131,7 +131,7 @@ func (a *Arr) RequestCtx(ctx context.Context, method, endpoint string, payload i
 
 // Request is the no-context shim for legacy callers. Prefer RequestCtx for
 // any code path that should be cancellable (repair, etc.).
-func (a *Arr) Request(method, endpoint string, payload interface{}, res any) (*http.Response, error) {
+func (a *Arr) Request(method, endpoint string, payload any, res any) (*http.Response, error) {
 	return a.RequestCtx(context.Background(), method, endpoint, payload, res)
 }
 
@@ -299,7 +299,7 @@ func (s *Storage) Monitor() {
 	wg := sync.WaitGroup{}
 	wg.Add(s.arrs.Size())
 	s.arrs.Range(func(name string, arr *Arr) bool {
-		_, _, _ = s.sg.Do(fmt.Sprintf("cleanup_%s", arr.Name), func() (interface{}, error) {
+		_, _, _ = s.sg.Do(fmt.Sprintf("cleanup_%s", arr.Name), func() (any, error) {
 			go func() {
 				defer wg.Done()
 				if err := arr.CleanupQueue(); err != nil {

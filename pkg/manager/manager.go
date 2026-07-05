@@ -505,7 +505,7 @@ func (m *Manager) Reset() error {
 	return nil
 }
 
-func (m *Manager) GetStats() (map[string]interface{}, error) {
+func (m *Manager) GetStats() (map[string]any, error) {
 	count, err := m.storage.Count()
 	if err != nil {
 		return nil, err
@@ -527,9 +527,9 @@ func (m *Manager) GetStats() (map[string]interface{}, error) {
 		return true
 	})
 
-	return map[string]interface{}{
+	return map[string]any{
 		"total_torrents": count,
-		"storage_stats":  map[string]interface{}{"total_size": diskSize},
+		"storage_stats":  map[string]any{"total_size": diskSize},
 		"active_jobs":    activeJobs,
 		"completed_jobs": completedJobs,
 		"failed_jobs":    failedJobs,

@@ -6,7 +6,7 @@ import (
 )
 
 type PanicError struct {
-	e interface{}
+	e any
 }
 
 func (e *PanicError) Error() string {
@@ -17,7 +17,7 @@ func (e *PanicError) Unwrap() error {
 	return fmt.Errorf("panic: %v", e.e)
 }
 
-func NewPanicError(e interface{}) error {
+func NewPanicError(e any) error {
 	return &PanicError{e: e}
 }
 

@@ -1246,15 +1246,9 @@ func sliceSegmentsForRangeSimple(
 		}
 
 		// Calculate the overlap
-		overlapStart := segStart
-		if overlapStart < targetStart {
-			overlapStart = targetStart
-		}
+		overlapStart := max(segStart, targetStart)
 
-		overlapEnd := segEnd
-		if overlapEnd > targetEnd {
-			overlapEnd = targetEnd
-		}
+		overlapEnd := min(segEnd, targetEnd)
 
 		// Calculate segment-relative offsets
 		// relStart = where to start reading within this NNTP segment's decoded data

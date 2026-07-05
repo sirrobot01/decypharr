@@ -1,5 +1,7 @@
 package utils
 
+import "slices"
+
 func RemoveItem[S ~[]E, E comparable](s S, values ...E) S {
 	result := make(S, 0, len(s))
 outer:
@@ -15,12 +17,7 @@ outer:
 }
 
 func Contains(slice []string, value string) bool {
-	for _, item := range slice {
-		if item == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, value)
 }
 
 func Mask(text string) string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -889,9 +890,7 @@ func mergeCandidates(dst, src map[string]*candidate) {
 		if existing.contentMap == nil {
 			existing.contentMap = make(map[string]arr.ContentFile)
 		}
-		for k, v := range c.contentMap {
-			existing.contentMap[k] = v
-		}
+		maps.Copy(existing.contentMap, c.contentMap)
 	}
 }
 
@@ -1059,9 +1058,7 @@ func (r *Repair) FixBroken(ctx context.Context, names []string) (*storage.Repair
 		return nil, fmt.Errorf("failed to persist repair run: %w", err)
 	}
 
-	r.runWG.Add(1)
-	go func() {
-		defer r.runWG.Done()
+	r.runWG.Go(func() {
 		defer func() {
 			r.mu.Lock()
 			if r.activeRunID == run.ID {
@@ -1083,7 +1080,7 @@ func (r *Repair) FixBroken(ctx context.Context, names []string) (*storage.Repair
 			Int("repaired", run.Stats.Repaired).
 			Int("repair_failed", run.Stats.RepairFailed).
 			Msg("FixBroken: completed")
-	}()
+	})
 	return run, nil
 }
 
@@ -1132,9 +1129,7 @@ func (r *Repair) ClearBroken(ctx context.Context, names []string) (*storage.Repa
 		return nil, fmt.Errorf("failed to persist repair run: %w", err)
 	}
 
-	r.runWG.Add(1)
-	go func() {
-		defer r.runWG.Done()
+	r.runWG.Go(func() {
 		defer func() {
 			r.mu.Lock()
 			if r.activeRunID == run.ID {
@@ -1156,7 +1151,7 @@ func (r *Repair) ClearBroken(ctx context.Context, names []string) (*storage.Repa
 			Int("cleared", run.Stats.Cleared).
 			Int("clear_failed", run.Stats.RepairFailed).
 			Msg("ClearBroken: completed")
-	}()
+	})
 	return run, nil
 }
 
@@ -1231,9 +1226,7 @@ func (r *Repair) RecheckEntry(ctx context.Context, entryName string, fix bool) (
 	if ctx == nil {
 		ctx = r.parentCtx
 	}
-	r.runWG.Add(1)
-	go func() {
-		defer r.runWG.Done()
+	r.runWG.Go(func() {
 		if fix {
 			r.attachArrContext(ctx, c)
 		}
@@ -1245,7 +1238,7 @@ func (r *Repair) RecheckEntry(ctx context.Context, entryName string, fix bool) (
 		pseudo := &storage.RepairRun{ID: runID, Stats: storage.RepairRunStats{}}
 		var statsMu sync.Mutex
 		r.healBrokenEntry(ctx, pseudo, &statsMu, entryName, final)
-	}()
+	})
 
 	// Return an in-memory ack reflecting the freshly-started recheck. The
 	// real EntryHealth in storage is updated by probeEntry shortly after.
@@ -1306,9 +1299,7 @@ func (r *Repair) RecheckMedia(ctx context.Context, arrName, mediaID string, fix 
 		return nil, fmt.Errorf("failed to persist repair run: %w", err)
 	}
 
-	r.runWG.Add(1)
-	go func() {
-		defer r.runWG.Done()
+	r.runWG.Go(func() {
 		defer func() {
 			r.mu.Lock()
 			if r.activeRunID == run.ID {
@@ -1319,7 +1310,7 @@ func (r *Repair) RecheckMedia(ctx context.Context, arrName, mediaID string, fix 
 			cancel()
 		}()
 		r.executeRecheckMedia(runCtx, run, arrs, arrName, mediaID, fix)
-	}()
+	})
 	return run, nil
 }
 

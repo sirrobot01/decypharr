@@ -24,7 +24,7 @@ const (
 // streamBufPool provides reusable buffers for streaming to reduce GC pressure.
 // Each buffer is 256KB - prevents per-request allocations.
 var streamBufPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		buf := make([]byte, streamBufferSize)
 		return &buf
 	},

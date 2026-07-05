@@ -369,7 +369,7 @@ func isProbeRead(off, length, fileSize int64) bool {
 // error — retrying those would only spin.
 func (dls *Downloaders) DownloadWithRetry(ctx context.Context, r ranges.Range, priority bool) error {
 	var err error
-	for attempt := 0; attempt < downloadRetryAttempts; attempt++ {
+	for attempt := range downloadRetryAttempts {
 		if err = dls.DownloadWithPriority(ctx, r, priority); err == nil {
 			return nil
 		}
@@ -530,9 +530,7 @@ func (dls *Downloaders) newDownloaderLocked(r ranges.Range, targetEnd int64, pri
 	// Track active download count
 	dls.item.cache.activeDownloads.Add(1)
 
-	dl.wg.Add(1)
-	go func() {
-		defer dl.wg.Done()
+	dl.wg.Go(func() {
 		defer dls.item.cache.activeDownloads.Add(-1)
 		defer dlCancel() // always release the per-downloader context
 		n, err := dl.run()
@@ -543,7 +541,7 @@ func (dls *Downloaders) newDownloaderLocked(r ranges.Range, targetEnd int64, pri
 			dls.countErrors(n, err)
 		}
 		dls.kickWaiters()
-	}()
+	})
 
 	return nil
 }
@@ -984,10 +982,7 @@ func (dl *downloader) run() (totalBytes int64, err error) {
 
 		// Calculate chunk boundaries
 		// Always download at least chunkSize to reduce Stream calls
-		chunkEnd := start + chunkSize
-		if chunkEnd > fileSize {
-			chunkEnd = fileSize
-		}
+		chunkEnd := min(start+chunkSize, fileSize)
 
 		// Ensure we're downloading something meaningful
 		if chunkEnd <= start {
@@ -1024,10 +1019,7 @@ func (dl *downloader) getState() (start, targetEnd, chunkSize, fileSize int64, s
 	}
 
 	fileSize = dl.dls.item.info.Size
-	targetEnd = dl.maxOffset
-	if targetEnd > fileSize {
-		targetEnd = fileSize
-	}
+	targetEnd = min(dl.maxOffset, fileSize)
 
 	return dl.offset, targetEnd, chunkSize, fileSize, dl.stopped
 }

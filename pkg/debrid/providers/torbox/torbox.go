@@ -98,7 +98,7 @@ func (tb *Torbox) Logger() zerolog.Logger {
 }
 
 // doGet performs a GET request and unmarshals the response
-func (tb *Torbox) doGet(endpoint string, queryParams map[string]string, result interface{}) (*http.Response, error) {
+func (tb *Torbox) doGet(endpoint string, queryParams map[string]string, result any) (*http.Response, error) {
 	u, err := url.Parse(tb.Host + endpoint)
 	if err != nil {
 		return nil, err
@@ -133,7 +133,7 @@ func (tb *Torbox) doGet(endpoint string, queryParams map[string]string, result i
 }
 
 // doPostForm performs a POST request with form data
-func (tb *Torbox) doPostForm(endpoint string, formData map[string]string, result interface{}) (*http.Response, error) {
+func (tb *Torbox) doPostForm(endpoint string, formData map[string]string, result any) (*http.Response, error) {
 	form := url.Values{}
 	for k, v := range formData {
 		form.Set(k, v)
@@ -161,7 +161,7 @@ func (tb *Torbox) doPostForm(endpoint string, formData map[string]string, result
 }
 
 // doDelete performs a DELETE request
-func (tb *Torbox) doDelete(endpoint string, payload interface{}) (*http.Response, error) {
+func (tb *Torbox) doDelete(endpoint string, payload any) (*http.Response, error) {
 	var body io.Reader
 	if payload != nil {
 		data, err := json.Marshal(payload)
@@ -190,10 +190,7 @@ func (tb *Torbox) IsAvailable(hashes []string) map[string]bool {
 	result := make(map[string]bool)
 
 	for i := 0; i < len(hashes); i += 100 {
-		end := i + 100
-		if end > len(hashes) {
-			end = len(hashes)
-		}
+		end := min(i+100, len(hashes))
 
 		validHashes := make([]string, 0, end-i)
 		for _, hash := range hashes[i:end] {
@@ -614,8 +611,8 @@ func (tb *Torbox) CheckFile(ctx context.Context, infohash, link string) error {
 	tb.downloadPresentMu.Unlock()
 
 	torrentID := link
-	if strings.HasPrefix(link, "torbox://") {
-		parts := strings.SplitN(strings.TrimPrefix(link, "torbox://"), "/", 2)
+	if after, ok := strings.CutPrefix(link, "torbox://"); ok {
+		parts := strings.SplitN(after, "/", 2)
 		if len(parts) > 0 {
 			torrentID = parts[0]
 		}

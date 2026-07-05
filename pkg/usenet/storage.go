@@ -340,11 +340,11 @@ func (s *NZBStorage) Count() (int, error) {
 }
 
 // Stats returns storage statistics
-func (s *NZBStorage) Stats() map[string]interface{} {
+func (s *NZBStorage) Stats() map[string]any {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	return map[string]interface{}{
+	return map[string]any{
 		"count":       s.metaCount,
 		"total_bytes": s.metaTotalBytes,
 		"meta_dir":    s.metaDir,

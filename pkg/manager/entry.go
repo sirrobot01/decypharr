@@ -33,7 +33,7 @@ type FileInfo struct {
 	canDelete    bool
 	byteRange    *[2]int64
 	infohash     string
-	sys          interface{} // For caching fuse nodes
+	sys          any // For caching fuse nodes
 }
 
 func (f *FileInfo) Name() string         { return f.name }
@@ -41,8 +41,8 @@ func (f *FileInfo) Size() int64          { return f.size }
 func (f *FileInfo) Mode() os.FileMode    { return f.mode }
 func (f *FileInfo) ModTime() time.Time   { return f.modTime }
 func (f *FileInfo) IsDir() bool          { return f.isDir }
-func (f *FileInfo) Sys() interface{}     { return f.sys }
-func (f *FileInfo) SetSys(v interface{}) { f.sys = v }
+func (f *FileInfo) Sys() any             { return f.sys }
+func (f *FileInfo) SetSys(v any)         { f.sys = v }
 func (f *FileInfo) Content() []byte      { return f.content }
 func (f *FileInfo) Parent() string       { return f.parent }
 func (f *FileInfo) ActiveDebrid() string { return f.activeDebrid }

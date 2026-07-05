@@ -281,10 +281,7 @@ func (pm *Premiumize) IsAvailable(infohashes []string) map[string]bool {
 	result := make(map[string]bool, len(infohashes))
 	const batchSize = 100
 	for i := 0; i < len(infohashes); i += batchSize {
-		end := i + batchSize
-		if end > len(infohashes) {
-			end = len(infohashes)
-		}
+		end := min(i+batchSize, len(infohashes))
 		values := url.Values{}
 		hashByItem := make(map[string]string, end-i)
 		for _, hash := range infohashes[i:end] {

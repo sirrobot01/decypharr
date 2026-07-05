@@ -138,10 +138,7 @@ func (s *Server) handleBrowseMount(w http.ResponseWriter, r *http.Request) {
 
 	var paginatedEntries []BrowseEntry
 	if offset < total {
-		end := offset + limit
-		if end > total {
-			end = total
-		}
+		end := min(offset+limit, total)
 		paginatedEntries = entries[offset:end]
 	} else {
 		paginatedEntries = []BrowseEntry{}
@@ -214,10 +211,7 @@ func (s *Server) handleBrowseGroup(w http.ResponseWriter, r *http.Request) {
 
 	var paginatedEntries []BrowseEntry
 	if offset < total {
-		end := offset + limit
-		if end > total {
-			end = total
-		}
+		end := min(offset+limit, total)
 		paginatedEntries = entries[offset:end]
 	} else {
 		paginatedEntries = []BrowseEntry{}
@@ -288,10 +282,7 @@ func (s *Server) handleBrowseTorrentFiles(w http.ResponseWriter, r *http.Request
 
 	var paginatedEntries []BrowseEntry
 	if offset < total {
-		end := offset + limit
-		if end > total {
-			end = total
-		}
+		end := min(offset+limit, total)
 		paginatedEntries = entries[offset:end]
 	} else {
 		paginatedEntries = []BrowseEntry{}
@@ -328,7 +319,7 @@ func (s *Server) handleDeleteBrowseTorrent(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	utils.JSONResponse(w, map[string]interface{}{
+	utils.JSONResponse(w, map[string]any{
 		"success": true,
 		"message": "Item deleted successfully",
 	}, http.StatusOK)
@@ -356,7 +347,7 @@ func (s *Server) handleBatchDeleteBrowseTorrents(w http.ResponseWriter, r *http.
 		return
 	}
 
-	utils.JSONResponse(w, map[string]interface{}{
+	utils.JSONResponse(w, map[string]any{
 		"success": true,
 		"message": "Torrents deleted successfully",
 		"count":   len(req.IDs),

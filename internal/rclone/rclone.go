@@ -25,8 +25,8 @@ type Client struct {
 }
 
 type Request struct {
-	Command string                 `json:"command"`
-	Args    map[string]interface{} `json:"args,omitempty"`
+	Command string         `json:"command"`
+	Args    map[string]any `json:"args,omitempty"`
 }
 
 func NewClient(url, username, password string, logger zerolog.Logger) *Client {
@@ -93,7 +93,7 @@ func (r *Client) Do(ctx context.Context, req Request, res any) error {
 }
 
 func (r *Client) Refresh(ctx context.Context, dirs []string, fs string) error {
-	args := map[string]interface{}{}
+	args := map[string]any{}
 	if fs != "" {
 		args["fs"] = fs
 	}
@@ -129,7 +129,7 @@ func (r *Client) Refresh(ctx context.Context, dirs []string, fs string) error {
 func (r *Client) CheckMountHealth(ctx context.Context, fs string) error {
 	req := Request{
 		Command: "operations/list",
-		Args: map[string]interface{}{
+		Args: map[string]any{
 			"fs":     fs,
 			"remote": "",
 		},
@@ -147,7 +147,7 @@ func (r *Client) Ping(ctx context.Context) error {
 func (r *Client) Unmount(ctx context.Context, mountPoint string) error {
 	req := Request{
 		Command: "mount/unmount",
-		Args: map[string]interface{}{
+		Args: map[string]any{
 			"mountPoint": mountPoint,
 		},
 	}
@@ -158,7 +158,7 @@ func (r *Client) Unmount(ctx context.Context, mountPoint string) error {
 	return nil
 }
 
-func (r *Client) Mount(ctx context.Context, mountArgs map[string]interface{}) error {
+func (r *Client) Mount(ctx context.Context, mountArgs map[string]any) error {
 	req := Request{
 		Command: "mount/mount",
 		Args:    mountArgs,
@@ -170,7 +170,7 @@ func (r *Client) Mount(ctx context.Context, mountArgs map[string]interface{}) er
 	return nil
 }
 
-func (r *Client) CreateConfig(ctx context.Context, args map[string]interface{}) error {
+func (r *Client) CreateConfig(ctx context.Context, args map[string]any) error {
 	req := Request{
 		Command: "config/create",
 		Args:    args,

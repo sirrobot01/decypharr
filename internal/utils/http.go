@@ -50,7 +50,7 @@ func ParseRateLimit(rateStr string) ratelimit.Limiter {
 	}
 }
 
-func JSONResponse(w http.ResponseWriter, data interface{}, code int) {
+func JSONResponse(w http.ResponseWriter, data any, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	if data != nil {
@@ -200,8 +200,8 @@ func getFilenameFromResponse(resp *http.Response, originalURL string) string {
 // where filename is not properly quoted (e.g., filename=[Erai-raws]...nzb)
 func extractFilenameManual(cd string) string {
 	// Try filename*= first (RFC 5987)
-	if idx := strings.Index(cd, "filename*="); idx != -1 {
-		value := cd[idx+10:]
+	if _, after, ok := strings.Cut(cd, "filename*="); ok {
+		value := after
 		// Handle UTF-8'' prefix
 		if strings.HasPrefix(value, "UTF-8''") || strings.HasPrefix(value, "utf-8''") {
 			value = value[7:]
@@ -218,8 +218,8 @@ func extractFilenameManual(cd string) string {
 	}
 
 	// Try filename= (simple case)
-	if idx := strings.Index(cd, "filename="); idx != -1 {
-		value := cd[idx+9:]
+	if _, after, ok := strings.Cut(cd, "filename="); ok {
+		value := after
 		// Take until semicolon or end
 		if semi := strings.Index(value, ";"); semi != -1 {
 			value = value[:semi]

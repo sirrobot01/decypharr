@@ -433,9 +433,7 @@ func (r *Repair) runSweep(trigger storage.RepairRunTrigger, opts RepairRunOption
 		return "", fmt.Errorf("failed to persist repair run: %w", err)
 	}
 
-	r.runWG.Add(1)
-	go func() {
-		defer r.runWG.Done()
+	r.runWG.Go(func() {
 		defer func() {
 			r.mu.Lock()
 			if r.activeRunID == run.ID {
@@ -446,7 +444,7 @@ func (r *Repair) runSweep(trigger storage.RepairRunTrigger, opts RepairRunOption
 			cancel()
 		}()
 		r.executeSweep(runCtx, run, opts)
-	}()
+	})
 
 	r.logger.Info().Str("run_id", run.ID).Str("trigger", string(trigger)).Msg("Repair sweep started")
 	return run.ID, nil

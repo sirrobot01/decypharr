@@ -34,28 +34,28 @@ type ImportResponseSchema struct {
 			SeasonNumber int  `json:"seasonNumber"`
 			Monitored    bool `json:"monitored"`
 		} `json:"seasons"`
-		Year              int           `json:"year"`
-		Path              string        `json:"path"`
-		QualityProfileId  int           `json:"qualityProfileId"`
-		SeasonFolder      bool          `json:"seasonFolder"`
-		Monitored         bool          `json:"monitored"`
-		MonitorNewItems   string        `json:"monitorNewItems"`
-		UseSceneNumbering bool          `json:"useSceneNumbering"`
-		Runtime           int           `json:"runtime"`
-		TvdbId            int           `json:"tvdbId"`
-		TvRageId          int           `json:"tvRageId"`
-		TvMazeId          int           `json:"tvMazeId"`
-		TmdbId            int           `json:"tmdbId"`
-		FirstAired        time.Time     `json:"firstAired"`
-		LastAired         time.Time     `json:"lastAired"`
-		SeriesType        string        `json:"seriesType"`
-		CleanTitle        string        `json:"cleanTitle"`
-		ImdbId            string        `json:"imdbId"`
-		TitleSlug         string        `json:"titleSlug"`
-		Certification     string        `json:"certification"`
-		Genres            []string      `json:"genres"`
-		Tags              []interface{} `json:"tags"`
-		Added             time.Time     `json:"added"`
+		Year              int       `json:"year"`
+		Path              string    `json:"path"`
+		QualityProfileId  int       `json:"qualityProfileId"`
+		SeasonFolder      bool      `json:"seasonFolder"`
+		Monitored         bool      `json:"monitored"`
+		MonitorNewItems   string    `json:"monitorNewItems"`
+		UseSceneNumbering bool      `json:"useSceneNumbering"`
+		Runtime           int       `json:"runtime"`
+		TvdbId            int       `json:"tvdbId"`
+		TvRageId          int       `json:"tvRageId"`
+		TvMazeId          int       `json:"tvMazeId"`
+		TmdbId            int       `json:"tmdbId"`
+		FirstAired        time.Time `json:"firstAired"`
+		LastAired         time.Time `json:"lastAired"`
+		SeriesType        string    `json:"seriesType"`
+		CleanTitle        string    `json:"cleanTitle"`
+		ImdbId            string    `json:"imdbId"`
+		TitleSlug         string    `json:"titleSlug"`
+		Certification     string    `json:"certification"`
+		Genres            []string  `json:"genres"`
+		Tags              []any     `json:"tags"`
+		Added             time.Time `json:"added"`
 		Ratings           struct {
 			Votes int     `json:"votes"`
 			Value float64 `json:"value"`
@@ -100,11 +100,11 @@ type ImportResponseSchema struct {
 		Id   int    `json:"id"`
 		Name string `json:"name"`
 	} `json:"languages"`
-	QualityWeight     int           `json:"qualityWeight"`
-	CustomFormats     []interface{} `json:"customFormats"`
-	CustomFormatScore int           `json:"customFormatScore"`
-	IndexerFlags      int           `json:"indexerFlags"`
-	ReleaseType       string        `json:"releaseType"`
+	QualityWeight     int    `json:"qualityWeight"`
+	CustomFormats     []any  `json:"customFormats"`
+	CustomFormatScore int    `json:"customFormatScore"`
+	IndexerFlags      int    `json:"indexerFlags"`
+	ReleaseType       string `json:"releaseType"`
 	Rejections        []struct {
 		Reason string `json:"reason"`
 		Type   string `json:"type"`
@@ -136,11 +136,11 @@ type ManualImportRequestFile struct {
 		Id   int    `json:"id"`
 		Name string `json:"name"`
 	} `json:"languages"`
-	ReleaseGroup      string        `json:"releaseGroup"`
-	CustomFormats     []interface{} `json:"customFormats"`
-	CustomFormatScore int           `json:"customFormatScore"`
-	IndexerFlags      int           `json:"indexerFlags"`
-	ReleaseType       string        `json:"releaseType"`
+	ReleaseGroup      string `json:"releaseGroup"`
+	CustomFormats     []any  `json:"customFormats"`
+	CustomFormatScore int    `json:"customFormatScore"`
+	IndexerFlags      int    `json:"indexerFlags"`
+	ReleaseType       string `json:"releaseType"`
 	Rejections        []struct {
 		Reason string `json:"reason"`
 		Type   string `json:"type"`

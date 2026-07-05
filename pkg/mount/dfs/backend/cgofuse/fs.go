@@ -267,10 +267,7 @@ func (f *FS) Read(path string, buff []byte, off int64, fh uint64) int {
 		if off >= int64(len(content)) {
 			return 0
 		}
-		end := off + int64(size)
-		if end > int64(len(content)) {
-			end = int64(len(content))
-		}
+		end := min(off+int64(size), int64(len(content)))
 		return copy(buff, content[off:end])
 	}
 

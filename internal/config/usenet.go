@@ -204,7 +204,7 @@ func (c *Config) applyUsenetEnvVars() {
 	}
 
 	// Usenet providers array
-	for i := 0; i < 10; i++ { // Support up to 10 usenet providers
+	for i := range 10 { // Support up to 10 usenet providers
 		prefix := fmt.Sprintf("USENET__PROVIDERS__%d__", i)
 		if val := getEnv(prefix + "HOST"); val != "" {
 			// Ensure array is large enough

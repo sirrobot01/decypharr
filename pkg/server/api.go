@@ -23,11 +23,11 @@ import (
 )
 
 type mountCacheCleaner interface {
-	CleanupCache() (map[string]interface{}, error)
+	CleanupCache() (map[string]any, error)
 }
 
 type mountCachePurger interface {
-	PurgeCache() (map[string]interface{}, error)
+	PurgeCache() (map[string]any, error)
 }
 
 func (s *Server) handleGetArrs(w http.ResponseWriter, r *http.Request) {
@@ -83,7 +83,7 @@ func (s *Server) handleAddContent(w http.ResponseWriter, r *http.Request) {
 
 	// Collect torrent URLs
 	if urls := r.FormValue("urls"); urls != "" {
-		for _, u := range strings.Split(urls, "\n") {
+		for u := range strings.SplitSeq(urls, "\n") {
 			if trimmed := strings.TrimSpace(u); trimmed != "" {
 				magnet, err := utils.GetMagnetFromUrl(trimmed, rmTrackerUrls)
 				if err != nil {
@@ -124,7 +124,7 @@ func (s *Server) handleAddContent(w http.ResponseWriter, r *http.Request) {
 
 	// Collect NZB URLs
 	if nzbURLs := r.FormValue("nzbURLs"); nzbURLs != "" {
-		for _, u := range strings.Split(nzbURLs, "\n") {
+		for u := range strings.SplitSeq(nzbURLs, "\n") {
 			if trimmed := strings.TrimSpace(u); trimmed != "" {
 				filename, content, err := utils.DownloadFile(trimmed, utils.WithHeader("User-Agent", s.nzbUserAgent))
 				if err != nil {
@@ -248,7 +248,7 @@ func (s *Server) handleRunMountCacheCleanup(w http.ResponseWriter, r *http.Reque
 		s.stats.Refresh()
 	}
 
-	utils.JSONResponse(w, map[string]interface{}{
+	utils.JSONResponse(w, map[string]any{
 		"status": "success",
 		"cache":  cleanupStats,
 	}, http.StatusOK)
@@ -278,7 +278,7 @@ func (s *Server) handlePurgeMountCache(w http.ResponseWriter, r *http.Request) {
 		s.stats.Refresh()
 	}
 
-	utils.JSONResponse(w, map[string]interface{}{
+	utils.JSONResponse(w, map[string]any{
 		"status": "success",
 		"cache":  purgeStats,
 	}, http.StatusOK)
@@ -350,10 +350,7 @@ func (s *Server) handleGetTorrents(w http.ResponseWriter, r *http.Request) {
 	// Apply pagination
 	var paginatedTorrents []*storage.Entry
 	if offset < total {
-		end := offset + limit
-		if end > total {
-			end = total
-		}
+		end := min(offset+limit, total)
 		paginatedTorrents = filteredTorrents[offset:end]
 	} else {
 		paginatedTorrents = []*storage.Entry{}
@@ -372,7 +369,7 @@ func (s *Server) handleGetTorrents(w http.ResponseWriter, r *http.Request) {
 		categories = append(categories, c)
 	}
 
-	utils.JSONResponse(w, map[string]interface{}{
+	utils.JSONResponse(w, map[string]any{
 		"torrents":    paginatedTorrents,
 		"total":       total,
 		"page":        page,
@@ -800,7 +797,7 @@ func (s *Server) handleRecheckMedia(w http.ResponseWriter, r *http.Request) {
 		// Returning the run record (when present) gives the caller the
 		// failure detail captured in storage as well as the message.
 		if run != nil {
-			utils.JSONResponse(w, map[string]interface{}{
+			utils.JSONResponse(w, map[string]any{
 				"error": err.Error(),
 				"run":   run,
 			}, status)
@@ -960,7 +957,7 @@ func (s *Server) handleRefreshAPIToken(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	utils.JSONResponse(w, map[string]interface{}{
+	utils.JSONResponse(w, map[string]any{
 		"token":   token,
 		"message": "API token refreshed successfully",
 	}, http.StatusOK)

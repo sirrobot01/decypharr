@@ -35,14 +35,8 @@ func (r *rangeSet) coverage(lo, hi int64) int64 {
 	var c int64
 	i := sort.Search(len(r.rs), func(i int) bool { return r.rs[i].end > lo })
 	for ; i < len(r.rs) && r.rs[i].off < hi; i++ {
-		a := r.rs[i].off
-		if a < lo {
-			a = lo
-		}
-		b := r.rs[i].end
-		if b > hi {
-			b = hi
-		}
+		a := max(r.rs[i].off, lo)
+		b := min(r.rs[i].end, hi)
 		if b > a {
 			c += b - a
 		}
@@ -175,14 +169,8 @@ func (r *rangeSet) presentRanges(off, length int64) []Range {
 	var out []Range
 	i := sort.Search(len(r.rs), func(i int) bool { return r.rs[i].end > off })
 	for ; i < len(r.rs) && r.rs[i].off < end; i++ {
-		lo := r.rs[i].off
-		if lo < off {
-			lo = off
-		}
-		hi := r.rs[i].end
-		if hi > end {
-			hi = end
-		}
+		lo := max(r.rs[i].off, off)
+		hi := min(r.rs[i].end, end)
 		if hi > lo {
 			out = append(out, Range{Off: lo, Size: hi - lo})
 		}

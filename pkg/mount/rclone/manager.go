@@ -52,13 +52,13 @@ type MountInfo struct {
 }
 
 type RCRequest struct {
-	Command string                 `json:"command"`
-	Args    map[string]interface{} `json:"args,omitempty"`
+	Command string         `json:"command"`
+	Args    map[string]any `json:"args,omitempty"`
 }
 
 type RCResponse struct {
-	Result interface{} `json:"result,omitempty"`
-	Error  string      `json:"error,omitempty"`
+	Result any    `json:"result,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 // NewManager creates a new rclone RC manager
@@ -328,7 +328,7 @@ func (m *Manager) Type() string {
 // waitForServer waits for the RC server to become available
 func (m *Manager) waitForServer() {
 	maxAttempts := 30
-	for i := 0; i < maxAttempts; i++ {
+	for range maxAttempts {
 		if m.ctx.Err() != nil {
 			return
 		}

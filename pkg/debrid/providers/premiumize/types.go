@@ -59,7 +59,7 @@ type premiumizeTransfer struct {
 	FolderID nullableString   `json:"folder_id"`
 	FileID   nullableString   `json:"file_id"`
 	Src      string           `json:"src,omitempty"`
-	Created  flexibleUnixTime `json:"created_at,omitempty"`
+	Created  flexibleUnixTime `json:"created_at"`
 }
 
 type cacheCheckResponse struct {

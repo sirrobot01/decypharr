@@ -20,8 +20,8 @@ type Stats struct {
 }
 
 // Stats retrieves statistics from the rclone RC server
-func (m *Manager) Stats() map[string]interface{} {
-	empty := make(map[string]interface{})
+func (m *Manager) Stats() map[string]any {
+	empty := make(map[string]any)
 	stats := &Stats{}
 	stats.Ready = m.IsReady()
 	stats.Enabled = true
@@ -51,7 +51,7 @@ func (m *Manager) Stats() map[string]interface{} {
 	}
 
 	// Convert to map[string]interface{}
-	statsMap := make(map[string]interface{})
+	statsMap := make(map[string]any)
 	data, err := json.Marshal(stats)
 	if err != nil {
 		return empty

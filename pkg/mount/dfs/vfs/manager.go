@@ -72,7 +72,7 @@ func (m *Manager) GetFile(info *manager.FileInfo) (*StreamingFile, error) {
 	// then stale and must be retired so a fresh item can be created. The loop
 	// is bounded: each retry either succeeds or removes the stale entry it
 	// observed, and the janitor's claim/delete pair is near-instantaneous.
-	for attempt := 0; attempt < 8; attempt++ {
+	for range 8 {
 		// Fast path: existing file.
 		// Increment refCount first, then verify the entry wasn't concurrently
 		// deleted by ReleaseFile between our Load and the Add. If it was, undo
@@ -178,8 +178,8 @@ func (m *Manager) Close() error {
 }
 
 // GetStats returns manager statistics
-func (m *Manager) GetStats() map[string]interface{} {
-	stats := map[string]interface{}{
+func (m *Manager) GetStats() map[string]any {
+	stats := map[string]any{
 		"type":         "dfs",
 		"ready":        true,
 		"enabled":      true,
@@ -197,9 +197,9 @@ func (m *Manager) GetStats() map[string]interface{} {
 	return stats
 }
 
-func (m *Manager) CleanupCache() map[string]interface{} {
+func (m *Manager) CleanupCache() map[string]any {
 	if m.cache == nil {
-		return map[string]interface{}{
+		return map[string]any{
 			"cleanup_status": "unsupported",
 			"cleanup_result": "cache is not initialized",
 		}
@@ -207,9 +207,9 @@ func (m *Manager) CleanupCache() map[string]interface{} {
 	return m.cache.RunCleanup()
 }
 
-func (m *Manager) PurgeCache() map[string]interface{} {
+func (m *Manager) PurgeCache() map[string]any {
 	if m.cache == nil {
-		return map[string]interface{}{
+		return map[string]any{
 			"purge_status": "unsupported",
 			"purge_result": "cache is not initialized",
 		}

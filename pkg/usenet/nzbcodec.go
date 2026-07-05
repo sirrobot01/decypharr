@@ -496,7 +496,7 @@ func decodeHeader(buf []byte) (*storage.NZB, []int, error) {
 	}
 	nzb.Files = make([]storage.NZBFile, nFiles)
 	counts := make([]int, nFiles)
-	for i := uint64(0); i < nFiles; i++ {
+	for i := range nFiles {
 		f := &nzb.Files[i]
 		f.NzbID = nzb.ID
 		var ft string
@@ -680,7 +680,7 @@ func decodeFileMessageIDsSampled(data []byte, filename string, percent int) (ids
 	}
 
 	out := make([]string, 0, len(want))
-	for j := 0; j < c; j++ {
+	for j := range c {
 		if _, ok := wantSet[j]; ok {
 			// Owned copy: lets the decompressed buffer be collected.
 			s, err := mr.strCopy()
@@ -712,10 +712,7 @@ func sampleIndices(total, percent int) []int {
 		return out
 	}
 
-	targetCount := (total * percent) / 100
-	if targetCount < 2 {
-		targetCount = 2
-	}
+	targetCount := max((total*percent)/100, 2)
 	if targetCount > total {
 		targetCount = total
 	}
@@ -726,7 +723,7 @@ func sampleIndices(total, percent int) []int {
 	if middleCount > 0 {
 		mlen := total - 2
 		step := float64(mlen) / float64(middleCount+1)
-		for i := 0; i < middleCount; i++ {
+		for i := range middleCount {
 			idx := int(step * float64(i+1))
 			if idx >= mlen {
 				idx = mlen - 1

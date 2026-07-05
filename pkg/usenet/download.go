@@ -54,9 +54,7 @@ func (u *Usenet) Download(ctx context.Context, nzoID, filename string, writer io
 
 	// Writer goroutine - writes segments in order as they arrive
 	var writerWg sync.WaitGroup
-	writerWg.Add(1)
-	go func() {
-		defer writerWg.Done()
+	writerWg.Go(func() {
 		for result := range resultChan {
 			if result.err != nil {
 				writeErrMu.Lock()
@@ -107,7 +105,7 @@ func (u *Usenet) Download(ctx context.Context, nzoID, filename string, writer io
 			}
 			pendingMu.Unlock()
 		}
-	}()
+	})
 
 	// Fetch segments in parallel
 	p := pool.New().WithContext(ctx).WithMaxGoroutines(max(u.processingMaxConnections, 1))

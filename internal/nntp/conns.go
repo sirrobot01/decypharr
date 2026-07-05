@@ -717,9 +717,9 @@ func (c *Connection) Post(messageID, filename string, body []byte) error {
 	if len(body) > 0 {
 		// Normalize to \n, then re-add \r\n
 		body := bytes.ReplaceAll(body, []byte("\r\n"), []byte("\n"))
-		lines := bytes.Split(body, []byte("\n"))
+		lines := bytes.SplitSeq(body, []byte("\n"))
 
-		for _, line := range lines {
+		for line := range lines {
 			// Last split after trailing \n will give empty line; still write CRLF.
 			if len(line) > 0 && line[0] == '.' {
 				// dot-stuff per NNTP
@@ -837,14 +837,14 @@ func (c *Connection) parseArticle(messageID string, lines []string) (*Article, e
 		}
 
 		// Parse headers
-		if strings.HasPrefix(line, "Subject: ") {
-			article.Subject = strings.TrimPrefix(line, "Subject: ")
-		} else if strings.HasPrefix(line, "From: ") {
-			article.From = strings.TrimPrefix(line, "From: ")
-		} else if strings.HasPrefix(line, "Date: ") {
-			article.Date = strings.TrimPrefix(line, "Date: ")
-		} else if strings.HasPrefix(line, "Newsgroups: ") {
-			groups := strings.TrimPrefix(line, "Newsgroups: ")
+		if after, ok := strings.CutPrefix(line, "Subject: "); ok {
+			article.Subject = after
+		} else if after, ok := strings.CutPrefix(line, "From: "); ok {
+			article.From = after
+		} else if after, ok := strings.CutPrefix(line, "Date: "); ok {
+			article.Date = after
+		} else if after, ok := strings.CutPrefix(line, "Newsgroups: "); ok {
+			groups := after
 			article.Groups = strings.Split(groups, ",")
 			for i := range article.Groups {
 				article.Groups[i] = strings.TrimSpace(article.Groups[i])

@@ -81,7 +81,7 @@ func NewSegmentFetcher(
 	// from starving the blocking read that the caller is waiting on.
 	numPrefetchWorkers := maxConns - 1
 	if numPrefetchWorkers > 0 {
-		for i := 0; i < numPrefetchWorkers; i++ {
+		for i := range numPrefetchWorkers {
 			sf.prefetchWg.Add(1)
 			go sf.prefetchWorker(i)
 		}

@@ -62,7 +62,7 @@ func (s *Server) isAPIRequest(r *http.Request) bool {
 func (s *Server) sendJSONError(w http.ResponseWriter, message string, statusCode int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	err := json.ConfigDefault.NewEncoder(w).Encode(map[string]interface{}{
+	err := json.ConfigDefault.NewEncoder(w).Encode(map[string]any{
 		"error":  message,
 		"status": statusCode,
 	})

@@ -1,5 +1,7 @@
 package config
 
+import "slices"
+
 // NotificationEvent defines the type of notification event
 type NotificationEvent string
 
@@ -37,10 +39,5 @@ func (n *Notifications) IsEventEnabled(event NotificationEvent) bool {
 	if len(n.Events) == 0 {
 		return true
 	}
-	for _, e := range n.Events {
-		if e == event {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(n.Events, event)
 }

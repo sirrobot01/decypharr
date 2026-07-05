@@ -41,7 +41,7 @@ type ImportRequest struct {
 	SkipMultiSeason  bool                  `json:"skip_multi_season"`
 
 	Status      string    `json:"status"`
-	CompletedAt time.Time `json:"completedAt,omitempty"`
+	CompletedAt time.Time `json:"completedAt"`
 	Error       string    `json:"error,omitempty"`
 
 	Type  ImportType `json:"type"`

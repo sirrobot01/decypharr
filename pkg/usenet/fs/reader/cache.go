@@ -202,7 +202,7 @@ func NewSegmentCache(
 		stats:       stats,
 	}
 
-	for i := 0; i < numShards; i++ {
+	for i := range numShards {
 		sc.shardCond[i] = sync.NewCond(&sc.shardMu[i])
 	}
 
@@ -447,10 +447,7 @@ func (w *bufferStreamWriter) Write(p []byte) (int, error) {
 	}
 
 	remaining := w.maxBytes - w.written
-	writeLen := int64(len(p))
-	if writeLen > remaining {
-		writeLen = remaining
-	}
+	writeLen := min(int64(len(p)), remaining)
 
 	n, err := w.buf.WriteAt(p[:writeLen], w.offset+w.written)
 	if err != nil {
@@ -1045,7 +1042,7 @@ func (sc *SegmentCache) Close() error {
 	}
 	sc.cancel()
 
-	for i := 0; i < numShards; i++ {
+	for i := range numShards {
 		sc.shardMu[i].Lock()
 		sc.shardCond[i].Broadcast()
 		sc.shardMu[i].Unlock()

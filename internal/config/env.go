@@ -80,7 +80,7 @@ func (c *Config) applyEnvOverrides() {
 		c.SkipAutoMove = parseBool(val)
 	}
 	// Manager categories array
-	for i := 0; i < 100; i++ { // Support up to 100 categories
+	for i := range 100 { // Support up to 100 categories
 		key := fmt.Sprintf("CATEGORIES__%d", i)
 		if val := getEnv(key); val != "" {
 			if i >= len(c.Categories) {
@@ -92,7 +92,7 @@ func (c *Config) applyEnvOverrides() {
 		}
 	}
 	// Manager allowed extensions array
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		key := fmt.Sprintf("ALLOWED_FILE_TYPES__%d", i)
 		if val := getEnv(key); val != "" {
 			if i >= len(c.AllowedExt) {
@@ -115,7 +115,7 @@ func (c *Config) applyEnvOverrides() {
 	c.applyUsenetEnvVars()
 
 	// Arr applications array
-	for i := 0; i < 20; i++ { // Support up to 20 arr applications
+	for i := range 20 { // Support up to 20 arr applications
 		prefix := fmt.Sprintf("ARRS__%d__", i)
 		if val := getEnv(prefix + "NAME"); val != "" {
 			// Ensure array is large enough

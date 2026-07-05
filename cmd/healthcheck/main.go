@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -157,10 +158,8 @@ func drainAndClose(resp *http.Response) {
 }
 
 func isHealthyStatus(statusCode int, authMayBeRequired bool, expectedStatusCodes ...int) bool {
-	for _, expectedStatusCode := range expectedStatusCodes {
-		if statusCode == expectedStatusCode {
-			return true
-		}
+	if slices.Contains(expectedStatusCodes, statusCode) {
+		return true
 	}
 
 	if !authMayBeRequired {

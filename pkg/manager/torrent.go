@@ -20,14 +20,12 @@ func (m *Manager) syncTorrents(ctx context.Context) {
 		Msg("Performing initial sync of torrents from debrid clients...")
 	var wg sync.WaitGroup
 	m.clients.Range(func(name string, client debrid.Client) bool {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if err := m.refreshTorrents(ctx, name, client); err != nil {
 				m.logger.Error().Err(err).Str("debrid", name).Msg("Initial torrent sync failed")
 			}
 			m.RefreshEntries(false)
-		}()
+		})
 		return true
 	})
 	wg.Wait()
@@ -57,7 +55,7 @@ func (m *Manager) refreshTorrents(ctx context.Context, provider string, debridCl
 	}
 
 	// Use singleflight to prevent concurrent refreshes for the same debrid
-	_, err, _ := m.refreshSG.Do(provider, func() (interface{}, error) {
+	_, err, _ := m.refreshSG.Do(provider, func() (any, error) {
 		return nil, m.doRefreshTorrents(ctx, provider, debridClient)
 	})
 
@@ -189,16 +187,14 @@ func (m *Manager) handleTorrentDeletions(torrentsToDelete []string) {
 	deleteChan := make(chan string, len(torrentsToDelete))
 
 	deleteWorkers := min(refreshDeleteWorkers, len(torrentsToDelete))
-	for i := 0; i < deleteWorkers; i++ {
-		deleteWg.Add(1)
-		go func() {
-			defer deleteWg.Done()
+	for range deleteWorkers {
+		deleteWg.Go(func() {
 			for infohash := range deleteChan {
 				if err := m.storage.Delete(infohash); err != nil {
 					m.logger.Error().Err(err).Str("infohash", infohash).Msg("Failed to delete torrent")
 				}
 			}
-		}()
+		})
 	}
 
 	for _, infohash := range torrentsToDelete {
@@ -220,19 +216,15 @@ func (m *Manager) processNewTorrents(provider string, newTorrents []*types.Torre
 	totalTorrents := len(newTorrents)
 
 	// Batch writer goroutine
-	batchWg.Add(1)
-	go func() {
-		defer batchWg.Done()
+	batchWg.Go(func() {
 		m.runBatchWriter(batchChan, errChan)
-	}()
+	})
 
 	// Scale workers based on torrent count, but cap to avoid overwhelming APIs
 	workers := min(refreshMaxWorkers, max(refreshMinWorkers, len(newTorrents)/10))
 
-	for i := 0; i < workers; i++ {
-		processWg.Add(1)
-		go func() {
-			defer processWg.Done()
+	for range workers {
+		processWg.Go(func() {
 			for t := range workChan {
 				if mt, err := m.processSyncTorrent(t); err != nil {
 					m.logger.Error().Err(err).Str("debrid", provider).Msgf("Failed to process torrent %s", t.Id)
@@ -244,7 +236,7 @@ func (m *Manager) processNewTorrents(provider string, newTorrents []*types.Torre
 					m.logger.Debug().Str("debrid", provider).Msgf("Processed %d / %d new torrents", count, totalTorrents)
 				}
 			}
-		}()
+		})
 	}
 
 	// Send torrents to workers

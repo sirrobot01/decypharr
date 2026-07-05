@@ -238,7 +238,7 @@ type Config struct {
 	DisableWebDav bool `json:"disable_webdav,omitempty"`
 
 	// Notifications configuration
-	Notifications Notifications `json:"notifications,omitempty"`
+	Notifications Notifications `json:"notifications"`
 
 	// Deprecated: Use Notifications.WebhookURL instead
 	DiscordWebhook string `json:"discord_webhook_url,omitempty"`
@@ -264,7 +264,7 @@ type Config struct {
 	Repair RepairConfig `json:"repair,omitzero"`
 
 	// QueueCleanup is the global arr queue-cleanup policy (see CleanupQueue).
-	QueueCleanup QueueCleanup `json:"queue_cleanup,omitempty"`
+	QueueCleanup QueueCleanup `json:"queue_cleanup"`
 }
 
 func (c *Config) JsonFile() string {

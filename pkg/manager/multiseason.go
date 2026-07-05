@@ -3,6 +3,7 @@ package manager
 import (
 	"crypto/md5"
 	"fmt"
+	"maps"
 	"regexp"
 	"sort"
 	"strconv"
@@ -103,9 +104,7 @@ func convertToMultiSeason(torrent *storage.Entry, seasons []SeasonInfo) []*stora
 		}
 
 		// Copy placement
-		for debridName, placement := range torrent.Providers {
-			seasonTorrent.Providers[debridName] = placement
-		}
+		maps.Copy(seasonTorrent.Providers, torrent.Providers)
 		seasonResults = append(seasonResults, seasonTorrent)
 	}
 	return seasonResults
@@ -221,9 +220,9 @@ func groupFilesBySeason(files []*storage.File, knownSeasons map[int]bool) map[in
 }
 
 func inferSeasonFromPath(path string, knownSeasons map[int]bool) int {
-	pathParts := strings.Split(path, "/")
+	pathParts := strings.SplitSeq(path, "/")
 
-	for _, part := range pathParts {
+	for part := range pathParts {
 		if season := extractSeason(part); season > 0 && knownSeasons[season] {
 			return season
 		}

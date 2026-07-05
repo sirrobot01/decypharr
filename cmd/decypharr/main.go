@@ -142,9 +142,7 @@ func startServices(ctx context.Context, manager *manager.Manager, cancelSvc cont
 	_log := logger.Default()
 
 	safeGo := func(f func() error) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() {
 				if r := recover(); r != nil {
 					stack := debug.Stack()
@@ -161,7 +159,7 @@ func startServices(ctx context.Context, manager *manager.Manager, cancelSvc cont
 			if err := f(); err != nil {
 				errChan <- err
 			}
-		}()
+		})
 	}
 
 	safeGo(func() error {

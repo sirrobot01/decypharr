@@ -1,5 +1,7 @@
 package storage
 
+import "maps"
+
 import "github.com/sirrobot01/decypharr/internal/config"
 
 // HandleExistingEntryMerge merges an incoming entry with an existing one that
@@ -30,9 +32,7 @@ func mergeProviders(existing, incoming map[string]*ProviderEntry) map[string]*Pr
 	merged := make(map[string]*ProviderEntry)
 
 	// Copy existing placements
-	for k, v := range existing {
-		merged[k] = v
-	}
+	maps.Copy(merged, existing)
 
 	// Merge incoming placements (overwrites if same key)
 	for k, v := range incoming {
@@ -61,9 +61,7 @@ func mergeFiles(existing, incoming map[string]*File) map[string]*File {
 	merged := make(map[string]*File)
 
 	// Copy existing files
-	for k, v := range existing {
-		merged[k] = v
-	}
+	maps.Copy(merged, existing)
 
 	// Merge incoming files
 	for k, v := range incoming {

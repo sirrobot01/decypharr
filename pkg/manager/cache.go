@@ -42,16 +42,16 @@ func (e *EntryCache) Get(name string) (*FileInfo, []FileInfo) {
 }
 
 func (e *EntryCache) refreshEntry(name string) EntryCacheItem {
-	result, _, _ := e.refreshing.Do(name, func() (interface{}, error) {
+	result, _, _ := e.refreshing.Do(name, func() (any, error) {
 		return e._refreshEntry(name), nil
 	})
 	return result.(EntryCacheItem)
 }
 
 func (e *EntryCache) _refreshEntry(name string) EntryCacheItem {
-	if strings.HasPrefix(name, torrentEntryCachePrefix) {
+	if after, ok := strings.CutPrefix(name, torrentEntryCachePrefix); ok {
 		// This is a torrent folder
-		torrentName := strings.TrimPrefix(name, torrentEntryCachePrefix)
+		torrentName := after
 		current, children := e.manager.getTorrentChildren(torrentName)
 		item := EntryCacheItem{
 			current:  current,

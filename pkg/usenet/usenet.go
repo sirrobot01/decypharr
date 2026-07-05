@@ -941,7 +941,7 @@ func (u *Usenet) PreCache(ctx context.Context, nzoID, filename string) error {
 }
 
 // Stats returns nntp statistics
-func (u *Usenet) Stats() map[string]interface{} {
+func (u *Usenet) Stats() map[string]any {
 	stats := u.nntp.Stats()
 	stats["readers"] = u.fs.Size()
 	stats["nzb_storage"] = u.nzbStorage.Stats()

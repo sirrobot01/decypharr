@@ -9,8 +9,9 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
+//go:fix inline
 func ptrTime(t time.Time) *time.Time {
-	return &t
+	return new(t)
 }
 
 // This is in-charge of moving torrents between different debrid services
@@ -65,7 +66,7 @@ func (m *Manager) executeMigration(job *storage.SwitcherJob, torrent *storage.En
 	if targetClient == nil {
 		job.Status = storage.SwitcherStatusFailed
 		job.Error = fmt.Sprintf("target debrid %s not found", job.TargetProvider)
-		job.CompletedAt = ptrTime(time.Now())
+		job.CompletedAt = new(time.Now())
 		return
 	}
 	// Submit to target debrid
@@ -77,7 +78,7 @@ func (m *Manager) executeMigration(job *storage.SwitcherJob, torrent *storage.En
 	if err != nil || !success {
 		job.Status = storage.SwitcherStatusFailed
 		job.Error = fmt.Sprintf("failed to move torrent to target debrid: %v", err)
-		job.CompletedAt = ptrTime(time.Now())
+		job.CompletedAt = new(time.Now())
 		m.logger.Error().
 			Err(err).
 			Str("job_id", job.ID).
@@ -117,7 +118,7 @@ func (m *Manager) executeMigration(job *storage.SwitcherJob, torrent *storage.En
 		job.Progress = 100
 	}
 
-	job.CompletedAt = ptrTime(time.Now())
+	job.CompletedAt = new(time.Now())
 
 	m.logger.Info().
 		Str("job_id", job.ID).

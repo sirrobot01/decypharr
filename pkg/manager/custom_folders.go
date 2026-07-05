@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -119,11 +120,8 @@ func (cf *CustomFolders) matchesFilter(folderName string, fileInfo os.FileInfo, 
 			fileNames := getFileNames()
 			filesMatched := false
 			for _, f := range filesRegexFilters {
-				for _, fn := range fileNames {
-					if f.regex.MatchString(fn) {
-						filesMatched = true
-						break
-					}
+				if slices.ContainsFunc(fileNames, f.regex.MatchString) {
+					filesMatched = true
 				}
 				if filesMatched {
 					break
@@ -189,19 +187,9 @@ func (cf *CustomFolders) checkSingleFilter(filter directoryFilter, fileInfo os.F
 	case filterByFileCountLT:
 		return len(getFileNames()) < filter.countThreshold
 	case filterByFilesRegex:
-		for _, fn := range getFileNames() {
-			if filter.regex.MatchString(fn) {
-				return true
-			}
-		}
-		return false
+		return slices.ContainsFunc(getFileNames(), filter.regex.MatchString)
 	case filterByNotFilesRegex:
-		for _, fn := range getFileNames() {
-			if filter.regex.MatchString(fn) {
-				return false
-			}
-		}
-		return true
+		return !slices.ContainsFunc(getFileNames(), filter.regex.MatchString)
 	default:
 		return false
 	}

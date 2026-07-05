@@ -57,7 +57,7 @@ func New(prefix string) zerolog.Logger {
 		Out:        os.Stdout,
 		TimeFormat: "2006-01-02 15:04:05",
 		NoColor:    false, // Set to true if you don't want colors
-		FormatLevel: func(i interface{}) string {
+		FormatLevel: func(i any) string {
 			var colorCode string
 			switch strings.ToLower(fmt.Sprintf("%s", i)) {
 			case "debug":
@@ -77,7 +77,7 @@ func New(prefix string) zerolog.Logger {
 			}
 			return fmt.Sprintf("%s| %-6s|\033[0m", colorCode, strings.ToUpper(fmt.Sprintf("%s", i)))
 		},
-		FormatMessage: func(i interface{}) string {
+		FormatMessage: func(i any) string {
 			return fmt.Sprintf("[%s] %v", prefix, i)
 		},
 	}
@@ -86,10 +86,10 @@ func New(prefix string) zerolog.Logger {
 		Out:        rotatingLogFile,
 		TimeFormat: "2006-01-02 15:04:05",
 		NoColor:    true, // No colors in file output
-		FormatLevel: func(i interface{}) string {
+		FormatLevel: func(i any) string {
 			return strings.ToUpper(fmt.Sprintf("| %-6s|", i))
 		},
-		FormatMessage: func(i interface{}) string {
+		FormatMessage: func(i any) string {
 			return fmt.Sprintf("[%s] %v", prefix, i)
 		},
 	}

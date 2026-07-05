@@ -71,7 +71,7 @@ func New(
 func (s *Service) GetLink(ctx context.Context, entry *storage.Entry, filename string) (types.DownloadLink, error) {
 	// Use singleflight to deduplicate concurrent requests for the same file
 	key := entry.InfoHash + ":" + filename
-	v, err, _ := s.singleflight.Do(key, func() (interface{}, error) {
+	v, err, _ := s.singleflight.Do(key, func() (any, error) {
 		return s.fetchAndValidate(ctx, entry, filename, 0)
 	})
 

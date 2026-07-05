@@ -50,7 +50,7 @@ func (h *Hoster) UnmarshalJSON(data []byte) error {
 	}
 
 	// If unmarshalling into an object fails, check if it's an empty array
-	var arr []interface{}
+	var arr []any
 	if err := json.Unmarshal(data, &arr); err == nil && len(arr) == 0 {
 		// It's an empty array; initialize with no entries
 		*h = Hoster{Rd: nil}

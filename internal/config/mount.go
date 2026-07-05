@@ -73,9 +73,9 @@ type DFS struct {
 	DaemonTimeout string `json:"daemon_timeout,omitempty"` // Time after which the FUSE daemon will exit if idle
 
 	// File system settings
-	UID                uint32 `json:"uid,omitempty"`                 // User ID for mounted files
-	GID                uint32 `json:"gid,omitempty"`                 // Group ID for mounted files
-	Umask              string `json:"umask,omitempty"`               // File permissions mask
+	UID   uint32 `json:"uid,omitempty"`   // User ID for mounted files
+	GID   uint32 `json:"gid,omitempty"`   // Group ID for mounted files
+	Umask string `json:"umask,omitempty"` // File permissions mask
 }
 
 // DiskCacheSizeBytes resolves the DFS on-disk cache budget in bytes. Empty or
@@ -116,9 +116,9 @@ type Mount struct {
 	Type      MountType `json:"type,omitempty"`
 	MountPath string    `json:"mount_path,omitempty"`
 
-	Rclone         Rclone         `json:"rclone,omitempty"`
-	DFS            DFS            `json:"dfs,omitempty"`
-	ExternalRclone ExternalRclone `json:"external_rclone,omitempty"`
+	Rclone         Rclone         `json:"rclone"`
+	DFS            DFS            `json:"dfs"`
+	ExternalRclone ExternalRclone `json:"external_rclone"`
 }
 
 func (c *Config) applyMountEnvVars() {

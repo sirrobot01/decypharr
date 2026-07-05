@@ -171,10 +171,7 @@ func normalizeTimeouts(in TimeoutConfig) TimeoutConfig {
 		in.ReaperInterval = 5 * time.Second
 	}
 	// Sweep frequently enough to avoid long idle overhang.
-	maxReaperInterval := in.IdleTimeout / 4
-	if maxReaperInterval < time.Second {
-		maxReaperInterval = time.Second
-	}
+	maxReaperInterval := max(in.IdleTimeout/4, time.Second)
 	if in.ReaperInterval > maxReaperInterval {
 		in.ReaperInterval = maxReaperInterval
 	}
@@ -925,13 +922,13 @@ func (c *Client) reapIdleConnections() {
 }
 
 // Stats returns current pool statistics
-func (c *Client) Stats() map[string]interface{} {
+func (c *Client) Stats() map[string]any {
 	if c.closed.Load() {
 		return nil
 	}
 
-	stats := make(map[string]interface{})
-	providers := make([]map[string]interface{}, 0, len(c.providers))
+	stats := make(map[string]any)
+	providers := make([]map[string]any, 0, len(c.providers))
 
 	totalActive := 0
 	totalIdle := 0
@@ -955,7 +952,7 @@ func (c *Client) Stats() map[string]interface{} {
 		totalIdle += idle
 		totalMax += maxC
 
-		providerInfo := map[string]interface{}{
+		providerInfo := map[string]any{
 			"host":            p.Host,
 			"port":            p.Port,
 			"max_connections": maxC,
@@ -966,7 +963,7 @@ func (c *Client) Stats() map[string]interface{} {
 
 		// Add speed test result if available
 		if result, ok := c.speedTestResults.Load(p.Host); ok {
-			providerInfo["speed_test"] = map[string]interface{}{
+			providerInfo["speed_test"] = map[string]any{
 				"latency_ms": result.LatencyMs,
 				"speed_mbps": result.SpeedMBps,
 				"bytes_read": result.BytesRead,
@@ -978,7 +975,7 @@ func (c *Client) Stats() map[string]interface{} {
 		providers = append(providers, providerInfo)
 	}
 
-	poolStats := map[string]interface{}{
+	poolStats := map[string]any{
 		"max_connections": totalMax,
 		"total_created":   totalActive + totalIdle,
 		"active":          totalActive,
@@ -1145,7 +1142,6 @@ func (c *Client) BatchStat(ctx context.Context, messageIDs []string) (*BatchStat
 	var bailOnce sync.Once
 	var wg sync.WaitGroup
 	for _, ch := range chunks {
-		ch := ch
 		wg.Add(1)
 		err := c.repairPool.Submit(ctx, ch.messageIDs, func(results []StatResult, taskErr error) {
 			defer wg.Done()
