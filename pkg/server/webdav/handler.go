@@ -1,7 +1,9 @@
 package webdav
 
 import (
+	"crypto/subtle"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -154,6 +156,11 @@ func (h *Handler) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		if h.isInternalBearer(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		username, password, ok := r.BasicAuth()
 		if !ok || !config.VerifyAuth(username, password) {
 			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
@@ -162,4 +169,23 @@ func (h *Handler) authMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isInternalBearer accepts the manager's random, in-memory, per-process token
+// as an alternative to the WebDAV username/password. It exists for the repair
+// sweep's ffprobe check: the configured WebDAV password is only ever stored
+// as a bcrypt hash, so there's no plaintext credential available to hand to
+// an external ffprobe process. The token is regenerated on every restart and
+// never persisted, so this bypass has a lifetime and blast radius bounded to
+// the current process.
+func (h *Handler) isInternalBearer(r *http.Request) bool {
+	token := h.manager.InternalToken()
+	if token == "" {
+		return false
+	}
+	after, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(after), []byte(token)) == 1
 }

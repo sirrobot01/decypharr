@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -13,6 +15,7 @@ import (
 type episode struct {
 	Id            int `json:"id"`
 	EpisodeFileID int `json:"episodeFileId"`
+	Runtime       int `json:"runtime"` // minutes; per-episode override of the series runtime
 }
 
 type sonarrSearch struct {
@@ -29,8 +32,9 @@ type radarrSearch struct {
 func (a *Arr) GetMedia(ctx context.Context, mediaId string) ([]Content, error) {
 	// GetReader series
 	type series struct {
-		Title string `json:"title"`
-		Id    int    `json:"id"`
+		Title   string `json:"title"`
+		Id      int    `json:"id"`
+		Runtime int    `json:"runtime"` // minutes; fallback when a specific episode has no runtime
 	}
 	var data []series
 	if a.Type == Radarr {
@@ -63,7 +67,10 @@ func (a *Arr) GetMedia(ctx context.Context, mediaId string) ([]Content, error) {
 		}
 		var ct Content
 
-		episodeFileIDMap := make(map[int]int)
+		// episodesByFile groups every episode Sonarr has mapped to a given
+		// episodeFileId, so a multi-episode file (double episodes, finales)
+		// resolves to all of its episodes rather than just the last one seen.
+		episodesByFile := make(map[int][]episode)
 		ct = Content{
 			Title: d.Title,
 			Id:    d.Id,
@@ -74,25 +81,30 @@ func (a *Arr) GetMedia(ctx context.Context, mediaId string) ([]Content, error) {
 			continue
 		}
 		for _, e := range episodes {
-			episodeFileIDMap[e.EpisodeFileID] = e.Id
+			episodesByFile[e.EpisodeFileID] = append(episodesByFile[e.EpisodeFileID], e)
 		}
 		files := make([]ContentFile, 0)
 		for _, file := range seriesFiles {
-			eId, ok := episodeFileIDMap[file.Id]
-			if !ok {
-				eId = 0
+			matched := episodesByFile[file.Id]
+			eId := 0
+			if len(matched) > 0 {
+				eId = matched[0].Id
 			}
 			if file.Id == 0 || file.Path == "" {
 				// Skip files without path
 				continue
 			}
+			runtimeSec, episodeCount, confirmed := sonarrExpectedRuntime(matched, d.Runtime, file.Path)
 			files = append(files, ContentFile{
-				FileId:       file.Id,
-				Path:         file.Path,
-				Id:           d.Id,
-				EpisodeId:    eId,
-				SeasonNumber: file.SeasonNumber,
-				Size:         file.Size,
+				FileId:                file.Id,
+				Path:                  file.Path,
+				Id:                    d.Id,
+				EpisodeId:             eId,
+				SeasonNumber:          file.SeasonNumber,
+				Size:                  file.Size,
+				RuntimeSec:            runtimeSec,
+				EpisodeCount:          episodeCount,
+				EpisodeCountConfirmed: confirmed,
 			})
 		}
 		if len(files) == 0 {
@@ -103,6 +115,67 @@ func (a *Arr) GetMedia(ctx context.Context, mediaId string) ([]Content, error) {
 		contents = append(contents, ct)
 	}
 	return contents, nil
+}
+
+// multiEpisodeFilenameRe matches an "E01-E02" / "E01E02" / "E01-02" style
+// multi-episode span in a release filename.
+var multiEpisodeFilenameRe = regexp.MustCompile(`(?i)E(\d{1,3})[-. _]?E?(\d{1,3})`)
+
+// sonarrExpectedRuntime derives a file's expected runtime in seconds and its
+// episode count, in preference order:
+//  1. the sum of the per-episode runtimes Sonarr reports for the episodes
+//     actually mapped to this file - exact, and handles variable-length
+//     episodes (finales, anthology shows) correctly.
+//  2. seriesRuntimeMin x episode count, when (1) has no usable per-episode
+//     runtimes but the file is still mapped to a known set of episodes.
+//  3. seriesRuntimeMin x a filename-guessed episode count, when Sonarr has no
+//     episode mapped to this file at all (episodeCountConfirmed=false).
+//
+// Returns runtimeSec=0 when nothing usable is available, signaling "unknown"
+// to the caller (ceiling-only check, no ratio comparison).
+func sonarrExpectedRuntime(matched []episode, seriesRuntimeMin int, path string) (runtimeSec, episodeCount int, confirmed bool) {
+	if len(matched) > 0 {
+		episodeCount = len(matched)
+		confirmed = true
+
+		sum := 0
+		allHaveRuntime := true
+		for _, e := range matched {
+			if e.Runtime <= 0 {
+				allHaveRuntime = false
+				break
+			}
+			sum += e.Runtime * 60
+		}
+		switch {
+		case allHaveRuntime:
+			runtimeSec = sum
+		case seriesRuntimeMin > 0:
+			runtimeSec = seriesRuntimeMin * 60 * episodeCount
+		}
+		return runtimeSec, episodeCount, confirmed
+	}
+
+	episodeCount = multiEpisodeCountFromFilename(filepath.Base(path))
+	if seriesRuntimeMin > 0 {
+		runtimeSec = seriesRuntimeMin * 60 * episodeCount
+	}
+	return runtimeSec, episodeCount, false
+}
+
+// multiEpisodeCountFromFilename returns the number of episodes spanned by a
+// release filename (e.g. "S01E01-E02" -> 2), or 1 when no span is found.
+func multiEpisodeCountFromFilename(name string) int {
+	m := multiEpisodeFilenameRe.FindStringSubmatch(name)
+	if m == nil {
+		return 1
+	}
+	lo, errLo := strconv.Atoi(m[1])
+	hi, errHi := strconv.Atoi(m[2])
+	if errLo != nil || errHi != nil || hi < lo {
+		return 1
+	}
+	return hi - lo + 1
 }
 
 func (a *Arr) GetMovies(ctx context.Context, tvId string) ([]Content, error) {
@@ -129,10 +202,13 @@ func (a *Arr) GetMovies(ctx context.Context, tvId string) ([]Content, error) {
 		files := make([]ContentFile, 0)
 
 		files = append(files, ContentFile{
-			FileId: movie.MovieFile.Id,
-			Id:     movie.Id,
-			Path:   movie.MovieFile.Path,
-			Size:   movie.MovieFile.Size,
+			FileId:                movie.MovieFile.Id,
+			Id:                    movie.Id,
+			Path:                  movie.MovieFile.Path,
+			Size:                  movie.MovieFile.Size,
+			RuntimeSec:            movie.Runtime * 60,
+			EpisodeCount:          1,
+			EpisodeCountConfirmed: true,
 		})
 		ct.Files = files
 		contents = append(contents, ct)

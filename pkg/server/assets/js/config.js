@@ -166,6 +166,7 @@ class ConfigManager {
         if ($('repair.stop_schedule')) $('repair.stop_schedule').value = repair.stop_schedule || '';
         if ($('repair.auto_repair')) $('repair.auto_repair').checked = !!repair.auto_repair;
         if ($('repair.skip_nzb_repair')) $('repair.skip_nzb_repair').checked = !!repair.skip_nzb_repair;
+        if ($('repair.ffprobe_check')) $('repair.ffprobe_check').checked = !!repair.ffprobe_check;
     }
 
     collectRepairConfig() {
@@ -185,6 +186,7 @@ class ConfigManager {
             stop_schedule: $('repair.stop_schedule')?.value.trim() || '',
             auto_repair: $('repair.auto_repair')?.checked || false,
             skip_nzb_repair: $('repair.skip_nzb_repair')?.checked || false,
+            ffprobe_check: $('repair.ffprobe_check')?.checked || false,
             arrs,
         };
     }

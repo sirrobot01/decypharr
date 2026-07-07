@@ -6,6 +6,7 @@ type Movie struct {
 	Title         string `json:"title"`
 	OriginalTitle string `json:"originalTitle"`
 	Path          string `json:"path"`
+	Runtime       int    `json:"runtime"` // minutes
 	MovieFile     struct {
 		MovieId      int    `json:"movieId"`
 		RelativePath string `json:"relativePath"`
@@ -29,6 +30,19 @@ type ContentFile struct {
 	SeasonNumber int    `json:"seasonNumber"`
 	Processed    bool   `json:"processed"`
 	Size         int64  `json:"size"`
+
+	// RuntimeSec is this file's expected playback duration in seconds, sourced
+	// from the Arr (movie runtime, or the summed/derived runtime of the
+	// episode(s) the file contains). 0 means unknown - callers should fall
+	// back to a ceiling-only sanity check rather than a ratio comparison.
+	RuntimeSec int `json:"runtimeSec,omitempty"`
+	// EpisodeCount is the number of episodes this file is believed to contain
+	// (1 for movies and single episodes, >1 for multi-episode files).
+	EpisodeCount int `json:"episodeCount,omitempty"`
+	// EpisodeCountConfirmed is true when EpisodeCount came from an actual
+	// Arr episode mapping rather than a filename guess (e.g. an "E01-E02"
+	// span parse). Callers should require a wider safety margin when false.
+	EpisodeCountConfirmed bool `json:"episodeCountConfirmed,omitempty"`
 }
 
 func (file *ContentFile) Delete() {
