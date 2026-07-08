@@ -222,13 +222,19 @@ type RepairConfig struct {
 	FFProbeTimeout string `json:"ffprobe_timeout,omitempty"`
 	// FFProbePath overrides the ffprobe binary location. Default: find "ffprobe" on PATH.
 	FFProbePath string `json:"ffprobe_path,omitempty"`
+	// FFProbeOnImport, when true, validates each newly imported download with ffprobe (same checks
+	// as FFProbeCheck, minus the runtime comparison) BEFORE it is reported complete to
+	// Sonarr/Radarr. A file that fails twice is rejected, so the Arr blocklists the release and
+	// grabs another - corrupt downloads never enter the library. Adds seconds and real reads per
+	// import; requires the ffprobe binary and WebDAV. Default off.
+	FFProbeOnImport bool `json:"ffprobe_on_import,omitempty"`
 }
 
 func (r RepairConfig) IsZero() bool {
 	return !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
 		r.NNTPConnectionPercent == 0 && r.Strategy == "" && r.RecheckInterval == "" && len(r.Arrs) == 0 &&
 		!r.AutoRepair && !r.SkipNZBRepair && r.StopSchedule == "" &&
-		!r.FFProbeCheck && r.FFProbeTimeout == "" && r.FFProbePath == ""
+		!r.FFProbeCheck && r.FFProbeTimeout == "" && r.FFProbePath == "" && !r.FFProbeOnImport
 }
 
 type Config struct {

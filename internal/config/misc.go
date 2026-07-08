@@ -70,12 +70,31 @@ func (c *Config) isNameAllowed(filename string) bool {
 	return slices.Contains(c.AllowedExt, ext)
 }
 
+// videoExtensions lists container/video extensions decypharr treats as
+// playable video (used both to seed the default allowed-extensions list and,
+// via IsVideoFile, to decide which files are worth an ffprobe validation
+// pass). Kept as the single source of truth so the two never drift apart.
+var videoExtensions = strings.Split("webm,m4v,3gp,nsv,ty,strm,rm,rmvb,m3u,ifo,mov,qt,divx,xvid,bivx,nrg,pva,wmv,asf,asx,ogm,ogv,m2v,avi,bin,dat,dvr-ms,mpg,mpeg,mp4,avc,vp3,svq3,nuv,viv,dv,fli,flv,wpl,vob,mkv,mk3d,ts,wtv,m2ts", ",")
+
+// IsVideoFile reports whether filename's extension is a known video/container
+// format. Narrower than IsFileAllowed, which also passes audio formats and
+// respects the user's own allow-list - this is for callers (the ffprobe
+// import gate, the repair sweep) that specifically need "is this worth
+// probing as a video," independent of what the user has configured as
+// downloadable.
+func IsVideoFile(filename string) bool {
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(filename), "."))
+	if ext == "" {
+		return false
+	}
+	return slices.Contains(videoExtensions, ext)
+}
+
 func getDefaultExtensions() []string {
-	videoExts := strings.Split("webm,m4v,3gp,nsv,ty,strm,rm,rmvb,m3u,ifo,mov,qt,divx,xvid,bivx,nrg,pva,wmv,asf,asx,ogm,ogv,m2v,avi,bin,dat,dvr-ms,mpg,mpeg,mp4,avc,vp3,svq3,nuv,viv,dv,fli,flv,wpl,vob,mkv,mk3d,ts,wtv,m2ts", ",")
 	musicExts := strings.Split("MP3,WAV,FLAC,OGG,WMA,AIFF,ALAC,M4A,APE,AC3,DTS,M4P,MID,MIDI,MKA,MP2,MPA,RA,VOC,WV,AMR", ",")
 
 	// Combine both slices
-	allExts := append(videoExts, musicExts...)
+	allExts := append(append([]string{}, videoExtensions...), musicExts...)
 
 	// Convert to lowercase
 	for i, ext := range allExts {

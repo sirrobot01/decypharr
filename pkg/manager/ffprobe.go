@@ -98,18 +98,41 @@ func newFFProbeChecker(cfg *config.Config, m *Manager, log zerolog.Logger) *ffpr
 	if !cfg.Repair.FFProbeCheck {
 		return nil
 	}
+	return buildFFProbeChecker(cfg, m, log)
+}
 
+// newImportFFProbeChecker builds a checker for the import-time gate
+// (Repair.FFProbeOnImport), independent of the sweep's own FFProbeCheck
+// toggle - either can be on without the other. Shares every bit of binary
+// resolution, WebDAV/auth wiring, and timeout parsing with the sweep-side
+// checker via buildFFProbeChecker, and the resulting *ffprobeChecker's
+// check/checkConfirmed methods are exactly the ones the sweep uses - the
+// import gate is a second caller of the same core, not a parallel
+// implementation.
+func newImportFFProbeChecker(cfg *config.Config, m *Manager, log zerolog.Logger) *ffprobeChecker {
+	if !cfg.Repair.FFProbeOnImport {
+		return nil
+	}
+	return buildFFProbeChecker(cfg, m, log)
+}
+
+// buildFFProbeChecker does the binary/WebDAV/auth/timeout resolution shared
+// by both newFFProbeChecker and newImportFFProbeChecker. Returns nil (with
+// exactly one WARN) when ffprobe can't actually be used: binary missing, or
+// WebDAV disabled. Callers must treat nil as "proceed without validation"
+// rather than failing whatever they're doing.
+func buildFFProbeChecker(cfg *config.Config, m *Manager, log zerolog.Logger) *ffprobeChecker {
 	binPath := strings.TrimSpace(cfg.Repair.FFProbePath)
 	if binPath == "" {
 		binPath = "ffprobe"
 	}
 	resolved, err := exec.LookPath(binPath)
 	if err != nil {
-		log.Warn().Err(err).Str("path", binPath).Msg("Repair: ffprobe_check is enabled but the ffprobe binary was not found on PATH; sweep will use STAT-only checks")
+		log.Warn().Err(err).Str("path", binPath).Msg("Repair: ffprobe validation is enabled but the ffprobe binary was not found on PATH; proceeding without it")
 		return nil
 	}
 	if cfg.DisableWebDav {
-		log.Warn().Msg("Repair: ffprobe_check is enabled but WebDAV is disabled (disable_webdav); sweep will use STAT-only checks")
+		log.Warn().Msg("Repair: ffprobe validation is enabled but WebDAV is disabled (disable_webdav); proceeding without it")
 		return nil
 	}
 
