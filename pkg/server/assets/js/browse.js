@@ -40,7 +40,44 @@ class FileBrowser {
             // Context menu
             contextMenu: document.getElementById('contextMenu'),
             contextDownload: document.getElementById('contextDownload'),
-            contextDelete: document.getElementById('contextDelete')
+            contextDelete: document.getElementById('contextDelete'),
+
+            // Stale NZB cleanup
+            staleNZBsBtn: document.getElementById('staleNZBsBtn'),
+            staleNZBsModal: document.getElementById('staleNZBsModal'),
+            staleNZBsSummary: document.getElementById('staleNZBsSummary'),
+            staleNZBsResult: document.getElementById('staleNZBsResult'),
+            staleNZBsMajorityWarning: document.getElementById('staleNZBsMajorityWarning'),
+            staleNZBsProgress: document.getElementById('staleNZBsProgress'),
+            staleNZBsProgressCount: document.getElementById('staleNZBsProgressCount'),
+            staleNZBsProgressBar: document.getElementById('staleNZBsProgressBar'),
+            staleNZBsSelectAll: document.getElementById('staleNZBsSelectAll'),
+            staleNZBsSelectionSummary: document.getElementById('staleNZBsSelectionSummary'),
+            staleNZBsTableBody: document.getElementById('staleNZBsTableBody'),
+            staleNZBsEmpty: document.getElementById('staleNZBsEmpty'),
+            staleNZBsFilterInput: document.getElementById('staleNZBsFilterInput'),
+            staleNZBsCancelBtn: document.getElementById('staleNZBsCancelBtn'),
+            staleNZBsDeleteAllBtn: document.getElementById('staleNZBsDeleteAllBtn'),
+            staleNZBsDeleteSelectedBtn: document.getElementById('staleNZBsDeleteSelectedBtn')
+        };
+
+        // Stale NZB cleanup state, kept separate from the main browse state:
+        // preview holds the last preview response ({entries, orphans, totals}).
+        // selected tracks which rows are currently checked in the modal, as
+        // "entry:<id>" / "orphan:<id>" keys - entries and orphans share one
+        // selection/confirm/delete flow but live in different ID namespaces,
+        // so the prefix keeps them distinguishable without risking a collision.
+        // filterQuery narrows which rows renderStaleNZBsTable shows (name
+        // match, both categories) without touching selection - it's a view
+        // filter, not a selection filter.
+        // progressTimer is the setInterval id for polling
+        // /api/browse/stale-nzbs/progress while a preview or cleanup request
+        // is outstanding - see start/stopStaleNZBsProgressPolling.
+        this.staleNZBs = {
+            preview: null,
+            selected: new Set(),
+            filterQuery: '',
+            progressTimer: null
         };
 
         this.searchTimeout = null;
@@ -104,6 +141,29 @@ class FileBrowser {
         }
         if (this.refs.clearSelectionBtn) {
             this.refs.clearSelectionBtn.addEventListener('click', () => this.clearSelection());
+        }
+
+        // Stale NZB cleanup
+        if (this.refs.staleNZBsBtn) {
+            this.refs.staleNZBsBtn.addEventListener('click', () => this.openStaleNZBsModal());
+        }
+        if (this.refs.staleNZBsSelectAll) {
+            this.refs.staleNZBsSelectAll.addEventListener('change', (e) => this.toggleStaleNZBsSelectAll(e.target.checked));
+        }
+        if (this.refs.staleNZBsFilterInput) {
+            this.refs.staleNZBsFilterInput.addEventListener('input', (e) => {
+                this.staleNZBs.filterQuery = e.target.value;
+                this.renderStaleNZBsTable();
+            });
+        }
+        if (this.refs.staleNZBsCancelBtn) {
+            this.refs.staleNZBsCancelBtn.addEventListener('click', () => this.refs.staleNZBsModal?.close?.());
+        }
+        if (this.refs.staleNZBsDeleteSelectedBtn) {
+            this.bindStaleNZBsConfirmButton(this.refs.staleNZBsDeleteSelectedBtn, () => Array.from(this.staleNZBs.selected));
+        }
+        if (this.refs.staleNZBsDeleteAllBtn) {
+            this.bindStaleNZBsConfirmButton(this.refs.staleNZBsDeleteAllBtn, () => this.getStaleNZBRows().map(r => r.key));
         }
 
         // Hide context menu on click outside
@@ -355,6 +415,12 @@ class FileBrowser {
                 this.navigate(path);
             });
         });
+
+        // "Clean up stale NZBs" only makes sense at the top-level nzbs group,
+        // not while browsing into a specific release's files.
+        if (this.refs.staleNZBsBtn) {
+            this.refs.staleNZBsBtn.classList.toggle('hidden', this.state.currentPath !== '/nzbs');
+        }
     }
 
     renderEntries() {
@@ -751,6 +817,339 @@ class FileBrowser {
 
     getSelectedEntries() {
         return Array.from(this.state.selectedEntryData.values()).filter(Boolean);
+    }
+
+    // === Stale NZB cleanup ===
+
+    async openStaleNZBsModal() {
+        const modal = this.refs.staleNZBsModal;
+        if (!modal) return;
+
+        this.refs.staleNZBsResult?.classList.add('hidden');
+        this.refs.staleNZBsMajorityWarning?.classList.add('hidden');
+        this.refs.staleNZBsProgress?.classList.add('hidden');
+        this.refs.staleNZBsProgress?.classList.remove('flex');
+        this.refs.staleNZBsSummary.textContent = 'Checking every NZB entry against Sonarr/Radarr…';
+        this.refs.staleNZBsTableBody.innerHTML = '';
+        this.refs.staleNZBsEmpty?.classList.add('hidden');
+        this.staleNZBs.filterQuery = '';
+        if (this.refs.staleNZBsFilterInput) this.refs.staleNZBsFilterInput.value = '';
+        this.setStaleNZBsButtonsBusy(true);
+
+        if (typeof modal.showModal === 'function') {
+            modal.showModal();
+        } else {
+            modal.setAttribute('open', '');
+        }
+
+        this.startStaleNZBsProgressPolling();
+        try {
+            const response = await fetch(`${window.urlBase}api/browse/stale-nzbs/preview`);
+            const text = await response.text();
+            if (!response.ok) throw new Error(text || `HTTP ${response.status}`);
+            const preview = text ? JSON.parse(text) : {entries: [], orphans: [], totals: {}};
+            this.staleNZBs.preview = preview;
+            this.staleNZBs.selected = new Set([
+                ...(preview.entries || []).map(e => `entry:${e.id}`),
+                ...(preview.orphans || []).map(o => `orphan:${o.id}`)
+            ]);
+            this.renderStaleNZBsTable();
+        } catch (error) {
+            console.error('Failed to load stale NZB preview:', error);
+            this.refs.staleNZBsSummary.textContent = 'Failed to check for stale NZBs.';
+            this.showStaleNZBsError(`Failed to check for stale NZBs: ${error.message}`);
+        } finally {
+            this.stopStaleNZBsProgressPolling();
+            this.setStaleNZBsButtonsBusy(false);
+        }
+    }
+
+    // startStaleNZBsProgressPolling polls the progress endpoint every 500ms
+    // while a preview/cleanup request is outstanding. Progress is purely
+    // decorative - the main request's own response is always the source of
+    // truth for what actually happened, so a poll failure is swallowed and
+    // never surfaced to the user.
+    startStaleNZBsProgressPolling() {
+        this.stopStaleNZBsProgressPolling();
+        const poll = async () => {
+            try {
+                const response = await fetch(`${window.urlBase}api/browse/stale-nzbs/progress`);
+                if (!response.ok) return;
+                const progress = await response.json();
+                this.renderStaleNZBsProgress(progress);
+            } catch {
+                // Decorative only - see method comment.
+            }
+        };
+        poll();
+        this.staleNZBs.progressTimer = setInterval(poll, 500);
+    }
+
+    stopStaleNZBsProgressPolling() {
+        if (this.staleNZBs.progressTimer) {
+            clearInterval(this.staleNZBs.progressTimer);
+            this.staleNZBs.progressTimer = null;
+        }
+        this.refs.staleNZBsProgress?.classList.add('hidden');
+        this.refs.staleNZBsProgress?.classList.remove('flex');
+    }
+
+    // renderStaleNZBsProgress swaps the loading label to the current phase
+    // and shows a counter (plus a bar, when the phase's total is known) next
+    // to it. total <= 0 means "unknown" - shown as a running count instead
+    // of a bar, since there's nothing to size a bar against yet.
+    renderStaleNZBsProgress(progress) {
+        if (!progress || !progress.running) {
+            this.refs.staleNZBsProgress?.classList.add('hidden');
+            this.refs.staleNZBsProgress?.classList.remove('flex');
+            return;
+        }
+        if (progress.phase) {
+            this.refs.staleNZBsSummary.textContent = progress.phase;
+        }
+        if (!this.refs.staleNZBsProgress) return;
+        this.refs.staleNZBsProgress.classList.remove('hidden');
+        this.refs.staleNZBsProgress.classList.add('flex');
+
+        const done = progress.done || 0;
+        if (progress.total > 0) {
+            const pct = Math.min(100, Math.round((done / progress.total) * 100));
+            if (this.refs.staleNZBsProgressBar) {
+                this.refs.staleNZBsProgressBar.classList.remove('hidden');
+                this.refs.staleNZBsProgressBar.value = pct;
+            }
+            if (this.refs.staleNZBsProgressCount) {
+                this.refs.staleNZBsProgressCount.textContent = `${done.toLocaleString()} / ${progress.total.toLocaleString()}`;
+            }
+        } else {
+            this.refs.staleNZBsProgressBar?.classList.add('hidden');
+            if (this.refs.staleNZBsProgressCount) {
+                this.refs.staleNZBsProgressCount.textContent = `${done.toLocaleString()} scanned…`;
+            }
+        }
+    }
+
+    // showStaleNZBsError displays a failure inside the modal body itself
+    // (the staleNZBsResult alert, styled as an error) rather than only a
+    // toast - a toast disappears on its own before it can always be read;
+    // this stays until the next successful preview/cleanup replaces it or
+    // the user closes the modal.
+    showStaleNZBsError(message) {
+        window.createToast(message, 'error');
+        if (!this.refs.staleNZBsResult) return;
+        this.refs.staleNZBsResult.textContent = message;
+        this.refs.staleNZBsResult.classList.remove('hidden', 'alert-success', 'alert-warning');
+        this.refs.staleNZBsResult.classList.add('alert-error');
+    }
+
+    setStaleNZBsButtonsBusy(busy) {
+        [this.refs.staleNZBsDeleteAllBtn, this.refs.staleNZBsDeleteSelectedBtn].forEach(btn => {
+            if (btn) btn.disabled = busy;
+        });
+    }
+
+    // getStaleNZBRows returns preview.entries and preview.orphans as one
+    // combined list, each tagged with a "kind" and the prefixed selection
+    // key it shares with this.staleNZBs.selected - the single source both
+    // categories render, select and delete through.
+    getStaleNZBRows() {
+        const entries = (this.staleNZBs.preview?.entries || []).map(e => ({...e, kind: 'entry', key: `entry:${e.id}`}));
+        const orphans = (this.staleNZBs.preview?.orphans || []).map(o => ({...o, kind: 'orphan', key: `orphan:${o.id}`}));
+        return [...entries, ...orphans];
+    }
+
+    // getFilteredStaleNZBRows applies filterQuery (name match, case
+    // insensitive) on top of getStaleNZBRows - a view filter only, it never
+    // changes what's selected, just what's currently shown/selectable via
+    // "Select all".
+    getFilteredStaleNZBRows() {
+        const rows = this.getStaleNZBRows();
+        const q = (this.staleNZBs.filterQuery || '').trim().toLowerCase();
+        if (!q) return rows;
+        return rows.filter(r => (r.name || '').toLowerCase().includes(q));
+    }
+
+    renderStaleNZBsTable() {
+        const rows = this.getStaleNZBRows();
+        const filteredRows = this.getFilteredStaleNZBRows();
+        const totals = this.staleNZBs.preview?.totals || {};
+
+        this.refs.staleNZBsMajorityWarning?.classList.toggle('hidden', !totals.majorityStale);
+
+        const totalGB = this.formatSize(totals.totalBytes || 0);
+        const cacheGB = this.formatSize(totals.cacheBytes || 0);
+        const nzbMetaGB = this.formatSize(totals.nzbMetaBytes || 0);
+        this.refs.staleNZBsSummary.textContent = rows.length
+            ? `${totals.count || rows.length} stale items — ${totalGB} of local disk reclaimable (${cacheGB} cache, ${nzbMetaGB} nzb/meta).`
+            : 'No stale NZB entries found.';
+
+        this.refs.staleNZBsTableBody.innerHTML = '';
+        this.refs.staleNZBsEmpty?.classList.toggle('hidden', filteredRows.length > 0);
+        if (this.refs.staleNZBsEmpty) {
+            this.refs.staleNZBsEmpty.querySelector('.stale-nzb-empty-text')?.remove();
+            const text = rows.length && !filteredRows.length
+                ? `No matches for "${this.staleNZBs.filterQuery.trim()}".`
+                : 'No stale NZB entries found.';
+            const span = document.createElement('span');
+            span.className = 'stale-nzb-empty-text';
+            span.textContent = text;
+            this.refs.staleNZBsEmpty.appendChild(span);
+        }
+        this.refs.staleNZBsSelectAll.checked = filteredRows.length > 0 && filteredRows.every(r => this.staleNZBs.selected.has(r.key));
+        this.refs.staleNZBsSelectAll.disabled = filteredRows.length === 0;
+
+        for (const row of filteredRows) {
+            const tr = document.createElement('tr');
+            const added = row.addedOn ? new Date(row.addedOn).toLocaleDateString() : '-';
+            const badge = row.kind === 'orphan'
+                ? '<span class="badge badge-ghost badge-xs mr-1" title="No database entry - disk file only">orphan</span>'
+                : '';
+            const checkedAttr = this.staleNZBs.selected.has(row.key) ? 'checked' : '';
+            tr.innerHTML = `
+                <td><input type="checkbox" class="checkbox checkbox-sm checkbox-primary stale-nzb-checkbox" data-key="${this.escapeAttr(row.key)}" ${checkedAttr}></td>
+                <td class="font-mono text-xs break-all">${badge}${this.escapeHtml(row.name)}</td>
+                <td class="text-xs whitespace-nowrap">${added}</td>
+                <td class="text-xs text-right whitespace-nowrap">${this.formatSize(row.localBytes?.total || 0)}</td>
+            `;
+            this.refs.staleNZBsTableBody.appendChild(tr);
+        }
+
+        this.refs.staleNZBsTableBody.querySelectorAll('.stale-nzb-checkbox').forEach(cb => {
+            cb.addEventListener('change', (e) => {
+                const key = e.target.dataset.key;
+                if (e.target.checked) {
+                    this.staleNZBs.selected.add(key);
+                } else {
+                    this.staleNZBs.selected.delete(key);
+                }
+                this.updateStaleNZBsSelectionSummary();
+            });
+        });
+
+        this.updateStaleNZBsSelectionSummary();
+    }
+
+    // toggleStaleNZBsSelectAll only affects rows the current filter shows -
+    // a row hidden by filterQuery keeps whatever selection state it already
+    // had, matching the checkboxes actually visible in the modal.
+    toggleStaleNZBsSelectAll(checked) {
+        const rows = this.getFilteredStaleNZBRows();
+        for (const row of rows) {
+            if (checked) {
+                this.staleNZBs.selected.add(row.key);
+            } else {
+                this.staleNZBs.selected.delete(row.key);
+            }
+        }
+        this.refs.staleNZBsTableBody.querySelectorAll('.stale-nzb-checkbox').forEach(cb => {
+            cb.checked = checked;
+        });
+        this.updateStaleNZBsSelectionSummary();
+    }
+
+    updateStaleNZBsSelectionSummary() {
+        const rows = this.getStaleNZBRows();
+        const selected = rows.filter(r => this.staleNZBs.selected.has(r.key));
+        const bytes = selected.reduce((sum, r) => sum + (r.localBytes?.total || 0), 0);
+
+        if (this.refs.staleNZBsSelectionSummary) {
+            this.refs.staleNZBsSelectionSummary.textContent = selected.length
+                ? `${selected.length} selected — ${this.formatSize(bytes)}`
+                : 'Nothing selected';
+        }
+        if (this.refs.staleNZBsDeleteSelectedBtn) {
+            this.refs.staleNZBsDeleteSelectedBtn.textContent = `Delete selected (${selected.length})`;
+            this.refs.staleNZBsDeleteSelectedBtn.dataset.confirming = '';
+        }
+        if (this.refs.staleNZBsDeleteAllBtn) {
+            this.refs.staleNZBsDeleteAllBtn.dataset.confirming = '';
+            this.refs.staleNZBsDeleteAllBtn.textContent = 'Delete all';
+        }
+    }
+
+    // bindStaleNZBsConfirmButton wires a cheap two-step confirm onto btn: the
+    // first click swaps the label to "Really delete N entries?"; a second
+    // click within the window actually runs the cleanup. keysFn is called
+    // fresh on each click so "Delete all" always reflects the current
+    // preview regardless of the individual-row selection. keys are the
+    // prefixed "entry:<id>" / "orphan:<id>" strings from getStaleNZBRows.
+    bindStaleNZBsConfirmButton(btn, keysFn) {
+        btn.addEventListener('click', () => {
+            const keys = keysFn();
+            if (!keys.length) {
+                window.createToast('No entries to delete', 'warning');
+                return;
+            }
+            if (btn.dataset.confirming === 'true') {
+                this.runStaleNZBsCleanup(keys);
+                return;
+            }
+            btn.dataset.confirming = 'true';
+            btn.dataset.originalLabel = btn.textContent;
+            btn.textContent = `Really delete ${keys.length} entries?`;
+            setTimeout(() => {
+                if (btn.dataset.confirming === 'true') {
+                    btn.dataset.confirming = '';
+                    if (btn.dataset.originalLabel) btn.textContent = btn.dataset.originalLabel;
+                }
+            }, 4000);
+        });
+    }
+
+    async runStaleNZBsCleanup(keys) {
+        this.setStaleNZBsButtonsBusy(true);
+        this.startStaleNZBsProgressPolling();
+        try {
+            const entryIds = keys.filter(k => k.startsWith('entry:')).map(k => k.slice('entry:'.length));
+            const orphanIds = keys.filter(k => k.startsWith('orphan:')).map(k => k.slice('orphan:'.length));
+            const response = await fetch(`${window.urlBase}api/browse/stale-nzbs/cleanup`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({entryIds, orphanIds})
+            });
+            const text = await response.text();
+            let result = null;
+            try {
+                result = text ? JSON.parse(text) : null;
+            } catch { /* leave null */
+            }
+            if (!response.ok) throw new Error((result && result.error) || text || `HTTP ${response.status}`);
+
+            const freedTotal = this.formatSize(result?.freed?.totalBytes || 0);
+            const freedCache = this.formatSize(result?.freed?.cacheBytes || 0);
+            const freedNzbMeta = this.formatSize(result?.freed?.nzbMetaBytes || 0);
+            const skippedCount = (result?.skipped || []).length;
+            window.createToast(
+                `Freed ${freedTotal} (${freedCache} cache, ${freedNzbMeta} nzb/meta) — deleted ${result?.deleted || 0} entries, skipped ${skippedCount}`,
+                'success'
+            );
+
+            if (this.refs.staleNZBsResult) {
+                const lines = [`Deleted ${result?.deleted || 0}, failed ${result?.failed || 0}.`];
+                if (skippedCount) {
+                    lines.push('Skipped:');
+                    for (const s of result.skipped) {
+                        lines.push(`- ${s.name || s.id}: ${s.reason}`);
+                    }
+                }
+                this.refs.staleNZBsResult.textContent = lines.join('\n');
+                this.refs.staleNZBsResult.classList.remove('hidden', 'alert-error');
+                this.refs.staleNZBsResult.classList.toggle('alert-warning', skippedCount > 0 || (result?.failed || 0) > 0);
+                this.refs.staleNZBsResult.classList.toggle('alert-success', skippedCount === 0 && (result?.failed || 0) === 0);
+                this.refs.staleNZBsResult.style.whiteSpace = 'pre-line';
+            }
+
+            // Re-preview so the table reflects what's actually left, and
+            // refresh the underlying nzbs listing behind the modal.
+            await this.openStaleNZBsModal();
+            this.refresh();
+        } catch (error) {
+            console.error('Stale NZB cleanup failed:', error);
+            this.showStaleNZBsError(`Cleanup failed: ${error.message}`);
+        } finally {
+            this.stopStaleNZBsProgressPolling();
+            this.setStaleNZBsButtonsBusy(false);
+        }
     }
 
     async bulkRecheck() {

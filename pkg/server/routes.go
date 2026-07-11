@@ -83,6 +83,11 @@ func (s *Server) WebRoutes() http.Handler {
 				r.Delete("/torrents/{id}", s.handleDeleteBrowseTorrent)
 				r.Delete("/torrents/batch", s.handleBatchDeleteBrowseTorrents)
 
+				// Stale NZB cleanup
+				r.Get("/stale-nzbs/preview", s.handleStaleNZBsPreview)
+				r.Post("/stale-nzbs/cleanup", s.handleStaleNZBsCleanup)
+				r.Get("/stale-nzbs/progress", s.handleStaleNZBsProgress)
+
 				// File download
 				r.Get("/download/{torrent}/{file}", s.handleDownloadFile)
 			})

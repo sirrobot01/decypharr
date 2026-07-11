@@ -14,6 +14,7 @@ import (
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/customerror"
 	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/manager"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
@@ -352,6 +353,79 @@ func (s *Server) handleBatchDeleteBrowseTorrents(w http.ResponseWriter, r *http.
 		"message": "Torrents deleted successfully",
 		"count":   len(req.IDs),
 	}, http.StatusOK)
+}
+
+// handleStaleNZBsPreview classifies every NZB entry and returns the ones
+// that currently qualify as stale (not referenced by any Arr, old enough,
+// not active), with the local disk each would free. Read-only.
+func (s *Server) handleStaleNZBsPreview(w http.ResponseWriter, r *http.Request) {
+	svc := s.manager.Repair()
+	if svc == nil {
+		s.logger.Error().Msg("StaleNZB: preview request failed - repair service not available")
+		http.Error(w, "Repair service not available", http.StatusServiceUnavailable)
+		return
+	}
+	preview, err := svc.PreviewStaleNZBs(r.Context())
+	if err != nil {
+		// The manager layer already logs this at ERROR with full context
+		// (Arr reference-set failures etc.) - this response is just the
+		// client-facing side of the same failure.
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	utils.JSONResponse(w, preview, http.StatusOK)
+}
+
+// handleStaleNZBsProgress returns the live progress of an in-flight preview
+// or cleanup pass, polled by the modal while one of those requests is
+// outstanding. Returns {running: false} rather than an error when nothing
+// is running - that's an expected, normal state, not a failure.
+func (s *Server) handleStaleNZBsProgress(w http.ResponseWriter, r *http.Request) {
+	svc := s.manager.Repair()
+	if svc == nil {
+		utils.JSONResponse(w, manager.StaleNZBProgress{Running: false}, http.StatusOK)
+		return
+	}
+	utils.JSONResponse(w, svc.StaleNZBProgress(), http.StatusOK)
+}
+
+// handleStaleNZBsCleanup deletes the requested entry and orphan IDs that are
+// still stale/orphaned at the moment this runs - the request body is a
+// selection, not an authorization; every ID is re-classified before
+// anything is deleted.
+func (s *Server) handleStaleNZBsCleanup(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		EntryIDs  []string `json:"entryIds"`
+		OrphanIDs []string `json:"orphanIds"`
+	}
+	if err := json.ConfigDefault.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(req.EntryIDs) == 0 && len(req.OrphanIDs) == 0 {
+		http.Error(w, "No entry or orphan ids provided", http.StatusBadRequest)
+		return
+	}
+
+	svc := s.manager.Repair()
+	if svc == nil {
+		s.logger.Error().Msg("StaleNZB: cleanup request failed - repair service not available")
+		http.Error(w, "Repair service not available", http.StatusServiceUnavailable)
+		return
+	}
+	result, err := svc.CleanupStaleNZBs(r.Context(), req.EntryIDs, req.OrphanIDs)
+	if err != nil {
+		// The manager layer already logs this at ERROR with full context
+		// (Arr reference-set failures, a run already active, etc.) - this
+		// response is just the client-facing side of the same failure.
+		status := http.StatusBadGateway
+		if strings.Contains(err.Error(), "already running") {
+			status = http.StatusConflict
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	utils.JSONResponse(w, result, http.StatusOK)
 }
 
 // handleDownloadFile proxies file download for both torrents and NZBs

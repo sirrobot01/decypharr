@@ -71,6 +71,20 @@ func (s *NZBStorage) metaFilePath(id string) string {
 	return filepath.Join(s.metaDir, id+metaFileExtension)
 }
 
+// MetaFilePath exposes metaFilePath for callers outside this package that
+// need to size or verify the meta file without duplicating the dir/extension
+// convention (e.g. stale-entry cleanup reporting local disk bytes freed).
+func (s *NZBStorage) MetaFilePath(id string) string {
+	return s.metaFilePath(id)
+}
+
+// MetaDir exposes the meta directory for callers outside this package that
+// need to scan it directly (e.g. stale-entry cleanup reconciling on-disk
+// meta files against storage entries).
+func (s *NZBStorage) MetaDir() string {
+	return s.metaDir
+}
+
 // recalculateStatsLocked rebuilds cached stats by scanning metadata files.
 // Caller must hold s.mu.
 func (s *NZBStorage) recalculateStatsLocked() error {

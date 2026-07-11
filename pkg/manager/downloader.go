@@ -135,6 +135,13 @@ func (d *Downloader) completeEntry(entry *storage.Entry) {
 func (d *Downloader) markAsCompleted(entry *storage.Entry) {
 	// Mark as completed
 	entry.MarkAsCompleted(entry.DownloadPath())
+	// Persist completion to the canonical entry store, not just the queue -
+	// queue.Update only ever touches the separate active-download bucket, so
+	// without this an entry's IsComplete/IsDownloading never reach the record
+	// everything else (Browse, stale-NZB classification, etc.) actually reads.
+	if err := d.manager.AddOrUpdate(entry, nil); err != nil {
+		d.logger.Warn().Err(err).Str("name", entry.Name).Msg("Failed to persist completed entry to main storage")
+	}
 	_ = d.manager.queue.Update(entry)
 }
 
