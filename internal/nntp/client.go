@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/textproto"
 	"sort"
@@ -61,6 +62,11 @@ type Client struct {
 	// (≈ buffer ÷ RTT), so it must cover the bandwidth-delay product.
 	sockReadBuf  int
 	sockWriteBuf int
+
+	// bw meters per-provider downloaded bytes and enforces per-provider
+	// quotas so a provider that hits its daily/weekly/monthly cap is skipped
+	// (handing off to lower-priority/backup providers) until it resets.
+	bw *BandwidthTracker
 }
 
 // SpeedTestResult holds the result of a provider speed test
@@ -219,6 +225,7 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		sockWriteBuf:     parseSockBuf(cfg.Usenet.SocketWriteBuffer),
 	}
 	cm.repairPool = cm.newRepairPool(cfg.Repair.NNTPConnectionPercent)
+	cm.bw = newBandwidthTracker(providers, cm.logger)
 
 	// Start background reaper
 	go cm.reaper()
@@ -509,19 +516,45 @@ func (c *Client) getAnyAvailableConnection(ctx context.Context, exclusions provi
 	// slices on the common path: when a pool has a free slot, the first scan
 	// returns immediately. A slice is only needed for the uncommon all-busy
 	// fallback that races across providers.
-	useBackups := true
+	// Effective serving tiers (recomputed each call from live quota state):
+	//   lead  = primary below its soft threshold â carries bulk load
+	//   fill  = configured backup, OR a primary in its reserve band â used only
+	//           to fill segments the leads can't provide (article-not-found /
+	//           connection error), drawing a capped primary's held-back reserve
+	//   blocked = at/over hard quota â never used
+	//
+	// Bulk draws from the lead tier. The fill tier is consulted only when leads
+	// EXIST but are all excluded for this segment. If no lead exists at all
+	// (every primary at/over its soft cap), bulk fails here rather than spilling
+	// onto reserves or metered backups â reserves are a cushion for the normal
+	// case (one server capped, others still leading), not a way to keep
+	// streaming when every primary is maxed.
+	leadExists := false
+	leadUsable := false
 	for _, p := range c.providers {
-		if !p.Backup && !exclusions.excludes(p) {
-			useBackups = false
+		if c.providerTier(p) != tierLead {
+			continue
+		}
+		leadExists = true
+		if !exclusions.excludes(p) {
+			leadUsable = true
 			break
 		}
 	}
 
+	target := tierLead
+	if !leadUsable {
+		if !leadExists {
+			return nil, config.UsenetProvider{}, errors.New("no eligible providers available")
+		}
+		target = tierFill
+	}
+
 	// Phase 1: Non-blocking scan - try to get a free slot from any provider
-	// within the current tier.
+	// within the target tier.
 	eligibleCount := 0
 	for _, provider := range c.providers {
-		if provider.Backup != useBackups || exclusions.excludes(provider) {
+		if c.providerTier(provider) != target || exclusions.excludes(provider) {
 			continue
 		}
 		eligibleCount++
@@ -546,12 +579,12 @@ func (c *Client) getAnyAvailableConnection(ctx context.Context, exclusions provi
 		return nil, config.UsenetProvider{}, errors.New("no eligible providers available")
 	}
 
-	// Phase 2: All providers in this tier busy - race for first available
-	// slot in the tier. When the primary tier is in use this is the wait
-	// that lets a backup remain idle rather than getting roped in.
+	// Phase 2: All providers in the target tier busy - race for first available
+	// slot in the tier. When the lead tier is in use this is the wait that lets
+	// the fill tier remain idle rather than getting roped in.
 	eligible := make([]config.UsenetProvider, 0, eligibleCount)
 	for _, provider := range c.providers {
-		if provider.Backup == useBackups && !exclusions.excludes(provider) {
+		if c.providerTier(provider) == target && !exclusions.excludes(provider) {
 			eligible = append(eligible, provider)
 		}
 	}
@@ -821,7 +854,14 @@ func (c *Client) createConnection(ctx context.Context, provider config.UsenetPro
 		}
 	}
 
-	reader := bufio.NewReaderSize(netConn, 512*1024)
+	// Meter every byte read from this provider's socket. For SSL this wraps
+	// the tls.Conn, so we count decrypted NNTP bytes (yEnc body + headers +
+	// protocol) — i.e. the transfer volume the provider actually bills.
+	var src io.Reader = netConn
+	if c.bw != nil {
+		src = c.bw.newCountingReader(netConn, provider.Host)
+	}
+	reader := bufio.NewReaderSize(src, 512*1024)
 	writer := bufio.NewWriterSize(netConn, 64*1024)
 
 	conn := &Connection{
@@ -953,6 +993,9 @@ func (c *Client) Stats() map[string]any {
 			"active":          active,
 			"idle":            idle,
 			"ssl":             p.SSL,
+			// Computed live (not cached) so a soft-threshold demotion or a
+			// calendar-aligned quota reset is reflected on the very next poll.
+			"tier": tierLabel(c.providerTier(p)),
 		}
 
 		// Add speed test result if available
@@ -963,6 +1006,22 @@ func (c *Client) Stats() map[string]any {
 				"bytes_read": result.BytesRead,
 				"tested_at":  result.TestedAt.Format("2006-01-02T15:04:05Z07:00"),
 				"error":      result.Error,
+			}
+		}
+
+		// Add bandwidth usage / quota state
+		if c.bw != nil {
+			if bw, ok := c.bw.Snapshot(p.Host); ok {
+				providerInfo["bytes_used"] = bw.BytesUsed
+				providerInfo["quota_bytes"] = bw.QuotaBytes
+				providerInfo["reserve_bytes"] = bw.ReserveBytes
+				providerInfo["soft_threshold"] = bw.SoftThreshold
+				providerInfo["quota_period"] = bw.Period
+				providerInfo["quota_exceeded"] = bw.Exceeded
+				providerInfo["fill_only"] = bw.FillOnly
+				if !bw.ResetAt.IsZero() {
+					providerInfo["quota_reset_at"] = bw.ResetAt.Format("2006-01-02T15:04:05Z07:00")
+				}
 			}
 		}
 
@@ -1375,6 +1434,10 @@ func (c *Client) Close() error {
 	// connections we just force-closed, which makes them return with
 	// errors and exit cleanly.
 	c.repairPool.Stop()
+
+	if c.bw != nil {
+		c.bw.Close()
+	}
 
 	c.logger.Info().
 		Int("total_closed", totalClosed).
