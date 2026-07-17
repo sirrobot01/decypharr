@@ -54,10 +54,12 @@ type SegmentCache struct {
 	// Hard-disk budget. The sliding-window sweeper does the routine eviction
 	// work; drainOverBudget is the backstop if pinned-segment count or burst
 	// inflow pushes curDisk past maxDisk anyway.
-	maxDisk     int64
-	curDisk     atomic.Int64
-	evictSignal chan struct{}
-	evictWg     sync.WaitGroup
+	maxDisk      int64
+	curDisk      atomic.Int64
+	evictSignal  chan struct{}
+	evictMu      sync.Mutex          // serializes hard-budget scans and hole punching
+	evictScratch []evictionCandidate // reused by findEvictableBatch under evictMu
+	evictWg      sync.WaitGroup
 
 	// Sliding-window state. See sweepWindow for the policy.
 	maxConsumedOff atomic.Int64
@@ -744,6 +746,15 @@ func (sc *SegmentCache) drainOverBudget() {
 	if sc.maxDisk <= 0 {
 		return
 	}
+
+	// StreamWriter, Put, and the background evictor can all notice the same
+	// overshoot concurrently. Let one caller do the scan and punching while
+	// the others wait; once they acquire the lock the budget is normally
+	// already satisfied. Without this guard, N concurrent segment completions
+	// can each scan the full segment table and race to evict the same batch.
+	sc.evictMu.Lock()
+	defer sc.evictMu.Unlock()
+
 	for sc.curDisk.Load() > sc.maxDisk {
 		batch := sc.findEvictableBatch(segmentSweepBatch)
 		if len(batch) == 0 {
@@ -753,14 +764,25 @@ func (sc *SegmentCache) drainOverBudget() {
 	}
 }
 
+type evictionCandidate struct {
+	idx int
+	t   int64
+}
+
 // findEvictableBatch returns up to maxN unpinned OnDisk segments, sorted
-// oldest-first by access time. Used by drainOverBudget only.
+// oldest-first by access time. Used by drainOverBudget only, with evictMu
+// held. The scratch slice is retained so repeated budget checks do not create
+// a large allocation-and-GC cycle; its size follows the number of actually
+// cached segments, not the total NZB segment count.
 func (sc *SegmentCache) findEvictableBatch(maxN int) []int {
-	type cand struct {
-		idx int
-		t   int64
+	if maxN <= 0 {
+		return nil
 	}
-	cands := make([]cand, 0, maxN*2)
+
+	cands := sc.evictScratch[:0]
+	if cands == nil {
+		cands = make([]evictionCandidate, 0, min(maxN*2, sc.segCount))
+	}
 	for i := 0; i < sc.segCount; i++ {
 		if sc.pinCounts[i].Load() > 0 {
 			continue
@@ -768,19 +790,23 @@ func (sc *SegmentCache) findEvictableBatch(maxN int) []int {
 		if SegmentState(sc.states[i].Load()) != StateOnDisk {
 			continue
 		}
-		cands = append(cands, cand{i, sc.accessTime[i].Load()})
+		cands = append(cands, evictionCandidate{i, sc.accessTime[i].Load()})
 	}
 	if len(cands) == 0 {
+		sc.evictScratch = cands
 		return nil
 	}
-	sort.Slice(cands, func(a, b int) bool { return cands[a].t < cands[b].t })
-	if len(cands) > maxN {
-		cands = cands[:maxN]
-	}
-	out := make([]int, len(cands))
-	for i, c := range cands {
+	sort.Slice(cands, func(a, b int) bool {
+		if cands[a].t != cands[b].t {
+			return cands[a].t < cands[b].t
+		}
+		return cands[a].idx < cands[b].idx
+	})
+	out := make([]int, min(len(cands), maxN))
+	for i, c := range cands[:len(out)] {
 		out[i] = c.idx
 	}
+	sc.evictScratch = cands[:0]
 	return out
 }
 

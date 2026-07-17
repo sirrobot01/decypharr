@@ -3,10 +3,7 @@ package buffer
 import (
 	"sync"
 	"sync/atomic"
-	"time"
 )
-
-func nowNano() int64 { return time.Now().UnixNano() }
 
 // Pool is the buffer service: it owns a RAM budget and a disk limit shared
 // across every Buffer it hands out, plus the eviction policy that enforces
@@ -177,7 +174,7 @@ func (p *Pool) wouldExceedMemory() bool {
 	return b > 0 && p.memInUse.Load()+int64(blockSize) > b
 }
 
-func (p *Pool) addBlock()         { p.memInUse.Add(int64(blockSize)) }
+func (p *Pool) addBlock() { p.memInUse.Add(int64(blockSize)) }
 func (p *Pool) dropBytes(n int64) {
 	if n > 0 {
 		p.memInUse.Add(-n)

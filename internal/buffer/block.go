@@ -3,12 +3,9 @@ package buffer
 // block is a fixed-size in-memory cache entry covering a single blockSize
 // region of the buffer. Blocks are aligned: blk.off % blockSize == 0.
 //
-// Dirty tracking uses a single contiguous range [dirtyLo, dirtyHi). For
-// strictly-sequential writes within a block (the common case for streaming
-// downloads) this stays accurate without over-flushing. Non-contiguous
-// writes trigger an early flush of the current dirty range before the
-// new write so we never persist arbitrary block contents — only bytes
-// that have actually been written.
+// Dirty tracking retains exact byte ranges so interleaved writers can update
+// separate parts of one block without forcing synchronous intermediate
+// flushes. Only bytes actually written are persisted.
 //
 // Block memory comes from the owning Buffer's blockAllocator (mmap-backed
 // on Linux; see alloc.go).
@@ -17,57 +14,92 @@ type block struct {
 	data []byte // exactly blockSize bytes
 
 	// bufPtr is the exact *[]byte returned by blockAllocator.get() so that
-	// dropBlockLocked can put it back unambiguously. Storing it avoids
-	// the &blk.data trick, which puts a pointer-to-struct-field into
-	// the pool and only happens to work because the underlying array
-	// stays alive — fragile to layout changes.
+	// dropBlockLocked can put it back unambiguously.
 	bufPtr *[]byte
 
-	// Dirty tracking. -1/-1 means clean (nothing to flush).
-	// Otherwise [dirtyLo, dirtyHi) is the byte range inside data that
-	// needs to be persisted to disk.
-	dirtyLo, dirtyHi int
-
-	// lastAccess is a coarse recency stamp (unix nanos) set when the block
-	// enters the LRU front. The LRU is write-order (reads don't touch it), so
-	// this is effectively the block's creation/write time — used only by the
-	// global-budget instrument to compare block recency across Buffers.
-	lastAccess int64
+	// Sorted, non-overlapping dirty byte ranges. Streaming blocks normally
+	// need at most two: the tail of one segment and the head of the next. Keep
+	// those inline so admitting a block does not add a heap allocation.
+	dirtyInline [2]dirtyExtent
+	dirty       []dirtyExtent
 
 	// LRU doubly-linked list pointers. Managed only by the Buffer under
 	// b.mu — never inspect from outside the cache layer.
 	prev, next *block
 }
 
+type dirtyExtent struct {
+	lo, hi int
+}
+
 // isClean reports whether the block has no pending disk write.
-func (blk *block) isClean() bool { return blk.dirtyLo < 0 }
+func (blk *block) isClean() bool { return len(blk.dirty) == 0 }
 
-// addDirty merges [lo, hi) into the block's dirty range. Returns false if
-// the new range is not contiguous with the existing dirty range — the
-// caller must flush the existing dirty range before applying the new write,
-// otherwise the flush would have to write bytes that were never touched.
-func (blk *block) addDirty(lo, hi int) (contiguous bool) {
-	if blk.dirtyLo < 0 {
-		blk.dirtyLo = lo
-		blk.dirtyHi = hi
-		return true
+func (blk *block) initDirty() { blk.dirty = blk.dirtyInline[:0] }
+
+// addDirty inserts [lo, hi) and merges overlaps and adjacent extents.
+func (blk *block) addDirty(lo, hi int) {
+	if hi <= lo {
+		return
 	}
-	// Adjacent or overlapping (allow touching boundaries: lo == dirtyHi or
-	// hi == dirtyLo merges cleanly).
-	if lo <= blk.dirtyHi && hi >= blk.dirtyLo {
-		if lo < blk.dirtyLo {
-			blk.dirtyLo = lo
+	for i := range blk.dirty {
+		ext := &blk.dirty[i]
+		if hi < ext.lo {
+			blk.dirty = append(blk.dirty, dirtyExtent{})
+			copy(blk.dirty[i+1:], blk.dirty[i:])
+			blk.dirty[i] = dirtyExtent{lo: lo, hi: hi}
+			return
 		}
-		if hi > blk.dirtyHi {
-			blk.dirtyHi = hi
+		if lo > ext.hi {
+			continue
 		}
-		return true
+		if lo < ext.lo {
+			ext.lo = lo
+		}
+		if hi > ext.hi {
+			ext.hi = hi
+		}
+		j := i + 1
+		for j < len(blk.dirty) && blk.dirty[j].lo <= ext.hi {
+			if blk.dirty[j].hi > ext.hi {
+				ext.hi = blk.dirty[j].hi
+			}
+			j++
+		}
+		if j > i+1 {
+			copy(blk.dirty[i+1:], blk.dirty[j:])
+			blk.dirty = blk.dirty[:len(blk.dirty)-(j-i-1)]
+		}
+		return
 	}
-	return false
+	blk.dirty = append(blk.dirty, dirtyExtent{lo: lo, hi: hi})
 }
 
-// clearDirty resets the dirty range to clean. Call after a successful flush.
-func (blk *block) clearDirty() {
-	blk.dirtyLo = -1
-	blk.dirtyHi = -1
+// removeDirty removes [lo, hi) from the dirty ranges.
+func (blk *block) removeDirty(lo, hi int) {
+	for i := 0; i < len(blk.dirty) && blk.dirty[i].lo < hi; {
+		ext := blk.dirty[i]
+		switch {
+		case ext.hi <= lo:
+			i++
+		case ext.lo >= lo && ext.hi <= hi:
+			copy(blk.dirty[i:], blk.dirty[i+1:])
+			blk.dirty = blk.dirty[:len(blk.dirty)-1]
+		case ext.lo < lo && ext.hi > hi:
+			blk.dirty[i].hi = lo
+			blk.dirty = append(blk.dirty, dirtyExtent{})
+			copy(blk.dirty[i+2:], blk.dirty[i+1:])
+			blk.dirty[i+1] = dirtyExtent{lo: hi, hi: ext.hi}
+			return
+		case ext.lo < lo:
+			blk.dirty[i].hi = lo
+			i++
+		default:
+			blk.dirty[i].lo = hi
+			i++
+		}
+	}
 }
+
+// clearDirty resets the dirty ranges while retaining their storage.
+func (blk *block) clearDirty() { blk.dirty = blk.dirty[:0] }

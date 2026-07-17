@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -32,8 +33,9 @@ type SegmentFetcher struct {
 	inFlightMu sync.Mutex
 
 	// Background prefetch
-	prefetchCh chan int
-	prefetchWg sync.WaitGroup
+	prefetchCh     chan int
+	prefetchQueued []atomic.Uint64 // one deduplication bit per segment
+	prefetchWg     sync.WaitGroup
 
 	// Lifecycle
 	ctx    context.Context
@@ -71,8 +73,12 @@ func NewSegmentFetcher(
 		semaphore:  make(chan struct{}, maxConns),
 		inFlight:   make(map[int]*fetchPromise),
 		prefetchCh: make(chan int, 256), // Buffer for prefetch hints
-		ctx:        ctx,
-		cancel:     cancel,
+		// A packed atomic bitmap keeps duplicate suppression cheap even for
+		// very large NZBs: 100k segments consume about 12 KiB, versus roughly
+		// 400 KiB for one atomic.Bool per segment.
+		prefetchQueued: make([]atomic.Uint64, (cache.SegmentCount()+63)/64),
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 
 	// Start fewer prefetch workers than foreground connection slots. Seeky
@@ -255,6 +261,32 @@ func (sf *SegmentFetcher) doFetch(ctx context.Context, segIdx int) error {
 	return nil
 }
 
+func (sf *SegmentFetcher) markPrefetchQueued(segIdx int) bool {
+	if segIdx < 0 || segIdx >= sf.cache.SegmentCount() {
+		return false
+	}
+	word := &sf.prefetchQueued[segIdx>>6]
+	mask := uint64(1) << uint(segIdx&63)
+	for {
+		old := word.Load()
+		if old&mask != 0 {
+			return false
+		}
+		if word.CompareAndSwap(old, old|mask) {
+			return true
+		}
+	}
+}
+
+func (sf *SegmentFetcher) clearPrefetchQueued(segIdx int) {
+	if segIdx < 0 || segIdx >= sf.cache.SegmentCount() {
+		return
+	}
+	word := &sf.prefetchQueued[segIdx>>6]
+	mask := uint64(1) << uint(segIdx&63)
+	word.And(^mask)
+}
+
 // QueuePrefetch adds a segment to the background prefetch queue (non-blocking).
 func (sf *SegmentFetcher) QueuePrefetch(segIdx int) {
 	// Check if already cached
@@ -262,11 +294,18 @@ func (sf *SegmentFetcher) QueuePrefetch(segIdx int) {
 	if state == StateOnDisk || state == StateFetching {
 		return
 	}
+	// State remains Empty while a hint is waiting in prefetchCh. Track that
+	// interval separately so frequent small ReadAt calls cannot enqueue the
+	// same read-ahead window hundreds of times and crowd useful hints out.
+	if !sf.markPrefetchQueued(segIdx) {
+		return
+	}
 
 	select {
 	case sf.prefetchCh <- segIdx:
 		// Queued successfully
 	default:
+		sf.clearPrefetchQueued(segIdx)
 		// Queue full, drop the hint
 		sf.stats.PrefetchMisses.Add(1)
 	}
@@ -292,6 +331,7 @@ func (sf *SegmentFetcher) prefetchWorker(id int) {
 				return
 			}
 			sf.prefetchOne(segIdx)
+			sf.clearPrefetchQueued(segIdx)
 		}
 	}
 }

@@ -417,19 +417,10 @@ func (b *Buffer) writeRegion(blockOff int64, lo, hi int, src []byte) error {
 	return err
 }
 
-// writeIntoBlockLocked copies src into a RAM-resident block's [lo, hi)
-// range, flushing first if the new write isn't contiguous with the
-// existing dirty range, then records presence. Caller holds b.mu.
+// writeIntoBlockLocked copies src into a RAM-resident block's [lo, hi),
+// records its exact dirty range, then records presence. Caller holds b.mu.
 func (b *Buffer) writeIntoBlockLocked(blk *block, lo, hi int, src []byte) error {
-	// If this write isn't contiguous with the existing dirty range, we
-	// must flush what's there before extending; otherwise the next flush
-	// would persist arbitrary block contents between the two.
-	if !blk.addDirty(lo, hi) {
-		if err := b.flushBlockLocked(blk); err != nil {
-			return err
-		}
-		blk.addDirty(lo, hi)
-	}
+	blk.addDirty(lo, hi)
 	copy(blk.data[lo:hi], src)
 	b.touchLocked(blk)
 	b.rangesInsert(blk.off+int64(lo), int64(hi-lo))
@@ -619,24 +610,11 @@ func (b *Buffer) discard(off, length int64) int64 {
 			b.dropBlockLocked(blk)
 			continue
 		}
-		// Partial discard within a block: trim the block's dirty range
-		// down to the surviving portion so we don't try to flush bytes
-		// the caller just said it doesn't care about.
-		if blk.dirtyLo >= 0 {
-			startInBlk := int(max(off-blkOff, 0))
-			endInBlk := int(min(end-blkOff, blockSize))
-			// Clip [dirtyLo, dirtyHi) by removing [startInBlk, endInBlk).
-			if startInBlk <= blk.dirtyLo && endInBlk >= blk.dirtyHi {
-				blk.clearDirty()
-			} else if startInBlk <= blk.dirtyLo && endInBlk > blk.dirtyLo {
-				blk.dirtyLo = endInBlk
-			} else if endInBlk >= blk.dirtyHi && startInBlk < blk.dirtyHi {
-				blk.dirtyHi = startInBlk
-			}
-			if blk.dirtyHi <= blk.dirtyLo {
-				blk.clearDirty()
-			}
-		}
+		// Partial discard within a block: trim every dirty extent so we
+		// don't later flush bytes the caller explicitly discarded.
+		startInBlk := int(max(off-blkOff, 0))
+		endInBlk := int(min(end-blkOff, blockSize))
+		blk.removeDirty(startInBlk, endInBlk)
 	}
 	removed := b.rangesRemove(off, length)
 	// Recompute fast-path state for every block this discard touched —
@@ -976,12 +954,11 @@ func (b *Buffer) acquireBlockLocked(blockOff int64) (*block, error) {
 	}
 
 	blk := &block{
-		off:     blockOff,
-		data:    buf,
-		bufPtr:  bufPtr,
-		dirtyLo: -1,
-		dirtyHi: -1,
+		off:    blockOff,
+		data:   buf,
+		bufPtr: bufPtr,
 	}
+	blk.initDirty()
 	b.blocks[blockOff] = blk
 	b.bytesInRAM += int64(blockSize)
 	b.pool.addBlock()
@@ -1050,12 +1027,13 @@ func (b *Buffer) flushBlockLocked(blk *block) error {
 	if blk.isClean() {
 		return nil
 	}
-	lo, hi := blk.dirtyLo, blk.dirtyHi
-	if _, err := b.file.WriteAt(blk.data[lo:hi], blk.off+int64(lo)); err != nil {
-		return fmt.Errorf("buffer: flush block %d [%d,%d): %w", blk.off, lo, hi, err)
+	for _, ext := range blk.dirty {
+		if _, err := b.file.WriteAt(blk.data[ext.lo:ext.hi], blk.off+int64(ext.lo)); err != nil {
+			return fmt.Errorf("buffer: flush block %d [%d,%d): %w", blk.off, ext.lo, ext.hi, err)
+		}
+		b.statsFlushes.Add(1)
 	}
 	blk.clearDirty()
-	b.statsFlushes.Add(1)
 	return nil
 }
 
@@ -1065,7 +1043,6 @@ func (b *Buffer) flushBlockLocked(blk *block) error {
 // -----------------------------------------------------------------------
 
 func (b *Buffer) pushFrontLocked(blk *block) {
-	blk.lastAccess = nowNano()
 	blk.prev = nil
 	blk.next = b.lruHead
 	if b.lruHead != nil {
