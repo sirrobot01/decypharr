@@ -43,10 +43,24 @@ const (
 	ffprobeTooLongRatioUnconfirmed = 2.5
 	ffprobeTooLongMinOverage       = 60 * time.Minute
 
-	// TOO SHORT: broken when under half the expected runtime and at least 15
-	// minutes short (truncated assembly).
+	// TOO SHORT: candidate for broken when under half the expected runtime and
+	// at least 15 minutes short. On its own this is only metadata-level
+	// evidence: ffprobe reads duration from the container header, which
+	// survives a truncated assembly intact and still reports the encoded
+	// length rather than however much of the stream is actually readable. So
+	// a too-short ratio here is corroborated with a tail read (tailIntact)
+	// before anything is marked broken - it's only trusted as "truncated
+	// assembly" when that tail read also fails; otherwise the file plays to
+	// its own recorded end and the mismatch is Arr metadata being wrong
+	// (as-aired combined runtime, extended-cut listing) rather than the file.
 	ffprobeTooShortRatio    = 0.5
 	ffprobeTooShortMinUnder = 15 * time.Minute
+
+	// ffprobeTailWindow is the span of stream tail demuxed by tailIntact to
+	// corroborate a too-short verdict: packets are read starting this long
+	// before the probed duration, so a real end-of-stream packet lands in the
+	// window rather than being missed by seeking in too late.
+	ffprobeTailWindow = 30 * time.Second
 
 	// Ceiling-only thresholds used when no expected runtime is available.
 	ffprobeCeilingSonarr = 6 * time.Hour
@@ -88,12 +102,18 @@ type ffprobeChecker struct {
 	authToken string
 
 	logger zerolog.Logger
+
+	// tailIntactFn, when set, replaces the tailIntact method. Production
+	// code leaves this nil (check calls f.tailIntact directly); tests set it
+	// to corroborate a too-short verdict without shelling out to a real
+	// ffprobe process.
+	tailIntactFn func(ctx context.Context, entryFolder, fileName string, probed time.Duration) bool
 }
 
-// newFFProbeChecker builds a checker for one sweep run, or returns nil (with
+// newFFProbeChecker builds a checker for one repair sweep run, or returns nil (with
 // exactly one WARN) when ffprobe_check is enabled but can't actually be used:
 // binary missing, or WebDAV disabled. Callers must treat nil as "proceed
-// STAT-only" rather than failing the sweep.
+// STAT-only" rather than failing the repair sweep.
 func newFFProbeChecker(cfg *config.Config, m *Manager, log zerolog.Logger) *ffprobeChecker {
 	if !cfg.Repair.FFProbeCheck {
 		return nil
@@ -102,11 +122,11 @@ func newFFProbeChecker(cfg *config.Config, m *Manager, log zerolog.Logger) *ffpr
 }
 
 // newImportFFProbeChecker builds a checker for the import-time gate
-// (Repair.FFProbeOnImport), independent of the sweep's own FFProbeCheck
+// (Repair.FFProbeOnImport), independent of the repair sweep's own FFProbeCheck
 // toggle - either can be on without the other. Shares every bit of binary
-// resolution, WebDAV/auth wiring, and timeout parsing with the sweep-side
+// resolution, WebDAV/auth wiring, and timeout parsing with the repair-sweep-side
 // checker via buildFFProbeChecker, and the resulting *ffprobeChecker's
-// check/checkConfirmed methods are exactly the ones the sweep uses - the
+// check/checkConfirmed methods are exactly the ones the repair sweep uses - the
 // import gate is a second caller of the same core, not a parallel
 // implementation.
 func newImportFFProbeChecker(cfg *config.Config, m *Manager, log zerolog.Logger) *ffprobeChecker {
@@ -159,6 +179,22 @@ func buildFFProbeChecker(cfg *config.Config, m *Manager, log zerolog.Logger) *ff
 	}
 }
 
+// probeTarget builds the WebDAV URL for entryFolder/fileName that both check
+// and tailIntact probe against.
+func (f *ffprobeChecker) probeTarget(entryFolder, fileName string) string {
+	return f.baseURL + EntryAllFolder + "/" + url.PathEscape(entryFolder) + "/" + url.PathEscape(fileName)
+}
+
+// probeArgs appends the shared -headers auth flag (if any) and the target
+// URL to args, so check and tailIntact only need to supply their own
+// probe-specific flags.
+func (f *ffprobeChecker) probeArgs(entryFolder, fileName string, args []string) []string {
+	if f.authToken != "" {
+		args = append(args, "-headers", "Authorization: Bearer "+f.authToken+"\r\n")
+	}
+	return append(args, f.probeTarget(entryFolder, fileName))
+}
+
 type ffprobeOutput struct {
 	Format struct {
 		Duration string `json:"duration"`
@@ -173,13 +209,7 @@ type ffprobeOutput struct {
 // inconclusive (ok=true) rather than broken - a slow cold read over Usenet
 // must never cause an auto-delete.
 func (f *ffprobeChecker) check(ctx context.Context, entryFolder, fileName string, expected expectedRuntime) (ok bool, reason string) {
-	target := f.baseURL + EntryAllFolder + "/" + url.PathEscape(entryFolder) + "/" + url.PathEscape(fileName)
-
-	args := []string{"-v", "error", "-print_format", "json", "-show_format", "-show_streams"}
-	if f.authToken != "" {
-		args = append(args, "-headers", "Authorization: Bearer "+f.authToken+"\r\n")
-	}
-	args = append(args, target)
+	args := f.probeArgs(entryFolder, fileName, []string{"-v", "error", "-print_format", "json", "-show_format", "-show_streams"})
 
 	cctx, cancel := context.WithTimeout(ctx, f.timeout)
 	defer cancel()
@@ -249,7 +279,20 @@ func (f *ffprobeChecker) check(ctx context.Context, entryFolder, fileName string
 		return false, fmt.Sprintf("%s: probe=%dm expected=%dm (%.1fx)", ffprobeReasonRuntimeMismatch, int(duration.Minutes()), int(expectedDur.Minutes()), ratio)
 	}
 	if ratio <= ffprobeTooShortRatio && expectedDur-duration >= ffprobeTooShortMinUnder {
-		return false, fmt.Sprintf("%s: probe=%dm expected=%dm (%.1fx)", ffprobeReasonRuntimeMismatch, int(duration.Minutes()), int(expectedDur.Minutes()), ratio)
+		tailFn := f.tailIntactFn
+		if tailFn == nil {
+			tailFn = f.tailIntact
+		}
+		if tailFn(ctx, entryFolder, fileName, duration) {
+			f.logger.Info().
+				Str("entry", entryFolder).
+				Str("file", fileName).
+				Int("probe_minutes", int(duration.Minutes())).
+				Int("expected_minutes", int(expectedDur.Minutes())).
+				Msg("Repair: runtime shorter than Arr metadata but stream is complete to its own header duration; treating as metadata mismatch (split release or as-aired special), not marking broken")
+			return true, ""
+		}
+		return false, fmt.Sprintf("%s: probe=%dm expected=%dm (%.1fx); tail_unreadable", ffprobeReasonRuntimeMismatch, int(duration.Minutes()), int(expectedDur.Minutes()), ratio)
 	}
 
 	// Grey zone: meaningfully different from expected but inside the safety
@@ -259,6 +302,82 @@ func (f *ffprobeChecker) check(ctx context.Context, entryFolder, fileName string
 		f.logger.Info().Str("entry", entryFolder).Str("file", fileName).Float64("ratio", ratio).Msg("Repair: ffprobe duration differs from expected but within tolerance; not marking broken")
 	}
 	return true, ""
+}
+
+type ffprobeTailOutput struct {
+	Packets []struct {
+		PtsTime string `json:"pts_time"`
+	} `json:"packets"`
+}
+
+// tailIntact corroborates a too-short verdict by demuxing a window of stream
+// near the probed duration's end and checking that a video packet actually
+// exists there. ffprobe's format duration comes from the container header,
+// which survives a truncated assembly and keeps reporting the encoded
+// length - so a short header duration alone doesn't prove the file is
+// broken. If the stream genuinely reads through to (near) that duration, the
+// short probe is a metadata mismatch (Arr's expected runtime is wrong), not
+// corruption.
+//
+// Like check, a context timeout or cancellation is treated as inconclusive
+// (true) rather than broken - never condemn a file because the corroborating
+// read itself ran out of time.
+func (f *ffprobeChecker) tailIntact(ctx context.Context, entryFolder, fileName string, probed time.Duration) bool {
+	start := probed - ffprobeTailWindow
+	if start < 0 {
+		start = 0
+	}
+	readSpan := ffprobeTailWindow + 15*time.Second
+	interval := fmt.Sprintf("%.0f%%+%.0f", start.Seconds(), readSpan.Seconds())
+
+	args := f.probeArgs(entryFolder, fileName, []string{
+		"-v", "error",
+		"-read_intervals", interval,
+		"-select_streams", "v:0",
+		"-show_entries", "packet=pts_time",
+		"-of", "json",
+	})
+
+	cctx, cancel := context.WithTimeout(ctx, f.timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(cctx, f.binPath, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+
+	if cctx.Err() != nil {
+		if errors.Is(cctx.Err(), context.DeadlineExceeded) {
+			f.logger.Debug().Str("entry", entryFolder).Str("file", fileName).Msg("Repair: ffprobe tail check timed out; treating as inconclusive")
+		}
+		return true
+	}
+	if runErr != nil {
+		return false
+	}
+
+	var out ffprobeTailOutput
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		return false
+	}
+
+	const nearEndTolerance = 45 * time.Second
+	for _, p := range out.Packets {
+		sec, err := strconv.ParseFloat(strings.TrimSpace(p.PtsTime), 64)
+		if err != nil {
+			continue
+		}
+		pts := time.Duration(sec * float64(time.Second))
+		diff := probed - pts
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff <= nearEndTolerance {
+			return true
+		}
+	}
+	return false
 }
 
 // checkConfirmed retries once before declaring a file broken: a transient
@@ -296,7 +415,7 @@ func firstLine(s string) string {
 
 // ffprobeCheckerCtxKey carries an optional *ffprobeChecker down through the
 // probe call chain (probeAndHealCandidates -> probeEntry -> probeFiles ->
-// probeFile), which is shared by the timed sweep, the on-demand sweep, and
+// probeFile), which is shared by the timed repair sweep, the on-demand repair sweep, and
 // ad-hoc series/movie rechecks alike - a context value avoids threading a new
 // parameter through every layer for what is, for two of those three
 // call-sites, almost always nil.
@@ -317,7 +436,7 @@ func ffprobeCheckerFromContext(ctx context.Context) *ffprobeChecker {
 // attachFFProbeChecker builds an ffprobe checker for this run when enabled
 // and stores it on ctx for probeFile to pick up. newFFProbeChecker itself
 // logs the one WARN when the flag is on but unusable (missing binary,
-// WebDAV disabled); either way the sweep proceeds STAT-only.
+// WebDAV disabled); either way the repair sweep proceeds STAT-only.
 func (r *Repair) attachFFProbeChecker(ctx context.Context, log zerolog.Logger) context.Context {
 	cfg := config.Get()
 	checker := newFFProbeChecker(cfg, r.manager, log)

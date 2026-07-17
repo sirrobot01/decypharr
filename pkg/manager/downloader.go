@@ -180,13 +180,13 @@ func (d *Downloader) importFFProbeChecker() *ffprobeChecker {
 // ffprobeImportGate validates a newly-completed download with ffprobe before
 // it's reported to the Arr as done. A file confirmed broken (two consecutive
 // ffprobe failures - see ffprobeChecker.checkConfirmed, the same retry-once
-// policy the sweep uses) fails the import instead of completing it, so the
+// policy the repair sweep uses) fails the import instead of completing it, so the
 // existing "download failed" propagation blocklists the release and lets the
 // Arr grab another candidate - the same path today's parse/download failures
 // already take, no new rejection machinery.
 //
 // Deliberately conservative, because wrongly rejecting a good release here is
-// worse than letting a bad file through to the sweep, which will still catch
+// worse than letting a bad file through to the repair sweep, which will still catch
 // it: a timeout or a cancelled context is inconclusive and lets the import
 // proceed, a missing ffprobe binary or disabled WebDAV lets it proceed (after
 // one WARN, see importFFProbeChecker), and any unexpected error from the gate
@@ -196,7 +196,7 @@ func (d *Downloader) importFFProbeChecker() *ffprobeChecker {
 // Only checks structural health - container parses, a video stream exists, a
 // sane duration - plus a category-based ceiling (6h for a Sonarr grab, 12h
 // otherwise), since there's no Arr ContentFile mapping yet to compare a
-// precise expected runtime against. That comparison remains the sweep's job,
+// precise expected runtime against. That comparison remains the repair sweep's job,
 // which runs after the Arr has already imported the file.
 //
 // The whole function is wrapped in a recover(): a panic here must never take

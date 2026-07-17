@@ -211,12 +211,12 @@ type RepairConfig struct {
 	// already found broken: repaired if true, left alone if false.
 	StopSchedule string `json:"stop_schedule,omitempty"`
 
-	// FFProbeCheck, when true, additionally validates each file the sweep's STAT probe called
+	// FFProbeCheck, when true, additionally validates each file the repair sweep's STAT probe called
 	// healthy by running ffprobe against the local WebDAV endpoint. Catches files whose article
 	// headers still exist but whose assembled stream is unplayable: purged bodies, mis-assembled
 	// containers with bogus durations, and files with no decodable video/audio streams. Requires
 	// the ffprobe binary on PATH (or FFProbePath) and WebDAV enabled. Default off - it reads real
-	// bytes per file, so sweeps take longer and use provider bandwidth.
+	// bytes per file, so repair sweeps take longer and use provider bandwidth.
 	FFProbeCheck bool `json:"ffprobe_check,omitempty"`
 	// FFProbeTimeout bounds a single ffprobe invocation (e.g. "90s"). Default 90s.
 	FFProbeTimeout string `json:"ffprobe_timeout,omitempty"`
