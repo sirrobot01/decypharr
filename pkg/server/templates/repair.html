@@ -310,9 +310,15 @@
                 <i class="bi bi-bug text-error"></i>Broken entries
                 <span id="brokenModalCount" class="badge badge-error badge-sm">0</span>
             </h3>
-            <button id="refreshBrokenBtn" class="btn btn-outline btn-sm">
-                <i class="bi bi-arrow-clockwise mr-1"></i>Refresh
-            </button>
+            <div class="flex items-center gap-2">
+                <button id="clearSupersededBtn" class="btn btn-outline btn-sm"
+                        title="Check every broken entry against Sonarr/Radarr and remove ones already replaced by a working version">
+                    <i class="bi bi-recycle mr-1"></i>Clear replaced
+                </button>
+                <button id="refreshBrokenBtn" class="btn btn-outline btn-sm">
+                    <i class="bi bi-arrow-clockwise mr-1"></i>Refresh
+                </button>
+            </div>
         </div>
         <div class="overflow-x-auto">
             <table class="table table-hover">
