@@ -67,7 +67,7 @@ func (s *Server) handleAddContent(w http.ResponseWriter, r *http.Request) {
 	_arr := s.manager.Arr().Get(arrName)
 	if _arr == nil {
 		// These are not found in the config. They are throwaway arrs.
-		_arr = arr.New(arrName, "", "", false, false, downloadUncached, "", "")
+		_arr = arr.New(arrName, "", "", false, downloadUncached, "", "")
 	}
 
 	// Unified task type for all content types
@@ -525,13 +525,14 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	validArrs := make([]config.Arr, 0, len(newConfig.Arrs))
 	for _, a := range newConfig.Arrs {
 		if a.Name != "" && a.Host != "" && a.Token != "" {
+			if err := utils.ValidateURL(a.Host); err != nil {
+				http.Error(w, fmt.Sprintf("Invalid Arr host for %q: %v", a.Name, err), http.StatusBadRequest)
+				return
+			}
 			validArrs = append(validArrs, a)
 		}
 	}
 	newConfig.Arrs = validArrs
-
-	// Sync arr storage with the new configuration
-	s.manager.Arr().SyncFromConfig(newConfig.Arrs)
 
 	// Save the updated config. This also applies defaults to newConfig, so the
 	// restart comparison below sees a fully-normalized config on both sides.
@@ -549,6 +550,9 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		go s.Restart()
 	} else {
 		config.Get().ApplyRuntime(&newConfig)
+		// Expose Arr policy changes only after the complete configuration has
+		// been durably saved. A failed write must never enable cleanup.
+		s.manager.Arr().SyncFromConfig(newConfig.Arrs)
 		// Reschedule/reapply the repair sweep if its settings changed.
 		if svc := s.manager.Repair(); svc != nil {
 			if err := svc.ApplyConfig(); err != nil {

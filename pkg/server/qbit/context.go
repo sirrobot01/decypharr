@@ -147,16 +147,18 @@ func (q *QBit) authenticate(category, username, password string) (*arr.Arr, erro
 	a := q.manager.Arr().Get(category)
 	if a == nil {
 		// Arr is not yet in runtime storage — look for a matching config entry
-		// so we inherit its download_uncached setting. If no config match,
-		// leave nil so SendToDebrid falls back to the debrid provider's setting.
-		var downloadUncached *bool
-		for _, cfgArr := range config.Get().Arrs {
+		// so we inherit every Arr-scoped policy.
+		options := arr.Options{Source: arr.SourceAuto}
+		for _, cfgArr := range cfg.Arrs {
 			if cfgArr.Name == category {
-				downloadUncached = cfgArr.DownloadUncached
+				options.Cleanup = cfgArr.Cleanup
+				options.SkipRepair = cfgArr.SkipRepair
+				options.DownloadUncached = cfgArr.DownloadUncached
+				options.SelectedDebrid = cfgArr.SelectedDebrid
 				break
 			}
 		}
-		a = arr.New(category, username, password, false, false, downloadUncached, "", "auto")
+		a = arr.NewWithOptions(category, username, password, options)
 	}
 	arrValidated := false // This is a flag to indicate if arr validation was successful
 	if (username == "" || password == "") && cfg.UseAuth {

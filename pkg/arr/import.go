@@ -158,9 +158,18 @@ func (a *Arr) Import(downloadID string) (io.ReadCloser, error) {
 	query.Add("downloadId", downloadID)
 	url := "api/v3/manualimport" + "?" + query.Encode()
 	var data []ImportResponseSchema
-	_, err := a.Request(http.MethodGet, url, nil, &data)
+	resp, err := a.Request(http.MethodGet, url, nil, &data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to import: %w", err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("failed to import: manual import lookup returned no response")
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		if resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		return nil, fmt.Errorf("failed to import: manual import lookup returned %s", resp.Status)
 	}
 	var files []ManualImportRequestFile
 	for _, d := range data {
@@ -194,9 +203,18 @@ func (a *Arr) Import(downloadID string) (io.ReadCloser, error) {
 	}
 
 	url = "api/v3/command"
-	resp, err := a.Request(http.MethodPost, url, request, nil)
+	resp, err = a.Request(http.MethodPost, url, request, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to import: %w", err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("failed to import: manual import command returned no response")
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		if resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		return nil, fmt.Errorf("failed to import: manual import command returned %s", resp.Status)
 	}
 	return resp.Body, nil
 }

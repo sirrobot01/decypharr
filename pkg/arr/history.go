@@ -31,6 +31,12 @@ type queueDecision struct {
 type confirmedQueueDecision struct {
 	QueueSchema
 	queueDecision
+	Observation cleanupAttempt
+}
+
+type cleanupAttempt struct {
+	Condition string
+	FirstSeen time.Time
 }
 
 type cleanupObservation struct {
@@ -156,33 +162,46 @@ func (a *Arr) GetHistory(downloadId, eventType string) *HistorySchema {
 	return data
 }
 
-func (a *Arr) GetQueue() []QueueSchema {
+func (a *Arr) GetQueue() ([]QueueSchema, error) {
 	query := gourl.Values{}
 	query.Add("page", "1")
 	query.Add("pageSize", "200")
 	results := make([]QueueSchema, 0)
+	requestedPage := 1
 
 	for {
 		url := "api/v3/queue" + "?" + query.Encode()
 		var data QueueResponseScheme
 		resp, err := a.Request(http.MethodGet, url, nil, &data)
 		if err != nil {
-			break
+			return nil, fmt.Errorf("fetch queue page %d: %w", requestedPage, err)
 		}
-		if resp.StatusCode != http.StatusOK {
-			break
+		if resp == nil {
+			return nil, fmt.Errorf("fetch queue page %d: no response", requestedPage)
+		}
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			if resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+			return nil, fmt.Errorf("fetch queue page %d: %s", requestedPage, resp.Status)
 		}
 
 		results = append(results, data.Records...)
 
 		if len(results) >= data.TotalRecords {
-			break
+			return results, nil
 		}
 
-		query.Set("page", strconv.Itoa(data.Page+1))
+		if len(data.Records) == 0 {
+			return nil, fmt.Errorf("fetch queue page %d: incomplete response (%d of %d records)", requestedPage, len(results), data.TotalRecords)
+		}
+		nextPage := data.Page + 1
+		if nextPage <= requestedPage {
+			return nil, fmt.Errorf("fetch queue page %d: non-advancing page response %d", requestedPage, data.Page)
+		}
+		requestedPage = nextPage
+		query.Set("page", strconv.Itoa(requestedPage))
 	}
-
-	return results
 }
 
 // queueItemText returns the lowercased join of every statusMessages title and
@@ -284,7 +303,14 @@ func (a *Arr) confirmedDecisions(queue []QueueSchema, policy config.QueueCleanup
 
 		if !observation.Acted && observation.Sweeps >= requiredSweeps && now.Sub(observation.FirstSeen) >= requiredDelay {
 			observation.Acted = true
-			confirmed = append(confirmed, confirmedQueueDecision{QueueSchema: q, queueDecision: decision})
+			confirmed = append(confirmed, confirmedQueueDecision{
+				QueueSchema:   q,
+				queueDecision: decision,
+				Observation: cleanupAttempt{
+					Condition: observation.Condition,
+					FirstSeen: observation.FirstSeen,
+				},
+			})
 		}
 		a.cleanupObservations[q.Id] = observation
 	}
@@ -297,17 +323,24 @@ func (a *Arr) confirmedDecisions(queue []QueueSchema, policy config.QueueCleanup
 	return confirmed
 }
 
-func (a *Arr) retryCleanupDecisions(items map[int]bool) {
+func (a *Arr) retryCleanupDecisions(items map[int]cleanupAttempt) {
 	a.cleanupMu.Lock()
 	defer a.cleanupMu.Unlock()
-	for id := range items {
+	for id, attempt := range items {
 		observation, ok := a.cleanupObservations[id]
-		if !ok {
+		if !ok || observation.Condition != attempt.Condition || !observation.FirstSeen.Equal(attempt.FirstSeen) {
 			continue
 		}
 		observation.Acted = false
 		a.cleanupObservations[id] = observation
 	}
+}
+
+func addCleanupAttempt(grouped map[bool]map[int]cleanupAttempt, removeFromClient bool, decision confirmedQueueDecision) {
+	if grouped[removeFromClient] == nil {
+		grouped[removeFromClient] = make(map[int]cleanupAttempt)
+	}
+	grouped[removeFromClient][decision.Id] = decision.Observation
 }
 
 func (a *Arr) CleanupQueue() error {
@@ -318,28 +351,26 @@ func (a *Arr) CleanupQueue() error {
 		return nil
 	}
 	l := logger.New("arr")
-	policy := config.Get().QueueCleanup
+	policy := config.Get().SnapshotQueueCleanup()
 
-	queue := a.GetQueue()
-	blacklists := make(map[bool]map[int]bool)        // removeFromClient -> ids
-	blacklistResearch := make(map[bool]map[int]bool) // removeFromClient -> ids
-	manualImports := make(map[string]bool)           // force manual import
-	manualImportIDs := make(map[int]bool)
+	queue, err := a.GetQueue()
+	if err != nil {
+		return fmt.Errorf("queue cleanup poll failed: %w", err)
+	}
+	blacklists := make(map[bool]map[int]cleanupAttempt)        // removeFromClient -> attempts
+	blacklistResearch := make(map[bool]map[int]cleanupAttempt) // removeFromClient -> attempts
+	manualImports := make(map[string]map[int]cleanupAttempt)   // download ID -> queue attempts
 	for _, decision := range a.confirmedDecisions(queue, policy, time.Now()) {
 		switch decision.Action {
 		case QueueActionBlocklist:
-			if blacklists[decision.RemoveFromClient] == nil {
-				blacklists[decision.RemoveFromClient] = make(map[int]bool)
-			}
-			blacklists[decision.RemoveFromClient][decision.Id] = true
+			addCleanupAttempt(blacklists, decision.RemoveFromClient, decision)
 		case QueueActionBlocklistResearch:
-			if blacklistResearch[decision.RemoveFromClient] == nil {
-				blacklistResearch[decision.RemoveFromClient] = make(map[int]bool)
-			}
-			blacklistResearch[decision.RemoveFromClient][decision.Id] = true
+			addCleanupAttempt(blacklistResearch, decision.RemoveFromClient, decision)
 		case QueueActionImport:
-			manualImports[decision.DownloadId] = true
-			manualImportIDs[decision.Id] = true
+			if manualImports[decision.DownloadId] == nil {
+				manualImports[decision.DownloadId] = make(map[int]cleanupAttempt)
+			}
+			manualImports[decision.DownloadId][decision.Id] = decision.Observation
 		}
 	}
 
@@ -357,9 +388,11 @@ func (a *Arr) CleanupQueue() error {
 	}
 	if len(manualImports) > 0 {
 		go func() {
-			if err := a.ManualImportItems(manualImports); err != nil {
-				a.retryCleanupDecisions(manualImportIDs)
-				l.Error().Err(err).Str("arr", a.Name).Msg("queue cleanup: manual import failed")
+			for downloadID, attempts := range manualImports {
+				if err := a.manualImportItem(downloadID); err != nil {
+					a.retryCleanupDecisions(attempts)
+					l.Error().Err(err).Str("arr", a.Name).Str("download_id", downloadID).Msg("queue cleanup: manual import failed")
+				}
 			}
 		}()
 	}
@@ -434,7 +467,7 @@ func (a *Arr) MarkHistoryFailed(historyID int) error {
 // removeQueueItems bulk-removes queue items from the arr. removeFromClient
 // controls whether the download client's data is deleted; blocklist controls
 // whether releases are blocklisted; skipRedownload=false triggers a re-search.
-func (a *Arr) removeQueueItems(items map[int]bool, removeFromClient, blocklist, skipRedownload bool) error {
+func (a *Arr) removeQueueItems(items map[int]cleanupAttempt, removeFromClient, blocklist, skipRedownload bool) error {
 	queueIDs := make([]int, 0, len(items))
 	for id := range items {
 		queueIDs = append(queueIDs, id)
@@ -464,11 +497,23 @@ func (a *Arr) removeQueueItems(items map[int]bool, removeFromClient, blocklist, 
 	return nil
 }
 
+func (a *Arr) manualImportItem(downloadID string) error {
+	body, err := a.Import(downloadID)
+	if err != nil {
+		return err
+	}
+	if body != nil {
+		if err := body.Close(); err != nil {
+			return fmt.Errorf("close response: %w", err)
+		}
+	}
+	return nil
+}
+
 func (a *Arr) ManualImportItems(items map[string]bool) error {
 	var errs []error
 	for downloadId := range items {
-		_, err := a.Import(downloadId)
-		if err != nil {
+		if err := a.manualImportItem(downloadId); err != nil {
 			errs = append(errs, fmt.Errorf("import %s: %w", downloadId, err))
 		}
 	}

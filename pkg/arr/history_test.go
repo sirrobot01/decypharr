@@ -1,6 +1,7 @@
 package arr
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -35,8 +36,15 @@ func cleanupPolicy(ruleID, action string) config.QueueCleanup {
 	}
 }
 
+func newCleanupTestArr(host string, enabled bool) *Arr {
+	return NewWithOptions("radarr", host, "token", Options{
+		Cleanup: enabled,
+		Source:  SourceManual,
+	})
+}
+
 func TestConfirmedDecisionsRequiresSweepsAndDelay(t *testing.T) {
-	a := New("radarr", "", "", true, false, nil, "", "manual")
+	a := newCleanupTestArr("", true)
 	policy := cleanupPolicy("no_eligible_files", string(QueueActionBlocklistResearch))
 	q := queueItem(42, "completed", "warning", "No files found are eligible for import")
 	start := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
@@ -59,7 +67,7 @@ func TestConfirmedDecisionsRequiresSweepsAndDelay(t *testing.T) {
 }
 
 func TestConfirmedDecisionsResetWhenConditionDisappears(t *testing.T) {
-	a := New("radarr", "", "", true, false, nil, "", "manual")
+	a := newCleanupTestArr("", true)
 	policy := cleanupPolicy("failed_download", string(QueueActionBlocklistResearch))
 	q := queueItem(7, "failed", "error", "download failed")
 	start := time.Now()
@@ -74,7 +82,7 @@ func TestConfirmedDecisionsResetWhenConditionDisappears(t *testing.T) {
 }
 
 func TestConfirmedDecisionsResetWhenConditionChanges(t *testing.T) {
-	a := New("radarr", "", "", true, false, nil, "", "manual")
+	a := newCleanupTestArr("", true)
 	policy := config.QueueCleanup{
 		Rules: []config.QueueCleanupRule{
 			{ID: "no_eligible_files", Action: string(QueueActionBlocklistResearch)},
@@ -97,7 +105,7 @@ func TestConfirmedDecisionsResetWhenConditionChanges(t *testing.T) {
 }
 
 func TestNoEligibleFilesPreservesDownloadClientData(t *testing.T) {
-	a := New("radarr", "", "", true, false, nil, "", "manual")
+	a := newCleanupTestArr("", true)
 	policy := config.QueueCleanup{
 		Rules: []config.QueueCleanupRule{
 			{ID: "no_eligible_files", Action: string(QueueActionBlocklistResearch)},
@@ -118,7 +126,7 @@ func TestNoEligibleFilesPreservesDownloadClientData(t *testing.T) {
 }
 
 func TestFailedCleanupActionIsRearmed(t *testing.T) {
-	a := New("radarr", "", "", true, false, nil, "", "manual")
+	a := newCleanupTestArr("", true)
 	policy := config.QueueCleanup{
 		Rules: []config.QueueCleanupRule{
 			{ID: "failed_download", Action: string(QueueActionBlocklistResearch)},
@@ -133,7 +141,11 @@ func TestFailedCleanupActionIsRearmed(t *testing.T) {
 		t.Fatalf("initial confirmed action = %+v", got)
 	}
 
-	a.retryCleanupDecisions(map[int]bool{q.Id: true})
+	observation := a.cleanupObservations[q.Id]
+	a.retryCleanupDecisions(map[int]cleanupAttempt{q.Id: {
+		Condition: observation.Condition,
+		FirstSeen: observation.FirstSeen,
+	}})
 	if got := a.confirmedDecisions([]QueueSchema{q}, policy, start.Add(2*time.Nanosecond)); len(got) != 1 {
 		t.Fatalf("failed action was not rearmed: %+v", got)
 	}
@@ -146,7 +158,7 @@ func TestCleanupQueueDisabledMakesNoRequests(t *testing.T) {
 	}))
 	defer server.Close()
 
-	a := New("radarr", server.URL, "token", false, false, nil, "", "manual")
+	a := newCleanupTestArr(server.URL, false)
 	if err := a.CleanupQueue(); err != nil {
 		t.Fatalf("CleanupQueue: %v", err)
 	}
@@ -169,8 +181,8 @@ func TestRemoveQueueItemsCanPreserveClientData(t *testing.T) {
 	}))
 	defer server.Close()
 
-	a := New("radarr", server.URL, "token", true, false, nil, "", "manual")
-	if err := a.removeQueueItems(map[int]bool{123: true}, false, true, false); err != nil {
+	a := newCleanupTestArr(server.URL, true)
+	if err := a.removeQueueItems(map[int]cleanupAttempt{123: {}}, false, true, false); err != nil {
 		t.Fatalf("removeQueueItems: %v", err)
 	}
 	if gotRemove != "false" || gotBlocklist != "true" || gotResearch != "false" {
@@ -180,13 +192,190 @@ func TestRemoveQueueItemsCanPreserveClientData(t *testing.T) {
 
 func TestRemoveQueueItemsRejectsHTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "temporary failure", http.StatusServiceUnavailable)
+		http.Error(w, "invalid request", http.StatusBadRequest)
 	}))
 	defer server.Close()
 
-	a := New("radarr", server.URL, "token", true, false, nil, "", "manual")
-	if err := a.removeQueueItems(map[int]bool{123: true}, true, true, false); err == nil {
-		t.Fatal("removeQueueItems accepted an HTTP 503 response")
+	a := newCleanupTestArr(server.URL, true)
+	if err := a.removeQueueItems(map[int]cleanupAttempt{123: {}}, true, true, false); err == nil {
+		t.Fatal("removeQueueItems accepted an HTTP 400 response")
+	}
+}
+
+func TestRetryCleanupDecisionIgnoresStaleObservation(t *testing.T) {
+	a := newCleanupTestArr("", true)
+	current := cleanupObservation{
+		Condition: "new-condition",
+		FirstSeen: time.Now(),
+		Sweeps:    3,
+		Acted:     true,
+	}
+	a.cleanupObservations[42] = current
+
+	a.retryCleanupDecisions(map[int]cleanupAttempt{42: {
+		Condition: "old-condition",
+		FirstSeen: current.FirstSeen.Add(-time.Minute),
+	}})
+
+	if got := a.cleanupObservations[42]; !got.Acted {
+		t.Fatal("stale async failure rearmed a newer cleanup observation")
+	}
+}
+
+func TestGetQueueRejectsHTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "bad request", http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	a := newCleanupTestArr(server.URL, true)
+	if queue, err := a.GetQueue(); err == nil || queue != nil {
+		t.Fatalf("GetQueue accepted an HTTP 400 response: queue=%+v err=%v", queue, err)
+	}
+}
+
+func TestGetQueueRejectsIncompletePagination(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := QueueResponseScheme{Page: 2, PageSize: 200, TotalRecords: 2}
+		if r.URL.Query().Get("page") == "1" {
+			response.Page = 1
+			response.Records = []QueueSchema{{Id: 1}}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	a := newCleanupTestArr(server.URL, true)
+	if queue, err := a.GetQueue(); err == nil || queue != nil {
+		t.Fatalf("GetQueue returned a partial sweep: queue=%+v err=%v", queue, err)
+	}
+}
+
+func TestManualImportItemsRejectsLookupHTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v3/manualimport" {
+			http.Error(w, "invalid lookup", http.StatusBadRequest)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	a := newCleanupTestArr(server.URL, true)
+	if err := a.ManualImportItems(map[string]bool{"download-id": true}); err == nil {
+		t.Fatal("ManualImportItems accepted an HTTP 400 lookup response")
+	}
+}
+
+func TestManualImportItemsRejectsCommandHTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/manualimport":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte("[]"))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v3/command":
+			http.Error(w, "invalid import", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	a := newCleanupTestArr(server.URL, true)
+	if err := a.ManualImportItems(map[string]bool{"download-id": true}); err == nil {
+		t.Fatal("ManualImportItems accepted an HTTP 400 command response")
+	}
+}
+
+func TestCleanupQueueRearmsOnlyFailedDownloadImport(t *testing.T) {
+	config.SetConfigPath(t.TempDir())
+	liveConfig := config.Get()
+	originalConfig := *liveConfig
+	originalConfig.QueueCleanup.Rules = append([]config.QueueCleanupRule(nil), liveConfig.QueueCleanup.Rules...)
+	policy := config.QueueCleanup{
+		Rules: []config.QueueCleanupRule{{
+			ID:     "failed_download",
+			Action: string(QueueActionImport),
+		}},
+		ConfirmationSweeps: 1,
+		ConfirmationDelay:  "1ns",
+	}
+	updatedConfig := originalConfig
+	updatedConfig.QueueCleanup = policy
+	liveConfig.ApplyRuntime(&updatedConfig)
+	defer liveConfig.ApplyRuntime(&originalConfig)
+
+	failed := queueItem(301, "failed", "error", "download failed")
+	failed.DownloadId = "failed-download"
+	succeeded := queueItem(302, "failed", "error", "download failed")
+	succeeded.DownloadId = "successful-download"
+	queue := []QueueSchema{failed, succeeded}
+
+	processed := make(chan string, len(queue))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/queue":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(QueueResponseScheme{
+				Page:         1,
+				PageSize:     200,
+				TotalRecords: len(queue),
+				Records:      queue,
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/manualimport":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]ImportResponseSchema{{Path: "/download/file.mkv"}})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v3/command":
+			var request ManualImportRequestSchema
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Files) != 1 {
+				http.Error(w, "invalid command", http.StatusBadRequest)
+				return
+			}
+			downloadID := request.Files[0].DownloadId
+			if downloadID == failed.DownloadId {
+				http.Error(w, "invalid import", http.StatusBadRequest)
+			} else {
+				w.WriteHeader(http.StatusOK)
+			}
+			processed <- downloadID
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	a := newCleanupTestArr(server.URL, true)
+	_ = a.confirmedDecisions(queue, policy, time.Now().Add(-time.Second))
+	if err := a.CleanupQueue(); err != nil {
+		t.Fatalf("CleanupQueue: %v", err)
+	}
+
+	seen := make(map[string]bool, len(queue))
+	for len(seen) < len(queue) {
+		select {
+		case downloadID := <-processed:
+			seen[downloadID] = true
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for manual imports: seen=%v", seen)
+		}
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		a.cleanupMu.Lock()
+		failedActed := a.cleanupObservations[failed.Id].Acted
+		succeededActed := a.cleanupObservations[succeeded.Id].Acted
+		a.cleanupMu.Unlock()
+		if !failedActed && succeededActed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("unexpected rearm state: failed acted=%v successful acted=%v", failedActed, succeededActed)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

@@ -56,6 +56,7 @@ var (
 	instance   *Config
 	once       sync.Once
 	configPath string
+	runtimeMu  sync.RWMutex
 )
 
 // QBitTorrent is deprecated. Use Manager instead.
@@ -777,9 +778,21 @@ func (c *Config) RequiresRestart(n *Config) bool {
 // Only call this when RequiresRestart(n) is false: the cold fields are then
 // identical between c and n, so this effectively updates just the hot fields.
 func (c *Config) ApplyRuntime(n *Config) {
+	runtimeMu.Lock()
+	defer runtimeMu.Unlock()
 	auth := c.Auth
 	*c = *n
 	c.Auth = auth
+}
+
+// SnapshotQueueCleanup returns an immutable policy copy for a complete cleanup
+// sweep while ApplyRuntime may replace the live configuration.
+func (c *Config) SnapshotQueueCleanup() QueueCleanup {
+	runtimeMu.RLock()
+	defer runtimeMu.RUnlock()
+	policy := c.QueueCleanup
+	policy.Rules = append([]QueueCleanupRule(nil), c.QueueCleanup.Rules...)
+	return policy
 }
 
 func (c *Config) createConfig() error {

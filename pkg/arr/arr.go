@@ -69,17 +69,37 @@ type Arr struct {
 	cleanupObservations map[int]cleanupObservation
 }
 
-func New(name, host, token string, cleanup, skipRepair bool, downloadUncached *bool, selectedDebrid, source string) *Arr {
+// Options contains behavior flags for an Arr. Keeping policy flags out of the
+// positional constructor avoids changing its public contract as policies grow.
+type Options struct {
+	Cleanup          bool
+	SkipRepair       bool
+	DownloadUncached *bool
+	SelectedDebrid   string
+	Source           Source
+}
+
+// New preserves the original constructor contract for existing callers.
+func New(name, host, token string, skipRepair bool, downloadUncached *bool, selectedDebrid, source string) *Arr {
+	return NewWithOptions(name, host, token, Options{
+		SkipRepair:       skipRepair,
+		DownloadUncached: downloadUncached,
+		SelectedDebrid:   selectedDebrid,
+		Source:           Source(source),
+	})
+}
+
+func NewWithOptions(name, host, token string, options Options) *Arr {
 	return &Arr{
 		Name:                name,
 		Host:                host,
 		Token:               strings.TrimSpace(token),
 		Type:                inferType(host, name),
-		Cleanup:             cleanup,
-		SkipRepair:          skipRepair,
-		DownloadUncached:    downloadUncached,
-		SelectedDebrid:      selectedDebrid,
-		Source:              Source(source),
+		Cleanup:             options.Cleanup,
+		SkipRepair:          options.SkipRepair,
+		DownloadUncached:    options.DownloadUncached,
+		SelectedDebrid:      options.SelectedDebrid,
+		Source:              options.Source,
 		cleanupObservations: make(map[int]cleanupObservation),
 	}
 }
@@ -183,7 +203,13 @@ func NewStorage() *Storage {
 			continue // Skip if host or token is not set
 		}
 		name := a.Name
-		as := New(name, a.Host, a.Token, a.Cleanup, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid, a.Source)
+		as := NewWithOptions(name, a.Host, a.Token, Options{
+			Cleanup:          a.Cleanup,
+			SkipRepair:       a.SkipRepair,
+			DownloadUncached: a.DownloadUncached,
+			SelectedDebrid:   a.SelectedDebrid,
+			Source:           Source(a.Source),
+		})
 		if utils.ValidateURL(as.Host) != nil {
 			continue
 		}
@@ -210,7 +236,7 @@ func (s *Storage) GetOrCreate(name string) *Arr {
 	}
 	arr, exists := s.arrs.Load(name)
 	if !exists {
-		return New(name, "", "", false, false, nil, "", "manual")
+		return New(name, "", "", false, nil, "", "manual")
 	}
 	return arr
 }
@@ -280,27 +306,47 @@ func (s *Storage) SyncToConfig() []config.Arr {
 }
 
 func (s *Storage) SyncFromConfig(arrs []config.Arr) {
-	newMaps := xsync.NewMap[string, *Arr]()
+	desired := xsync.NewMap[string, *Arr]()
 	for _, a := range arrs {
-		newMaps.Store(a.Name, New(a.Name, a.Host, a.Token, a.Cleanup, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid, a.Source))
+		desired.Store(a.Name, NewWithOptions(a.Name, a.Host, a.Token, Options{
+			Cleanup:          a.Cleanup,
+			SkipRepair:       a.SkipRepair,
+			DownloadUncached: a.DownloadUncached,
+			SelectedDebrid:   a.SelectedDebrid,
+			Source:           Source(a.Source),
+		}))
 	}
 
-	// AddOrUpdate or update arrs from config
+	// Preserve auto-detected Arrs that are not represented in config. Removed
+	// manual/configured Arrs must disappear immediately, especially when they
+	// had destructive queue cleanup enabled.
 	s.arrs.Range(func(name string, arr *Arr) bool {
-		if ac, ok := newMaps.Load(name); ok {
+		if ac, ok := desired.Load(name); ok {
 			// Update existing arr with new config values.
 			// Only preserve the resolved host from memory if the new host is invalid.
-			if utils.ValidateURL(ac.Host) == nil {
+			if utils.ValidateURL(ac.Host) != nil {
 				ac.Host = arr.Host
 			}
 			ac.Token = cmp.Or(ac.Token, arr.Token)
-			newMaps.Store(name, ac)
-		} else {
-			newMaps.Store(name, arr)
+			desired.Store(name, ac)
+		} else if arr.Source == SourceAuto {
+			desired.Store(name, arr)
 		}
 		return true
 	})
-	s.arrs = newMaps
+
+	// Mutate the concurrent map in place: Monitor and request handlers may hold
+	// and use this map while a hot configuration update is being applied.
+	s.arrs.Range(func(name string, _ *Arr) bool {
+		if _, ok := desired.Load(name); !ok {
+			s.arrs.Delete(name)
+		}
+		return true
+	})
+	desired.Range(func(name string, arr *Arr) bool {
+		s.arrs.Store(name, arr)
+		return true
+	})
 }
 
 func (s *Storage) Monitor() {
