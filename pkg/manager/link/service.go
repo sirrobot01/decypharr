@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/rs/zerolog"
@@ -107,6 +108,13 @@ func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, fi
 	// Check if we've already validated this link
 	if validationErr, exists := s.validated.Load(link.DownloadLink); exists {
 		if validationErr == nil {
+			// Re-fetch if the cached CDN URL has passed its declared expiry.
+			// Without this check a 3-hour TorBox CDN URL would be served from
+			// s.validated forever — bypassing the HEAD validation that would
+			// otherwise catch the expired URL.
+			if !link.ExpiresAt.IsZero() && time.Now().After(link.ExpiresAt) {
+				return s.invalidateAndRefetch(ctx, entry, link, attempt)
+			}
 			return link, nil // Already validated successfully
 		}
 		// Previous validation failed - check if we should retry
@@ -145,8 +153,13 @@ func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, fi
 		}
 	}
 
-	// Store validation result
-	s.validated.Store(link.DownloadLink, validationErr)
+	// Only cache permanent/refetchable failures and successes.
+	// Retryable errors (502, 503, 429) must not be cached: a single transient
+	// failure would block all future reads for the file until the cache is
+	// explicitly cleared (account-disable or restart).
+	if linkErr := GetLinkError(validationErr); linkErr == nil || !linkErr.ShouldRetry() {
+		s.validated.Store(link.DownloadLink, validationErr)
+	}
 
 	if validationErr == nil {
 		return link, nil

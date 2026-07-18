@@ -478,29 +478,44 @@ func (tb *Torbox) GetDownloadLink(id string, file *types.File) (types.DownloadLi
 }
 
 func (tb *Torbox) fetchDownloadLink(account *account.Account, id string, file *types.File) (types.DownloadLink, error) {
-	query := url.Values{}
-	query.Set("token", account.Token)
-	query.Set("torrent_id", id)
-	query.Set("file_id", file.Id)
-	query.Set("redirect", "true")
+	var res DownloadLinksResponse
 
-	downloadURL := fmt.Sprintf("%s/api/torrents/requestdl?%s", tb.Host, query.Encode())
+	resp, err := tb.doGet("/api/torrents/requestdl", map[string]string{
+		"token":      account.Token,
+		"torrent_id": id,
+		"file_id":    file.Id,
+	}, &res)
+	if err != nil {
+		return types.DownloadLink{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return types.DownloadLink{}, fmt.Errorf("torbox requestdl error: HTTP %d", resp.StatusCode)
+	}
+	if !res.Success || res.Data == nil || *res.Data == "" {
+		return types.DownloadLink{}, fmt.Errorf("torbox: empty CDN URL from requestdl: %s", res.Detail)
+	}
+
+	// TorBox CDN URLs are valid for 3 hours. Never cache them longer than that
+	// regardless of the user's auto_expire_links_after setting, otherwise we
+	// serve stale URLs that return 403/404 from the CDN.
+	const torboxCDNExpiry = 3 * time.Hour
+	expiry := torboxCDNExpiry
+	if tb.autoExpiresLinksAfter > 0 && tb.autoExpiresLinksAfter < torboxCDNExpiry {
+		expiry = tb.autoExpiresLinksAfter
+	}
 
 	now := time.Now()
-
-	// Always expires
-	dl := types.DownloadLink{
+	return types.DownloadLink{
 		Filename:     file.Name,
 		Size:         file.Size,
 		Token:        tb.APIKey,
 		Link:         file.Link,
-		DownloadLink: downloadURL,
+		DownloadLink: *res.Data,
 		Debrid:       tb.config.Name,
 		Id:           file.Id,
 		Generated:    now,
-		ExpiresAt:    now.Add(tb.autoExpiresLinksAfter),
-	}
-	return dl, nil
+		ExpiresAt:    now.Add(expiry),
+	}, nil
 }
 
 func (tb *Torbox) GetTorrents() ([]*types.Torrent, error) {
