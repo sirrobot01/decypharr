@@ -27,6 +27,11 @@
                         </select>
                     </div>
                     <div class="flex gap-2">
+                        <button class="btn btn-outline btn-warning btn-sm hidden" id="staleNZBsBtn"
+                                title="Find NZB entries no Sonarr/Radarr references anymore">
+                            <i class="bi bi-recycle"></i>
+                            <span class="hidden sm:inline">Clean up stale NZBs</span>
+                        </button>
                         <button class="btn btn-outline btn-sm" id="refreshBtn">
                             <i class="bi bi-arrow-clockwise"></i>
                             <span class="hidden sm:inline">Refresh</span>
@@ -148,6 +153,91 @@
         <li id="contextDelete" class="hidden"><a class="text-error"><i class="bi bi-trash"></i> Delete Entry</a></li>
     </div>
 </div>
+
+<!-- Stale NZBs preview modal -->
+<dialog id="staleNZBsModal" class="modal">
+    <div class="modal-box max-w-4xl">
+        <form method="dialog">
+            <button class="btn btn-sm btn-circle btn-ghost absolute right-3 top-3" aria-label="Close">✕</button>
+        </form>
+        <h3 class="font-bold text-lg flex items-center gap-2 pr-10">
+            <i class="bi bi-recycle text-warning"></i>Clean up stale NZBs
+        </h3>
+        <div class="flex items-center justify-between gap-3 mt-1">
+            <p id="staleNZBsSummary" class="text-sm opacity-80 flex-1">Loading…</p>
+            <div id="staleNZBsProgress" class="hidden items-center gap-2 shrink-0">
+                <span id="staleNZBsProgressCount" class="text-xs opacity-70 whitespace-nowrap"></span>
+                <progress id="staleNZBsProgressBar" class="progress progress-primary w-24" value="0" max="100"></progress>
+            </div>
+        </div>
+
+        <div id="staleNZBsMajorityWarning" role="alert" class="alert alert-error mt-3 text-sm hidden">
+            <i class="bi bi-exclamation-octagon text-lg"></i>
+            <div>
+                <strong>More than half of your NZB library was flagged stale/orphaned.</strong>
+                That's unusual and may mean something is misclassifying entries rather than
+                your library actually being this stale — review the list carefully before
+                deleting anything, especially before using "Delete all".
+            </div>
+        </div>
+
+        <div role="alert" class="alert alert-warning mt-3 text-sm">
+            <i class="bi bi-exclamation-triangle text-lg"></i>
+            <div>
+                These entries are not referenced by any Sonarr/Radarr. This ALSO matches manually added
+                downloads that no Arr tracks — untick anything you added on purpose. A second list, orphaned
+                .nzb/.meta files with no database entry at all, is included below and preselected too.
+                Entries and files added or modified in the last 24 hours are excluded automatically.
+                Deletion cannot be undone.
+                <br>
+                <span class="opacity-70">If you use an rclone mount, rclone's own cache reclaims space on its schedule after cleanup.</span>
+            </div>
+        </div>
+
+        <div id="staleNZBsResult" class="alert mt-3 text-sm hidden"></div>
+
+        <div class="mt-3">
+            <input type="text" placeholder="Search by name..."
+                   class="input input-sm w-full"
+                   id="staleNZBsFilterInput">
+        </div>
+
+        <div class="flex items-center justify-between mt-4 mb-2">
+            <label class="label cursor-pointer gap-2 justify-start">
+                <input type="checkbox" class="checkbox checkbox-sm checkbox-primary" id="staleNZBsSelectAll" checked>
+                <span class="label-text">Select all / none</span>
+            </label>
+            <span id="staleNZBsSelectionSummary" class="text-xs opacity-70"></span>
+        </div>
+
+        <div class="overflow-x-auto max-h-96 overflow-y-auto border border-base-200 rounded-lg">
+            <table class="table table-hover table-sm">
+                <thead class="bg-base-200 sticky top-0">
+                <tr>
+                    <th class="w-8"></th>
+                    <th>Name</th>
+                    <th>Added</th>
+                    <th class="text-right">Local disk</th>
+                </tr>
+                </thead>
+                <tbody id="staleNZBsTableBody"></tbody>
+            </table>
+            <div id="staleNZBsEmpty" class="text-center py-12 hidden text-base-content/70">
+                <i class="bi bi-check2-circle text-3xl block mb-2 text-success"></i>
+                <span class="stale-nzb-empty-text">No stale NZB entries found.</span>
+            </div>
+        </div>
+
+        <div class="modal-action">
+            <button id="staleNZBsCancelBtn" class="btn btn-ghost">Cancel</button>
+            <button id="staleNZBsDeleteAllBtn" class="btn btn-outline btn-error">Delete all</button>
+            <button id="staleNZBsDeleteSelectedBtn" class="btn btn-error">Delete selected (0)</button>
+        </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
 
 <script>
     document.addEventListener('DOMContentLoaded', () => {

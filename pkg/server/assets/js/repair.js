@@ -24,6 +24,7 @@ class RepairManager {
         $('viewBrokenBtn')?.addEventListener('click', () => this.openBrokenModal());
         $('refreshHistoryBtn')?.addEventListener('click', () => this.loadHistory());
         $('refreshBrokenBtn')?.addEventListener('click', () => this.loadBroken());
+        $('clearSupersededBtn')?.addEventListener('click', () => this.clearSuperseded());
         $('clearHistoryBtn')?.addEventListener('click', () => this.clearHistory());
         $('runRepairForm')?.addEventListener('submit', (e) => {
             e.preventDefault();
@@ -245,6 +246,29 @@ class RepairManager {
             await this.loadStatus();
         } catch (e) {
             this.toast(`Run failed: ${e.message}`, 'error');
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    async clearSuperseded() {
+        const btn = document.getElementById('clearSupersededBtn');
+        if (btn) btn.disabled = true;
+        try {
+            const res = await fetch(`${this.api}/repair/clear-superseded`, {method: 'POST'});
+            const text = await res.text();
+            let data = null;
+            try {
+                data = text ? JSON.parse(text) : null;
+            } catch { /* leave null */
+            }
+            if (!res.ok) throw new Error((data && (data.error || data.message)) || text || `HTTP ${res.status}`);
+            const cleared = data?.cleared_entries ?? 0;
+            const stillBroken = data?.still_broken ?? 0;
+            this.toast(`Cleared ${cleared} replaced entr${cleared === 1 ? 'y' : 'ies'}; ${stillBroken} still broken`, 'success');
+            await Promise.all([this.loadStatus(), this.loadBroken()]);
+        } catch (e) {
+            this.toast(`Clear replaced failed: ${e.message}`, 'error');
         } finally {
             if (btn) btn.disabled = false;
         }

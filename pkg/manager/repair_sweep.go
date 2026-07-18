@@ -83,15 +83,24 @@ type fileResult struct {
 }
 
 // executeSweep is the body of a sweep: enumerate, filter due, probe, repair.
-func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, opts RepairRunOptions) {
+func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, opts RepairRunOptions, stopState *repairStopState) {
 	cfg := r.cfg()
 	log := r.logger.With().Str("run_id", run.ID).Logger()
+
+	// Resolve auto-repair once: when off, the repair sweep is a pure health check —
+	// it probes and records broken state but attempts no debrid re-insert and
+	// no Arr delete/re-search. This also decides what happens to whatever was
+	// found broken so far if a StopSchedule cuts the repair sweep short.
+	autoRepair := cfg.AutoRepair
+	if opts.AutoRepair != nil {
+		autoRepair = *opts.AutoRepair
+	}
 
 	log.Info().Str("source", string(cfg.Source)).Msg("Sweep: selecting candidates")
 	candidates, err := r.enumerateCandidates(ctx, cfg)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			r.finalizeRun(run, storage.RepairRunCancelled, "", "context cancelled during selection")
+			r.finishCancelledRepairSweep(ctx, run, stopState, autoRepair, "context cancelled during selection", nil)
 			return
 		}
 		log.Error().Err(err).Msg("Sweep: enumeration failed")
@@ -99,7 +108,7 @@ func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, opts 
 		return
 	}
 	if ctx.Err() != nil {
-		r.finalizeRun(run, storage.RepairRunCancelled, "", "context cancelled after selection")
+		r.finishCancelledRepairSweep(ctx, run, stopState, autoRepair, "context cancelled after selection", nil)
 		return
 	}
 
@@ -109,27 +118,59 @@ func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, opts 
 	candidates = nil
 	protocolScope := r.effectiveProtocolScope(opts)
 	due = r.filterCandidatesByProtocol(due, protocolScope)
+
+	// Build the Arr reference set once per run and reuse it for both:
+	// (1) dropping fully-superseded managed-source candidates before probing,
+	// and (2) skipping individually-superseded files within any candidate's
+	// probe pass (the season-pack case: some files superseded, entry still a
+	// valid candidate because its other files are still referenced). A nil
+	// refs (build failed, or zero eligible Arrs) means "couldn't determine
+	// anything" everywhere it's used below - never treated as "nothing is
+	// referenced".
+	var refs map[string]map[string]string
+	if len(due) > 0 {
+		var refsErr error
+		refs, refsErr = r.buildArrReferencedSet(ctx)
+		if refsErr != nil {
+			log.Debug().Err(refsErr).Msg("Repair sweep: failed to build Arr reference set; probing without supersession filtering")
+			refs = nil
+		}
+	}
+
+	// Arr-source repair sweeps only ever enumerate entries an Arr currently
+	// references, so an already-superseded entry never reaches this point.
+	// Managed-source repair sweeps enumerate every entry in storage regardless, so a
+	// broken entry the Arrs have since replaced can otherwise sit here being
+	// re-probed (and re-confirmed broken) forever; drop those before probing.
+	if cfg.Source == config.RepairSourceManaged {
+		due = r.dropSupersededCandidates(due, refs, log)
+	}
+
 	run.Stats.Candidates = len(due)
 	run.Stats.SkippedFresh = skipped
+	sc := &supersessionContext{refs: refs}
 
-	// Resolve auto-repair once: when off, the sweep is a pure health check —
-	// it probes and records broken state but attempts no debrid re-insert and
-	// no Arr delete/re-search.
-	autoRepair := cfg.AutoRepair
-	if opts.AutoRepair != nil {
-		autoRepair = *opts.AutoRepair
-	}
+	// Order candidates oldest-checked-first (never-checked entries sort
+	// first, since their LastCheckedAt is the zero time). This is what makes
+	// a StopSchedule-truncated repair sweep make guaranteed forward progress: any
+	// entry probed today moves to the back of the queue (its LastCheckedAt
+	// becomes "now"), so tomorrow's truncated repair sweep naturally picks up where
+	// today's left off instead of re-rolling a random subset of `due`.
+	//
+	// This slice also doubles as the candidate list considered by this run,
+	// used to scope a stop-schedule repair pass.
+	names := r.orderCandidatesByLastChecked(due)
 
 	run.Stage = storage.RepairStageProbing
 	r.saveRun(run)
 	log.Info().Int("due", len(due)).Int("skipped_fresh", skipped).Str("protocol", protocolScope).Bool("auto_repair", autoRepair).Msg("Sweep: probing")
 
 	heal := newHealCache()
-	err = r.probeAndHealCandidates(ctx, run, due, heal, opts, autoRepair)
+	err = r.probeAndHealCandidates(ctx, run, due, names, heal, opts, autoRepair, sc)
 	due = nil
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			r.finalizeRun(run, storage.RepairRunCancelled, "", "context cancelled during probing")
+			r.finishCancelledRepairSweep(ctx, run, stopState, autoRepair, "context cancelled during probing", names)
 			return
 		}
 		log.Error().Err(err).Msg("Sweep: probing failed")
@@ -137,7 +178,7 @@ func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, opts 
 		return
 	}
 	if ctx.Err() != nil {
-		r.finalizeRun(run, storage.RepairRunCancelled, "", "context cancelled after probing")
+		r.finishCancelledRepairSweep(ctx, run, stopState, autoRepair, "context cancelled after probing", names)
 		return
 	}
 
@@ -148,19 +189,80 @@ func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, opts 
 		Int("healthy", run.Stats.Healthy).
 		Int("repaired", run.Stats.Repaired).
 		Int("repair_failed", run.Stats.RepairFailed).
+		Int64("skipped_superseded_files", sc.skipped.Load()).
 		Msg("Sweep: completed")
+}
+
+// finishCancelledRepairSweep is reached whenever the repair sweep's context is cancelled
+// (StopRun, StopSchedule, or process shutdown). When the cancellation came
+// from a StopSchedule firing, the run is finalized as completed (not
+// cancelled) and, when autoRepair is on, a final repair pass runs over
+// whatever this repair sweep found broken among the candidates it considered
+// (names). When autoRepair is off, nothing further happens to those entries.
+//
+// A user-initiated StopRun already wrote RepairRunCancelled to storage before
+// calling cancel; finalizeRun preserves that status regardless of what's
+// passed here, so the StopRun path is unaffected.
+func (r *Repair) finishCancelledRepairSweep(ctx context.Context, run *storage.RepairRun, stopState *repairStopState, autoRepair bool, reason string, names []string) {
+	stopped := stopState != nil && stopState.get()
+	if !stopped {
+		r.finalizeRun(run, storage.RepairRunCancelled, "", reason)
+		return
+	}
+
+	log := r.logger.With().Str("run_id", run.ID).Logger()
+	log.Info().Bool("auto_repair", autoRepair).Msg("Repair sweep: stop schedule fired; finishing run")
+
+	if autoRepair && len(names) > 0 {
+		// Use a fresh, un-cancelled context for the final repair pass: the
+		// probe pass was cut short, but the repair pass over what's already
+		// known-broken is a short, bounded set of Arr calls and should be
+		// allowed to complete. Bound it so a misbehaving Arr can't hang.
+		repairCtx, cancel := context.WithTimeout(detachedRepairContext(ctx, r.parentCtx), repairStopFinalRepairTimeout)
+		defer cancel()
+
+		healths, _ := r.collectBrokenHealths(names, true)
+		if healths.Size() > 0 {
+			run.Stage = storage.RepairStageRepairing
+			r.saveRun(run)
+			r.repairBroken(repairCtx, run, healths)
+		}
+	}
+
+	run.CancelReason = ""
+	r.finalizeRun(run, storage.RepairRunCompleted, "", "stopped by schedule: "+reason)
+}
+
+// detachedRepairContext returns a context that is not already cancelled, for
+// use by the post-stop repair pass. Falls back to the repair service's parent
+// context (or background) when the run's own context has already been
+// cancelled.
+func detachedRepairContext(runCtx, parentCtx context.Context) context.Context {
+	if runCtx.Err() == nil {
+		return runCtx
+	}
+	if parentCtx != nil {
+		return parentCtx
+	}
+	return context.Background()
 }
 
 // probeAndHealCandidates fans out across candidates with cfg.Repair.Workers
 // concurrency. Each entry then probes its own files internally with at most
 // repairFilesPerEntry concurrency, so total file probes in flight = workers × 2.
 //
+// names gives the iteration order (see orderCandidatesByLastChecked):
+// g.Go is called in this order, so with N workers the oldest-checked N
+// candidates start first. If the run is cut short by a StopSchedule, the
+// candidates that didn't get a chance to start remain oldest-first for the
+// next repair sweep.
+//
 // Healing is folded into the per-entry pass: probeEntry runs auto-heal (debrid
 // re-insert) inline, and when an entry is still broken afterwards this kicks
 // off the Arr delete/blocklist/re-search for that one entry — so there's no
 // separate end-of-run repair pass holding every health in memory. All healing
 // is gated on autoRepair.
-func (r *Repair) probeAndHealCandidates(ctx context.Context, run *storage.RepairRun, candidates map[string]*candidate, heal *healCache, opts RepairRunOptions, autoRepair bool) error {
+func (r *Repair) probeAndHealCandidates(ctx context.Context, run *storage.RepairRun, candidates map[string]*candidate, names []string, heal *healCache, opts RepairRunOptions, autoRepair bool, sc *supersessionContext) error {
 	// run.Stats has plain int fields, so a single mutex guards every mutation
 	// and the saveRun that follows it.
 	var runMu sync.Mutex
@@ -168,12 +270,17 @@ func (r *Repair) probeAndHealCandidates(ctx context.Context, run *storage.Repair
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(max(1, r.workers()))
 
-	for name, c := range candidates {
+	for _, name := range names {
+		c := candidates[name]
+		if c == nil {
+			continue
+		}
 		g.Go(func() error {
 			if gctx.Err() != nil {
 				return gctx.Err()
 			}
-			h := r.probeEntry(gctx, run.ID, c, heal, opts, autoRepair)
+
+			h := r.probeEntry(gctx, run.ID, c, heal, opts, autoRepair, sc)
 			if h == nil {
 				// Entry vanished or had no files between enumeration and probe;
 				// skip without counting. Release any loaded body.
@@ -214,7 +321,7 @@ func (r *Repair) probeAndHealCandidates(ctx context.Context, run *storage.Repair
 // probeEntry probes one entry: marks it repairing, probes its files (≤2 in
 // parallel), runs auto-heal on broken torrents (only when autoRepair is set),
 // then persists final health.
-func (r *Repair) probeEntry(ctx context.Context, runID string, c *candidate, heal *healCache, opts RepairRunOptions, autoRepair bool) *storage.EntryHealth {
+func (r *Repair) probeEntry(ctx context.Context, runID string, c *candidate, heal *healCache, opts RepairRunOptions, autoRepair bool, sc *supersessionContext) *storage.EntryHealth {
 	s := r.manager.storage
 	// Lazily load the entry body. Enumeration only recorded the name, so the
 	// store isn't fully decoded up front. A vanished or empty entry is a skip
@@ -240,7 +347,18 @@ func (r *Repair) probeEntry(ctx context.Context, runID string, c *candidate, hea
 	h.Protocol = ""
 	r.saveHealth(h)
 
+	// Drop any file this run's Arr reference set shows as already superseded
+	// (unreferenced, or referenced but backed by a different InfoHash - a
+	// healthy duplicate serves it) before probing anything: no STAT/provider
+	// check, no ffprobe check when that's wired in, and no BrokenFiles entry
+	// for it. Without this, a season pack whose broken episodes were
+	// individually re-grabbed stays a valid probe candidate (its other files
+	// are still referenced) but the dead episodes - still physically present
+	// - would otherwise get re-probed and re-marked broken every repair sweep,
+	// undoing what the "Clear replaced" pass or a prior partial-supersession
+	// trim already cleared.
 	names := orderedFilenames(c.item)
+	names = r.filterSupersededFiles(c.item, names, sc)
 	results := r.probeFiles(ctx, c.item, names, opts)
 	if autoRepair {
 		r.autoHealResults(ctx, results, heal)
@@ -936,6 +1054,41 @@ func (r *Repair) filterDueCandidates(in map[string]*candidate, ignoreLastChecked
 	return out, skipped
 }
 
+// orderCandidatesByLastChecked returns the names of `due` sorted by
+// EntryHealth.LastCheckedAt ascending - entries never checked (zero time)
+// sort first, then least-recently-checked, etc. Ties (e.g. multiple
+// never-checked entries) break on name for a stable, deterministic order
+// across runs.
+//
+// This ordering is what lets a StopSchedule-truncated repair sweep make guaranteed
+// forward progress across days: probing an entry updates its LastCheckedAt
+// immediately, so it sorts to the back of tomorrow's queue.
+func (r *Repair) orderCandidatesByLastChecked(due map[string]*candidate) []string {
+	type ordered struct {
+		name          string
+		lastCheckedAt time.Time
+	}
+	items := make([]ordered, 0, len(due))
+	for name := range due {
+		var lastCheckedAt time.Time
+		if h, _ := r.manager.storage.GetEntryHealth(name); h != nil {
+			lastCheckedAt = h.LastCheckedAt
+		}
+		items = append(items, ordered{name: name, lastCheckedAt: lastCheckedAt})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if !items[i].lastCheckedAt.Equal(items[j].lastCheckedAt) {
+			return items[i].lastCheckedAt.Before(items[j].lastCheckedAt)
+		}
+		return items[i].name < items[j].name
+	})
+	out := make([]string, len(items))
+	for i, it := range items {
+		out[i] = it.name
+	}
+	return out
+}
+
 // === Manual rechecks (webhooks + API) ===
 
 func (r *Repair) collectBrokenHealths(names []string, requireArrFile bool) (*xsync.Map[string, *storage.EntryHealth], int) {
@@ -1068,6 +1221,10 @@ func (r *Repair) FixBroken(ctx context.Context, names []string) (*storage.Repair
 			r.mu.Unlock()
 			cancel()
 		}()
+		// Drop or trim any candidate the Arrs no longer reference before
+		// acting on it - "Fix" must never blocklist or re-search on behalf
+		// of a file the Arr already replaced with a working copy.
+		r.filterSupersededHealths(runCtx, healths)
 		r.repairBroken(runCtx, run, healths)
 		if runCtx.Err() != nil {
 			r.finalizeRun(run, storage.RepairRunCancelled, "", "context cancelled during repair")
@@ -1227,11 +1384,51 @@ func (r *Repair) RecheckEntry(ctx context.Context, entryName string, fix bool) (
 		ctx = r.parentCtx
 	}
 	r.runWG.Go(func() {
+		// Build the Arr reference set once for this recheck and reuse it both
+		// for the whole-entry supersession check below and for probeEntry's
+		// own per-file filter (the partial case: some files superseded, the
+		// entry still worth probing for what's left). A nil refs (build
+		// failed, or zero eligible Arrs) means "couldn't determine anything" -
+		// probeEntry then probes every file exactly as before this existed.
+		refs, refsErr := r.buildArrReferencedSet(ctx)
+		if refsErr != nil {
+			r.logger.Debug().Err(refsErr).Str("entry", entryName).Msg("Recheck: failed to build Arr reference set; probing without supersession filtering")
+			refs = nil
+		}
+
+		// Whole-entry supersession check: a broken entry whose files no Arr
+		// references anymore was already replaced elsewhere - probing it just
+		// re-confirms "broken" for a release the library stopped using weeks
+		// ago. A file an Arr individually re-grabbed out of an otherwise
+		// still-active entry (season-pack case) is dropped from the broken
+		// list and excluded from this probe so the probe pass doesn't
+		// immediately re-add it.
+		if existing, _ := r.manager.storage.GetEntryHealth(entryName); refs != nil && existing != nil &&
+			existing.Status == storage.HealthBroken && len(existing.BrokenFiles) > 0 {
+			if res := classifySupersession(existing, refs); len(res.superseded) > 0 {
+				exclude := make(map[string]struct{}, len(res.superseded))
+				for _, bf := range res.superseded {
+					exclude[bf.FileName] = struct{}{}
+				}
+				cleared, aerr := r.applySupersession(existing, res, r.cfg().CleanupSuperseded)
+				if aerr != nil {
+					r.logger.Warn().Err(aerr).Str("entry", entryName).Msg("Recheck: failed to apply supersession")
+				} else if cleared {
+					// Every broken file (or the whole entry) was superseded -
+					// don't probe the dead release's own articles at all.
+					return
+				} else {
+					c.item = excludeFilesFromItem(c.item, exclude)
+				}
+			}
+		}
+
+		sc := &supersessionContext{refs: refs}
 		if fix {
 			r.attachArrContext(ctx, c)
 		}
 		heal := newHealCache()
-		final := r.probeEntry(ctx, runID, c, heal, RepairRunOptions{}, fix)
+		final := r.probeEntry(ctx, runID, c, heal, RepairRunOptions{}, fix, sc)
 		if !fix || final.Status != storage.HealthBroken {
 			return
 		}
@@ -1241,7 +1438,8 @@ func (r *Repair) RecheckEntry(ctx context.Context, entryName string, fix bool) (
 	})
 
 	// Return an in-memory ack reflecting the freshly-started recheck. The
-	// real EntryHealth in storage is updated by probeEntry shortly after.
+	// real EntryHealth in storage is updated by probeEntry shortly after -
+	// or, if the entry turns out to be fully superseded, cleared instead.
 	if h == nil {
 		h = &storage.EntryHealth{EntryName: entryName}
 	}
@@ -1351,8 +1549,23 @@ func (r *Repair) executeRecheckMedia(ctx context.Context, run *storage.RepairRun
 	run.Stage = storage.RepairStageProbing
 	r.saveRun(run)
 
+	// Same reference-set build/reuse pattern as executeSweep: built once,
+	// shared by every candidate's per-file supersession filter in
+	// probeEntry. A nil refs means "couldn't determine anything" - probing
+	// proceeds unfiltered.
+	refs, refsErr := r.buildArrReferencedSet(ctx)
+	if refsErr != nil {
+		r.logger.Debug().Err(refsErr).Str("media_id", mediaID).Msg("RecheckMedia: failed to build Arr reference set; probing without supersession filtering")
+		refs = nil
+	}
+	sc := &supersessionContext{refs: refs}
+
 	heal := newHealCache()
-	err := r.probeAndHealCandidates(ctx, run, candidates, heal, RepairRunOptions{}, fix)
+	mediaNames := make([]string, 0, len(candidates))
+	for name := range candidates {
+		mediaNames = append(mediaNames, name)
+	}
+	err := r.probeAndHealCandidates(ctx, run, candidates, mediaNames, heal, RepairRunOptions{}, fix, sc)
 	candidates = nil
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -1376,6 +1589,7 @@ func (r *Repair) executeRecheckMedia(ctx context.Context, run *storage.RepairRun
 		Int("broken", run.Stats.Broken).
 		Int("repaired", run.Stats.Repaired).
 		Bool("fix", fix).
+		Int64("skipped_superseded_files", sc.skipped.Load()).
 		Msg("RecheckMedia: completed")
 }
 

@@ -520,6 +520,11 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	// Preserve fields that shouldn't be overwritten by frontend
 	currentConfig := config.Get()
 	newConfig.Auth = currentConfig.GetAuth()
+	// The frontend config form doesn't include use_auth or enable_webdav_auth,
+	// so they would be zero-valued (false) in the decoded payload. Preserve
+	// them from the live config so auth isn't silently disabled on every save.
+	newConfig.UseAuth = currentConfig.UseAuth
+	newConfig.EnableWebdavAuth = currentConfig.EnableWebdavAuth
 
 	// Filter out empty or incomplete arrs
 	validArrs := make([]config.Arr, 0, len(newConfig.Arrs))
@@ -746,6 +751,12 @@ func (s *Server) handleListEntryHealth(w http.ResponseWriter, r *http.Request) {
 		if statusFilter != "" && string(state.Status) != statusFilter {
 			return nil
 		}
+		// A health record's backing entry can be deleted through a path that
+		// leaves the record itself behind (see Manager.EntryNameHasBackingEntry) -
+		// never show a record for something that no longer exists.
+		if !s.manager.EntryNameHasBackingEntry(state.EntryName) {
+			return nil
+		}
 		out = append(out, state)
 		return nil
 	})
@@ -888,6 +899,26 @@ func (s *Server) handleClearBroken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	utils.JSONResponse(w, run, http.StatusOK)
+}
+
+// handleClearSuperseded checks every currently-broken entry against the
+// configured Arrs and clears whichever ones the library has already
+// replaced with a working copy, without touching anything the Arrs still
+// reference. Returns a JSON summary for the UI to toast. A failure to build
+// the Arr reference set clears nothing and is reported as 502, since a
+// partial/failed Arr lookup must never be treated as "nothing is referenced".
+func (s *Server) handleClearSuperseded(w http.ResponseWriter, r *http.Request) {
+	svc := s.manager.Repair()
+	if svc == nil {
+		http.Error(w, "Repair service not available", http.StatusServiceUnavailable)
+		return
+	}
+	result, err := svc.ClearSuperseded(s.manager.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	utils.JSONResponse(w, result, http.StatusOK)
 }
 
 func (s *Server) handleClearRepairState(w http.ResponseWriter, r *http.Request) {

@@ -208,6 +208,15 @@ func (m *Manager) getEntryChildren(group string) (*FileInfo, []FileInfo) {
 		var infos []FileInfo
 		seen := make(map[string]struct{})
 		err := m.storage.ForEachMeta(func(meta *storage.EntryMetaInfo) error {
+			// KNOWN ISSUE (not addressed here): if two entries share a Name
+			// (a same-release-name duplicate - see pkg/manager/supersession.go),
+			// only the first one encountered in ForEachMeta's iteration order
+			// is shown here. ForEachMeta walks an xsync.MapOf, whose Range
+			// order is unordered/arbitrary, so which duplicate's metadata
+			// (infohash/size/modTime badge) wins this listing is undefined -
+			// it is not necessarily the newest. This is independent of which
+			// duplicate's files are served inside the folder (GetEntryItem's
+			// own, separate per-filename merge).
 			if _, ok := seen[meta.Name]; ok {
 				return nil
 			}

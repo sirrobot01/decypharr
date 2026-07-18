@@ -554,6 +554,35 @@ func (m *Manager) GetEntryItem(torrentName string) (*storage.EntryItem, error) {
 	return m.storage.GetEntryItem(torrentName)
 }
 
+// EntryNameHasBackingEntry reports whether name still resolves to at least
+// one live entry - i.e. whether an EntryHealth record for this name reflects
+// something that actually still exists, rather than being orphaned.
+//
+// Checks more than "does an EntryItem exist for this name": removeFromEntryItem
+// (the only place an entry's deletion updates the merged EntryItem view) reads
+// then writes that record without any lock spanning the two, so two entries
+// sharing a name deleted concurrently (the repair sweep's own worker pool, or the
+// periodic torrent-refresh job, both delete entries in parallel) can lose an
+// update and leave the EntryItem non-empty with file entries whose InfoHash
+// no longer backs anything. A stale EntryItem alone would pass an "exists"
+// check; checking that at least one of its files' InfoHash is still a real
+// entry catches that case too.
+func (m *Manager) EntryNameHasBackingEntry(name string) bool {
+	item, err := m.storage.GetEntryItem(name)
+	if err != nil || item == nil || len(item.Files) == 0 {
+		return false
+	}
+	for _, f := range item.Files {
+		if f == nil || f.InfoHash == "" {
+			continue
+		}
+		if exists, err := m.storage.Exists(f.InfoHash); err == nil && exists {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Manager) GetEntryByName(torrentName, filename string) (*storage.Entry, error) {
 	// First get entry
 	entry, err := m.storage.GetEntryItem(torrentName)

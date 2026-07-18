@@ -970,6 +970,13 @@ func (u *Usenet) NZBStorage() *NZBStorage {
 	return u.nzbStorage
 }
 
+// NZBsDir exposes the watched .nzb source directory for callers outside this
+// package that need to reconcile it against another store (e.g. stale-entry
+// cleanup scanning for on-disk files with no corresponding storage entry).
+func (u *Usenet) NZBsDir() string {
+	return u.metadataDir
+}
+
 // SpeedTest runs a speed test for a specific NNTP provider
 // It finds a segment from a processed NZB to download for real speed measurement
 func (u *Usenet) SpeedTest(ctx context.Context, providerHost string) nntp.SpeedTestResult {

@@ -57,6 +57,7 @@ func (s *Server) WebRoutes() http.Handler {
 			r.Post("/repair/recheck/media", s.handleRecheckMedia)
 			r.Post("/repair/fix", s.handleFixBroken)
 			r.Post("/repair/clear", s.handleClearBroken)
+			r.Post("/repair/clear-superseded", s.handleClearSuperseded)
 			r.Post("/repair/clear-state", s.handleClearRepairState)
 			r.Get("/repair/runs", s.handleListRepairRuns)
 			r.Get("/repair/runs/{id}", s.handleGetRepairRun)
@@ -81,6 +82,11 @@ func (s *Server) WebRoutes() http.Handler {
 				// Torrent operations
 				r.Delete("/torrents/{id}", s.handleDeleteBrowseTorrent)
 				r.Delete("/torrents/batch", s.handleBatchDeleteBrowseTorrents)
+
+				// Stale NZB cleanup
+				r.Get("/stale-nzbs/preview", s.handleStaleNZBsPreview)
+				r.Post("/stale-nzbs/cleanup", s.handleStaleNZBsCleanup)
+				r.Get("/stale-nzbs/progress", s.handleStaleNZBsProgress)
 
 				// File download
 				r.Get("/download/{torrent}/{file}", s.handleDownloadFile)
