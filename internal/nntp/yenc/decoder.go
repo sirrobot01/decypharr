@@ -63,6 +63,7 @@ type pureGoYencDecoder struct {
 	outPos   int
 	scratch  []byte // reused buffer for lines longer than the bufio buffer (rare)
 	sawBegin bool
+	sawEnd   bool
 	done     bool
 }
 
@@ -193,10 +194,17 @@ func (d *pureGoYencDecoder) processLine(line []byte) (bool, error) {
 		return false, nil
 	case bytes.HasPrefix(line, []byte("=yend ")):
 		parseYEndLine(line, d.meta)
-		return true, nil
+		// The yEnc payload ends here, but an NNTP BODY response ends on the
+		// following dot line. Keep consuming until that terminator so a pooled
+		// connection is aligned for its next command.
+		d.sawEnd = true
+		return false, nil
 	}
 
 	if !d.sawBegin {
+		return false, nil
+	}
+	if d.sawEnd {
 		return false, nil
 	}
 

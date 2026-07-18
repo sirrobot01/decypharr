@@ -192,9 +192,12 @@ func TestDecoder_ForcePureGo(t *testing.T) {
 
 func TestDecoder_NNTPTerminator(t *testing.T) {
 	original := []byte("NNTP terminator test")
-	encoded := yencEncode(original, "nntp.txt", 0, 0, 0) + ".\r\n"
+	const nextResponse = "222 next response\r\n"
+	source := &oneByteReader{reader: strings.NewReader(
+		yencEncode(original, "nntp.txt", 0, 0, 0) + ".\r\n" + nextResponse,
+	)}
 
-	dec := AcquireDecoder(strings.NewReader(encoded))
+	dec := AcquireDecoder(source)
 	defer ReleaseDecoder(dec)
 
 	decoded, err := io.ReadAll(dec)
@@ -204,4 +207,26 @@ func TestDecoder_NNTPTerminator(t *testing.T) {
 	if !bytes.Equal(decoded, original) {
 		t.Errorf("Decoded data mismatch\n  got:  %q\n  want: %q", decoded, original)
 	}
+
+	// A BODY decoder must consume NNTP's dot line, but no bytes from the
+	// following response. Limiting the source to one byte per Read prevents
+	// buffering from hiding either boundary error.
+	remainder, err := io.ReadAll(source)
+	if err != nil {
+		t.Fatalf("read source remainder: %v", err)
+	}
+	if string(remainder) != nextResponse {
+		t.Fatalf("source remainder = %q, want %q", remainder, nextResponse)
+	}
+}
+
+type oneByteReader struct {
+	reader io.Reader
+}
+
+func (r *oneByteReader) Read(p []byte) (int, error) {
+	if len(p) > 1 {
+		p = p[:1]
+	}
+	return r.reader.Read(p)
 }
