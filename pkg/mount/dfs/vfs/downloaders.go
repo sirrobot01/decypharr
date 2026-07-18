@@ -103,11 +103,9 @@ type Downloaders struct {
 	circuitOpenAt atomic.Int64 // Unix nano timestamp when circuit opened
 }
 
-// ensureStreamTracked makes sure the active stream is registered when reads begin.
-func (dls *Downloaders) ensureStreamTracked() {
-	dls.mu.Lock()
-	defer dls.mu.Unlock()
-
+// ensureStreamTrackedLocked makes sure the active stream is registered when
+// reads begin. Caller must hold dls.mu.
+func (dls *Downloaders) ensureStreamTrackedLocked() {
 	if dls.closed || dls.streamID != "" {
 		return
 	}
@@ -276,8 +274,6 @@ func (dls *Downloaders) DownloadWithPriority(ctx context.Context, r ranges.Range
 		return fmt.Errorf("circuit breaker open, cooldown active: last error: %w", lastErr)
 	}
 
-	dls.ensureStreamTracked()
-
 	// Update activity timestamp for idle detection
 	dls.touchActivity()
 
@@ -292,12 +288,22 @@ func (dls *Downloaders) DownloadWithPriority(ctx context.Context, r ranges.Range
 		dls.mu.Unlock()
 		return errors.New("downloaders closed")
 	}
+	if dls.stopping {
+		dls.mu.Unlock()
+		return errors.New("downloaders stopping")
+	}
+	if dls.ctx.Err() != nil {
+		err := dls.ctx.Err()
+		dls.mu.Unlock()
+		return err
+	}
 
 	// Lazy restart: if we went idle, restart the kicker goroutine.
 	if dls.idle {
 		dls.idle = false
 		dls.ensureKickerRunningLocked()
 	}
+	dls.ensureStreamTrackedLocked()
 
 	// Fast path: already have it
 	if dls.item.HasRange(r) {
