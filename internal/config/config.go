@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	json "github.com/bytedance/sonic"
 )
@@ -75,6 +76,7 @@ type Arr struct {
 	Name             string `json:"name,omitempty"`
 	Host             string `json:"host,omitempty"`
 	Token            string `json:"token,omitempty"`
+	Cleanup          bool   `json:"cleanup,omitempty"`
 	SkipRepair       bool   `json:"skip_repair,omitempty"`
 	DownloadUncached *bool  `json:"download_uncached,omitempty"`
 	SelectedDebrid   string `json:"selected_debrid,omitempty"`
@@ -82,13 +84,15 @@ type Arr struct {
 }
 
 func (a Arr) IsZero() bool {
-	return a.Name == "" && a.Host == "" && a.Token == "" && !a.SkipRepair && a.DownloadUncached == nil && a.SelectedDebrid == "" && a.Source == ""
+	return a.Name == "" && a.Host == "" && a.Token == "" && !a.Cleanup && !a.SkipRepair && a.DownloadUncached == nil && a.SelectedDebrid == "" && a.Source == ""
 }
 
 // QueueCleanup is the global policy that drives CleanupQueue. It maps
 // Sonarr/Radarr queue warnings/errors to an action.
 type QueueCleanup struct {
-	Rules []QueueCleanupRule `json:"rules,omitempty"`
+	Rules              []QueueCleanupRule `json:"rules,omitempty"`
+	ConfirmationSweeps int                `json:"confirmation_sweeps,omitempty"` // Consecutive matching monitor sweeps required before acting.
+	ConfirmationDelay  string             `json:"confirmation_delay,omitempty"`  // Minimum age of an unchanged condition, e.g. "5m".
 }
 
 // QueueCleanupRule maps a queue issue to a cleanup action.
@@ -543,6 +547,12 @@ func (c *Config) setDefaults() {
 	}
 
 	c.QueueCleanup.Rules = mergeQueueCleanupRules(c.QueueCleanup.Rules)
+	if c.QueueCleanup.ConfirmationSweeps <= 0 {
+		c.QueueCleanup.ConfirmationSweeps = 3
+	}
+	if delay, err := time.ParseDuration(c.QueueCleanup.ConfirmationDelay); err != nil || delay <= 0 {
+		c.QueueCleanup.ConfirmationDelay = "5m"
+	}
 
 	// Basic defaults
 	if c.URLBase == "" {

@@ -122,7 +122,7 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 	_arr := getArrFromContext(ctx)
 	if _arr == nil {
 		// Arr is not in context
-		_arr = arr.New(category, "", "", false, nil, "", "")
+		_arr = arr.New(category, "", "", false, false, nil, "", "")
 	}
 	atleastOne := false
 

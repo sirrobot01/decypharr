@@ -600,11 +600,30 @@
                                         <i class="bi bi-funnel mr-2 text-warning"></i>Queue Cleanup Actions
                                     </h3>
                                     <p class="text-sm opacity-70 mt-1 max-w-4xl">
-                                        These actions apply to configured Arr services. Unmatched warnings stay in the queue,
-                                        and changes apply on the next cleanup cycle.
+                                        These actions apply only to Arr services with Queue Cleanup enabled. A condition must
+                                        remain unchanged through the confirmation window before any action runs.
                                     </p>
                                 </div>
                                 <span class="badge badge-outline badge-warning lg:shrink-0">Global policy</span>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-box border border-base-300 bg-base-200/30 p-3">
+                                <div>
+                                    <label class="label" for="queueCleanupConfirmationSweeps">
+                                        <span class="font-medium">Required observations</span>
+                                    </label>
+                                    <input type="number" class="input input-sm w-full" id="queueCleanupConfirmationSweeps"
+                                           min="1" step="1" value="3">
+                                    <p class="text-xs opacity-60 mt-1">The same condition must appear this many sweeps in a row.</p>
+                                </div>
+                                <div>
+                                    <label class="label" for="queueCleanupConfirmationDelay">
+                                        <span class="font-medium">Minimum confirmation time</span>
+                                    </label>
+                                    <input type="text" class="input input-sm w-full" id="queueCleanupConfirmationDelay"
+                                           value="5m" placeholder="5m">
+                                    <p class="text-xs opacity-60 mt-1">Transient restart/import states clear before this delay expires.</p>
+                                </div>
                             </div>
 
                             <div class="grid grid-cols-1 xl:grid-cols-5 gap-4">

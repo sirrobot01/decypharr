@@ -1,11 +1,13 @@
 package arr
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	gourl "net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
@@ -19,6 +21,24 @@ const (
 	QueueActionBlocklist         QueueAction = "blacklist"          // blocklist + remove, do NOT re-search
 	QueueActionBlocklistResearch QueueAction = "blacklist_research" // blocklist + remove + re-search
 )
+
+type queueDecision struct {
+	Action           QueueAction
+	RuleKey          string
+	RemoveFromClient bool
+}
+
+type confirmedQueueDecision struct {
+	QueueSchema
+	queueDecision
+}
+
+type cleanupObservation struct {
+	Condition string
+	FirstSeen time.Time
+	Sweeps    int
+	Acted     bool
+}
 
 // actionFromConfig maps a config rule action string to a QueueAction. Unknown
 // or empty strings resolve to QueueActionNone (ignore).
@@ -178,68 +198,167 @@ func queueItemText(q QueueSchema) string {
 	return strings.ToLower(b.String())
 }
 
-// resolveAction decides what to do with a single queue item given the ordered
-// cleanup rule set. Only failed downloads and items flagged warning/error are
-// considered; everything else is left alone. Rules are evaluated in order and
-// the first match wins. No match resolves to QueueActionNone (ignore).
-func resolveAction(q QueueSchema, rules []config.QueueCleanupRule) QueueAction {
+// resolveDecision decides what to do with a single queue item and records the
+// matching rule identity so a changed condition resets its confirmation clock.
+func resolveDecision(q QueueSchema, rules []config.QueueCleanupRule) queueDecision {
 	status := strings.ToLower(q.TrackedDownloadStatus)
 	if !strings.EqualFold(q.Status, "failed") && status != "warning" && status != "error" {
-		return QueueActionNone
+		return queueDecision{}
 	}
 
 	text := queueItemText(q)
-	for _, r := range rules {
+	for i, r := range rules {
 		matched := false
+		ruleKey := r.ID
 		if r.ID != "" {
 			if m, ok := catalogMatchers[r.ID]; ok {
 				matched = m(q, text)
 			}
 		} else if s := strings.ToLower(strings.TrimSpace(r.Match)); s != "" {
 			matched = strings.Contains(text, s)
+			ruleKey = fmt.Sprintf("custom:%d:%s", i, s)
 		}
 		if matched {
-			return actionFromConfig(r.Action)
+			return queueDecision{
+				Action:           actionFromConfig(r.Action),
+				RuleKey:          ruleKey,
+				RemoveFromClient: ruleKey != "no_eligible_files",
+			}
 		}
 	}
-	return QueueActionNone
+	return queueDecision{}
+}
+
+func resolveAction(q QueueSchema, rules []config.QueueCleanupRule) QueueAction {
+	return resolveDecision(q, rules).Action
+}
+
+func cleanupConfirmationPolicy(policy config.QueueCleanup) (int, time.Duration) {
+	sweeps := policy.ConfirmationSweeps
+	if sweeps <= 0 {
+		sweeps = 3
+	}
+	delay, err := time.ParseDuration(policy.ConfirmationDelay)
+	if err != nil || delay <= 0 {
+		delay = 5 * time.Minute
+	}
+	return sweeps, delay
+}
+
+// confirmedDecisions returns only conditions that stayed unchanged for both
+// the configured number of observations and minimum delay. An acted condition
+// is suppressed until it disappears from the queue or changes.
+func (a *Arr) confirmedDecisions(queue []QueueSchema, policy config.QueueCleanup, now time.Time) []confirmedQueueDecision {
+	a.cleanupMu.Lock()
+	defer a.cleanupMu.Unlock()
+
+	if a.cleanupObservations == nil {
+		a.cleanupObservations = make(map[int]cleanupObservation)
+	}
+
+	requiredSweeps, requiredDelay := cleanupConfirmationPolicy(policy)
+	actionable := make(map[int]bool, len(queue))
+	confirmed := make([]confirmedQueueDecision, 0)
+
+	for _, q := range queue {
+		decision := resolveDecision(q, policy.Rules)
+		if decision.Action == QueueActionNone {
+			delete(a.cleanupObservations, q.Id)
+			continue
+		}
+
+		actionable[q.Id] = true
+		condition := strings.Join([]string{
+			decision.RuleKey,
+			string(decision.Action),
+			strings.ToLower(q.Status),
+			strings.ToLower(q.TrackedDownloadStatus),
+		}, "|")
+
+		observation, ok := a.cleanupObservations[q.Id]
+		if !ok || observation.Condition != condition {
+			observation = cleanupObservation{Condition: condition, FirstSeen: now, Sweeps: 1}
+		} else {
+			observation.Sweeps++
+		}
+
+		if !observation.Acted && observation.Sweeps >= requiredSweeps && now.Sub(observation.FirstSeen) >= requiredDelay {
+			observation.Acted = true
+			confirmed = append(confirmed, confirmedQueueDecision{QueueSchema: q, queueDecision: decision})
+		}
+		a.cleanupObservations[q.Id] = observation
+	}
+
+	for id := range a.cleanupObservations {
+		if !actionable[id] {
+			delete(a.cleanupObservations, id)
+		}
+	}
+	return confirmed
+}
+
+func (a *Arr) retryCleanupDecisions(items map[int]bool) {
+	a.cleanupMu.Lock()
+	defer a.cleanupMu.Unlock()
+	for id := range items {
+		observation, ok := a.cleanupObservations[id]
+		if !ok {
+			continue
+		}
+		observation.Acted = false
+		a.cleanupObservations[id] = observation
+	}
 }
 
 func (a *Arr) CleanupQueue() error {
 	if a == nil {
 		return fmt.Errorf("arr not configured")
 	}
+	if !a.Cleanup {
+		return nil
+	}
 	l := logger.New("arr")
-	rules := config.Get().QueueCleanup.Rules
+	policy := config.Get().QueueCleanup
 
 	queue := a.GetQueue()
-	blacklists := make(map[int]bool)        // blocklist + remove, no re-search
-	blacklistResearch := make(map[int]bool) // blocklist + remove + re-search
-	manualImports := make(map[string]bool)  // force manual import
-	for _, q := range queue {
-		switch resolveAction(q, rules) {
+	blacklists := make(map[bool]map[int]bool)        // removeFromClient -> ids
+	blacklistResearch := make(map[bool]map[int]bool) // removeFromClient -> ids
+	manualImports := make(map[string]bool)           // force manual import
+	manualImportIDs := make(map[int]bool)
+	for _, decision := range a.confirmedDecisions(queue, policy, time.Now()) {
+		switch decision.Action {
 		case QueueActionBlocklist:
-			blacklists[q.Id] = true
+			if blacklists[decision.RemoveFromClient] == nil {
+				blacklists[decision.RemoveFromClient] = make(map[int]bool)
+			}
+			blacklists[decision.RemoveFromClient][decision.Id] = true
 		case QueueActionBlocklistResearch:
-			blacklistResearch[q.Id] = true
+			if blacklistResearch[decision.RemoveFromClient] == nil {
+				blacklistResearch[decision.RemoveFromClient] = make(map[int]bool)
+			}
+			blacklistResearch[decision.RemoveFromClient][decision.Id] = true
 		case QueueActionImport:
-			manualImports[q.DownloadId] = true
+			manualImports[decision.DownloadId] = true
+			manualImportIDs[decision.Id] = true
 		}
 	}
 
-	if len(blacklistResearch) > 0 {
-		if err := a.removeQueueItems(blacklistResearch, true, false); err != nil {
+	for removeFromClient, items := range blacklistResearch {
+		if err := a.removeQueueItems(items, removeFromClient, true, false); err != nil {
+			a.retryCleanupDecisions(items)
 			l.Error().Err(err).Str("arr", a.Name).Msg("queue cleanup: blacklist + research failed")
 		}
 	}
-	if len(blacklists) > 0 {
-		if err := a.removeQueueItems(blacklists, true, true); err != nil {
+	for removeFromClient, items := range blacklists {
+		if err := a.removeQueueItems(items, removeFromClient, true, true); err != nil {
+			a.retryCleanupDecisions(items)
 			l.Error().Err(err).Str("arr", a.Name).Msg("queue cleanup: blacklist failed")
 		}
 	}
 	if len(manualImports) > 0 {
 		go func() {
 			if err := a.ManualImportItems(manualImports); err != nil {
+				a.retryCleanupDecisions(manualImportIDs)
 				l.Error().Err(err).Str("arr", a.Name).Msg("queue cleanup: manual import failed")
 			}
 		}()
@@ -312,10 +431,10 @@ func (a *Arr) MarkHistoryFailed(historyID int) error {
 	return nil
 }
 
-// removeQueueItems bulk-removes queue items from the arr. blocklist controls
-// whether the releases are added to the blocklist; skipRedownload controls
-// whether a re-search is triggered (false = re-search, the "research" action).
-func (a *Arr) removeQueueItems(items map[int]bool, blocklist, skipRedownload bool) error {
+// removeQueueItems bulk-removes queue items from the arr. removeFromClient
+// controls whether the download client's data is deleted; blocklist controls
+// whether releases are blocklisted; skipRedownload=false triggers a re-search.
+func (a *Arr) removeQueueItems(items map[int]bool, removeFromClient, blocklist, skipRedownload bool) error {
 	queueIDs := make([]int, 0, len(items))
 	for id := range items {
 		queueIDs = append(queueIDs, id)
@@ -326,26 +445,32 @@ func (a *Arr) removeQueueItems(items map[int]bool, blocklist, skipRedownload boo
 		Ids: queueIDs,
 	}
 	query := gourl.Values{}
-	query.Add("removeFromClient", "true")
+	query.Add("removeFromClient", strconv.FormatBool(removeFromClient))
 	query.Add("blocklist", strconv.FormatBool(blocklist))
 	query.Add("skipRedownload", strconv.FormatBool(skipRedownload))
 	query.Add("changeCategory", "false")
 	url := "api/v3/queue/bulk" + "?" + query.Encode()
 
-	_, err := a.Request(http.MethodDelete, url, payload, nil)
+	resp, err := a.Request(http.MethodDelete, url, payload, nil)
 	if err != nil {
 		return err
+	}
+	if resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("queue bulk delete failed: %s", resp.Status)
 	}
 	return nil
 }
 
 func (a *Arr) ManualImportItems(items map[string]bool) error {
+	var errs []error
 	for downloadId := range items {
 		_, err := a.Import(downloadId)
 		if err != nil {
-			// log error
-			fmt.Println(err)
+			errs = append(errs, fmt.Errorf("import %s: %w", downloadId, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
