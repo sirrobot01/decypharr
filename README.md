@@ -123,12 +123,23 @@ services:
 |---|---|---|
 | `RD_API_KEY` | Real-Debrid API key | - |
 | `LOCAL_CACHE_ENABLED` | Copy files locally after symlink creation | `false` |
+| `LOCAL_CACHE_DIRS` | Comma-separated dirs to scan for symlinks to cache. Point at your **media library** if the arrs import the symlink itself — see note below | Download folder + categories |
 | `DOWNLOAD_FOLDER` | Where symlinks and local files are stored | Set in config.json |
 | `RCLONE_MOUNT_PATH` | Where rclone mounts debrid files | Set in config.json |
 | `RCLONE_INDICATOR` | Substring to identify rclone symlink targets | `decypharr` |
 | `MAX_PARALLEL` | Max simultaneous file copies | `2` |
 | `MIN_FREE_MB` | Stop caching below this free space (MB) | `20000` |
 | `SCAN_INTERVAL` | Background scan interval in seconds | `1800` |
+
+> **Note on `LOCAL_CACHE_DIRS`.** The local cache replaces symlinks with real
+> files so playback stops depending on the debrid provider. By default it scans
+> the download folder, which is correct only when the arrs *copy* on import.
+> If your arrs import the **symlink itself** into the media library, the
+> download folder is bypassed and caching it will consume disk without ever
+> changing what your media server reads — the library symlink still points at
+> the rclone mount. In that setup, point `LOCAL_CACHE_DIRS` at the library
+> (e.g. `/data/media/movies,/data/media/tv`) so the cache replaces the symlinks
+> that are actually being read.
 
 You can also configure Decypharr through the Web UI or by editing `config.json` directly in the `/app` volume.
 

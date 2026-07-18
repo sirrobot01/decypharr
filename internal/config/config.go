@@ -62,14 +62,20 @@ type QBitTorrent struct {
 }
 
 type LocalCache struct {
-	Enabled          bool   `json:"enabled,omitempty"`
-	RcloneIndicator  string `json:"rclone_indicator,omitempty"`  // Substring in symlink target that identifies rclone mounts (e.g. "decypharr/realdebrid")
-	MinFreeMB        int    `json:"min_free_mb,omitempty"`       // Stop downloading below this free space (default: 20000 = 20GB)
-	StaleHours       int    `json:"stale_hours,omitempty"`       // Remove .part files older than this (default: 24)
-	MaxParallel      int    `json:"max_parallel,omitempty"`      // Max simultaneous file copies (default: 2)
-	ScanInterval     int    `json:"scan_interval,omitempty"`     // Seconds between background scans for missed symlinks (default: 1800)
-	UseDebridCDN     bool   `json:"use_debrid_cdn,omitempty"`    // Try to download directly from debrid CDN instead of FUSE copy
-	Aria2Connections int    `json:"aria2_connections,omitempty"` // Parallel connections per download when using CDN (default: 16)
+	Enabled bool `json:"enabled,omitempty"`
+	// CacheDirs are the directories scanned for symlinks to replace with local
+	// copies. Defaults to the qBittorrent download folder + its categories.
+	// Point this at the *media library* when the arrs import the symlink itself:
+	// the download folder is emptied/bypassed on import, so caching it would use
+	// disk without ever changing what the media server actually reads.
+	CacheDirs        []string `json:"cache_dirs,omitempty"`
+	RcloneIndicator  string   `json:"rclone_indicator,omitempty"`  // Substring in symlink target that identifies rclone mounts (e.g. "decypharr/realdebrid")
+	MinFreeMB        int      `json:"min_free_mb,omitempty"`       // Stop downloading below this free space (default: 20000 = 20GB)
+	StaleHours       int      `json:"stale_hours,omitempty"`       // Remove .part files older than this (default: 24)
+	MaxParallel      int      `json:"max_parallel,omitempty"`      // Max simultaneous file copies (default: 2)
+	ScanInterval     int      `json:"scan_interval,omitempty"`     // Seconds between background scans for missed symlinks (default: 1800)
+	UseDebridCDN     bool     `json:"use_debrid_cdn,omitempty"`    // Try to download directly from debrid CDN instead of FUSE copy
+	Aria2Connections int      `json:"aria2_connections,omitempty"` // Parallel connections per download when using CDN (default: 16)
 }
 
 type Arr struct {
@@ -497,6 +503,15 @@ func (c *Config) setDefaults() {
 	}
 	if v := Env("RCLONE_INDICATOR", ""); v != "" {
 		c.LocalCache.RcloneIndicator = v
+	}
+	if v := Env("LOCAL_CACHE_DIRS", ""); v != "" {
+		var dirs []string
+		for _, d := range strings.Split(v, ",") {
+			if d = strings.TrimSpace(d); d != "" {
+				dirs = append(dirs, d)
+			}
+		}
+		c.LocalCache.CacheDirs = dirs
 	}
 	if v := Env("SCAN_INTERVAL", ""); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

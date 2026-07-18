@@ -46,15 +46,23 @@ func NewLocalCacheWorker() *LocalCacheWorker {
 		lc.RcloneIndicator = "decypharr"
 	}
 
-	// Build media dirs from download folder + categories
+	// Explicit cache dirs win. This matters when the arrs import the symlink
+	// itself into the media library: the download folder is then bypassed, so
+	// caching it would consume disk without changing what the media server
+	// reads. Pointing CacheDirs at the library replaces those symlinks in place.
 	var mediaDirs []string
-	dlFolder := cfg.QBitTorrent.DownloadFolder
-	if len(cfg.QBitTorrent.Categories) > 0 {
-		for _, cat := range cfg.QBitTorrent.Categories {
-			mediaDirs = append(mediaDirs, filepath.Join(dlFolder, cat))
-		}
+	if len(lc.CacheDirs) > 0 {
+		mediaDirs = append(mediaDirs, lc.CacheDirs...)
 	} else {
-		mediaDirs = []string{dlFolder}
+		// Fall back to the download folder + categories.
+		dlFolder := cfg.QBitTorrent.DownloadFolder
+		if len(cfg.QBitTorrent.Categories) > 0 {
+			for _, cat := range cfg.QBitTorrent.Categories {
+				mediaDirs = append(mediaDirs, filepath.Join(dlFolder, cat))
+			}
+		} else {
+			mediaDirs = []string{dlFolder}
+		}
 	}
 
 	return &LocalCacheWorker{
