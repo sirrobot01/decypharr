@@ -175,7 +175,14 @@ func (c *Client) Get(url string) (*http.Response, error) {
 type zerologAdapter struct{ log zerolog.Logger }
 
 func (z zerologAdapter) Printf(format string, args ...interface{}) {
-	z.log.Debug().Msgf(format, args...)
+	msg := fmt.Sprintf(format, args...)
+	// retryablehttp logs "[DEBUG] METHOD URL" for every single request
+	// attempt; suppress those and keep only retry and error events,
+	// which is what wiring this logger up was meant to surface.
+	if strings.HasPrefix(msg, "[DEBUG] ") && !strings.Contains(msg, "retrying in") {
+		return
+	}
+	z.log.Debug().Msg(msg)
 }
 
 // retryAfterBackoff extends DefaultBackoff with Retry-After header support.
