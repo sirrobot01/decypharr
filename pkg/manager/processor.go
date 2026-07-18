@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sirrobot01/decypharr/internal/config"
@@ -399,74 +400,219 @@ func applyDebridTorrentToEntry(torrent *storage.Entry, debridTorrent *debridType
 
 // SendToDebrid submits a magnet to debrid service(s) - replaces debrid.Parse
 func (m *Manager) SendToDebrid(ctx context.Context, importRequest *ImportRequest) (*debridTypes.Torrent, error) {
-	debridTorrent := &debridTypes.Torrent{
-		InfoHash: importRequest.Magnet.InfoHash,
-		Magnet:   importRequest.Magnet,
-		Name:     importRequest.Magnet.Name,
-		Arr:      importRequest.Arr,
-		Size:     importRequest.Magnet.Size,
-		Files:    make(map[string]debridTypes.File),
+	if importRequest == nil || importRequest.Magnet == nil {
+		return nil, fmt.Errorf("failed to process torrent: magnet is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
-	clients := m.FilterDebrid(func(c common.Client) bool {
-		if importRequest.SelectedDebrid != "" && c.Config().Name != importRequest.SelectedDebrid {
-			return false
-		}
-		return true
-	})
-
+	clients, selectedFound := m.debridClientsForRequest(importRequest.SelectedDebrid, importRequest.FallbackOnFailure)
+	errs := make([]error, 0, len(clients)+1)
+	if importRequest.SelectedDebrid != "" && !selectedFound {
+		errs = append(errs, fmt.Errorf("provider %q is not configured", importRequest.SelectedDebrid))
+	}
 	if len(clients) == 0 {
-		return nil, fmt.Errorf("no debrid clients available")
+		if len(errs) == 0 {
+			errs = append(errs, errors.New("no debrid clients available"))
+		}
+		return nil, joinDebridErrors(errs)
 	}
-
-	errs := make([]error, 0, len(clients))
 
 	for _, db := range clients {
-		overrideDownloadUncached := false
-
-		if importRequest.DownloadUncached != nil {
-			overrideDownloadUncached = *importRequest.DownloadUncached
-		} else {
-			overrideDownloadUncached = db.Config().DownloadUncached
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, fmt.Errorf("debrid request canceled: %w", err))
+			break
 		}
-		debridTorrent.DownloadUncached = overrideDownloadUncached
+
+		dbConfig := db.Config()
+		providerName := dbConfig.Name
+		if providerName == "" {
+			providerName = dbConfig.Provider
+		}
+		downloadUncached := providerAllowsUncached(dbConfig.DownloadUncached, importRequest.DownloadUncached)
+		debridTorrent := newDebridAttempt(importRequest, downloadUncached)
+
+		// Cache-only is a hard provider policy. If the provider supports an
+		// availability API, reject an uncached release before uploading it.
+		if !downloadUncached && db.SupportsInstantAvailability() && debridTorrent.InfoHash != "" {
+			availability := db.IsAvailable([]string{debridTorrent.InfoHash})
+			if !isHashAvailable(availability, debridTorrent.InfoHash) {
+				errs = append(errs, providerStageError(providerName, "availability check", errors.New("torrent is not cached and uncached downloads are disabled")))
+				continue
+			}
+			if err := ctx.Err(); err != nil {
+				errs = append(errs, fmt.Errorf("debrid request canceled: %w", err))
+				break
+			}
+		}
+
 		_logger := db.Logger()
+		arrName := ""
+		if importRequest.Arr != nil {
+			arrName = importRequest.Arr.Name
+		}
 		_logger.Info().
-			Str("Provider", db.Config().Name).
-			Str("Arr", importRequest.Arr.Name).
+			Str("Provider", providerName).
+			Str("Arr", arrName).
 			Str("Hash", debridTorrent.InfoHash).
 			Str("Name", debridTorrent.Name).
 			Str("Action", string(importRequest.Action)).
 			Msg("Processing torrent")
 
 		dbt, err := db.SubmitMagnet(debridTorrent)
-		if err != nil || dbt == nil || dbt.Id == "" {
-			errs = append(errs, err)
+		if err != nil {
+			attemptErr := providerStageError(providerName, "submit", err)
+			if dbt != nil && dbt.Id != "" {
+				attemptErr = errors.Join(attemptErr, cleanupDebridAttempt(db, providerName, dbt.Id))
+			}
+			errs = append(errs, attemptErr)
+			continue
+		}
+		if dbt == nil {
+			errs = append(errs, providerStageError(providerName, "submit", errors.New("provider returned a nil torrent")))
+			continue
+		}
+		if dbt.Id == "" {
+			errs = append(errs, providerStageError(providerName, "submit", errors.New("provider returned an empty torrent id")))
 			continue
 		}
 		dbt.Arr = importRequest.Arr
-		_logger.Info().Str("id", dbt.Id).Msgf("Entry: %s submitted to %s", dbt.Name, db.Config().Name)
+		_logger.Info().Str("id", dbt.Id).Msgf("Entry: %s submitted to %s", dbt.Name, providerName)
+
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, errors.Join(
+				fmt.Errorf("debrid request canceled: %w", err),
+				cleanupDebridAttempt(db, providerName, dbt.Id),
+			))
+			break
+		}
 
 		torrent, err := db.CheckStatus(dbt)
-		if err != nil && torrent != nil && torrent.Id != "" {
-			// Delete the torrent if it was not downloaded
-			go func(id string) {
-				_ = db.DeleteTorrent(id)
-			}(torrent.Id)
-		}
 		if err != nil {
-			errs = append(errs, err)
+			cleanupID := dbt.Id
+			if torrent != nil && torrent.Id != "" {
+				cleanupID = torrent.Id
+			}
+			errs = append(errs, errors.Join(
+				providerStageError(providerName, "status check", err),
+				cleanupDebridAttempt(db, providerName, cleanupID),
+			))
 			continue
 		}
 		if torrent == nil {
-			errs = append(errs, fmt.Errorf("torrent %s returned nil after checking status", dbt.Name))
+			errs = append(errs, errors.Join(
+				providerStageError(providerName, "status check", errors.New("provider returned a nil torrent")),
+				cleanupDebridAttempt(db, providerName, dbt.Id),
+			))
 			continue
+		}
+		if !downloadUncached && torrent.Status != debridTypes.TorrentStatusDownloaded {
+			cleanupID := torrent.Id
+			if cleanupID == "" {
+				cleanupID = dbt.Id
+			}
+			errs = append(errs, errors.Join(
+				providerStageError(providerName, "status check", errors.New("torrent is not cached and uncached downloads are disabled")),
+				cleanupDebridAttempt(db, providerName, cleanupID),
+			))
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			cleanupID := torrent.Id
+			if cleanupID == "" {
+				cleanupID = dbt.Id
+			}
+			errs = append(errs, errors.Join(
+				fmt.Errorf("debrid request canceled: %w", err),
+				cleanupDebridAttempt(db, providerName, cleanupID),
+			))
+			break
 		}
 		return torrent, nil
 	}
-	if len(errs) == 0 {
-		return nil, fmt.Errorf("failed to process torrent: no clients available")
+	return nil, joinDebridErrors(errs)
+}
+
+func (m *Manager) debridClientsForRequest(selected string, fallbackOnFailure bool) ([]common.Client, bool) {
+	clients := m.FilterDebrid(func(common.Client) bool { return true })
+	if selected == "" {
+		return clients, true
 	}
-	joinedErrors := errors.Join(errs...)
-	return nil, fmt.Errorf("failed to process torrent: %w", joinedErrors)
+
+	selectedIndex := -1
+	for i, client := range clients {
+		if client.Config().Name == selected {
+			selectedIndex = i
+			break
+		}
+	}
+	if selectedIndex == -1 {
+		if fallbackOnFailure {
+			return clients, false
+		}
+		return nil, false
+	}
+	if !fallbackOnFailure {
+		return []common.Client{clients[selectedIndex]}, true
+	}
+
+	ordered := make([]common.Client, 0, len(clients))
+	ordered = append(ordered, clients[selectedIndex])
+	ordered = append(ordered, clients[:selectedIndex]...)
+	ordered = append(ordered, clients[selectedIndex+1:]...)
+	return ordered, true
+}
+
+func newDebridAttempt(importRequest *ImportRequest, downloadUncached bool) *debridTypes.Torrent {
+	return &debridTypes.Torrent{
+		InfoHash:         importRequest.Magnet.InfoHash,
+		Magnet:           importRequest.Magnet,
+		Name:             importRequest.Magnet.Name,
+		Arr:              importRequest.Arr,
+		Size:             importRequest.Magnet.Size,
+		Files:            make(map[string]debridTypes.File),
+		DownloadUncached: downloadUncached,
+	}
+}
+
+func providerAllowsUncached(providerAllows bool, requestOverride *bool) bool {
+	if !providerAllows {
+		return false
+	}
+	return requestOverride == nil || *requestOverride
+}
+
+func isHashAvailable(availability map[string]bool, infoHash string) bool {
+	for hash, available := range availability {
+		if available && strings.EqualFold(hash, infoHash) {
+			return true
+		}
+	}
+	return false
+}
+
+func providerStageError(providerName, stage string, err error) error {
+	if err == nil {
+		err = errors.New("unknown provider error")
+	}
+	return fmt.Errorf("provider %q %s failed: %w", providerName, stage, err)
+}
+
+func cleanupDebridAttempt(client common.Client, providerName, torrentID string) error {
+	if torrentID == "" {
+		return nil
+	}
+	if err := client.DeleteTorrent(torrentID); err != nil {
+		return providerStageError(providerName, "cleanup", err)
+	}
+	return nil
+}
+
+func joinDebridErrors(errs []error) error {
+	joined := errors.Join(errs...)
+	if joined == nil {
+		joined = errors.New("no debrid clients available")
+	}
+	return fmt.Errorf("failed to process torrent: %w", joined)
 }

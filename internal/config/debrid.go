@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strconv"
 )
 
 type Debrid struct {
@@ -18,6 +19,8 @@ type Debrid struct {
 	Proxy                        string   `json:"proxy,omitempty"`
 	UnpackRar                    bool     `json:"unpack_rar,omitempty"`
 	MinimumFreeSlot              int      `json:"minimum_free_slot,omitempty"` // Minimum active pots to use this debrid
+	Priority                     int      `json:"priority,omitempty"`          // Lower values are tried first; defaults to config order
+	ConfigOrder                  int      `json:"-"`                           // Stable tie-breaker derived from debrids[] order
 	Limit                        int      `json:"limit,omitempty"`             // Maximum number of total torrents
 	TorrentsRefreshInterval      string   `json:"torrents_refresh_interval,omitempty"`
 	DownloadLinksRefreshInterval string   `json:"download_links_refresh_interval,omitempty"`
@@ -37,9 +40,13 @@ type Debrid struct {
 	Directories map[string]WebdavDirectories `json:"directories,omitempty"` // Deprecated. Use global setting instead.
 }
 
-func (c *Config) updateDebrid(d Debrid) Debrid {
+func (c *Config) updateDebrid(index int, d Debrid) Debrid {
 	workers := runtime.NumCPU() * 50
 	perDebrid := workers / len(c.Debrids)
+	d.ConfigOrder = index
+	if d.Priority == 0 {
+		d.Priority = index + 1
+	}
 
 	if d.Provider == "" {
 		d.Provider = d.Name
@@ -81,6 +88,9 @@ func validateDebrids(debrids []Debrid) error {
 		if debrid.APIKey == "" {
 			return errors.New("debrid api key is required")
 		}
+		if debrid.Priority < 0 {
+			return errors.New("debrid priority cannot be negative")
+		}
 	}
 
 	return nil
@@ -109,6 +119,11 @@ func (c *Config) applyDebridEnvVars() {
 			}
 			if proxy := getEnv(prefix + "PROXY"); proxy != "" {
 				c.Debrids[i].Proxy = proxy
+			}
+			if priority := getEnv(prefix + "PRIORITY"); priority != "" {
+				if value, err := strconv.Atoi(priority); err == nil {
+					c.Debrids[i].Priority = value
+				}
 			}
 		}
 	}

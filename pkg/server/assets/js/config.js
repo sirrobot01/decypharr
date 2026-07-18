@@ -548,6 +548,15 @@ class ConfigManager {
                                        placeholder="1" value="1">
                                 <span class="text-sm opacity-70">Minimum free slot for this debrid</span>
                             </div>
+                            <div>
+                                <label class="label" for="debrid[${index}].priority">
+                                    <span class="font-medium">Priority</span>
+                                </label>
+                                <input type="number" class="input w-full"
+                                       name="debrid[${index}].priority" id="debrid[${index}].priority"
+                                       min="0" placeholder="0" value="0">
+                                <span class="text-sm opacity-70">Lower runs first; 0 follows provider order</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1044,7 +1053,7 @@ class ConfigManager {
                                 <option value="">Auto Select</option>
                                 ${debridOptions}
                             </select>
-                            <span class="text-sm opacity-70">Which debrid service this Arr should prefer</span>
+                            <span class="text-sm opacity-70">Pinned unless fallback is enabled below</span>
                         </div>
                     </div>
 
@@ -1062,6 +1071,15 @@ class ConfigManager {
                                 <input type="checkbox" class="checkbox checkbox-sm checkbox-primary"
                                        name="arr[${index}].download_uncached" id="arr[${index}].download_uncached">
                                 <span class="text-sm leading-tight">Download Uncached</span>
+                            </label>
+                        </div>
+
+                        <div class="rounded-box bg-base-200/50 px-3 py-2"
+                             title="Try the remaining providers in priority order only when the preferred provider rejects or fails the add.">
+                            <label class="label cursor-pointer justify-start gap-2 p-0">
+                                <input type="checkbox" class="checkbox checkbox-sm checkbox-primary"
+                                       name="arr[${index}].fallback_on_failure" id="arr[${index}].fallback_on_failure">
+                                <span class="text-sm leading-tight">Fallback on Provider Failure</span>
                             </label>
                         </div>
                     </div>
@@ -1309,6 +1327,7 @@ class ConfigManager {
             const repairRateLimitInput = getField('repair_rate_limit');
             const downloadRateLimitInput = getField('download_rate_limit');
             const minimumFreeSlotInput = getField('minimum_free_slot');
+            const priorityInput = getField('priority');
             const proxyInput = getField('proxy');
             const downloadUncachedInput = getField('download_uncached');
             const unpackRarInput = getField('unpack_rar');
@@ -1320,7 +1339,7 @@ class ConfigManager {
             const autoExpireLinksAfterInput = getField('auto_expire_links_after');
 
             if (!nameInput || !providerInput || !apiKeyInput || !rateLimitInput || !repairRateLimitInput || !downloadRateLimitInput ||
-                !minimumFreeSlotInput || !proxyInput || !downloadUncachedInput || !unpackRarInput || !addSamplesInput ||
+                !minimumFreeSlotInput || !priorityInput || !proxyInput || !downloadUncachedInput || !unpackRarInput || !addSamplesInput ||
                 !userAgentInput || !torrentsRefreshIntervalInput || !downloadLinksRefreshIntervalInput || !autoExpireLinksAfterInput) {
                 return;
             }
@@ -1333,6 +1352,7 @@ class ConfigManager {
                 repair_rate_limit: repairRateLimitInput.value,
                 download_rate_limit: downloadRateLimitInput.value,
                 minimum_free_slot: parseInt(minimumFreeSlotInput.value) || 0,
+                priority: parseInt(priorityInput.value) || 0,
                 proxy: proxyInput.value,
                 download_uncached: downloadUncachedInput.checked,
                 unpack_rar: unpackRarInput.checked,
@@ -1373,9 +1393,10 @@ class ConfigManager {
             const skipRepairInput = getField('skip_repair');
             const downloadUncachedInput = getField('download_uncached');
             const selectedDebridInput = getField('selected_debrid');
+            const fallbackOnFailureInput = getField('fallback_on_failure');
             const sourceInput = getField('source');
 
-            if (!nameInput || !hostInput || !tokenInput || !skipRepairInput || !downloadUncachedInput || !selectedDebridInput || !sourceInput) {
+            if (!nameInput || !hostInput || !tokenInput || !skipRepairInput || !downloadUncachedInput || !selectedDebridInput || !fallbackOnFailureInput || !sourceInput) {
                 return;
             }
 
@@ -1386,6 +1407,7 @@ class ConfigManager {
                 skip_repair: skipRepairInput.checked,
                 download_uncached: downloadUncachedInput.checked,
                 selected_debrid: selectedDebridInput.value,
+                fallback_on_failure: fallbackOnFailureInput.checked,
                 source: sourceInput.value
             };
 

@@ -15,6 +15,7 @@ type Client interface {
 	GetDownloadLink(torrentID string, file *types.File) (types.DownloadLink, error)
 	DeleteTorrent(torrentId string) error
 	IsAvailable(infohashes []string) map[string]bool
+	SupportsInstantAvailability() bool
 	UpdateTorrent(torrent *types.Torrent) error
 	GetTorrent(torrentId string) (*types.Torrent, error)
 	GetTorrents() ([]*types.Torrent, error)

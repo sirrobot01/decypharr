@@ -60,6 +60,7 @@ Array of Debrid services:
       "name": "RD Primary",
       "api_key": "YOUR_API_KEY",
       "download_uncached": false,
+      "priority": 1,
       "rate_limit": "200/minute",
       "workers": 50,
       "minimum_free_slot": 0,
@@ -83,6 +84,7 @@ Array of Debrid services:
 | `api_key`                         | string | API key from provider dashboard                                                | **Required**                    |
 | `download_api_keys`               | array  | Additional keys for download rotation                                          | `[api_key]`                     |
 | `download_uncached`               | bool   | Download torrents not in provider cache                                        | `false`                         |
+| `priority`                        | int    | Provider add priority (lower runs first; `0` follows `debrids[]` order)       | Config order                    |
 | `rate_limit`                      | string | API rate limit (`200/minute`, `10/second`)                                     | `200/minute`                    |
 | `repair_rate_limit`               | string | Separate limit for repair operations                                           | Same as `rate_limit`            |
 | `download_rate_limit`             | string | Separate limit for downloads                                                   | Same as `rate_limit`            |
@@ -303,21 +305,30 @@ See the [Health Checker & Repair guide](/guides/repair/) for the full model, API
       "token": "API_TOKEN",
       "skip_repair": false,
       "download_uncached": false,
-      "selected_debrid": ""
+      "selected_debrid": "AllDebrid",
+      "fallback_on_failure": true
     }
   ]
 }
 ```
 
-| Field               | Description                      | Default     |
-|---------------------|----------------------------------|-------------|
-| `name`              | Display name                     | Required    |
-| `host`              | Arr URL                          | Required    |
-| `token`             | Arr API key                      | Required    |
-| `skip_repair`       | Skip repair for this Arr         | `false`     |
-| `download_uncached` | Download uncached torrents       | `false`     |
-| `selected_debrid`   | Force specific Debrid provider   | `""` (auto) |
-| `source`            | Config source (`auto`, `config`) | `config`    |
+| Field                 | Description                                                           | Default     |
+|-----------------------|-----------------------------------------------------------------------|-------------|
+| `name`                | Display name                                                          | Required    |
+| `host`                | Arr URL                                                               | Required    |
+| `token`               | Arr API key                                                           | Required    |
+| `skip_repair`         | Skip repair for this Arr                                              | `false`     |
+| `download_uncached`   | Allow uncached downloads when the chosen provider also allows them    | `false`     |
+| `selected_debrid`     | Preferred Debrid provider; pinned when fallback is disabled           | `""` (auto) |
+| `fallback_on_failure` | Try remaining providers in priority order after the preferred fails   | `false`     |
+| `source`              | Config source (`auto`, `config`)                                      | `config`    |
+
+With `fallback_on_failure: false`, a non-empty `selected_debrid` keeps the
+existing pin behavior. When fallback is enabled, the selected provider is still
+tried first; only a rejection or failure advances to the remaining providers.
+Each provider's `download_uncached` setting remains a hard ceiling, so a
+cache-only backup cannot start an uncached download even when the Arr permits
+uncached downloads.
 
 ## Queue Cleanup
 

@@ -72,17 +72,18 @@ func (q QBitTorrent) IsZero() bool {
 }
 
 type Arr struct {
-	Name             string `json:"name,omitempty"`
-	Host             string `json:"host,omitempty"`
-	Token            string `json:"token,omitempty"`
-	SkipRepair       bool   `json:"skip_repair,omitempty"`
-	DownloadUncached *bool  `json:"download_uncached,omitempty"`
-	SelectedDebrid   string `json:"selected_debrid,omitempty"`
-	Source           string `json:"source,omitempty"` // The source of the arr, e.g. "auto", "config", "". Auto means it was automatically detected from the arr
+	Name              string `json:"name,omitempty"`
+	Host              string `json:"host,omitempty"`
+	Token             string `json:"token,omitempty"`
+	SkipRepair        bool   `json:"skip_repair,omitempty"`
+	DownloadUncached  *bool  `json:"download_uncached,omitempty"`
+	SelectedDebrid    string `json:"selected_debrid,omitempty"`
+	FallbackOnFailure bool   `json:"fallback_on_failure,omitempty"`
+	Source            string `json:"source,omitempty"` // The source of the arr, e.g. "auto", "config", "". Auto means it was automatically detected from the arr
 }
 
 func (a Arr) IsZero() bool {
-	return a.Name == "" && a.Host == "" && a.Token == "" && !a.SkipRepair && a.DownloadUncached == nil && a.SelectedDebrid == "" && a.Source == ""
+	return a.Name == "" && a.Host == "" && a.Token == "" && !a.SkipRepair && a.DownloadUncached == nil && a.SelectedDebrid == "" && !a.FallbackOnFailure && a.Source == ""
 }
 
 // QueueCleanup is the global policy that drives CleanupQueue. It maps
@@ -499,7 +500,7 @@ func (c *Config) setDefaults() {
 	}
 
 	for i, debrid := range c.Debrids {
-		c.Debrids[i] = c.updateDebrid(debrid)
+		c.Debrids[i] = c.updateDebrid(i, debrid)
 	}
 
 	// Set usenet defaults

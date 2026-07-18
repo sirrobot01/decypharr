@@ -58,23 +58,29 @@ type Arr struct {
 	Host  string `json:"host"`
 	Token string `json:"token"`
 
-	Type             Type   `json:"type"`
-	SkipRepair       bool   `json:"skip_repair"`
-	DownloadUncached *bool  `json:"download_uncached"`
-	SelectedDebrid   string `json:"selected_debrid,omitempty"` // The debrid service selected for this arr
-	Source           Source `json:"source,omitempty"`          // The source of the arr, e.g. "auto", "manual". Auto means it was automatically detected from the arr
+	Type              Type   `json:"type"`
+	SkipRepair        bool   `json:"skip_repair"`
+	DownloadUncached  *bool  `json:"download_uncached"`
+	SelectedDebrid    string `json:"selected_debrid,omitempty"` // The debrid service selected for this arr
+	FallbackOnFailure bool   `json:"fallback_on_failure,omitempty"`
+	Source            Source `json:"source,omitempty"` // The source of the arr, e.g. "auto", "manual". Auto means it was automatically detected from the arr
 }
 
 func New(name, host, token string, skipRepair bool, downloadUncached *bool, selectedDebrid, source string) *Arr {
+	return NewWithFallback(name, host, token, skipRepair, downloadUncached, selectedDebrid, false, source)
+}
+
+func NewWithFallback(name, host, token string, skipRepair bool, downloadUncached *bool, selectedDebrid string, fallbackOnFailure bool, source string) *Arr {
 	return &Arr{
-		Name:             name,
-		Host:             host,
-		Token:            strings.TrimSpace(token),
-		Type:             inferType(host, name),
-		SkipRepair:       skipRepair,
-		DownloadUncached: downloadUncached,
-		SelectedDebrid:   selectedDebrid,
-		Source:           Source(source),
+		Name:              name,
+		Host:              host,
+		Token:             strings.TrimSpace(token),
+		Type:              inferType(host, name),
+		SkipRepair:        skipRepair,
+		DownloadUncached:  downloadUncached,
+		SelectedDebrid:    selectedDebrid,
+		FallbackOnFailure: fallbackOnFailure,
+		Source:            Source(source),
 	}
 }
 
@@ -177,7 +183,7 @@ func NewStorage() *Storage {
 			continue // Skip if host or token is not set
 		}
 		name := a.Name
-		as := New(name, a.Host, a.Token, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid, a.Source)
+		as := NewWithFallback(name, a.Host, a.Token, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid, a.FallbackOnFailure, a.Source)
 		if utils.ValidateURL(as.Host) != nil {
 			continue
 		}
@@ -248,17 +254,19 @@ func (s *Storage) SyncToConfig() []config.Arr {
 			exists.SkipRepair = arr.SkipRepair
 			exists.DownloadUncached = arr.DownloadUncached
 			exists.SelectedDebrid = arr.SelectedDebrid
+			exists.FallbackOnFailure = arr.FallbackOnFailure
 			arrConfigs[name] = exists
 		} else {
 			// AddOrUpdate new arr config
 			arrConfigs[name] = config.Arr{
-				Name:             arr.Name,
-				Host:             arr.Host,
-				Token:            arr.Token,
-				SkipRepair:       arr.SkipRepair,
-				DownloadUncached: arr.DownloadUncached,
-				SelectedDebrid:   arr.SelectedDebrid,
-				Source:           string(arr.Source),
+				Name:              arr.Name,
+				Host:              arr.Host,
+				Token:             arr.Token,
+				SkipRepair:        arr.SkipRepair,
+				DownloadUncached:  arr.DownloadUncached,
+				SelectedDebrid:    arr.SelectedDebrid,
+				FallbackOnFailure: arr.FallbackOnFailure,
+				Source:            string(arr.Source),
 			}
 		}
 		return true
@@ -274,7 +282,7 @@ func (s *Storage) SyncToConfig() []config.Arr {
 func (s *Storage) SyncFromConfig(arrs []config.Arr) {
 	newMaps := xsync.NewMap[string, *Arr]()
 	for _, a := range arrs {
-		newMaps.Store(a.Name, New(a.Name, a.Host, a.Token, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid, a.Source))
+		newMaps.Store(a.Name, NewWithFallback(a.Name, a.Host, a.Token, a.SkipRepair, a.DownloadUncached, a.SelectedDebrid, a.FallbackOnFailure, a.Source))
 	}
 
 	// AddOrUpdate or update arrs from config

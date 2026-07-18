@@ -28,17 +28,18 @@ const (
 )
 
 type ImportRequest struct {
-	Name             string                `json:"name"`
-	NZBContent       []byte                `json:"-"`
-	Id               string                `json:"id"`
-	DownloadFolder   string                `json:"downloadFolder"`
-	SelectedDebrid   string                `json:"debrid"`
-	Magnet           *utils.Magnet         `json:"magnet"`
-	Arr              *arr.Arr              `json:"arr"`
-	Action           config.DownloadAction `json:"action"`
-	DownloadUncached *bool                 `json:"downloadUncached"`
-	CallBackUrl      string                `json:"callBackUrl"`
-	SkipMultiSeason  bool                  `json:"skip_multi_season"`
+	Name              string                `json:"name"`
+	NZBContent        []byte                `json:"-"`
+	Id                string                `json:"id"`
+	DownloadFolder    string                `json:"downloadFolder"`
+	SelectedDebrid    string                `json:"debrid"`
+	Magnet            *utils.Magnet         `json:"magnet"`
+	Arr               *arr.Arr              `json:"arr"`
+	Action            config.DownloadAction `json:"action"`
+	DownloadUncached  *bool                 `json:"downloadUncached"`
+	FallbackOnFailure bool                  `json:"fallbackOnFailure"`
+	CallBackUrl       string                `json:"callBackUrl"`
+	SkipMultiSeason   bool                  `json:"skip_multi_season"`
 
 	Status      string    `json:"status"`
 	CompletedAt time.Time `json:"completedAt"`
@@ -51,17 +52,18 @@ type ImportRequest struct {
 func NewTorrentRequest(debrid string, downloadFolder string, magnet *utils.Magnet, arr *arr.Arr, action config.DownloadAction, downloadUncached *bool, callBackUrl string, importType ImportType, skipMultiSeason bool) *ImportRequest {
 
 	return &ImportRequest{
-		Id:               uuid.New().String(),
-		Status:           "started",
-		DownloadFolder:   downloadFolder,
-		SelectedDebrid:   cmp.Or(arr.SelectedDebrid, debrid), // Use debrid from arr if available
-		Magnet:           magnet,
-		Arr:              arr,
-		Action:           action,
-		DownloadUncached: downloadUncached,
-		CallBackUrl:      callBackUrl,
-		Type:             importType,
-		SkipMultiSeason:  skipMultiSeason,
+		Id:                uuid.New().String(),
+		Status:            "started",
+		DownloadFolder:    downloadFolder,
+		SelectedDebrid:    cmp.Or(arr.SelectedDebrid, debrid), // Use debrid from arr if available
+		Magnet:            magnet,
+		Arr:               arr,
+		Action:            action,
+		DownloadUncached:  downloadUncached,
+		FallbackOnFailure: arr.FallbackOnFailure,
+		CallBackUrl:       callBackUrl,
+		Type:              importType,
+		SkipMultiSeason:   skipMultiSeason,
 	}
 }
 

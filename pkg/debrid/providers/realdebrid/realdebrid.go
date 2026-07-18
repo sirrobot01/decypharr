@@ -451,6 +451,10 @@ func (r *RealDebrid) IsAvailable(hashes []string) map[string]bool {
 	return result
 }
 
+func (r *RealDebrid) SupportsInstantAvailability() bool {
+	return true
+}
+
 func (r *RealDebrid) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
 	if t.Magnet.IsTorrent() {
 		return r.addTorrent(t)

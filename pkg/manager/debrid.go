@@ -3,6 +3,7 @@ package manager
 import (
 	"cmp"
 	"errors"
+	"slices"
 
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/utils"
@@ -80,15 +81,49 @@ func (m *Manager) createClient(dc config.Debrid) (debrid.Client, error) {
 
 // FilterDebrid returns clients that match the filter function
 func (m *Manager) FilterDebrid(filter func(debrid.Client) bool) []debrid.Client {
-	var filtered []debrid.Client
+	type orderedClient struct {
+		name   string
+		config config.Debrid
+		client debrid.Client
+	}
+
+	filtered := make([]orderedClient, 0, m.clients.Size())
 
 	m.clients.Range(func(key string, client debrid.Client) bool {
 		if client != nil && filter(client) {
-			filtered = append(filtered, client)
+			dc := client.Config()
+			filtered = append(filtered, orderedClient{
+				name:   cmp.Or(dc.Name, key),
+				config: dc,
+				client: client,
+			})
 		}
 		return true
 	})
-	return filtered
+
+	slices.SortFunc(filtered, func(a, b orderedClient) int {
+		aPriority := a.config.Priority
+		if aPriority == 0 {
+			aPriority = a.config.ConfigOrder + 1
+		}
+		bPriority := b.config.Priority
+		if bPriority == 0 {
+			bPriority = b.config.ConfigOrder + 1
+		}
+		if order := cmp.Compare(aPriority, bPriority); order != 0 {
+			return order
+		}
+		if order := cmp.Compare(a.config.ConfigOrder, b.config.ConfigOrder); order != 0 {
+			return order
+		}
+		return cmp.Compare(a.name, b.name)
+	})
+
+	clients := make([]debrid.Client, 0, len(filtered))
+	for _, item := range filtered {
+		clients = append(clients, item.client)
+	}
+	return clients
 }
 
 func (m *Manager) GetIngests() ([]types.IngestData, error) {
