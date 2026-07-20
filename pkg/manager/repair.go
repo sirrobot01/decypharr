@@ -61,6 +61,21 @@ const (
 	// repairStopFinalRepairTimeout bounds the Arr delete + re-search pass run
 	// when StopSchedule fires and auto-repair is enabled.
 	repairStopFinalRepairTimeout = 5 * time.Minute
+	// playbackRepairCooldown is the minimum gap between playback-failure
+	// repairs for the SAME entry, enforced manager-side so it survives the
+	// CacheItem/Downloaders being recreated by a repair. It exists to collapse
+	// a burst of concurrent reads (and the immediate re-read after a re-grab
+	// recreates the item) into a single repair, NOT to rate-limit progress.
+	//
+	// Kept short on purpose: when a re-grabbed replacement is ALSO dead (common
+	// for purged releases with several bad copies on the indexers), the user
+	// re-pressing play should be able to kick the next attempt — which
+	// blocklists this bad copy too and pulls the next candidate — without
+	// waiting minutes. It only needs to outlast one re-grab + import-attempt
+	// cycle so concurrent reads during that window don't stampede; ~90s covers
+	// a typical import attempt while still letting a genuinely-still-broken file
+	// advance to the next release quickly.
+	playbackRepairCooldown = 2 * time.Minute
 )
 
 // Repair is the health-check / auto-repair service. One instance per Manager.
@@ -77,6 +92,16 @@ type Repair struct {
 	stopScheduled  bool
 	activeStopFunc func() // called by the stop job for the active run
 	runWG          sync.WaitGroup
+
+	// lastPlaybackRepair tracks, per entry name, when a playback-failure repair
+	// was last kicked off. This lives on the manager (not the per-file
+	// Downloaders) so the cooldown SURVIVES the file being deleted and
+	// re-imported: a repair recreates the CacheItem — and with it a fresh
+	// Downloaders whose own cooldown resets to zero — so without a
+	// manager-level guard a still-dead re-grab would re-escalate instantly and
+	// churn. Guarded by playbackRepairMu.
+	playbackRepairMu   sync.Mutex
+	lastPlaybackRepair map[string]time.Time
 }
 
 // NewRepair builds the repair service for the given manager. Call

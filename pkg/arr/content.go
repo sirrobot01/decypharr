@@ -309,20 +309,58 @@ func (a *Arr) batchDeleteFiles(ctx context.Context, files []ContentFile) error {
 		payload = struct {
 			EpisodeFileIds []int `json:"episodeFileIds"`
 		}{EpisodeFileIds: ids}
-		_, err := a.RequestCtx(ctx, http.MethodDelete, "api/v3/episodefile/bulk", payload, nil)
-		if err != nil {
-			return err
+		if _, err := a.RequestCtx(ctx, http.MethodDelete, "api/v3/episodefile/bulk", payload, nil); err != nil {
+			// The bulk endpoint fails the WHOLE batch if any single id no longer
+			// exists (Sonarr's strict row-count check 500s). A stale id is
+			// common after a prior repair cycle replaced the file. Fall back to
+			// deleting each id individually, treating not-found as success — the
+			// goal (row gone) is already met for those.
+			return a.deleteFilesIndividually(ctx, "api/v3/episodefile", ids)
 		}
 	case Radarr:
 		payload = struct {
 			MovieFileIds []int `json:"movieFileIds"`
 		}{MovieFileIds: ids}
-		_, err := a.RequestCtx(ctx, http.MethodDelete, "api/v3/moviefile/bulk", payload, nil)
-		if err != nil {
-			return err
+		if _, err := a.RequestCtx(ctx, http.MethodDelete, "api/v3/moviefile/bulk", payload, nil); err != nil {
+			return a.deleteFilesIndividually(ctx, "api/v3/moviefile", ids)
 		}
 	default:
 		return fmt.Errorf("unknown arr type: %s", a.Type)
 	}
 	return nil
+}
+
+// deleteFilesIndividually deletes each file id with a single DELETE call,
+// treating a 404 (already gone) as success. This is the fallback when the bulk
+// delete fails because one or more ids are stale: per-id deletes don't trip the
+// bulk endpoint's all-or-nothing row-count check, so the ids that DO still
+// exist get cleared instead of the whole batch failing. Returns an error only
+// if a delete fails for a reason other than not-found.
+func (a *Arr) deleteFilesIndividually(ctx context.Context, basePath string, ids []int) error {
+	var firstErr error
+	for _, id := range ids {
+		if ctx != nil && ctx.Err() != nil {
+			return ctx.Err()
+		}
+		resp, err := a.RequestCtx(ctx, http.MethodDelete, fmt.Sprintf("%s/%d", basePath, id), nil, nil)
+		if err != nil {
+			// Transport/retry give-up. If the resource is already gone that's
+			// success; otherwise remember the first real error but keep going so
+			// the remaining (valid) ids still get deleted.
+			if resp != nil && resp.StatusCode == http.StatusNotFound {
+				continue
+			}
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if resp != nil && resp.StatusCode != http.StatusNotFound &&
+			(resp.StatusCode < 200 || resp.StatusCode >= 300) {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("delete %s/%d: status %d", basePath, id, resp.StatusCode)
+			}
+		}
+	}
+	return firstErr
 }

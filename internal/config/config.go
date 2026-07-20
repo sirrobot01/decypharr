@@ -200,7 +200,13 @@ type RepairConfig struct {
 	RecheckInterval       string       `json:"recheck_interval,omitempty"`
 	Arrs                  []string     `json:"arrs,omitempty"`
 	AutoRepair            bool         `json:"auto_repair,omitempty"`
-	SkipNZBRepair         bool         `json:"skip_nzb_repair,omitempty"`
+
+	// RepairOnPlaybackFailure, when true, escalates a streaming read that fails with a
+	// permanent NNTP article-not-found (430) into an immediate delete + re-search for the
+	// played file. Requires Enabled and AutoRepair to also be set. Only fires for reads
+	// through the built-in DFS mount — rclone/WebDAV playback does not trigger it.
+	RepairOnPlaybackFailure bool         `json:"repair_on_playback_failure,omitempty"`
+	SkipNZBRepair           bool         `json:"skip_nzb_repair,omitempty"`
 
 	// StopSchedule, when set, stops an in-progress repair sweep at this time/interval
 	// (same formats as Schedule: clock time, cron expression, or duration).
@@ -215,7 +221,8 @@ type RepairConfig struct {
 func (r RepairConfig) IsZero() bool {
 	return !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
 		r.NNTPConnectionPercent == 0 && r.Strategy == "" && r.RecheckInterval == "" && len(r.Arrs) == 0 &&
-		!r.AutoRepair && !r.SkipNZBRepair && r.StopSchedule == ""
+		!r.AutoRepair && !r.SkipNZBRepair && r.StopSchedule == "" &&
+		!r.RepairOnPlaybackFailure
 }
 
 type Config struct {

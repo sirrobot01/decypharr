@@ -1442,6 +1442,14 @@
                                        id="repair.skip_nzb_repair" name="repair.skip_nzb_repair">
                                 <span class="label-text font-medium">Skip NZB repair</span>
                             </label>
+                            <label class="label cursor-pointer justify-start gap-3">
+                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
+                                       id="repair.repair_on_playback_failure" name="repair.repair_on_playback_failure">
+                                <span class="label-text font-medium tooltip tooltip-left"
+                                      data-tip="Triggers when a DFS read hits an expired article (NNTP 430). Built-in DFS mount only — rclone/WebDAV playback won't trigger it.">
+                                    Auto-repair on playback failure (NNTP 430, DFS only)
+                                </span>
+                            </label>
                         </div>
                     </div>
                 </div>

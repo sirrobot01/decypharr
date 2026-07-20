@@ -165,6 +165,7 @@ class ConfigManager {
         if ($('repair.strategy')) $('repair.strategy').value = repair.strategy || 'per_entry';
         if ($('repair.stop_schedule')) $('repair.stop_schedule').value = repair.stop_schedule || '';
         if ($('repair.auto_repair')) $('repair.auto_repair').checked = !!repair.auto_repair;
+        if ($('repair.repair_on_playback_failure')) $('repair.repair_on_playback_failure').checked = !!repair.repair_on_playback_failure;
         if ($('repair.skip_nzb_repair')) $('repair.skip_nzb_repair').checked = !!repair.skip_nzb_repair;
     }
 
@@ -184,6 +185,7 @@ class ConfigManager {
             strategy: $('repair.strategy')?.value || 'per_entry',
             stop_schedule: $('repair.stop_schedule')?.value.trim() || '',
             auto_repair: $('repair.auto_repair')?.checked || false,
+            repair_on_playback_failure: $('repair.repair_on_playback_failure')?.checked || false,
             skip_nzb_repair: $('repair.skip_nzb_repair')?.checked || false,
             arrs,
         };
