@@ -27,6 +27,15 @@ type Downloader struct {
 	mountPath string
 	dest      string
 	logger    zerolog.Logger
+
+	// ffprobeImportOnce lazily builds ffprobeImportChecker at most once per
+	// process, the first time an import actually needs it (Repair.FFProbeOnImport
+	// is checked fresh on every call, so flipping the toggle on later still
+	// works) - see importFFProbeChecker. This also means a "checker
+	// unavailable" verdict (missing binary / WebDAV disabled) is remembered
+	// for the rest of the process instead of re-warning on every import.
+	ffprobeImportOnce    sync.Once
+	ffprobeImportChecker *ffprobeChecker
 }
 
 const (
@@ -38,6 +47,11 @@ const (
 	symlinkReadyMaxInterval     = 2 * time.Second
 	symlinkLogEveryAttempts     = 10
 	symlinkLogSampleSize        = 8
+
+	// ffprobeImportMinSize skips ffprobe validation for files smaller than
+	// this at import time, so junk sample clips bundled in an otherwise good
+	// release can't fail the whole grab.
+	ffprobeImportMinSize = 100 * 1024 * 1024 // 100 MiB
 )
 
 type downloadLogMeta struct {
@@ -102,7 +116,11 @@ func (d *Downloader) download(torrent *storage.Entry) error {
 		}
 		// Parent has been fanned out into season entries; mark it complete so
 		// it leaves the downloading queue instead of getting re-processed.
-		d.completeEntry(torrent)
+		// (It has no active files of its own by this point, so the ffprobe
+		// import gate in completeEntry is a no-op here regardless.)
+		if err := d.completeEntry(torrent); err != nil {
+			d.markAsError(torrent, err)
+		}
 		return nil
 	}
 	return d.process(torrent, torrentMountPath)
@@ -117,7 +135,9 @@ func (d *Downloader) process(entry *storage.Entry, mountPath string) error {
 	case config.DownloadActionStrm:
 		return d.processStrm(entry)
 	case config.DownloadActionNone:
-		d.completeEntry(entry)
+		if err := d.completeEntry(entry); err != nil {
+			return err
+		}
 		// Remove entry from queue
 		_ = d.manager.queue.Delete(entry.InfoHash, nil)
 		return nil
@@ -126,10 +146,105 @@ func (d *Downloader) process(entry *storage.Entry, mountPath string) error {
 	}
 }
 
-func (d *Downloader) completeEntry(entry *storage.Entry) {
+// completeEntry is the single choke point every action (symlink, download,
+// strm, none) and both protocols (torrent, NZB) funnel through once their
+// files are in place and servable via WebDAV, right before the entry is
+// reported complete to the Arr. That makes it the natural home for the
+// optional ffprobe import gate: it runs here, before markAsCompleted /
+// notifyCompleted, so a confirmed-broken file never gets reported done.
+func (d *Downloader) completeEntry(entry *storage.Entry) error {
+	if err := d.ffprobeImportGate(entry); err != nil {
+		return err
+	}
 	d.markAsCompleted(entry)
 	d.notifyCompleted(entry)
 	d.triggerArrRefresh(entry)
+	return nil
+}
+
+// importFFProbeChecker returns the shared ffprobe checker for the import
+// gate, building it at most once (see ffprobeImportOnce). Repair.FFProbeOnImport
+// itself is still read fresh on every call so toggling it on later (without a
+// restart) takes effect on the next import.
+func (d *Downloader) importFFProbeChecker() *ffprobeChecker {
+	cfg := config.Get()
+	if !cfg.Repair.FFProbeOnImport {
+		return nil
+	}
+	d.ffprobeImportOnce.Do(func() {
+		d.ffprobeImportChecker = newImportFFProbeChecker(cfg, d.manager, d.logger)
+	})
+	return d.ffprobeImportChecker
+}
+
+// ffprobeImportGate validates a newly-completed download with ffprobe before
+// it's reported to the Arr as done. A file confirmed broken (two consecutive
+// ffprobe failures - see ffprobeChecker.checkConfirmed, the same retry-once
+// policy the repair sweep uses) fails the import instead of completing it, so the
+// existing "download failed" propagation blocklists the release and lets the
+// Arr grab another candidate - the same path today's parse/download failures
+// already take, no new rejection machinery.
+//
+// Deliberately conservative, because wrongly rejecting a good release here is
+// worse than letting a bad file through to the repair sweep, which will still catch
+// it: a timeout or a cancelled context is inconclusive and lets the import
+// proceed, a missing ffprobe binary or disabled WebDAV lets it proceed (after
+// one WARN, see importFFProbeChecker), and any unexpected error from the gate
+// itself is swallowed and logged rather than failing the import - this gate
+// must never be the reason a good download breaks.
+//
+// Only checks structural health - container parses, a video stream exists, a
+// sane duration - plus a category-based ceiling (6h for a Sonarr grab, 12h
+// otherwise), since there's no Arr ContentFile mapping yet to compare a
+// precise expected runtime against. That comparison remains the repair sweep's job,
+// which runs after the Arr has already imported the file.
+//
+// The whole function is wrapped in a recover(): a panic here must never take
+// down the download-completion path every torrent and NZB funnels through,
+// so an unexpected bug in the gate degrades to "proceed without validation"
+// exactly like a missing binary or a timeout would.
+func (d *Downloader) ffprobeImportGate(entry *storage.Entry) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			d.logger.Warn().Interface("panic", r).Str("entry", entry.Name).
+				Msg("Import: ffprobe gate panicked; proceeding without validation")
+			err = nil
+		}
+	}()
+
+	checker := d.importFFProbeChecker()
+	if checker == nil {
+		return nil
+	}
+
+	ctx := d.manager.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	kind := storage.ArrKindOther
+	if a := d.manager.arr.GetOrCreate(entry.Category); a != nil {
+		kind = arrKindFromType(a.Type)
+	}
+	expected := expectedRuntime{ArrKind: kind}
+	entryFolder := entry.GetFolder()
+
+	for _, file := range entry.GetActiveFiles() {
+		if ctx.Err() != nil {
+			// Cancellation (shutdown) is inconclusive, never a rejection.
+			return nil
+		}
+		if file == nil || file.Size < ffprobeImportMinSize || !config.IsVideoFile(file.Name) {
+			continue
+		}
+		ok, reason := checker.checkConfirmed(ctx, entryFolder, file.Name, expected)
+		if !ok {
+			d.logger.Warn().Str("entry", entry.Name).Str("file", file.Name).Str("reason", reason).
+				Msg("Import: ffprobe confirmed broken; rejecting download")
+			return fmt.Errorf("ffprobe import check: %s", reason)
+		}
+	}
+	return nil
 }
 
 func (d *Downloader) markAsCompleted(entry *storage.Entry) {
@@ -222,9 +337,7 @@ func (d *Downloader) processSymlink(entry *storage.Entry, mountPath string) erro
 		}
 	}
 
-	d.completeEntry(entry)
-
-	return nil
+	return d.completeEntry(entry)
 }
 
 func (d *Downloader) createSymlinksWhenMountFilesAppear(entry *storage.Entry, files []*storage.File, mountPath string, symlinkDir string) ([]string, error) {
@@ -542,7 +655,9 @@ func (d *Downloader) processTorrentDownload(entry *storage.Entry) error {
 	if err := p.Wait(); err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
-	d.completeEntry(entry)
+	if err := d.completeEntry(entry); err != nil {
+		return err
+	}
 	d.logger.Info().Msgf("Downloaded all files for %s", entry.Name)
 	return nil
 }
@@ -618,7 +733,9 @@ func (d *Downloader) processUsenetDownload(entry *storage.Entry) error {
 		return fmt.Errorf("NZB download failed: %w", err)
 	}
 
-	d.completeEntry(entry)
+	if err := d.completeEntry(entry); err != nil {
+		return err
+	}
 	d.logger.Info().Msgf("Downloaded all NZB files for %s", entry.Name)
 	return nil
 }
@@ -653,7 +770,9 @@ func (d *Downloader) processStrm(torrent *storage.Entry) error {
 			return fmt.Errorf("failed to create .strm file: %s: %v", strmFilePath, err)
 		}
 	}
-	d.completeEntry(torrent)
+	if err := d.completeEntry(torrent); err != nil {
+		return err
+	}
 	d.logger.Info().Str("destination", torrentSymlinkPath).Msgf("Created .strm files for %s", torrent.Name)
 	return nil
 }

@@ -210,12 +210,31 @@ type RepairConfig struct {
 	// fires mid-repair-sweep, AutoRepair decides what happens to whatever was
 	// already found broken: repaired if true, left alone if false.
 	StopSchedule string `json:"stop_schedule,omitempty"`
+
+	// FFProbeCheck, when true, additionally validates each file the repair sweep's STAT probe called
+	// healthy by running ffprobe against the local WebDAV endpoint. Catches files whose article
+	// headers still exist but whose assembled stream is unplayable: purged bodies, mis-assembled
+	// containers with bogus durations, and files with no decodable video/audio streams. Requires
+	// the ffprobe binary on PATH (or FFProbePath) and WebDAV enabled. Default off - it reads real
+	// bytes per file, so repair sweeps take longer and use provider bandwidth.
+	FFProbeCheck bool `json:"ffprobe_check,omitempty"`
+	// FFProbeTimeout bounds a single ffprobe invocation (e.g. "90s"). Default 90s.
+	FFProbeTimeout string `json:"ffprobe_timeout,omitempty"`
+	// FFProbePath overrides the ffprobe binary location. Default: find "ffprobe" on PATH.
+	FFProbePath string `json:"ffprobe_path,omitempty"`
+	// FFProbeOnImport, when true, validates each newly imported download with ffprobe (same checks
+	// as FFProbeCheck, minus the runtime comparison) BEFORE it is reported complete to
+	// Sonarr/Radarr. A file that fails twice is rejected, so the Arr blocklists the release and
+	// grabs another - corrupt downloads never enter the library. Adds seconds and real reads per
+	// import; requires the ffprobe binary and WebDAV. Default off.
+	FFProbeOnImport bool `json:"ffprobe_on_import,omitempty"`
 }
 
 func (r RepairConfig) IsZero() bool {
 	return !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
 		r.NNTPConnectionPercent == 0 && r.Strategy == "" && r.RecheckInterval == "" && len(r.Arrs) == 0 &&
-		!r.AutoRepair && !r.SkipNZBRepair && r.StopSchedule == ""
+		!r.AutoRepair && !r.SkipNZBRepair && r.StopSchedule == "" &&
+		!r.FFProbeCheck && r.FFProbeTimeout == "" && r.FFProbePath == "" && !r.FFProbeOnImport
 }
 
 type Config struct {

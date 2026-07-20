@@ -86,6 +86,7 @@ type fileResult struct {
 func (r *Repair) executeSweep(ctx context.Context, run *storage.RepairRun, opts RepairRunOptions, stopState *repairStopState) {
 	cfg := r.cfg()
 	log := r.logger.With().Str("run_id", run.ID).Logger()
+	ctx = r.attachFFProbeChecker(ctx, log)
 
 	// Resolve auto-repair once: when off, the repair sweep is a pure health check —
 	// it probes and records broken state but attempts no debrid re-insert and
@@ -318,7 +319,7 @@ func (r *Repair) probeEntry(ctx context.Context, runID string, c *candidate, hea
 	r.saveHealth(h)
 
 	names := orderedFilenames(c.item)
-	results := r.probeFiles(ctx, c.item, names, opts)
+	results := r.probeFiles(ctx, c, names, opts)
 	if autoRepair {
 		r.autoHealResults(ctx, results, heal)
 	}
@@ -355,7 +356,7 @@ func (r *Repair) probeEntry(ctx context.Context, runID string, c *candidate, hea
 
 // probeFiles fans per-file probes inside a single entry, capped at
 // repairFilesPerEntry concurrent workers.
-func (r *Repair) probeFiles(ctx context.Context, item *storage.EntryItem, names []string, opts RepairRunOptions) []fileResult {
+func (r *Repair) probeFiles(ctx context.Context, c *candidate, names []string, opts RepairRunOptions) []fileResult {
 	results := make([]fileResult, len(names))
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(repairFilesPerEntry)
@@ -365,7 +366,7 @@ func (r *Repair) probeFiles(ctx context.Context, item *storage.EntryItem, names 
 				results[i] = fileResult{name: name, reason: "context_cancelled"}
 				return nil
 			}
-			results[i] = r.probeFile(gctx, item, name, opts)
+			results[i] = r.probeFile(gctx, c, name, opts)
 			return nil
 		})
 	}
@@ -375,9 +376,13 @@ func (r *Repair) probeFiles(ctx context.Context, item *storage.EntryItem, names 
 
 // probeFile checks one file. NZB probes use usenet.CheckFile. Torrent probes
 // use the provider CheckFile endpoint unless this run requests unrestrict-link
-// probing.
-func (r *Repair) probeFile(ctx context.Context, item *storage.EntryItem, name string, opts RepairRunOptions) fileResult {
-	file := item.Files[name]
+// probing. When the protocol probe passes and an ffprobe checker is attached
+// to ctx (Repair.FFProbeCheck), the file is additionally validated by reading
+// it back over WebDAV - this is the only check that can catch a STAT-alive,
+// BODY-dead file or a mis-assembled container, since NNTP/provider CheckFile
+// never look past the article/link's existence.
+func (r *Repair) probeFile(ctx context.Context, c *candidate, name string, opts RepairRunOptions) fileResult {
+	file := c.item.Files[name]
 	res := fileResult{name: name}
 
 	if file == nil || file.InfoHash == "" {
@@ -398,9 +403,21 @@ func (r *Repair) probeFile(ctx context.Context, item *storage.EntryItem, name st
 	}
 
 	if entry.IsNZB() {
-		return r.probeNZBFile(ctx, entry, name, res)
+		res = r.probeNZBFile(ctx, entry, name, res)
+	} else {
+		res = r.probeTorrentFile(ctx, entry, file, name, res, opts)
 	}
-	return r.probeTorrentFile(ctx, entry, file, name, res, opts)
+
+	if res.healthy {
+		if checker := ffprobeCheckerFromContext(ctx); checker != nil {
+			if ok, reason := checker.checkConfirmed(ctx, c.name, name, expectedRuntimeFor(c, name)); !ok {
+				res.healthy = false
+				res.broken = true
+				res.reason = reason
+			}
+		}
+	}
+	return res
 }
 
 func (r *Repair) probeNZBFile(ctx context.Context, entry *storage.Entry, name string, res fileResult) fileResult {
@@ -1339,11 +1356,12 @@ func (r *Repair) RecheckEntry(ctx context.Context, entryName string, fix bool) (
 		ctx = r.parentCtx
 	}
 	r.runWG.Go(func() {
+		runCtx := r.attachFFProbeChecker(ctx, r.logger)
 		if fix {
-			r.attachArrContext(ctx, c)
+			r.attachArrContext(runCtx, c)
 		}
 		heal := newHealCache()
-		final := r.probeEntry(ctx, runID, c, heal, RepairRunOptions{}, fix)
+		final := r.probeEntry(runCtx, runID, c, heal, RepairRunOptions{}, fix)
 		if !fix || final.Status != storage.HealthBroken {
 			return
 		}
@@ -1429,6 +1447,7 @@ func (r *Repair) RecheckMedia(ctx context.Context, arrName, mediaID string, fix 
 // executeRecheckMedia is the body of a media recheck. Mirrors executeSweep
 // but scoped to a specific media-id resolved through one or more Arrs.
 func (r *Repair) executeRecheckMedia(ctx context.Context, run *storage.RepairRun, arrs []*arr.Arr, arrName, mediaID string, fix bool) {
+	ctx = r.attachFFProbeChecker(ctx, r.logger)
 	candidates := make(map[string]*candidate)
 	var lastErr error
 	for _, a := range arrs {

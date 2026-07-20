@@ -2,7 +2,9 @@ package manager
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"net/http"
@@ -69,6 +71,14 @@ type Manager struct {
 	entry      *EntryCache
 	downloader *Downloader
 	usenet     *usenet.Usenet
+
+	// internalToken is a random, in-memory, per-process credential the repair
+	// sweep's ffprobe check presents to the WebDAV auth middleware instead of
+	// the user's WebDAV password: that password is only ever stored as a
+	// bcrypt hash, so there is no plaintext credential available to hand to an
+	// external process. Regenerated (and any prior value invalidated) on
+	// every restart; never persisted.
+	internalToken string
 
 	// Debrid speed test results storage
 	debridSpeedTestResults *xsync.Map[string, debridTypes.SpeedTestResult]
@@ -153,6 +163,7 @@ func New() *Manager {
 		debridSpeedTestResults: xsync.NewMap[string, debridTypes.SpeedTestResult](),
 		activeStreams:          xsync.NewMap[string, *ActiveStream](),
 		processingEntries:      xsync.NewMap[string, struct{}](),
+		internalToken:          generateInternalToken(),
 	}
 
 	instance.init()
@@ -546,6 +557,24 @@ func (m *Manager) Uptime() time.Duration {
 
 func (m *Manager) StartTime() time.Time {
 	return m.startTime
+}
+
+// InternalToken returns the process-lifetime bearer credential the WebDAV
+// auth middleware accepts in place of the (unrecoverable, bcrypt-hashed)
+// WebDAV password. Used by the repair sweep's ffprobe check to authenticate
+// its own reads when WebDAV auth is enabled.
+func (m *Manager) InternalToken() string {
+	return m.internalToken
+}
+
+// generateInternalToken creates a random, per-process token. Never persisted;
+// a fresh value is generated on every restart.
+func generateInternalToken() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b)
 }
 
 // CRUD operations
