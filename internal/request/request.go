@@ -265,7 +265,7 @@ func New(options ...ClientOption) *Client {
 	retryClient.RetryMax = client.maxRetries
 	retryClient.RetryWaitMin = 1 * time.Second
 	retryClient.RetryWaitMax = 30 * time.Second
-	retryClient.Logger = zerologAdapter{log: client.logger}
+	retryClient.Logger = nil
 	retryClient.Backoff = retryAfterBackoff
 
 	// Custom retry policy based on retryable status codes
