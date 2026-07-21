@@ -197,6 +197,37 @@ type parseRAR5StreamResult struct {
 	IsHeaderEncrypted bool
 	EncryptionKey     []byte // AES key for file data decryption (if encrypted)
 	EncryptionIV      []byte // AES IV for file data decryption (if encrypted)
+	// VolumeNumber is the 0-based volume number read from this volume's RAR5
+	// main archive header (present when the archive-flags volume-number bit is
+	// set). HasVolumeNumber reports whether it was successfully parsed. These
+	// let the caller order volumes by their TRUE position rather than by NZB
+	// upload order, which is wrong for obfuscated multi-volume archives whose
+	// per-volume filenames carry no .partNN ordering hint.
+	VolumeNumber    int
+	HasVolumeNumber bool
+}
+
+// parseRAR5MainVolumeNumber extracts the 0-based volume number from a RAR5 main
+// archive header's data. RAR5 main header layout (after the common
+// CRC/size/type/flags fields already stripped into header.Data): ArchiveFlags
+// (vint), then VolumeNumber (vint) IFF ArchiveFlags has the volume-number bit
+// (RAR5MainFlagVolumeNumber). Returns (number, true) only when the bit is set
+// and the vint parses; otherwise (0, false) so the caller falls back to NZB
+// order rather than trusting a guess.
+func parseRAR5MainVolumeNumber(data []byte) (int, bool) {
+	r := bytes.NewReader(data)
+	archiveFlags, err := readVInt(r)
+	if err != nil {
+		return 0, false
+	}
+	if archiveFlags&RAR5MainFlagVolumeNumber == 0 {
+		return 0, false
+	}
+	volNum, err := readVInt(r)
+	if err != nil {
+		return 0, false
+	}
+	return int(volNum), true
 }
 
 // parseRAR5Stream parses RAR 5.0 headers from a stream reader
@@ -309,6 +340,16 @@ func (p *RARParser) parseRAR5Stream(stream *rarReader, volumeIndex int, volumeNa
 
 		// Data offset is immediately after the header (absolute position in stream)
 		dataOffsetAbsolute := headerStartPos + int64(headerSize)
+
+		// Main archive header: extract the true volume number if present, so the
+		// caller can order volumes correctly even when NZB/upload order doesn't
+		// match volume order (obfuscated multi-volume archives).
+		if header.Type == RAR5HeaderTypeMain {
+			if vn, ok := parseRAR5MainVolumeNumber(header.Data); ok {
+				result.VolumeNumber = vn
+				result.HasVolumeNumber = true
+			}
+		}
 
 		// Parse file headers
 		if header.Type == RAR5HeaderTypeFile {
