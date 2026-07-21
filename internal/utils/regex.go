@@ -40,6 +40,61 @@ func RemoveInvalidChars(value string) string {
 	}, value)
 }
 
+func SafeFolderName(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	value = strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 || strings.ContainsRune(`<>:"/\|?*`, r) {
+			return -1
+		}
+		return r
+	}, value)
+	value = strings.Join(strings.Fields(value), " ")
+	value = strings.Trim(value, " .")
+	if value == "" || value == "." || value == ".." {
+		return fallback
+	}
+	if isReservedWindowsName(value) {
+		return fallback
+	}
+	value = truncateFolderName(value, 255)
+	value = strings.Trim(value, " .")
+	if value == "" || isReservedWindowsName(value) {
+		return fallback
+	}
+	return value
+}
+
+func truncateFolderName(value string, maxBytes int) string {
+	if len(value) <= maxBytes {
+		return value
+	}
+	var builder strings.Builder
+	for _, r := range value {
+		if builder.Len()+len(string(r)) > maxBytes {
+			break
+		}
+		builder.WriteRune(r)
+	}
+	return builder.String()
+}
+
+func isReservedWindowsName(value string) bool {
+	name := strings.ToUpper(value)
+	if base, _, ok := strings.Cut(name, "."); ok {
+		name = base
+	}
+	switch name {
+	case "CON", "PRN", "AUX", "NUL":
+		return true
+	case "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9":
+		return true
+	case "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9":
+		return true
+	default:
+		return false
+	}
+}
+
 func RemoveExtension(value string) string {
 	ext := filepath.Ext(value)
 	if ext == "" {

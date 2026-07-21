@@ -48,6 +48,7 @@ const (
 	WebDavUseOriginalName      WebDavFolderNaming = "original"
 	WebDavUseFileNameNoExt     WebDavFolderNaming = "filename_no_ext"
 	WebDavUseOriginalNameNoExt WebDavFolderNaming = "original_no_ext"
+	WebDavUseArrSubmittedName  WebDavFolderNaming = "arr_submitted_name"
 	WebdavUseHash              WebDavFolderNaming = "infohash"
 )
 
