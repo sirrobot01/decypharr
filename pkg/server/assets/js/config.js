@@ -1260,6 +1260,12 @@ class ConfigManager {
                 return;
             }
 
+            const quotaInput = getField('quota');
+            const quotaPeriodInput = getField('quota_period');
+            const quotaResetDayInput = getField('quota_reset_day');
+            const quotaResetHourInput = getField('quota_reset_hour');
+            const reserveInput = getField('reserve');
+
             const provider = {
                 host: hostInput.value,
                 port: parseInt(portInput.value) || 119,
@@ -1272,7 +1278,14 @@ class ConfigManager {
                 // Backup is optional and defaults false — old form versions
                 // (or missing inputs after a hot-reload) shouldn't accidentally
                 // turn a primary into a backup.
-                backup: backupInput ? backupInput.checked : false
+                backup: backupInput ? backupInput.checked : false,
+                // Bandwidth quota — all optional; blank cap = unlimited.
+                quota: quotaInput ? quotaInput.value.trim() : '',
+                quota_period: quotaPeriodInput ? quotaPeriodInput.value : 'week',
+                quota_reset_day: quotaResetDayInput ? (parseInt(quotaResetDayInput.value) || 0) : 0,
+                quota_reset_hour: quotaResetHourInput ? (parseInt(quotaResetHourInput.value) || 0) : 0,
+                // Reserve held back for fills only; blank = 10% of cap (server-side default).
+                reserve: reserveInput ? reserveInput.value.trim() : ''
             };
 
             if (provider.host && provider.username && provider.password) {
@@ -1936,6 +1949,64 @@ class ConfigManager {
                                id="usenet_provider_${index}_backup">
                         <span class="text-sm">Backup provider (fallback only)</span>
                     </label>
+                </div>
+
+                <div class="divider text-xs opacity-60 mt-4 mb-2">Bandwidth Quota (optional)</div>
+                <p class="text-sm opacity-70 mb-3">Stop using this provider once it hits the cap, until the period resets. Prevents bans from weekly/monthly overuse. Leave the cap empty for unlimited.</p>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div>
+                        <label class="label" for="usenet_provider_${index}_quota">
+                            <span class="font-medium">Quota Cap</span>
+                        </label>
+                        <input type="text" class="input w-full"
+                               name="usenet.providers[${index}].quota"
+                               id="usenet_provider_${index}_quota"
+                               placeholder="e.g. 500GB (empty = unlimited)">
+                        <span class="text-sm opacity-70">Data cap per period. Empty or 0 = unlimited.</span>
+                    </div>
+                    <div>
+                        <label class="label" for="usenet_provider_${index}_reserve">
+                            <span class="font-medium">Reserve (fills)</span>
+                        </label>
+                        <input type="text" class="input w-full"
+                               name="usenet.providers[${index}].reserve"
+                               id="usenet_provider_${index}_reserve"
+                               placeholder="blank = 10% of cap">
+                        <span class="text-sm opacity-70">Held back for fills only. Once you've used the cap minus this reserve, the server drops to a fill/backup role for the rest of the period; blank defaults to 10% of the cap.</span>
+                    </div>
+                    <div>
+                        <label class="label" for="usenet_provider_${index}_quota_period">
+                            <span class="font-medium">Reset Period</span>
+                        </label>
+                        <select class="select w-full"
+                                name="usenet.providers[${index}].quota_period"
+                                id="usenet_provider_${index}_quota_period">
+                            <option value="day">Daily</option>
+                            <option value="week" selected>Weekly</option>
+                            <option value="month">Monthly</option>
+                        </select>
+                        <span class="text-sm opacity-70">When usage resets to zero.</span>
+                    </div>
+                    <div>
+                        <label class="label" for="usenet_provider_${index}_quota_reset_day">
+                            <span class="font-medium">Reset Day</span>
+                        </label>
+                        <input type="number" class="input w-full"
+                               name="usenet.providers[${index}].quota_reset_day"
+                               id="usenet_provider_${index}_quota_reset_day"
+                               min="0" max="31" value="0">
+                        <span class="text-sm opacity-70">Weekly: 0=Sun … 6=Sat. Monthly: 1–31 (day of month). Ignored for Daily.</span>
+                    </div>
+                    <div>
+                        <label class="label" for="usenet_provider_${index}_quota_reset_hour">
+                            <span class="font-medium">Reset Hour</span>
+                        </label>
+                        <input type="number" class="input w-full"
+                               name="usenet.providers[${index}].quota_reset_hour"
+                               id="usenet_provider_${index}_quota_reset_hour"
+                               min="0" max="23" value="0">
+                        <span class="text-sm opacity-70">Hour of day (0–23, server local time) the period rolls over.</span>
+                    </div>
                 </div>
             </div>
         </div>

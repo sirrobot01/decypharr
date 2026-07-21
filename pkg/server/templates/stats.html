@@ -1175,6 +1175,7 @@
                                         <div class="flex items-center gap-1">
                                             <span class="font-medium text-xs">${provider.host}</span>
                                             <span class="badge ${provider.ssl ? 'badge-success' : 'badge-warning'} badge-xs">${provider.ssl ? 'SSL' : 'Plain'}</span>
+                                            <span class="badge ${provider.tier === 'backup' ? 'badge-secondary' : 'badge-info'} badge-xs">${provider.tier === 'backup' ? 'Backup' : 'Primary'}</span>
                                         </div>
                                         <p class="text-xs text-base-content/70">${provider.max_connections || 0} connections</p>
                                     </div>
@@ -1190,6 +1191,52 @@
                                     </div>
                                 </div>
                                 <div id="speed-result-${provider.host.replace(/\./g, '-')}" class="text-xs mt-1"></div>
+                                ${(() => {
+                                    const used = provider.bytes_used || 0;
+                                    const q = provider.quota_bytes || 0;
+                                    if (!q && !used) return '';
+                                    if (!q) {
+                                        return `<div class="mt-1 text-xs text-base-content/60">${window.decypharrUtils.formatBytes(used)} downloaded this period</div>`;
+                                    }
+                                    const reserve = provider.reserve_bytes || 0;
+                                    const soft = provider.soft_threshold || (q - reserve);
+                                    const pct = Math.min(100, (used / q) * 100);
+                                    const softPct = Math.min(100, (soft / q) * 100);
+                                    const exceeded = provider.quota_exceeded;
+                                    const fillOnly = provider.fill_only;
+                                    const barColor = exceeded ? 'bg-error' : (fillOnly ? 'bg-info' : (pct >= 80 ? 'bg-warning' : 'bg-success'));
+                                    let badge = '';
+                                    if (exceeded) badge = ' <span class="badge badge-error badge-xs ml-1">Limit reached</span>';
+                                    else if (fillOnly) badge = ' <span class="badge badge-info badge-xs ml-1">Fills only</span>';
+                                    let resetStr = '';
+                                    if (provider.quota_reset_at) {
+                                        const ms = new Date(provider.quota_reset_at) - new Date();
+                                        if (ms > 0) {
+                                            const h = Math.floor(ms / 3600000);
+                                            const d = Math.floor(h / 24);
+                                            resetStr = d >= 1 ? `resets in ${d}d ${h % 24}h` : `resets in ${h}h`;
+                                        }
+                                    }
+                                    const textColor = exceeded ? 'text-error font-medium' : (fillOnly ? 'text-info font-medium' : 'text-base-content/70');
+                                    let sub = '';
+                                    if (reserve > 0) {
+                                        sub = provider.tier === 'backup'
+                                            ? `Now a backup server until quota resets \u00b7 reserve ${window.decypharrUtils.formatBytes(reserve)}`
+                                            : `${window.decypharrUtils.formatBytes(Math.max(0, soft - used))} until primary becomes a backup server \u00b7 reserve ${window.decypharrUtils.formatBytes(reserve)}`;
+                                    }
+                                    return `
+                                        <div class="mt-1">
+                                            <div class="flex justify-between items-center text-xs">
+                                                <span class="${textColor}">${window.decypharrUtils.formatBytes(used)} / ${window.decypharrUtils.formatBytes(q)}${badge}</span>
+                                                <span class="text-base-content/50">${resetStr}</span>
+                                            </div>
+                                            <div class="relative w-full bg-base-300 rounded-full h-1.5 mt-1 overflow-hidden">
+                                                <div class="h-full ${barColor} transition-all duration-300" style="width: ${pct}%"></div>
+                                                ${reserve > 0 ? `<div class="absolute top-0 bottom-0 w-px bg-base-content/40" style="left: ${softPct}%" title="Fills-only threshold"></div>` : ''}
+                                            </div>
+                                            ${sub ? `<div class="text-xs text-base-content/50 mt-0.5">${sub}</div>` : ''}
+                                        </div>`;
+                                })()}
                             </div>
                         </div>
                     `;

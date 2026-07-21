@@ -25,6 +25,29 @@ type UsenetProvider struct {
 	// other Usenet clients implement, and prevents block providers from
 	// being billed for articles the unlimited could have served.
 	Backup bool `json:"backup,omitempty"`
+
+	// Quota is the download cap for this provider over QuotaPeriod, as a human
+	// size like "500GB". Empty or "0" = unlimited. When the cap is reached the
+	// provider is skipped for downloads until the period resets, so a
+	// higher-priority provider that hits its cap automatically hands off to
+	// lower-priority/backup providers — this avoids provider bans from weekly
+	// or monthly overuse. Usage is metered at the socket (actual bytes
+	// received) and persisted across restarts in usenet_bandwidth.json.
+	Quota string `json:"quota,omitempty"`
+	// QuotaPeriod is the reset cadence: "day", "week", or "month". Default "week".
+	QuotaPeriod string `json:"quota_period,omitempty"`
+	// QuotaResetDay anchors the reset. For "week": 0=Sunday..6=Saturday. For
+	// "month": 1..31 (clamped to the last day of short months). Ignored for "day".
+	QuotaResetDay int `json:"quota_reset_day,omitempty"`
+	// QuotaResetHour is the hour of day (0..23, server local time) the period
+	// rolls over. Default 0 (midnight).
+	QuotaResetHour int `json:"quota_reset_hour,omitempty"`
+	// Reserve is a tail of the Quota held back for fills only, as a human size
+	// (e.g. "500GB"). Once (Quota - Reserve) is used the provider stops leading
+	// bulk and drops to a fill/backup role for the rest of the period, so its
+	// reserve is spent only completing segments the other primaries can't
+	// provide. Blank defaults to 10% of Quota.
+	Reserve string `json:"reserve,omitempty"`
 }
 
 // Usenet configuration for usenet streaming and downloading
