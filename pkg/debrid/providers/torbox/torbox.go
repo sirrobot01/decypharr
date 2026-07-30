@@ -262,6 +262,34 @@ func (tb *Torbox) IsAvailable(hashes []string) map[string]bool {
 	return result
 }
 
+// isCached reports whether a single info hash is present in TorBox's cache.
+//
+// The second return value states whether the answer is trustworthy. A transport
+// error, a non-2xx reply or a malformed body yields (false, false), and callers
+// must not read that as "not cached": absence of information is not evidence of
+// absence. Acting on an unknown answer as though it were a negative one is how a
+// cache probe turns into a mass false-positive machine.
+//
+// IsAvailable cannot be reused for this: it skips failed batches with `continue`,
+// so a probe that failed and a hash that is genuinely absent both surface as a
+// missing map key. That distinction is the whole point here.
+func (tb *Torbox) isCached(hash string) (cached bool, known bool) {
+	if hash == "" {
+		return false, false
+	}
+	var res AvailableResponse
+	resp, err := tb.doGet("/api/torrents/checkcached", map[string]string{"hash": hash}, &res)
+	if err != nil || resp == nil || resp.StatusCode < 200 || resp.StatusCode >= 300 || res.Data == nil {
+		return false, false
+	}
+	for h, c := range *res.Data {
+		if strings.EqualFold(h, hash) && c.Size > 0 {
+			return true, true
+		}
+	}
+	return false, true
+}
+
 func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
 	var data AddMagnetResponse
 
@@ -270,6 +298,19 @@ func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
 	}
 	if !torrent.DownloadUncached {
 		formData["add_only_if_cached"] = "true"
+
+		// Ask the cache before calling createtorrent. When a release is not
+		// cached TorBox does not reply with a refusal, it does not reply at
+		// all: the request wrapper then burns ResponseHeaderTimeout (30s) per
+		// attempt and retries cfg.Retries times, so one uncached grab can cost
+		// around two minutes. The calling *arr times out well before that and
+		// records the failure against the INDEXER, which it eventually
+		// disables, for a release the indexer served perfectly well.
+		// Failing fast keeps the refusal cheap and keeps the blame off the
+		// indexer. An unknown answer falls through to the previous behaviour.
+		if cached, known := tb.isCached(torrent.InfoHash); known && !cached {
+			return nil, fmt.Errorf("torrent: %s not cached", torrent.Name)
+		}
 	}
 
 	resp, err := tb.doPostFormWithClient(tb.submissionClient(), "/api/torrents/createtorrent", formData, &data)
