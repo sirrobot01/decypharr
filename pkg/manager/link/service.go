@@ -20,8 +20,11 @@ import (
 
 const (
 	MaxReinsertionAttempt = 3
+<<<<<<< HEAD
 	// maxValidatedEntries caps the validated-link memo map (see GetLink).
 	maxValidatedEntries = 8192
+=======
+>>>>>>> c5121c0 (fix(link): cap requestdl calls per file with a 5-minute refetch cooldown)
 
 	// Retry config for transient errors (429, 502, 503, 504) during link validation.
 	maxRetryableAttempts = 5
