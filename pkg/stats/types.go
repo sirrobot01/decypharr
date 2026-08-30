@@ -11,12 +11,44 @@ type Snapshot struct {
 	System        SystemStats       `json:"system"`
 	Debrids       []types.Stats     `json:"debrids"`
 	Mount         MountStats        `json:"mount"`
+	Access        AccessStats       `json:"access"`
 	Usenet        map[string]any    `json:"usenet,omitempty"`
 	ActiveStreams ActiveStreamStats `json:"active_streams"`
 	Storage       StorageStats      `json:"storage"`
 	Queue         QueueStats        `json:"queue"`
 	Arrs          ArrStats          `json:"arrs"`
 	Repair        RepairStats       `json:"repair"`
+}
+
+// AccessStats describes the network file servers that expose the library to
+// external clients (as opposed to the local Mount). The host is not included:
+// the dashboard fills it in from the browser's current location, which is the
+// address the user actually reaches Decypharr on.
+type AccessStats struct {
+	WebDAV WebDAVAccess `json:"webdav"`
+	NFS    NFSAccess    `json:"nfs"`
+	SMB    SMBAccess    `json:"smb"`
+}
+
+// NFSAccess describes the NFSv4 listener. NFSv4 is single-port with no
+// portmapper, so the dashboard's mount commands pass the port explicitly.
+type NFSAccess struct {
+	Enabled bool   `json:"enabled"`
+	Port    uint16 `json:"port"`
+}
+
+type SMBAccess struct {
+	Enabled   bool   `json:"enabled"`
+	Port      uint16 `json:"port"`
+	ShareName string `json:"share_name"`
+	Username  string `json:"username"`
+}
+
+type WebDAVAccess struct {
+	Enabled      bool   `json:"enabled"`
+	Path         string `json:"path"`          // URL path, e.g. "/webdav"
+	Port         string `json:"port"`          // main web server port
+	AuthRequired bool   `json:"auth_required"` // basic auth enforced on WebDAV
 }
 
 type SystemStats struct {

@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,8 +9,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/sirrobot01/appendstore"
 	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/pkg/storage/hybrid"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -19,13 +20,13 @@ var storeNames = []string{"entries", "queue", "items", "repair_state", "repair_r
 // on startup so they don't accumulate dead data.
 var legacyStoreNames = []string{"repair_jobs", "repair_keys"}
 
-// Storage handles persistence using HybridStore
+// Storage handles application persistence using appendstore.
 type Storage struct {
-	entries     *hybrid.Store
-	queue       *hybrid.Store
-	entryItems  *hybrid.Store
-	repairState *hybrid.Store
-	repairRuns  *hybrid.Store
+	entries     *appendstore.Store
+	queue       *appendstore.Store
+	entryItems  *appendstore.Store
+	repairState *appendstore.Store
+	repairRuns  *appendstore.Store
 	dir         string
 	logger      zerolog.Logger
 
@@ -34,18 +35,18 @@ type Storage struct {
 	healthCountsBuiltAt time.Time
 }
 
-
-
-
-func createItemStores(baseDir string, baseConfig hybrid.Config) (map[string]*hybrid.Store, error) {
-	items := make(map[string]*hybrid.Store)
+func createItemStores(baseDir string, baseOptions appendstore.Options) (map[string]*appendstore.Store, error) {
+	items := make(map[string]*appendstore.Store)
 	for _, name := range storeNames {
-		config := baseConfig
-		config.DataPath = filepath.Join(baseDir, name+".db")
-		store, err := hybrid.New(config)
+		path := filepath.Join(baseDir, name+".db")
+		store, err := appendstore.Open(path, baseOptions)
 		if err != nil {
 			for _, it := range items {
 				_ = it.Close()
+			}
+			if errors.Is(err, appendstore.ErrUnsupportedVersion) {
+				return nil, fmt.Errorf("the %s database was written by a newer version of Decypharr and this build cannot read it. "+
+					"Upgrade Decypharr, or restore the copy saved before the upgrade (a .bak file beside %s): %w", name, path, err)
 			}
 			return nil, fmt.Errorf("failed to create %s store: %w", name, err)
 		}
@@ -77,14 +78,29 @@ func NewStorage(dbPath string) (*Storage, error) {
 
 	dropLegacyStores(dbPath, log)
 
-	baseConfig := hybrid.Config{
+	baseOptions := appendstore.Options{
 		CacheSize:           5000,
 		SyncInterval:        time.Second,
 		CompactionThreshold: 0.5,
 		AutoCompact:         true,
+		IndexedFields:       []string{attributeCategory, attributeProvider, attributeStatus},
+		OnError: func(err error) {
+			log.Warn().Err(err).Msg("Storage background operation failed")
+		},
+		// appendstore keeps the pre-upgrade copy; surface where it landed,
+		// because that file is the only way back to an older Decypharr.
+		OnMigrate: func(info appendstore.MigrationInfo) error {
+			log.Warn().
+				Str("database", info.Path).
+				Uint32("from_version", info.FromVersion).
+				Uint32("to_version", info.ToVersion).
+				Str("backup", info.Backup).
+				Msg("Upgrading database format. Older Decypharr versions cannot read it — restore the backup to downgrade")
+			return nil
+		},
 	}
 
-	itemStores, err := createItemStores(dbPath, baseConfig)
+	itemStores, err := createItemStores(dbPath, baseOptions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create item stores: %w", err)
 	}
@@ -110,7 +126,7 @@ func NewStorage(dbPath string) (*Storage, error) {
 
 func (s *Storage) Close() error {
 	var errs []error
-	stores := []*hybrid.Store{s.entries, s.queue, s.entryItems, s.repairState, s.repairRuns}
+	stores := []*appendstore.Store{s.entries, s.queue, s.entryItems, s.repairState, s.repairRuns}
 	for _, store := range stores {
 		if store == nil {
 			continue
@@ -128,7 +144,7 @@ func (s *Storage) Close() error {
 // DiskSize returns the total on-disk size of all stores (O(1), no filesystem walk).
 func (s *Storage) DiskSize() int64 {
 	var size int64
-	for _, store := range []*hybrid.Store{s.entries, s.queue, s.entryItems, s.repairState, s.repairRuns} {
+	for _, store := range []*appendstore.Store{s.entries, s.queue, s.entryItems, s.repairState, s.repairRuns} {
 		if store != nil {
 			size += store.DiskSize()
 		}
@@ -162,8 +178,8 @@ func (s *Storage) GetMigrationStatus() (*SystemMigrationStatus, error) {
 func (s *Storage) copyFrom(other *Storage) error {
 	pairs := []struct {
 		name string
-		from *hybrid.Store
-		to   *hybrid.Store
+		from *appendstore.Store
+		to   *appendstore.Store
 	}{
 		{"entries", other.entries, s.entries},
 		{"queue", other.queue, s.queue},

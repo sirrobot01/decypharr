@@ -43,7 +43,7 @@ type Magnets []magnetInfo
 type TorrentInfoResponse struct {
 	Status string `json:"status"`
 	Data   struct {
-		Magnets magnetInfo `json:"magnets"`
+		Magnets Magnets `json:"magnets"`
 	} `json:"data"`
 	Error *errorResponse `json:"error"`
 }
@@ -117,10 +117,10 @@ type LinkInfosResponse struct {
 }
 
 // UnmarshalJSON implements custom unmarshaling for Magnets type
-// It can handle both an array of magnetInfo objects or a map with string keys.
+// It can handle an array, a map with string keys, or a single magnetInfo object.
 // If the input is an array, it will be unmarshaled directly into the Magnets slice.
 // If the input is a map, it will extract the values and append them to the Magnets slice.
-// If the input is neither, it will return an error.
+// A single object is retained for compatibility with older API responses.
 func (m *Magnets) UnmarshalJSON(data []byte) error {
 	// Try to unmarshal as array
 	var arr []magnetInfo
@@ -137,6 +137,14 @@ func (m *Magnets) UnmarshalJSON(data []byte) error {
 		}
 		return nil
 	}
+
+	// Try to unmarshal as a single magnet
+	var magnet magnetInfo
+	if err := json.Unmarshal(data, &magnet); err == nil {
+		*m = Magnets{magnet}
+		return nil
+	}
+
 	return fmt.Errorf("magnets: unsupported JSON format")
 }
 

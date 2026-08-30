@@ -1,38 +1,24 @@
 ---
 title: Virtual Folders
-description: Organize your mounted media into custom folders.
+description: Create accessible, filtered views of your mounted media library.
 ---
 
-Virtual folders let you create extra folders in your Decypharr mount without moving or copying anything.
+Virtual folders are filtered views of your Decypharr library. They do not move or copy media, and the same item can appear in more than one view.
 
-For example, you can add a folder named `4K Movies`. When you open it, Decypharr only shows items that match the filters
-you chose. The same items still remain available in `__all__`, `torrents`, `nzbs`, and provider folders.
+For example, a virtual folder named `4K Movies` can show items whose names contain `2160p`. Those items also remain available in `__all__`, `torrents`, `nzbs`, and provider folders.
 
-## When to Use Them
+## Create a Virtual Folder
 
-Use virtual folders when you want your mount to be easier to browse:
+1. Open **Settings**.
+2. Under **General**, open **Virtual Folders**.
+3. Select **Add virtual folder**.
+4. Enter the name that should appear in Browse, mounts, and shares.
+5. Choose whether an item must match **all conditions** or **any condition**.
+6. Choose a **Quick example**, or add a condition using the **What to check**, **Rule**, and **Value** controls.
+7. Select **Preview matches** to check the match count and some example items.
+8. Save the settings.
 
-- Put 4K releases in a `4K` folder
-- Keep recent items in a `Recently Added` folder
-- Separate large files from smaller files
-- Group items by words in the release name, such as `Movie`, `Season`, `1080p`, or `2160p`
-
-Virtual folders are only views. Deleting a virtual folder removes the view, not the media itself.
-
-## Add a Virtual Folder
-
-1. Open Decypharr.
-2. Go to **Settings**.
-3. Open the main configuration tab.
-4. Find **Virtual Folders**.
-5. Click **Add Virtual Folder**.
-6. Enter a folder name, such as `4K` or `Recently Added`.
-7. Add one or more filters.
-8. Save your settings.
-
-After saving, open your mount path. The new folder appears at the top level of the mount.
-
-Example:
+Changes are applied without restarting Decypharr. The folder appears at the top level:
 
 ```text
 /mnt/decypharr/
@@ -40,88 +26,103 @@ Example:
   __bad__/
   torrents/
   nzbs/
-  4K/
+  4K Movies/
   Recently Added/
 ```
 
-## Simple Filter Examples
+Folder names cannot duplicate another virtual folder, a built-in folder, `version.txt`, or a provider folder. Decypharr also rejects names and characters that are unsafe on common filesystems, mounts, or SMB clients.
 
-Each filter has a type and a value.
+## Quick Examples
 
-| Folder you want                          | Filter type     | Value    |
-|------------------------------------------|-----------------|----------|
-| Items with `2160p` in the name           | `include`       | `2160p`  |
-| Items that do not contain `sample`       | `exclude`       | `sample` |
-| Items added in the last 7 days           | `last_added`    | `7d`     |
-| Items larger than 20 GB                  | `size_gt`       | `20GB`   |
-| Items smaller than 5 GB                  | `size_lt`       | `5GB`    |
-| Items with more than 5 files             | `file_count_gt` | `5`      |
-| Items with file names matching a pattern | `files_regex`   | `S01E`   |
+Each virtual-folder card lists common examples above its conditions. Select one to fill an unused blank condition or add a new one:
 
-Most users should start with `include`, `exclude`, `last_added`, `size_gt`, or `size_lt`.
+- **Episode files** looks for a file name such as `S01E02` or `1x02`.
+- **Likely movie** looks for items without those episode-style file names.
+- **More than one file** looks for items containing at least two files.
+- **4K items** looks for `2160p` in the item name.
+- **Added this week** uses a seven-day window.
+- **Torrent only** limits the view to torrent sources.
 
-## How Filters Work
+Examples only populate the controls. You can edit every field before saving, and **Preview matches** shows how the rule behaves with your library. Episode and movie detection is a filename-based estimate rather than media metadata, so review the preview before relying on it.
 
-If you add more than one filter to a folder, Decypharr only shows items that match the filters.
+## Example Conditions
 
-Example `4K Movies` folder:
+| View you want | What to check | Rule | Value |
+|---|---|---|---|
+| Items with `2160p` in the name | Item name | contains | `2160p` |
+| Items without sample files | File name inside item | does not contain | `sample` |
+| Items added in the last week | Date added | is within the last | `7d` |
+| Items larger than 20 GB | Total item size | is larger than | `20GB` |
+| Items with more than five files | Number of files | is more than | `5` |
+| Torrent items only | Source type | is | Torrent |
+| Items on one provider | Provider | is | Select the provider |
+| Items assigned by Radarr | Category | contains | `radarr` |
 
-| Filter type | Value    |
-|-------------|----------|
-| `include`   | `2160p`  |
-| `exclude`   | `sample` |
+Text conditions ignore capitalization by default, so `2160p` also matches `2160P`. Enable **Match capitalization exactly** on an individual condition when capitalization matters.
 
-This folder shows items with `2160p` in the name and hides items with `sample` in the name.
+Regular-expression rules are available for advanced matching. Invalid expressions are rejected before saving and cannot crash Decypharr.
 
-## Useful Filter Types
+## All Conditions and Any Condition
 
-| Filter type     | What it checks                                                |
-|-----------------|---------------------------------------------------------------|
-| `include`       | The item name contains this text                              |
-| `exclude`       | The item name does not contain this text                      |
-| `starts_with`   | The item name starts with this text                           |
-| `ends_with`     | The item name ends with this text                             |
-| `exact_match`   | The item name exactly matches this text                       |
-| `regex`         | The item name matches a regular expression                    |
-| `files_regex`   | One of the files inside the item matches a regular expression |
-| `size_gt`       | The item is larger than this size                             |
-| `size_lt`       | The item is smaller than this size                            |
-| `last_added`    | The item was added within this time period                    |
-| `file_count_gt` | The item has more files than this number                      |
-| `file_count_lt` | The item has fewer files than this number                     |
+Use **All conditions** when every rule must pass. For a `Recent 4K` view, add:
 
-Sizes can use `KB`, `MB`, or `GB`, such as `700MB` or `10GB`.
+| What to check | Rule | Value |
+|---|---|---|
+| Item name | contains | `2160p` |
+| Date added | is within the last | `7d` |
 
-Time periods can use `h`, `d`, or `w`, such as `12h`, `3d`, or `2w`.
+Use **Any condition** when one matching rule is enough. The choice is always explicit; there are no special hidden combinations between name and file-name rules.
 
-## If You Edit config.json
+## Empty and Unhealthy Views
 
-You can also create virtual folders directly in `config.json`:
+A virtual folder with no conditions shows every healthy item. This can be useful as a starting point, but preview it before saving.
+
+Unhealthy items are excluded by default. Enable **Include unhealthy items** on a folder if it should also include entries normally shown under `__bad__`.
+
+An empty virtual folder means no current item matches its conditions. Browse provides a link back to the editor so you can adjust and preview the rules.
+
+## Deleting Views and Items
+
+Removing a virtual folder in Settings removes only the filtered view. It never deletes media.
+
+Deleting an item while browsing inside a virtual folder is different: it deletes the original entry from every library and virtual folder and removes its provider placement. Decypharr shows this consequence in the confirmation dialog.
+
+## Configure in JSON
+
+The visual editor is recommended, but the canonical `config.json` representation is also available:
 
 ```json
 {
-  "custom_folders": {
-    "4K": {
-      "filters": {
-        "include": "2160p",
-        "exclude": "sample"
-      }
+  "virtual_folders": [
+    {
+      "name": "4K Movies",
+      "match": "all",
+      "conditions": [
+        {
+          "field": "entry_name",
+          "operator": "contains",
+          "value": "2160p"
+        },
+        {
+          "field": "file_name",
+          "operator": "not_contains",
+          "value": "sample"
+        }
+      ]
     },
-    "Recently Added": {
-      "filters": {
-        "last_added": "7d"
-      }
+    {
+      "name": "Recently Added",
+      "match": "all",
+      "conditions": [
+        {
+          "field": "added",
+          "operator": "within_last",
+          "value": "7d"
+        }
+      ]
     }
-  }
+  ]
 }
 ```
 
-Restart Decypharr after changing the file manually.
-
-## Things to Know
-
-- A virtual folder can show the same item as another folder.
-- Virtual folders do not change where files are stored.
-- An empty virtual folder usually means no current item matches the filters.
-- A virtual folder with no filters will show all items.
-- Filter text is case-sensitive, so `2160p` and `2160P` are different.
+Existing `custom_folders` configurations are read automatically. They are converted to the ordered `virtual_folders` format the next time settings are saved. Existing text matching remains case-sensitive after migration unless you change that option in the editor.

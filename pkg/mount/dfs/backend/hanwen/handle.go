@@ -8,11 +8,11 @@ import (
 	"io"
 	"sync/atomic"
 	"syscall"
-	"time"
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/sirrobot01/decypharr/internal/logger"
+	"github.com/sirrobot01/decypharr/pkg/manager"
 	"github.com/sirrobot01/decypharr/pkg/mount/dfs/vfs"
 )
 
@@ -26,16 +26,15 @@ var (
 // Handle implements file operations using the new DFS implementation
 type Handle struct {
 	file       *File
+	info       *manager.FileInfo
+	content    []byte
 	streamFile *vfs.StreamingFile
 	closed     atomic.Bool
 	logger     *logger.RateLimitedEvent
-	lastAccess atomic.Int64
 }
 
 // Read implements DFS streaming
 func (fh *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
-	fh.lastAccess.Store(time.Now().Unix())
-
 	if fh.closed.Load() {
 		return nil, syscall.EBADF
 	}
@@ -43,7 +42,7 @@ func (fh *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRe
 	// Static content (e.g. version.txt): serve from the in-memory buffer.
 	// Check this first — streamFile is nil for static files, so dereferencing
 	// it below would panic.
-	if len(fh.file.content) > 0 {
+	if len(fh.content) > 0 {
 		data := fh.readFromStaticContent(off, int64(len(dest)))
 		return fuse.ReadResultData(data), 0
 	}
@@ -81,7 +80,7 @@ func (fh *Handle) Read(ctx context.Context, dest []byte, off int64) (fuse.ReadRe
 
 // readFromStaticContent handles static content
 func (fh *Handle) readFromStaticContent(offset, size int64) []byte {
-	content := fh.file.content
+	content := fh.content
 	end := offset + size
 	if end > int64(len(content)) {
 		end = int64(len(content))
@@ -101,7 +100,7 @@ func (fh *Handle) Release(ctx context.Context) syscall.Errno {
 	if fh.streamFile != nil {
 		fh.streamFile.Close()
 		if fh.file != nil && fh.file.vfs != nil {
-			fh.file.vfs.ReleaseFile(fh.file.info)
+			fh.file.vfs.ReleaseFile(fh.info)
 		}
 	}
 

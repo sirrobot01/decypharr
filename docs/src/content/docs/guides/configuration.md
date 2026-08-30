@@ -259,6 +259,100 @@ Mount configuration determines how files are exposed on the filesystem.
 
 Connect to an existing Rclone instance's RC API.
 
+## NFS Server
+
+NFS is independent of the local mount type. It exposes the same built-in and custom libraries as a read-only NFSv4
+filesystem. See the [NFS guide](./shares/nfs/) for mount commands.
+
+~~~json
+{
+  "nfs": {
+    "enabled": true,
+    "bind_address": "0.0.0.0",
+    "port": 20490,
+    "allowed_networks": [
+      "192.168.1.0/24"
+    ]
+  }
+}
+~~~
+
+| Field            | Description                                             | Default               |
+|------------------|---------------------------------------------------------|-----------------------|
+| enabled          | Start the NFSv4 server                                  | false                 |
+| bind_address     | Listen address; inherits the main server's when unset   | 0.0.0.0               |
+| port             | TCP listen port (clients pass it with `port=`)          | 20490                 |
+| allowed_networks | Client CIDRs or IPs allowed to mount and browse exports | Private networks only |
+
+NFSv4 is a single listener: there is no mount service, portmapper, or advertised-port mapping. Reads stream
+directly from the source unless you enable the [share cache](#share-cache).
+
+## SMB Server (experimental)
+
+SMB exposes the same libraries as one read-only share. Sessions are signed but not encrypted, so serve trusted
+networks only. See the [SMB guide](./shares/smb/) for connection commands.
+
+~~~json
+{
+  "smb": {
+    "enabled": true,
+    "bind_address": "0.0.0.0",
+    "port": 1445,
+    "share_name": "decypharr",
+    "username": "media",
+    "password": "change-me",
+    "allowed_networks": [
+      "192.168.1.0/24"
+    ]
+  }
+}
+~~~
+
+| Field            | Description                                              | Default               |
+|------------------|----------------------------------------------------------|-----------------------|
+| enabled          | Start the SMB server                                     | false                 |
+| bind_address     | Listen address; inherits the main server's when unset    | 0.0.0.0               |
+| port             | TCP listen port (Windows needs the host's 445 mapped)    | 1445                  |
+| share_name       | Name of the single exported share                        | decypharr             |
+| username         | Account for every session; no anonymous access           | —                     |
+| password         | Password for the account (required)                      | —                     |
+| require_signing  | Refuse clients that will not sign                        | false                 |
+| allowed_networks | Client CIDRs or IPs allowed to connect                   | Private networks only |
+
+## Share Cache
+
+The NFS and SMB servers can read through one on-disk cache. It is **off by default**. When on, it keeps the parts
+clients read more than once — file headers, and the recently played part of a stream — so seeks and library scans do
+not open a new debrid session for bytes that were already fetched. It does not cache whole files, and it does not
+apply to WebDAV or the local mount.
+
+~~~json
+{
+  "share_cache": {
+    "enabled": true,
+    "dir": "/app/share-cache",
+    "max_size": "10GB",
+    "max_age": "24h",
+    "chunk_size": "4MB",
+    "read_ahead": "16MB"
+  }
+}
+~~~
+
+| Field      | Description                                                       | Default                    |
+|------------|-------------------------------------------------------------------|----------------------------|
+| enabled    | Cache reads on disk; off streams straight from the source          | false                      |
+| dir        | Directory the cache owns                                           | `<config dir>/share-cache` |
+| max_size   | Disk budget for cached content                                     | 10GB                       |
+| max_age    | Content nothing reads for this long is dropped                     | 24h                        |
+| chunk_size | Base fetch size; doubles up to 16x while a stream stays sequential | 4MB                        |
+| read_ahead | Fetched beyond each read so a sequential stream does not stall     | 16MB                       |
+
+Put the cache directory on ext4, XFS, or APFS. To stay inside the budget while a client holds a large file open, the
+cache releases blocks behind the read head. ZFS and some overlay filesystems refuse this, so the size limit becomes
+advisory and the directory can grow past it. Decypharr logs a warning when that happens. Set a smaller `max_size`, or
+move the cache to another filesystem.
+
 ## Health Checker
 
 ```json

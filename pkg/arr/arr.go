@@ -115,11 +115,15 @@ func (a *Arr) RequestCtx(ctx context.Context, method, endpoint string, payload a
 		return nil, err
 	}
 
+	// The body is fully consumed here. Callers only read status and headers,
+	// which stay valid after close, so owning the lifecycle in one place keeps
+	// the nil-res and non-2xx paths from leaking the connection.
+	defer request.DrainAndCloseResponse(resp)
+
 	// Parse success result if provided. Stream-decode directly from the
 	// response body so large payloads (e.g. full Sonarr series lists) don't
 	// sit on the heap as raw bytes alongside the decoded object graph.
 	if res != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		defer resp.Body.Close()
 		dec := json.ConfigDefault.NewDecoder(resp.Body)
 		if err := dec.Decode(res); err != nil && err != io.EOF {
 			return resp, fmt.Errorf("failed to decode response: %w", err)
@@ -146,9 +150,6 @@ func (a *Arr) Validate() error {
 	resp, err := a.Request("GET", "/api/v3/health", nil, nil)
 	if err != nil {
 		return err
-	}
-	if resp.Body != nil {
-		defer resp.Body.Close()
 	}
 	// If response is not 200 or 404(this is the case for Lidarr, etc), return an error
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound {
@@ -323,9 +324,6 @@ func (a *Arr) Refresh() error {
 	resp, err := a.Request(http.MethodPost, "api/v3/command", payload, nil)
 	if err != nil {
 		return err
-	}
-	if resp.Body != nil {
-		defer resp.Body.Close()
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return fmt.Errorf("failed to refresh monitored downloads: %s", resp.Status)

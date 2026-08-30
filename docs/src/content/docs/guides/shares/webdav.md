@@ -5,6 +5,9 @@ description: Access files via WebDAV protocol.
 
 Decypharr includes a WebDAV server for browsing and streaming files without mounting.
 
+The library tree, virtual folders, and folder naming are the same for every share. See
+[Shares Overview](../overview/).
+
 ## Access WebDAV
 
 **URL**: `http://decypharr:8282/webdav/`
@@ -43,19 +46,6 @@ sudo mount -t davfs -o username=USER,password=PASS \
   http://decypharr:8282/webdav /mnt/decypharr
 ```
 
-## File Structure
-
-```
-/webdav/
-├── __all__/          # All torrents
-├── __bad__/          # Failed/problematic torrents
-├── torrents/         # torrents
-├── nzbs/             # nzbs
-└── {custom}/         # Custom categories
-```
-
-Each category contains torrent folders with files.
-
 ## Authentication
 
 WebDAV auth is controlled by:
@@ -69,24 +59,6 @@ WebDAV auth is controlled by:
 
 - `enable_webdav_auth: true`: Require Basic Auth
 - `enable_webdav_auth: false`: Public access (not recommended)
-
-## Folder Naming
-
-Control how torrent folders are named:
-
-```json
-{
-  "webdav_folder_naming": "filename"
-}
-```
-
-| Value             | Example                 |
-|-------------------|-------------------------|
-| `filename`        | `Movie.2024.1080p.mkv`  |
-| `original`        | `Original Torrent Name` |
-| `filename_no_ext` | `Movie.2024.1080p`      |
-| `original_no_ext` | `Original Torrent Name` |
-| `infohash`        | `abc123def456...`       |
 
 ## Streaming
 
@@ -115,13 +87,14 @@ When Plex/Jellyfin plays the STRM, it streams from WebDAV.
 
 ## Performance
 
-WebDAV streams directly from Debrid/Usenet (no local caching). Performance depends on:
+WebDAV streams directly from Debrid/Usenet. It does not use the [share cache](../overview/#share-cache)
+— that cache serves NFS and SMB only. Performance depends on:
 
 - Debrid provider speed
 - Network bandwidth
 - Client buffer settings
 
-For best performance, use [DFS mounting](../dfs/) instead of WebDAV.
+For best performance, use [DFS mounting](../../mounting/dfs/) instead of WebDAV.
 
 ## Troubleshooting
 

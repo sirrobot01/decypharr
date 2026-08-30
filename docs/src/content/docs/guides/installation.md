@@ -16,6 +16,10 @@ services:
     container_name: decypharr
     ports:
       - "8282:8282"
+      # Optional: NFSv4 (when NFS is enabled in Settings)
+      # - "2049:20490/tcp"
+      # Optional: SMB — Windows clients require host port 445 (when SMB is enabled in Settings)
+      # - "445:1445/tcp"
     volumes:
       - /mnt/:/mnt:rshared
       - ./configs/:/app # config.json must be in this directory
@@ -51,7 +55,7 @@ docker run -d \
     --device /dev/fuse:/dev/fuse:rwm \
     --cap-add SYS_ADMIN \
     --security-opt apparmor:unconfined \
-  sirrobot01/decypharr:latest
+  cy01/blackhole:latest
 ```
 
 ## Binary

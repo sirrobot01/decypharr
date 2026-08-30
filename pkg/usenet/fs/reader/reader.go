@@ -12,21 +12,25 @@ import (
 	"github.com/sirrobot01/decypharr/internal/nntp"
 )
 
+// decryptionBufPool stores *[]byte so Put does not box the slice header.
 var decryptionBufPool = sync.Pool{}
 
-func acquireDecryptionBuffer(size int) []byte {
+func acquireDecryptionBuffer(size int) *[]byte {
 	v := decryptionBufPool.Get()
 	if v == nil {
-		return make([]byte, size)
+		buf := make([]byte, size)
+		return &buf
 	}
-	buf := v.([]byte)
-	if cap(buf) < size {
-		return make([]byte, size)
+	bufPtr := v.(*[]byte)
+	if cap(*bufPtr) < size {
+		buf := make([]byte, size)
+		return &buf
 	}
-	return buf[:size]
+	*bufPtr = (*bufPtr)[:size]
+	return bufPtr
 }
 
-func releaseDecryptionBuffer(buf []byte) {
+func releaseDecryptionBuffer(buf *[]byte) {
 	decryptionBufPool.Put(buf)
 }
 
@@ -61,6 +65,14 @@ type StreamingReader struct {
 	// Read position for io.Reader interface
 	readOffset atomic.Int64
 
+	// Cursor registry: each concurrent consumer owns a Cursor so a tail
+	// probe and sequential playback on the same file don't fight over the
+	// prefetch queue or the eviction window. defaultCursor backs the
+	// StreamingReader.ReadAt entry points, registered lazily on first use.
+	cursorMu      sync.Mutex
+	cursors       map[*Cursor]struct{}
+	defaultCursor *Cursor
+
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -69,6 +81,118 @@ type StreamingReader struct {
 
 	// Stats
 	stats *ReaderStats
+}
+
+// ReadCursor is one consumer's view of a shared StreamingReader, with its
+// own seek detection and consume tracking. The cache evicts behind the
+// slowest cursor.
+type ReadCursor interface {
+	ReadAtContext(ctx context.Context, p []byte, off int64) (int, error)
+	Prefetch(ctx context.Context, off, length int64)
+	Close()
+}
+
+// Cursor implements ReadCursor over a StreamingReader.
+type Cursor struct {
+	sr *StreamingReader
+
+	// lastEndSeg is the final segment of this cursor's most recent read
+	// (-1 until the first); only a jump relative to this cursor cancels
+	// prefetch.
+	lastEndSeg atomic.Int64
+
+	// consumed is the end offset of the last bytes delivered through this
+	// cursor (-1 until the first). Not monotonic: a seek-back pulls the
+	// mark (and the eviction floor) back, protecting the region being
+	// re-read.
+	consumed atomic.Int64
+
+	// queuedThrough is the highest segment this cursor has hinted for
+	// prefetch (-1 = none), so the per-read hint pass only covers the
+	// window delta. Reset on seek.
+	queuedThrough atomic.Int64
+
+	closed atomic.Bool
+}
+
+// OpenCursor registers and returns a new cursor. Callers must Close it.
+func (sr *StreamingReader) OpenCursor() ReadCursor {
+	return sr.newCursor()
+}
+
+func (sr *StreamingReader) newCursor() *Cursor {
+	sr.cursorMu.Lock()
+	defer sr.cursorMu.Unlock()
+	return sr.registerCursorLocked()
+}
+
+// getDefaultCursor lazily creates the cursor behind the ReadAt entry points.
+// It is not registered until first use, so a reader driven purely through
+// explicit cursors has no phantom consumer pinning the eviction floor.
+func (sr *StreamingReader) getDefaultCursor() *Cursor {
+	sr.cursorMu.Lock()
+	defer sr.cursorMu.Unlock()
+	if sr.defaultCursor == nil {
+		sr.defaultCursor = sr.registerCursorLocked()
+	}
+	return sr.defaultCursor
+}
+
+func (sr *StreamingReader) registerCursorLocked() *Cursor {
+	c := &Cursor{sr: sr}
+	c.lastEndSeg.Store(-1)
+	c.consumed.Store(-1)
+	c.queuedThrough.Store(-1)
+	sr.cursors[c] = struct{}{}
+	return c
+}
+
+func (c *Cursor) ReadAtContext(ctx context.Context, p []byte, off int64) (int, error) {
+	return c.sr.readAtCursor(ctx, c, p, off)
+}
+
+func (c *Cursor) Prefetch(ctx context.Context, off, length int64) {
+	c.sr.Prefetch(ctx, off, length)
+}
+
+// Close unregisters the cursor so its consume mark stops holding the
+// eviction floor back.
+func (c *Cursor) Close() {
+	if !c.closed.CompareAndSwap(false, true) {
+		return
+	}
+	sr := c.sr
+	sr.cursorMu.Lock()
+	delete(sr.cursors, c)
+	sr.cursorMu.Unlock()
+	sr.publishConsumedFloor()
+}
+
+// markConsumed records delivery through c and republishes the floor.
+func (c *Cursor) markConsumed(end int64) {
+	c.consumed.Store(end)
+	c.sr.publishConsumedFloor()
+}
+
+// publishConsumedFloor hands the cache the minimum consume mark across live
+// cursors (the slowest active consumer); cursors that have not delivered
+// anything yet are ignored.
+func (sr *StreamingReader) publishConsumedFloor() {
+	sr.cursorMu.Lock()
+	floor := int64(-1)
+	for c := range sr.cursors {
+		v := c.consumed.Load()
+		if v < 0 {
+			continue
+		}
+		if floor < 0 || v < floor {
+			floor = v
+		}
+	}
+	sr.cursorMu.Unlock()
+	if floor >= 0 {
+		sr.cache.SetConsumedFloor(floor)
+	}
 }
 
 // NewStreamingReader creates a new streaming reader for NNTP segments.
@@ -112,6 +236,7 @@ func NewStreamingReader(
 		config:    config,
 		totalSize: cache.TotalSize(),
 		segCount:  cache.SegmentCount(),
+		cursors:   make(map[*Cursor]struct{}),
 		ctx:       ctx,
 		cancel:    cancel,
 		logger:    logger,
@@ -119,6 +244,20 @@ func NewStreamingReader(
 	}
 
 	return sr, nil
+}
+
+// seekAbandonedWindow reports whether a read landing on [startSeg, endSeg]
+// after a previous read that ended at prevEnd constitutes a seek that
+// abandons the queued read-ahead window. Reads within one prefetch window of
+// the previous position (in either direction) are sequential-ish — kernel
+// readahead reorders and overlaps small reads constantly — and keep their
+// queued hints. Anything further is a jump whose pending hints are dead
+// weight.
+func seekAbandonedWindow(prevEnd int64, startSeg, endSeg, ahead int) bool {
+	if prevEnd < 0 || ahead <= 0 {
+		return false
+	}
+	return int64(startSeg) > prevEnd+int64(ahead) || int64(endSeg) < prevEnd-int64(ahead)
 }
 
 // NewStreamingReaderWithEncryption creates an encrypted reader.
@@ -148,7 +287,14 @@ func (sr *StreamingReader) ReadAt(p []byte, off int64) (int, error) {
 // ReadAtContext implements context-aware random reads. The context is carried
 // into segment waits and NNTP fetches so DFS/FUSE read timeouts can cancel the
 // underlying work instead of waiting for the reader lifetime to end.
+//
+// This entry point shares one default cursor; independent consumers should
+// use OpenCursor.
 func (sr *StreamingReader) ReadAtContext(ctx context.Context, p []byte, off int64) (int, error) {
+	return sr.readAtCursor(ctx, sr.getDefaultCursor(), p, off)
+}
+
+func (sr *StreamingReader) readAtCursor(ctx context.Context, cur *Cursor, p []byte, off int64) (int, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -170,13 +316,13 @@ func (sr *StreamingReader) ReadAtContext(ctx context.Context, p []byte, off int6
 	sr.stats.Reads.Add(1)
 
 	if sr.encryption.Enabled {
-		return sr.readAtEncrypted(ctx, p, off)
+		return sr.readAtEncrypted(ctx, cur, p, off)
 	}
-	return sr.readAtPlain(ctx, p, off)
+	return sr.readAtPlain(ctx, cur, p, off)
 }
 
 // readAtPlain handles non-encrypted reads.
-func (sr *StreamingReader) readAtPlain(ctx context.Context, p []byte, off int64) (int, error) {
+func (sr *StreamingReader) readAtPlain(ctx context.Context, cur *Cursor, p []byte, off int64) (int, error) {
 	// Clamp to file bounds
 	readLen := int64(len(p))
 	eofAfter := false
@@ -192,10 +338,25 @@ func (sr *StreamingReader) readAtPlain(ctx context.Context, p []byte, off int64)
 	sr.cache.PinRange(startSeg, endSeg)
 	defer sr.cache.UnpinRange(startSeg, endSeg)
 
-	// Queue prefetch for read-ahead (non-blocking)
+	// On a seek relative to this cursor, drop the read-ahead hints queued
+	// for the old position BEFORE queueing the new window — the prefetch
+	// workers would otherwise keep downloading data the consumer jumped away
+	// from while this read waits for connection slots.
+	prevEnd := cur.lastEndSeg.Swap(int64(endSeg))
+	if seekAbandonedWindow(prevEnd, startSeg, endSeg, sr.config.PrefetchAhead) {
+		sr.fetcher.CancelPendingPrefetch()
+		cur.queuedThrough.Store(-1)
+	}
+
+	// Queue read-ahead hints for the part of the window this cursor hasn't
+	// already hinted (non-blocking).
 	prefetchEnd := min(endSeg+sr.config.PrefetchAhead, sr.segCount-1)
 	if prefetchEnd > endSeg {
-		sr.fetcher.QueuePrefetchRange(endSeg+1, prefetchEnd)
+		qStart := max(endSeg+1, int(cur.queuedThrough.Load())+1)
+		if qStart <= prefetchEnd {
+			sr.fetcher.QueuePrefetchRange(qStart, prefetchEnd)
+			cur.queuedThrough.Store(int64(prefetchEnd))
+		}
 	}
 
 	// Ensure all required segments are available (may block for downloads)
@@ -213,11 +374,11 @@ func (sr *StreamingReader) readAtPlain(ctx context.Context, p []byte, off int64)
 
 	sr.stats.BytesRead.Add(int64(n))
 
-	// Tell the cache what we actually delivered so its sliding-window
-	// sweeper can advance the back-window cutoff. Skip on zero-byte reads
-	// (probe, short EOF) to avoid moving the high-water mark spuriously.
+	// Record delivery so the sliding-window sweeper can advance its cutoff.
+	// Skip zero-byte reads (probe, short EOF) to avoid moving the mark
+	// spuriously.
 	if n > 0 {
-		sr.cache.MarkConsumed(off, int64(n))
+		cur.markConsumed(off + int64(n))
 	}
 
 	if eofAfter && int64(n) == readLen {
@@ -235,6 +396,9 @@ func (sr *StreamingReader) readAtPlain(ctx context.Context, p []byte, off int64)
 // progressive performance degradation on large files.
 func (sr *StreamingReader) readFromCache(ctx context.Context, p []byte, off int64, startSeg, endSeg int) (int, error) {
 	totalRead := 0
+	// filled is the absolute offset this read has delivered through. Segments
+	// must cover disjoint, ascending ranges; see the overlap check below.
+	filled := off
 
 	for segIdx := startSeg; segIdx <= endSeg; segIdx++ {
 		// Wait for segment to be ready
@@ -251,6 +415,14 @@ func (sr *StreamingReader) readFromCache(ctx context.Context, p []byte, off int6
 
 		if readStart >= readEnd {
 			continue
+		}
+		if readStart < filled {
+			// Two segments claim the same bytes. Their copies would land on
+			// top of each other in p while totalRead counted both, so the
+			// read would report more bytes than p can hold and panic the
+			// caller's copy loop. computeOffsets rejects such tables up
+			// front; anything reaching here is a bug, not bad metadata.
+			return totalRead, fmt.Errorf("segment %d starts at %d, behind delivered offset %d", segIdx, readStart, filled)
 		}
 
 		outOffset := readStart - off
@@ -278,13 +450,14 @@ func (sr *StreamingReader) readFromCache(ctx context.Context, p []byte, off int6
 		}
 
 		totalRead += n
+		filled = readEnd
 	}
 
 	return totalRead, nil
 }
 
 // readAtEncrypted handles AES-CBC encrypted reads.
-func (sr *StreamingReader) readAtEncrypted(ctx context.Context, p []byte, off int64) (int, error) {
+func (sr *StreamingReader) readAtEncrypted(ctx context.Context, cur *Cursor, p []byte, off int64) (int, error) {
 	// AES-CBC requires block-aligned reads
 	alignedStart := (off / crypto.BlockSize) * crypto.BlockSize
 
@@ -298,11 +471,12 @@ func (sr *StreamingReader) readAtEncrypted(ctx context.Context, p []byte, off in
 	}
 
 	bufLen := alignedEnd - alignedStart
-	buf := acquireDecryptionBuffer(int(bufLen))
-	defer releaseDecryptionBuffer(buf)
+	bufPtr := acquireDecryptionBuffer(int(bufLen))
+	defer releaseDecryptionBuffer(bufPtr)
+	buf := *bufPtr
 
 	// Read aligned data
-	n, err := sr.readAtPlain(ctx, buf, alignedStart)
+	n, err := sr.readAtPlain(ctx, cur, buf, alignedStart)
 	if n > 0 && len(sr.encryption.Key) > 0 {
 		// Handle partial last block
 		decryptedLen := int64(n)
@@ -376,8 +550,9 @@ func (sr *StreamingReader) computeIVForOffset(ctx context.Context, offset int64)
 	prevBlockOffset := blockOffset - crypto.BlockSize
 	iv := make([]byte, crypto.BlockSize)
 
-	// Read previous block (raw, not decrypted)
-	n, err := sr.readAtPlain(ctx, iv, prevBlockOffset)
+	// Read previous block (raw, not decrypted) through the default cursor —
+	// an IV fill is a peek, not a consumer position.
+	n, err := sr.readAtPlain(ctx, sr.getDefaultCursor(), iv, prevBlockOffset)
 	if err != nil && err != io.EOF {
 		return nil, fmt.Errorf("read IV block at %d: %w", prevBlockOffset, err)
 	}

@@ -19,6 +19,8 @@ import (
 
 const (
 	MaxReinsertionAttempt = 3
+	// maxValidatedEntries caps the validated-link memo map (see GetLink).
+	maxValidatedEntries = 8192
 )
 
 var (
@@ -82,6 +84,24 @@ func (s *Service) GetLink(ctx context.Context, entry *storage.Entry, filename st
 	return v.(types.DownloadLink), nil
 }
 
+// Refresh invalidates a link that failed mid-stream and fetches a replacement.
+// It shares GetLink's singleflight key, so a concurrent GetLink may win the
+// race and hand back the stale link once more; callers operate on bounded
+// retry budgets, so the follow-up attempt lands after the refresh completes.
+func (s *Service) Refresh(ctx context.Context, entry *storage.Entry, bad types.DownloadLink) (types.DownloadLink, error) {
+	if bad.Filename == "" {
+		return emptyDownloadLink, NewPermanentError(ErrEmptyLink, "empty_link")
+	}
+	key := entry.InfoHash + ":" + bad.Filename
+	v, err, _ := s.singleflight.Do(key, func() (any, error) {
+		return s.invalidateAndRefetch(ctx, entry, bad, 0)
+	})
+	if err != nil {
+		return emptyDownloadLink, err
+	}
+	return v.(types.DownloadLink), nil
+}
+
 func (s *Service) getClient(provider string) (debrid.Client, error) {
 	c, ok := s.clients.Load(provider)
 	if !ok {
@@ -138,7 +158,7 @@ func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, fi
 					// Account swap doesn't consume a re-insertion attempt.
 					return s.fetchAndValidate(ctx, entry, filename, attempt)
 				}
-			} else if linkErr.ShouldRefetch() {
+			} else if linkErr.ShouldRefetch() || linkErr.ShouldRetry() {
 				// Invalidate and refetch
 				return s.invalidateAndRefetch(ctx, entry, link, attempt)
 			}
@@ -146,6 +166,11 @@ func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, fi
 	}
 
 	// Store validation result
+	// Keys are full download URLs and links rotate on refresh/expiry, so cap
+	// the map; resetting merely costs a re-validation per link.
+	if s.validated.Size() > maxValidatedEntries {
+		s.validated.Clear()
+	}
 	s.validated.Store(link.DownloadLink, validationErr)
 
 	if validationErr == nil {

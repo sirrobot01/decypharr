@@ -163,7 +163,7 @@ Yes, use WebDAV:
 http://decypharr:8282/webdav/
 ```
 
-Mount as network drive in Windows/macOS/Linux. See [WebDAV Guide](../guides/mounting/webdav/).
+Mount as network drive in Windows/macOS/Linux. See [WebDAV Guide](../guides/shares/webdav/).
 
 ## Usenet
 

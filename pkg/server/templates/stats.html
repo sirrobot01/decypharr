@@ -277,6 +277,41 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Connect / Access Servers -->
+            <div class="card bg-base-100 shadow-xl mt-6" id="access-card">
+                <div class="card-header p-6 pb-3">
+                    <h2 class="card-title text-xl">
+                        <i class="bi bi-hdd-network mr-2 text-info"></i>
+                        Connect to Your Library
+                    </h2>
+                    <p class="text-sm text-base-content/70">Mount or browse your library from other devices over
+                        WebDAV, NFS, or SMB. Hosts below use the address you're viewing this page from.</p>
+                </div>
+                <div class="card-body p-6 pt-3 grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <div class="border border-base-300 rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-semibold"><i class="bi bi-folder-symlink mr-1 text-primary"></i>WebDAV</h3>
+                            <span class="badge badge-ghost" id="webdav-status">-</span>
+                        </div>
+                        <div id="webdav-details" class="text-sm space-y-2 text-base-content/50">Loading…</div>
+                    </div>
+                    <div class="border border-base-300 rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-semibold"><i class="bi bi-hdd-network mr-1 text-primary"></i>NFSv4</h3>
+                            <span class="badge badge-ghost" id="nfs-status">-</span>
+                        </div>
+                        <div id="nfs-details" class="text-sm space-y-2 text-base-content/50">Loading…</div>
+                    </div>
+                    <div class="border border-base-300 rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-semibold"><i class="bi bi-pc-display mr-1 text-primary"></i>SMB</h3>
+                            <span class="badge badge-ghost" id="smb-status">-</span>
+                        </div>
+                        <div id="smb-details" class="text-sm space-y-2 text-base-content/50">Loading…</div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Streams Tab -->
@@ -1280,6 +1315,99 @@
 
             // Active streams
             updateActiveStreams(stats.active_streams);
+
+            // Access servers (WebDAV connection details)
+            updateAccess(stats.access);
+        }
+
+        window.copyText = function (btn, text) {
+            navigator.clipboard?.writeText(text).then(() => {
+                const original = btn.innerHTML;
+                btn.innerHTML = '<i class="bi bi-check-lg"></i>';
+                setTimeout(() => { btn.innerHTML = original; }, 1200);
+            }).catch(() => {});
+        }
+
+        function connectRow(label, value) {
+            const safe = String(value).replace(/"/g, '&quot;');
+            return `
+                <div>
+                    <div class="text-xs text-base-content/60">${label}</div>
+                    <div class="flex items-center gap-2">
+                        <code class="flex-1 break-all bg-base-200 rounded px-2 py-1 text-xs">${value}</code>
+                        <button class="btn btn-ghost btn-xs" title="Copy"
+                                onclick="copyText(this, &quot;${safe}&quot;)"><i class="bi bi-clipboard"></i></button>
+                    </div>
+                </div>`;
+        }
+
+        function updateAccess(access) {
+            access = access || {};
+            const host = window.location.hostname || 'SERVER_IP';
+
+            // WebDAV
+            const wd = access.webdav || {};
+            const wdStatus = document.getElementById('webdav-status');
+            const wdDetails = document.getElementById('webdav-details');
+            if (wd.enabled) {
+                wdStatus.textContent = 'Enabled';
+                wdStatus.className = 'badge badge-success';
+                const proto = window.location.protocol; // http: or https:
+                const port = wd.port ? `:${wd.port}` : '';
+                const url = `${proto}//${host}${port}${wd.path || '/webdav'}/`;
+                let html = connectRow('URL (browser, rclone, Kodi, Infuse…)', url);
+                html += `<p class="text-xs text-base-content/60">${wd.auth_required
+                    ? 'Requires your Decypharr username and password.'
+                    : 'No authentication required.'}</p>`;
+                wdDetails.innerHTML = html;
+            } else {
+                wdStatus.textContent = 'Disabled';
+                wdStatus.className = 'badge badge-ghost';
+                wdDetails.innerHTML = '<p class="text-xs">WebDAV is disabled in settings.</p>';
+            }
+
+            // NFSv4: one port, no portmapper — clients pass it explicitly.
+            const nfs = access.nfs || {};
+            const nfsStatus = document.getElementById('nfs-status');
+            const nfsDetails = document.getElementById('nfs-details');
+            if (nfs.enabled) {
+                nfsStatus.textContent = 'Enabled';
+                nfsStatus.className = 'badge badge-success';
+                const port = nfs.port || 20490;
+                const opts = `vers=4.0,tcp,port=${port},ro`;
+                let html = connectRow('Linux', `sudo mount -t nfs -o ${opts} ${host}:/ /mnt/decypharr`);
+                html += connectRow('macOS', `sudo mount -t nfs -o ${opts},resvport ${host}:/ /Volumes/decypharr`);
+                html += `<p class="text-xs text-base-content/60">Read-only. Behind Docker or NAT, use the host port
+                    that maps to ${port}. On macOS the mountpoint must exist first
+                    (<code>sudo mkdir -p /Volumes/decypharr</code>).</p>`;
+                nfsDetails.innerHTML = html;
+            } else {
+                nfsStatus.textContent = 'Disabled';
+                nfsStatus.className = 'badge badge-ghost';
+                nfsDetails.innerHTML = '<p class="text-xs">Enable the NFSv4 server in Settings → Mount Settings.</p>';
+            }
+
+            // SMB
+            const smb = access.smb || {};
+            const smbStatus = document.getElementById('smb-status');
+            const smbDetails = document.getElementById('smb-details');
+            if (smb.enabled) {
+                smbStatus.textContent = 'Experimental';
+                smbStatus.className = 'badge badge-warning';
+                const share = smb.share_name || 'decypharr';
+                const user = smb.username || 'USERNAME';
+                const port = smb.port || 1445;
+                let html = connectRow('Windows (needs host port 445)', `net use Z: \\\\${host}\\${share} /user:${user}`);
+                html += connectRow('macOS', `open smb://${user}@${host}:${port}/${share}`);
+                html += connectRow('Linux', `sudo mount -t cifs -o vers=3.1.1,port=${port},user=${user},ro //${host}/${share} /mnt/decypharr`);
+                html += `<p class="text-xs text-base-content/60">Read-only, signed but not encrypted — trusted
+                    networks only. Windows connects to port 445 only: map the host's 445 to ${port}.</p>`;
+                smbDetails.innerHTML = html;
+            } else {
+                smbStatus.textContent = 'Disabled';
+                smbStatus.className = 'badge badge-ghost';
+                smbDetails.innerHTML = '<p class="text-xs">Enable the SMB server in Settings → Mount Settings.</p>';
+            }
         }
 
         function loadStats() {

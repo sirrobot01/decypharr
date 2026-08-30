@@ -110,6 +110,23 @@ Lower `priority` = higher preference.
 
 Prefetch buffer for smoother playback. Higher = smoother but more memory.
 
+### Connection Idle Timeout
+
+```json
+{
+  "usenet": {
+    "conn_idle_timeout": "5m"
+  }
+}
+```
+
+How long unused NNTP connections stay warm in the pool before being closed
+(default: `5m`). Idle connections are kept healthy with periodic keepalive
+pings and verified before reuse. Players read in bursts with quiet gaps in
+between, so closing connections too early forces a TCP+TLS+AUTH reconnect
+on every resume — visible as playback stutter. Lower this only if your
+provider aggressively drops idle sessions.
+
 ### Processing Limits
 
 ```json
@@ -139,6 +156,15 @@ Use `availability_sample_percent` for repair checks and
 - `100`: Check all segments (slow but accurate)
 - `10`: Check 10% (fast but may miss issues)
 - `1`: Quick import check (default)
+
+### Content Verification
+
+The availability check only proves that the articles exist. After it passes,
+decypharr also reads the head of each video file through the streaming stack
+and checks for a valid media container signature. This catches NZBs whose
+articles all exist but assemble into a broken stream (for example, RAR volumes
+in the wrong order). If the check fails, the NZB is marked failed and the Arr
+grabs a replacement release. The check reads one article per video file.
 
 ## Disk Buffer
 

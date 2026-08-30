@@ -6,6 +6,12 @@ const docsBasePath = normalizeBasePath(process.env.PUBLIC_DOCS_BASE_PATH || '/')
 // https://astro.build/config
 export default defineConfig({
     base: docsBasePath,
+    redirects: {
+        '/guides/mounting/rclone': '/guides/mounting/rclone-internal',
+        '/guides/mounting/webdav': '/guides/shares/webdav',
+        '/guides/mounting/nfs': '/guides/shares/nfs',
+        '/guides/mounting/smb': '/guides/shares/smb',
+    },
     integrations: [
         starlight({
             title: 'Decypharr',
@@ -55,8 +61,17 @@ export default defineConfig({
                     label: 'Mounting',
                     items: [
                         {label: 'DFS (Custom VFS)', link: '/guides/mounting/dfs'},
-                        {label: 'Rclone', link: '/guides/mounting/rclone'},
-                        {label: 'WebDAV Server', link: '/guides/mounting/webdav'},
+                        {label: 'Rclone (Internal)', link: '/guides/mounting/rclone-internal'},
+                        {label: 'Rclone (External)', link: '/guides/mounting/rclone-external'},
+                    ],
+                },
+                {
+                    label: 'Shares',
+                    items: [
+                        {label: 'Overview', link: '/guides/shares/overview'},
+                        {label: 'WebDAV Server', link: '/guides/shares/webdav'},
+                        {label: 'NFS Server', link: '/guides/shares/nfs'},
+                        {label: 'SMB Server', link: '/guides/shares/smb'},
                     ],
                 },
                 {

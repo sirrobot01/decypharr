@@ -307,7 +307,7 @@ class TorrentDashboard {
                         ${this.renderProtocolBadge(torrent.protocol)}
                     </td>
                     <td>
-                        ${torrent.debrid ? `<span class="badge badge-sm badge-primary">${this.escapeHtml(torrent.debrid)}</span>` : '-'}
+                        ${torrent.active_provider ? `<span class="badge badge-sm badge-primary">${this.escapeHtml(torrent.active_provider)}</span>` : '-'}
                     </td>
                     <td>
                         <span class="text-sm">${torrent.num_seeds || 0}</span>

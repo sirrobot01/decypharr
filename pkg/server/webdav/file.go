@@ -1,21 +1,40 @@
 package webdav
 
 import (
-	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"strconv"
+	"sync"
 
 	"github.com/sirrobot01/decypharr/internal/customerror"
-	"github.com/sirrobot01/decypharr/pkg/manager"
+	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
-func getDownloadByteRange(info *manager.FileInfo) *[2]int64 {
-	return info.ByteRange()
+// streamCopyBufPool holds the copy buffers StreamResponse pipes sessions
+// through; every session.Read costs a lock pass and watchdog arming, so
+// copy granularity multiplies all of it.
+var streamCopyBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 1<<20)
+		return &b
+	},
 }
 
-func (h *Handler) StreamResponse(entry *storage.Entry, info *manager.FileInfo, w http.ResponseWriter, r *http.Request) error {
-	start, end := h.getRange(info, r)
+func (h *Handler) StreamResponse(entry *storage.Entry, name string, size int64, w http.ResponseWriter, r *http.Request) error {
+	start, end := resolveRange(r.Header.Get("Range"), size)
+	if start < 0 {
+		start = 0
+	}
+	if end < 0 || end >= size {
+		end = size - 1
+	}
+	if size <= 0 || start >= size || end < start {
+		return customerror.NewError(
+			fmt.Errorf("invalid byte range %d-%d for size %d", start, end, size),
+			http.StatusRequestedRangeNotSatisfiable, "server.invalid_range", false, false)
+	}
 
 	// Extract client identifier from User-Agent header
 	client := r.UserAgent()
@@ -23,84 +42,52 @@ func (h *Handler) StreamResponse(entry *storage.Entry, info *manager.FileInfo, w
 		client = "Unknown"
 	}
 
-	streamID := h.manager.TrackStream(entry, info.Name(), client)
-	if streamID != "" {
-		defer h.manager.UntrackStream(streamID)
-	}
-
-	headersWritten := false
-	err := h.manager.Stream(r.Context(), entry, info.Name(), start, end, w, func(meta *manager.StreamMetadata) error {
-		if err := h.handleSuccessfulResponse(w, meta, start, end); err != nil {
-			return err
-		}
-		headersWritten = true
-		return nil
-	}, client)
+	stream, err := h.manager.OpenStream(r.Context(), entry, name, start, client)
 	if err != nil {
-		var customErr *customerror.Error
-		if errors.As(err, &customErr) {
-			customErr.HeadersWritten = headersWritten
-			return customErr
-		}
-
-		return customerror.NewError(err, http.StatusInternalServerError, "server.internal_error", false, headersWritten)
+		return customerror.NewError(err, http.StatusInternalServerError, "server.internal_error", false, false)
 	}
-	return nil
-}
+	defer stream.Close()
 
-func (h *Handler) handleSuccessfulResponse(w http.ResponseWriter, meta *manager.StreamMetadata, start, end int64) error {
-	statusCode := http.StatusOK
-	if meta != nil {
-		if meta.Header != nil {
-			if contentLength := meta.Header.Get("Content-Length"); contentLength != "" {
-				w.Header().Set("Content-Length", contentLength)
-			} else if meta.ContentLength > 0 {
-				w.Header().Set("Content-Length", fmt.Sprintf("%d", meta.ContentLength))
-			}
-
-			if contentRange := meta.Header.Get("Content-Range"); contentRange != "" {
-				w.Header().Set("Content-Range", contentRange)
-			}
-
-			if contentType := meta.Header.Get("Content-Type"); contentType != "" {
-				w.Header().Set("Content-Type", contentType)
-			}
-		}
-		if meta.StatusCode != 0 {
-			statusCode = meta.StatusCode
-		} else if start > 0 || end > 0 {
-			statusCode = http.StatusPartialContent
-		}
-	} else if start > 0 || end > 0 {
-		statusCode = http.StatusPartialContent
+	// Fast-fail before headers: an unreachable link becomes a proper error
+	// status instead of a dead 200.
+	if err := stream.Prime(); err != nil {
+		return customerror.NewError(err, http.StatusInternalServerError, "server.internal_error", false, false)
 	}
 
+	length := end - start + 1
+	w.Header().Set("Content-Type", utils.GetContentType(name))
+	w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
 	w.Header().Set("Accept-Ranges", "bytes")
+	statusCode := http.StatusOK
+	if start > 0 || end < size-1 {
+		statusCode = http.StatusPartialContent
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, size))
+	}
 	w.WriteHeader(statusCode)
+
+	// The wrapper struct hides w's ReaderFrom so io.CopyBuffer uses the
+	// pooled buffer instead of net/http's 32KB one.
+	bufPtr := streamCopyBufPool.Get().(*[]byte)
+	_, err = io.CopyBuffer(struct{ io.Writer }{w}, io.LimitReader(stream, length), *bufPtr)
+	streamCopyBufPool.Put(bufPtr)
+	if err != nil {
+		return customerror.NewError(err, http.StatusInternalServerError, "server.internal_error", false, true)
+	}
 	return nil
 }
 
-func (h *Handler) getRange(info *manager.FileInfo, r *http.Request) (int64, int64) {
-	rangeHeader := r.Header.Get("Range")
+// resolveRange maps a Range header to file-relative offsets (byte-ranged
+// split-archive slices are handled by the stream transport, not here).
+// Returns (0, -1) — whole file — when there is no header, when it is
+// unparsable, or when it holds multiple ranges: RFC 7233 lets a server
+// ignore a Range header it can't satisfy structurally.
+func resolveRange(rangeHeader string, size int64) (int64, int64) {
 	if rangeHeader == "" {
-		if byteRange := getDownloadByteRange(info); byteRange != nil {
-			return byteRange[0], byteRange[1]
-		}
-		// Signal downstream streaming code to serve the entire file
 		return 0, -1
 	}
-
-	ranges, err := parseRange(rangeHeader, info.Size())
+	ranges, err := parseRange(rangeHeader, size)
 	if err != nil || len(ranges) != 1 {
-		return 0, 0
+		return 0, -1
 	}
-
-	byteRange := getDownloadByteRange(info)
-	start, end := ranges[0].start, ranges[0].end
-
-	if byteRange != nil {
-		start += byteRange[0]
-		end += byteRange[0]
-	}
-	return start, end
+	return ranges[0].start, ranges[0].end
 }

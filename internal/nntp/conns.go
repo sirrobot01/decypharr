@@ -59,17 +59,12 @@ func (c *Connection) copyBodyWithIdleDeadline(dst io.Writer, src io.Reader, idle
 	// Disable any deadline carried in from earlier on this connection.
 	_ = c.conn.SetReadDeadline(time.Time{})
 
-	// Arm the janitor for this body copy. lastProgressNS is updated
-	// periodically (every progressUpdateStride reads); the janitor
-	// closes the conn if no progress is seen for `idle`. idleNS=0 on
-	// exit tells the janitor to skip.
+	// Arm the janitor for this body copy; the connection itself is
+	// registered for its whole lifetime (see createConnection/Close).
+	// idleNS=0 on exit disarms.
 	c.lastProgressNS.Store(nanotimeNow())
 	c.idleNS.Store(int64(idle))
-	bodyIdleJanitor.add(c)
-	defer func() {
-		bodyIdleJanitor.remove(c)
-		c.idleNS.Store(0)
-	}()
+	defer c.idleNS.Store(0)
 
 	// progressUpdateStride throttles the per-Read nanotime cost.
 	// Calling time.Since on every successful Read showed up as 19% of
@@ -167,26 +162,30 @@ func (j *bodyJanitor) remove(c *Connection) {
 func (j *bodyJanitor) run() {
 	tick := time.NewTicker(bodyJanitorInterval)
 	defer tick.Stop()
-	// Snapshot under the lock and act outside it so a slow Close() can't
-	// hold up other registrations.
-	var stalled []*Connection
 	for range tick.C {
-		now := nanotimeNow()
-		stalled = stalled[:0]
-		j.mu.Lock()
-		for c := range j.conns {
-			idle := c.idleNS.Load()
-			if idle <= 0 {
-				continue
-			}
-			if now-c.lastProgressNS.Load() > idle {
-				stalled = append(stalled, c)
-			}
+		j.sweep()
+	}
+}
+
+// sweep closes every registered connection whose armed body copy has made no
+// progress within its idle deadline. Snapshot under the lock and act outside
+// it so a slow Close() can't hold up other registrations.
+func (j *bodyJanitor) sweep() {
+	now := nanotimeNow()
+	var stalled []*Connection
+	j.mu.Lock()
+	for c := range j.conns {
+		idle := c.idleNS.Load()
+		if idle <= 0 {
+			continue
 		}
-		j.mu.Unlock()
-		for _, c := range stalled {
-			_ = c.conn.Close() // unblocks the in-flight Read
+		if now-c.lastProgressNS.Load() > idle {
+			stalled = append(stalled, c)
 		}
+	}
+	j.mu.Unlock()
+	for _, c := range stalled {
+		_ = c.conn.Close() // unblocks the in-flight Read
 	}
 }
 
@@ -233,6 +232,7 @@ func (c *Connection) Close() error {
 	if c.closed.Swap(true) {
 		return nil
 	}
+	bodyIdleJanitor.remove(c)
 	return c.conn.Close()
 }
 
@@ -293,9 +293,10 @@ func (c *Connection) startTLS() error {
 		MinVersion:         tls.VersionTLS12,
 	})
 
+	// Same sizing rationale as createConnection.
 	c.conn = tlsConn
-	c.reader = bufio.NewReaderSize(tlsConn, 256*1024)
-	c.writer = bufio.NewWriterSize(tlsConn, 256*1024)
+	c.reader = bufio.NewReaderSize(tlsConn, 128*1024)
+	c.writer = bufio.NewWriterSize(tlsConn, 4*1024)
 	c.text = textproto.NewReader(c.reader)
 
 	c.logger.Debug().Msg("TLS encryption enabled")

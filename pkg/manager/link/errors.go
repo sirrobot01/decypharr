@@ -1,8 +1,15 @@
 package link
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"strconv"
+	"syscall"
+	"time"
 )
 
 // ErrorCategory defines the type of link error and its retry behavior
@@ -17,6 +24,8 @@ const (
 	CategoryRefetchable
 	// CategoryAccountIssue - Disable account (bandwidth exceeded)
 	CategoryAccountIssue
+	// CategoryThrottled - Back off, honoring RetryAfter; the link itself is fine (429)
+	CategoryThrottled
 )
 
 // String returns a human-readable name for the error category
@@ -30,6 +39,8 @@ func (c ErrorCategory) String() string {
 		return "refetchable"
 	case CategoryAccountIssue:
 		return "account_issue"
+	case CategoryThrottled:
+		return "throttled"
 	default:
 		return "unknown"
 	}
@@ -37,9 +48,10 @@ func (c ErrorCategory) String() string {
 
 // Error represents a structured error with retry semantics
 type Error struct {
-	Err      error
-	Category ErrorCategory
-	Code     string // Error code from provider (e.g., "bandwidth_exceeded", "404")
+	Err        error
+	Category   ErrorCategory
+	Code       string        // Error code from provider (e.g., "bandwidth_exceeded", "404")
+	RetryAfter time.Duration // For CategoryThrottled: server-requested wait, 0 if unspecified
 }
 
 // Error implements the error interface
@@ -95,6 +107,9 @@ var (
 	Err404 = errors.New("HTTP 404 Not Found")
 	Err429 = errors.New("HTTP 429 Too Many Requests")
 	Err503 = errors.New("HTTP 503 Service Unavailable")
+	// ErrLinkRejected is a 400 from the provider/CDN, which in practice means
+	// the presigned link expired or rotated rather than a malformed request.
+	ErrLinkRejected = errors.New("HTTP 400: link rejected")
 )
 
 // NewLinkError creates a new LinkError with the given error and category
@@ -145,11 +160,104 @@ func ErrorCodeToLinkError(code string) *Error {
 		return NewPermanentError(Err404, code)
 	case "429":
 		return NewRetryableError(Err429, code)
-	case "503":
+	// Some providers (TorBox) return a bare 400 for a presigned link that has
+	// expired or rotated. ClassifyStreamStatus already treats 400 at the CDN
+	// layer as refetchable; the provider-API path must agree, otherwise a stale
+	// link is classified permanent, fast-trips the VFS circuit breaker
+	// (errorCount = maxErrorCount) and the file reads 0 bytes until cooldown
+	// instead of simply refetching the link.
+	case "400":
+		return NewRefetchableError(ErrLinkRejected, code)
+	case "503", "read_pxy_timeout":
 		return NewRetryableError(Err503, code)
 	default:
 		return NewPermanentError(fmt.Errorf("unknown error code: %s", code), code)
 	}
+}
+
+// ShouldBackoff returns true if the caller should wait (RetryAfter, or its own
+// backoff) and retry the same link — the link is healthy, the account is hot.
+func (e *Error) ShouldBackoff() bool {
+	return e.Category == CategoryThrottled
+}
+
+// IsRetryable reports whether retrying could succeed. It lets callers outside
+// this package (the vfs downloader's retry loop, via customerror's
+// selfRetryable interface) respect the classification without importing the
+// category constants. Only permanent errors are non-retryable.
+func (e *Error) IsRetryable() bool {
+	return e.Category != CategoryPermanent
+}
+
+// ClassifyStreamStatus classifies a non-2xx HTTP status observed while serving
+// bytes from a link (CDN edge), as opposed to provider-API error codes which go
+// through ErrorCodeToLinkError. At the CDN layer, 4xx auth-shaped statuses and
+// 404 usually mean the presigned link expired or rotated — refetchable. A
+// refreshed link that still fails escalates via the caller's attempt budget.
+func ClassifyStreamStatus(status int, header http.Header) *Error {
+	switch {
+	case status == http.StatusBadRequest || status == http.StatusUnauthorized ||
+		status == http.StatusForbidden || status == http.StatusGone:
+		return NewRefetchableError(fmt.Errorf("HTTP %d: link rejected", status), strconv.Itoa(status))
+	case status == http.StatusNotFound:
+		return NewRefetchableError(Err404, "404")
+	case status == http.StatusRequestedRangeNotSatisfiable:
+		return NewPermanentError(errors.New("HTTP 416: requested range not satisfiable"), "416")
+	case status == http.StatusTooManyRequests:
+		e := NewLinkError(Err429, CategoryThrottled, "429")
+		e.RetryAfter = parseRetryAfter(header.Get("Retry-After"))
+		return e
+	case status >= 500:
+		return NewRetryableError(fmt.Errorf("HTTP %d", status), strconv.Itoa(status))
+	default:
+		return NewPermanentError(fmt.Errorf("unexpected HTTP status %d", status), strconv.Itoa(status))
+	}
+}
+
+// ClassifyTransportError classifies an error from the transport layer (dial,
+// TLS, mid-body read). Anything already classified passes through. Unknown
+// errors default to retryable: mid-stream failures are retried on a bounded
+// budget, so a wrong "retryable" costs a few attempts while a wrong
+// "permanent" kills a recoverable stream.
+func ClassifyTransportError(err error) *Error {
+	if err == nil {
+		return nil
+	}
+	if existing := GetLinkError(err); existing != nil {
+		return existing
+	}
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// The caller decides whether this is its own cancellation or a
+		// stall-watchdog firing; classified retryable for the latter.
+		return NewRetryableError(err, "cancelled_or_stalled")
+	case errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, io.EOF):
+		return NewRetryableError(err, "short_body")
+	case errors.Is(err, syscall.ECONNRESET), errors.Is(err, syscall.EPIPE),
+		errors.Is(err, syscall.ECONNREFUSED):
+		return NewRetryableError(err, "connection")
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return NewRetryableError(err, "network")
+	}
+	return NewRetryableError(err, "transport")
+}
+
+// parseRetryAfter parses a Retry-After header value: delta-seconds or HTTP-date.
+func parseRetryAfter(value string) time.Duration {
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if at, err := http.ParseTime(value); err == nil {
+		if d := time.Until(at); d > 0 {
+			return d
+		}
+	}
+	return 0
 }
 
 // IsLinkError checks if an error is a LinkError

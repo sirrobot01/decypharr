@@ -41,6 +41,58 @@ chmod +x decypharr
 ./decypharr
 ```
 
+### "unsupported version" on startup
+
+Decypharr stops with a message like this, and the container restarts in a loop:
+
+```
+failed to create item stores: failed to create entries store: unsupported version: 4 (max: 3)
+```
+
+The database in your data directory uses a newer format than the running version can read. This happens when you
+move to a newer Decypharr tag and then go back. The newer build upgrades the database on first start, and older
+builds refuse the new format.
+
+**Upgrade Decypharr again.** A newer version reads every format. This is the quickest fix and it keeps all your
+data.
+
+### Go back to an older version
+
+Run the newer Decypharr once, then use its `downgrade-db` command. It rewrites the databases in the format the older
+release reads, and it carries everything you have done since the upgrade:
+
+```bash
+docker compose stop decypharr
+docker compose run --rm decypharr /decypharr downgrade-db
+```
+
+Then start the older release. Use `-to 4` instead if you are going back to a build that reads format 4.
+
+The command keeps the current databases as `.pre-downgrade.bak`, so the downgrade is itself reversible. It converts
+every database before it replaces any: if one holds something the older format cannot express, it stops and changes
+nothing. Decypharr must be stopped, because each database is locked by the process that has it open.
+
+You can move between versions as often as you need. On a later run, add `-replace-backup` to overwrite the
+`.pre-downgrade.bak` files an earlier run left behind.
+
+### Restore a pre-upgrade copy
+
+A newer build also saves a copy of each database before it upgrades it. Restoring one returns your data to the
+moment of the upgrade, so anything done since is lost. Prefer `downgrade-db`. Stop Decypharr, then:
+
+```bash
+cd /path/to/data/db
+for backup in *.v3.bak; do
+  mv "$backup" "${backup%.v3.bak}"
+done
+```
+
+Builds released before this safeguard do not save a copy. If there is no `.bak` file and `downgrade-db` is not
+available, delete the `db` directory. Decypharr rebuilds the library from your debrid providers on the next start,
+but the download queue and repair history are lost.
+
+Backup files are never deleted automatically. Remove them once you no longer plan to go back.
+
 ## Authentication Issues
 
 ### API token not working

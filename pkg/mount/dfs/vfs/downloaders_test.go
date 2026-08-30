@@ -2,7 +2,6 @@ package vfs
 
 import (
 	"context"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -196,9 +195,8 @@ func TestCacheItemReleaseStopsDownloadersOnZeroOpens(t *testing.T) {
 		cancel:    cancel,
 	}
 
-	item := &CacheItem{
-		downloaders: dls,
-	}
+	item := &CacheItem{}
+	item.downloaders.Store(dls)
 	item.opens.Store(1)
 
 	item.Release()
@@ -214,67 +212,6 @@ func TestCacheItemReleaseStopsDownloadersOnZeroOpens(t *testing.T) {
 	}
 }
 
-func TestNoProgressWatchdogCancelsStalledAttempt(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	var lastProgressNanos atomic.Int64
-	lastProgressNanos.Store(time.Now().Add(-300 * time.Millisecond).UnixNano())
-
-	var timedOut atomic.Bool
-	stop := startNoProgressWatchdog(
-		ctx,
-		120*time.Millisecond,
-		10*time.Millisecond,
-		&lastProgressNanos,
-		cancel,
-		&timedOut,
-	)
-	defer stop()
-
-	select {
-	case <-ctx.Done():
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("expected context cancellation from no-progress watchdog")
-	}
-
-	if !timedOut.Load() {
-		t.Fatal("expected watchdog timeout flag to be set")
-	}
-}
-
-func TestNoProgressWatchdogKeepsAliveWithProgress(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	var lastProgressNanos atomic.Int64
-	lastProgressNanos.Store(time.Now().UnixNano())
-
-	var timedOut atomic.Bool
-	stop := startNoProgressWatchdog(
-		ctx,
-		160*time.Millisecond,
-		20*time.Millisecond,
-		&lastProgressNanos,
-		cancel,
-		&timedOut,
-	)
-	defer stop()
-
-	deadline := time.Now().Add(300 * time.Millisecond)
-	ticker := time.NewTicker(30 * time.Millisecond)
-	defer ticker.Stop()
-
-	for time.Now().Before(deadline) {
-		select {
-		case <-ticker.C:
-			lastProgressNanos.Store(time.Now().UnixNano())
-		case <-ctx.Done():
-			t.Fatal("unexpected watchdog cancellation while progress was advancing")
-		}
-	}
-
-	if timedOut.Load() {
-		t.Fatal("watchdog timed out despite ongoing progress")
-	}
-}
+// Stall detection now lives in the manager stream session (see
+// TestSessionStallWatchdogRecovers); the downloader no longer runs its own
+// no-progress watchdog.

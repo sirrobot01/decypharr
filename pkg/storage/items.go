@@ -1,14 +1,14 @@
 package storage
 
 import (
-	"github.com/sirrobot01/decypharr/pkg/storage/hybrid"
+	"github.com/sirrobot01/appendstore"
 	"google.golang.org/protobuf/proto"
 )
 
 // GetEntryItems returns all entry item names
 func (s *Storage) GetEntryItems() map[string]struct{} {
 	items := make(map[string]struct{})
-	_ = s.entryItems.ForEachMeta(func(key string, meta *hybrid.IndexEntry) error {
+	_ = s.entryItems.ForEachMetadata(func(key string, meta *appendstore.Metadata) error {
 		items[key] = struct{}{}
 		return nil
 	})

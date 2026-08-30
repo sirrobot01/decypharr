@@ -8,7 +8,6 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime/debug"
 	"syscall"
 
@@ -25,6 +24,15 @@ func main() {
 		}
 	}()
 
+	// Subcommands are dispatched before flag parsing, which would otherwise
+	// stop at the subcommand name and treat it as a positional argument.
+	if len(os.Args) > 1 && os.Args[1] == downgradeCommand {
+		if err := runDowngrade(os.Args[2:]); err != nil {
+			log.Fatalf("%s: %v", downgradeCommand, err)
+		}
+		return
+	}
+
 	var configPath string
 	var pprofAddr string
 
@@ -36,17 +44,7 @@ func main() {
 	// get enable pprof flag from environment variable if not set via flag
 	enablePprof := os.Getenv("ENABLE_PPROF") != ""
 
-	if configPath == "" {
-		defaultDir, err := os.UserHomeDir()
-		if err != nil {
-			// If we can't get the user home directory, fallback to current directory
-			defaultDir = "."
-		}
-		defaultConfigDir := filepath.Join(defaultDir, ".decypharr")
-		configPath = defaultConfigDir
-	}
-
-	config.SetConfigPath(configPath)
+	config.SetConfigPath(resolveConfigPath(configPath))
 	config.Get()
 
 	// Buffer pools are owned by their subsystems: the DFS cache (vfs.NewCache)

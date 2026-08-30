@@ -120,6 +120,8 @@ func New(mgr *manager.Manager) *Server {
 	if !wd.IsDisabled() {
 		routes["/webdav"] = wd.Routes()
 	}
+	// Serves the URLs written into .strm files; independent of DisableWebDav.
+	routes["/stream"] = wd.StreamRoutes()
 	routes["/sabnzbd"] = sb.Routes()
 
 	// Trim trailing slash so chi registers the URLBase root path itself

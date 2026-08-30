@@ -29,6 +29,9 @@ import (
 
 const (
 	metaFlushInterval = 2 * time.Second
+	// metaFlushDebounce is the minimum spacing between signal-driven
+	// metadata flushes; crash exposure stays bounded by metaFlushInterval.
+	metaFlushDebounce = 500 * time.Millisecond
 
 	// How long to keep unused cache items around before removing(no delete on disk, just remove from map and close file. Cleanup loop will remove from disk eventually.
 	itemIdleTimeout = 1 * time.Minute
@@ -518,6 +521,11 @@ func (c *Cache) newItem(key, entryName, filename string, fileSize int64) (*Cache
 		DiskPath:      cachePath,
 		TotalSize:     fileSize,
 		InitialRanges: seed,
+		// Write-through by default: DFS is write-once, readers only see
+		// ranges after the download completes, and the kernel page cache
+		// serves the just-written bytes. `buffer_write_policy: "auto"`
+		// restores block caching.
+		WritePolicy: writePolicyFor(c.config),
 		// When the DFS pool punches a hole behind the read head to stay under
 		// the disk limit, drop the same range from the persisted metadata so a
 		// later reopen doesn't claim bytes that are now a hole on disk.
@@ -553,7 +561,7 @@ func (c *Cache) newItem(key, entryName, filename string, fileSize int64) (*Cache
 		logger:   log.Rate(buildCacheKey(entryName, filename)),
 	}
 
-	item.downloaders = NewDownloaders(c.ctx, c.manager, item, c.config)
+	item.downloaders.Store(NewDownloaders(c.ctx, c.manager, item, c.config))
 	item.startMetaWriter()
 	item.markMetadataDirty()
 	return item, nil
@@ -960,12 +968,13 @@ type CacheItem struct {
 
 	info ItemInfo
 
-	opens       atomic.Int32 // Number of open handles (prevents eviction)
-	logger      *logger.RateLimitedEvent
-	downloaders *Downloaders // Download coordinator
+	opens  atomic.Int32 // Number of open handles (prevents eviction)
+	logger *logger.RateLimitedEvent
+	// downloaders is the download coordinator: set once at construction,
+	// swapped to nil by Close, loaded per read.
+	downloaders atomic.Pointer[Downloaders]
 
 	metaMu sync.RWMutex
-	dlMu   sync.Mutex
 
 	metaDirty   atomic.Bool
 	metaFlushCh chan struct{}
@@ -997,12 +1006,21 @@ func (item *CacheItem) metaWriterLoop() {
 	defer item.metaWG.Done()
 	ticker := time.NewTicker(metaFlushInterval)
 	defer ticker.Stop()
+	var lastFlush time.Time
 	for {
 		select {
 		case <-ticker.C:
 			item.flushMetadata(false)
+			lastFlush = time.Now()
 		case <-item.metaFlushCh:
+			// The signal fires per write; debounce the flush. The dirty
+			// flag stays set, so the ticker picks up whatever the debounce
+			// skipped.
+			if time.Since(lastFlush) < metaFlushDebounce {
+				continue
+			}
 			item.flushMetadata(false)
+			lastFlush = time.Now()
 		case <-item.metaStopCh:
 			item.flushMetadata(true)
 			return
@@ -1136,11 +1154,7 @@ func (item *CacheItem) Release() {
 // StopDownloaders stops active downloads but keeps the cache item alive
 // for potential cache reuse. This is called when all file handles are closed.
 func (item *CacheItem) StopDownloaders() {
-	item.dlMu.Lock()
-	dls := item.downloaders
-	item.dlMu.Unlock()
-
-	if dls != nil {
+	if dls := item.downloaders.Load(); dls != nil {
 		dls.StopAll()
 	}
 }
@@ -1168,18 +1182,8 @@ func (item *CacheItem) ReadAtContext(ctx context.Context, p []byte, off int64) (
 
 	r := ranges.Range{Pos: off, Size: readSize}
 
-	// Track cache hit/miss: check if data is already present before downloading
-	alreadyCached := item.HasRange(r)
-	if alreadyCached {
-		item.cache.RecordCacheHit()
-	} else {
-		item.cache.RecordCacheMiss()
-	}
-
 	// Ensure data is on disk (may block until downloaded or ctx canceled)
-	item.dlMu.Lock()
-	dls := item.downloaders
-	item.dlMu.Unlock()
+	dls := item.downloaders.Load()
 	if dls == nil {
 		return 0, errors.New("downloaders closed")
 	}
@@ -1202,7 +1206,13 @@ func (item *CacheItem) ReadAtContext(ctx context.Context, p []byte, off int64) (
 	// bulk prefetch, and retry transient failures a few times before surfacing
 	// EIO — ffprobe treats a single read error as fatal.
 	priority := isProbeRead(off, readSize, item.info.Size)
-	if err := dls.DownloadWithRetry(ctx, r, priority); err != nil {
+	hit, err := dls.DownloadWithRetry(ctx, r, priority)
+	if hit {
+		item.cache.RecordCacheHit()
+	} else {
+		item.cache.RecordCacheMiss()
+	}
+	if err != nil {
 		return 0, fmt.Errorf("download failed: %w", err)
 	}
 
@@ -1253,8 +1263,10 @@ func (item *CacheItem) WriteAtNoOverwrite(p []byte, off int64) (n, skipped int, 
 	writeRange := ranges.Range{Pos: off, Size: int64(len(p))}
 	n = len(p)
 
+	// Stack scratch: writes rarely fragment into more than a few pieces.
+	var scratch [8]ranges.FoundRange
 	item.metaMu.RLock()
-	frs := item.info.Rs.FindAll(writeRange)
+	frs := item.info.Rs.FindAllInto(writeRange, scratch[:0])
 	item.metaMu.RUnlock()
 
 	for _, fr := range frs {
@@ -1317,10 +1329,7 @@ func (item *CacheItem) FindMissing(r ranges.Range) ranges.Range {
 // disk, not re-download).
 func (item *CacheItem) Close() error {
 	item.closeOnce.Do(func() {
-		item.dlMu.Lock()
-		dls := item.downloaders
-		item.downloaders = nil
-		item.dlMu.Unlock()
+		dls := item.downloaders.Swap(nil)
 
 		if dls != nil {
 			if err := dls.Close(nil); err != nil && item.closeErr == nil {
@@ -1345,6 +1354,14 @@ func (item *CacheItem) Close() error {
 }
 
 // Helper functions
+
+// writePolicyFor maps the DFS config to the buffer's write policy.
+func writePolicyFor(cfg *config.FuseConfig) buffer.WritePolicy {
+	if cfg != nil && cfg.BufferWriteAuto {
+		return buffer.WriteAuto
+	}
+	return buffer.WriteThrough
+}
 
 func buildCacheKey(entryName, filename string) string {
 	// Create safe filesystem key

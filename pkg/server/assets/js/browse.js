@@ -12,6 +12,7 @@ class FileBrowser {
             total: 0,
             totalPages: 0,
             parentDir: null,
+            currentKind: '',
             selectedEntry: null,
             selectedEntries: new Set(),
             selectedEntryData: new Map(),
@@ -28,6 +29,9 @@ class FileBrowser {
             paginationInfo: document.getElementById('paginationInfo'),
             paginationControls: document.getElementById('paginationControls'),
             emptyState: document.getElementById('emptyState'),
+            emptyStateMessage: document.getElementById('emptyStateMessage'),
+            emptyStateVirtualFolderLink: document.getElementById('emptyStateVirtualFolderLink'),
+            currentViewNotice: document.getElementById('currentViewNotice'),
 
             // Bulk actions
             selectAllCheckbox: document.getElementById('selectAllCheckbox'),
@@ -196,6 +200,7 @@ class FileBrowser {
     }
 
     navigate(path) {
+        this.clearSelection();
         this.state.currentPath = path;
         this.state.currentPage = 1;
         this.updateURL();
@@ -251,8 +256,10 @@ class FileBrowser {
             this.state.total = data.total || 0;
             this.state.totalPages = data.total_pages || 0;
             this.state.parentDir = data.parent_dir;
+            this.state.currentKind = data.current_kind || '';
 
             this.updateBreadcrumbs();
+            this.updateCurrentViewNotice();
             this.renderEntries();
             this.renderPagination();
             this.loadHealthForEntries();
@@ -267,7 +274,7 @@ class FileBrowser {
 
     async loadHealthForEntries() {
         const names = Array.from(new Set(this.state.entries
-            .filter((e) => e && e.name)
+            .filter((e) => e && e.name && e.kind === 'entry')
             .map((e) => e.name)));
         if (names.length === 0) return;
         const results = await Promise.all(names.map(async (name) => {
@@ -291,6 +298,17 @@ class FileBrowser {
             const name = cell.getAttribute('data-health-cell');
             cell.innerHTML = this.healthBadge(this.state.health.get(name));
         });
+    }
+
+    updateCurrentViewNotice() {
+        const isVirtual = this.state.currentKind === 'virtual';
+        this.refs.currentViewNotice?.classList.toggle('hidden', !isVirtual);
+        if (this.refs.emptyStateMessage) {
+            this.refs.emptyStateMessage.textContent = isVirtual
+                ? 'No current items match this virtual folder’s conditions.'
+                : 'No files or folders found here.';
+        }
+        this.refs.emptyStateVirtualFolderLink?.classList.toggle('hidden', !isVirtual);
     }
 
     healthBadge(state) {
@@ -368,30 +386,57 @@ class FileBrowser {
         this.refs.emptyState.classList.add('hidden');
 
         this.refs.fileBrowserList.innerHTML = this.state.entries.map(entry => {
-            const icon = entry.is_dir ?
-                '<i class="bi bi-folder-fill text-warning text-lg transition-colors group-hover:text-warning-content"></i>' :
-                '<i class="bi bi-file-earmark text-info transition-colors group-hover:text-info-content"></i>';
+            const icons = {
+                virtual: '<i class="bi bi-folder-symlink text-info text-lg" aria-hidden="true"></i>',
+                provider: '<i class="bi bi-cloud text-secondary text-lg" aria-hidden="true"></i>',
+                system: '<i class="bi bi-folder-fill text-warning text-lg" aria-hidden="true"></i>',
+                entry: '<i class="bi bi-folder-fill text-warning text-lg" aria-hidden="true"></i>',
+                file: '<i class="bi bi-file-earmark text-info" aria-hidden="true"></i>'
+            };
+            const icon = entry.is_dir ? (icons[entry.kind] || icons.entry) : icons.file;
+            const badges = {
+                virtual: '<span class="badge badge-info badge-outline badge-sm">Virtual view</span>',
+                provider: '<span class="badge badge-secondary badge-outline badge-sm">Provider</span>',
+                system: '<span class="badge badge-ghost badge-sm">Library</span>'
+            };
+            const kindBadge = badges[entry.kind] || '';
+            const isActionable = this.isActionableEntry(entry);
+            const canOpen = entry.is_dir || isActionable;
 
             const entryId = entry.info_hash || entry.path;
             const isChecked = this.state.selectedEntries.has(entryId);
+            const actionMenu = isActionable ? `
+                <div class="dropdown dropdown-end">
+                    <button type="button" tabindex="0" class="btn btn-ghost btn-xs" aria-label="Actions for ${this.escapeAttr(entry.name)}">
+                        <i class="bi bi-three-dots-vertical" aria-hidden="true"></i>
+                    </button>
+                    <ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-200 rounded-box w-56 z-50" aria-label="Actions">
+                        ${!entry.is_dir ? `<li><button type="button" onclick="window.fileBrowser.downloadFile('${this.escapeJs(entry.path)}', '${this.escapeJs(entry.name)}')"><i class="bi bi-download" aria-hidden="true"></i> Download</button></li>` : ''}
+                        ${entry.kind === 'entry' ? `<li><button type="button" onclick="window.fileBrowser.recheckEntry('${this.escapeJs(entry.name)}')"><i class="bi bi-search-heart" aria-hidden="true"></i> Recheck health</button></li>` : ''}
+                        ${entry.can_delete ? `<li><button type="button" onclick="window.fileBrowser.deleteTorrent('${this.escapeJs(entry.info_hash)}', '${this.escapeJs(entry.name)}')" class="text-error"><i class="bi bi-trash" aria-hidden="true"></i> Delete original item</button></li>` : ''}
+                    </ul>
+                </div>` : '<span aria-hidden="true">—</span>';
 
             return `
                 <tr class="group hover:bg-base-200 transition-colors"
-                    data-entry='${JSON.stringify(entry)}'
+                    data-entry='${this.escapeAttr(JSON.stringify(entry))}'
                     data-entry-id="${this.escapeAttr(entryId)}"
-                    oncontextmenu="window.fileBrowser.showContextMenu(event, ${this.escapeAttr(JSON.stringify(entry))});">
+                    ${isActionable ? `oncontextmenu="window.fileBrowser.showContextMenu(event, ${this.escapeAttr(JSON.stringify(entry))});"` : ''}>
                     <td onclick="event.stopPropagation();">
-                        <label class="cursor-pointer">
-                            <input type="checkbox"
+                        <label class="${isActionable ? 'cursor-pointer' : ''}">
+                            <span class="sr-only">Select ${this.escapeHtml(entry.name)}</span>
+                            <input type="checkbox" aria-label="Select ${this.escapeAttr(entry.name)}"
                                    class="checkbox checkbox-sm checkbox-primary entry-checkbox"
                                    data-entry-id="${this.escapeAttr(entryId)}"
                                    ${isChecked ? 'checked' : ''}
+                                   ${isActionable ? '' : 'disabled'}
                                    onchange="window.fileBrowser.handleEntrySelect('${this.escapeAttr(entryId)}', this.checked, ${this.escapeAttr(JSON.stringify(entry))})">
                         </label>
                     </td>
                     <td>${icon}</td>
-                    <td onclick="window.fileBrowser.handleEntryClick('${this.escapeJs(entry.path)}', ${entry.is_dir}, '${this.escapeJs(entry.name)}');" class="cursor-pointer hover:text-primary transition-colors">
-                        <span class="font-medium">${this.escapeHtml(entry.name)}</span>
+                    <td>
+                        ${canOpen ? `<button type="button" onclick="window.fileBrowser.handleEntryClick('${this.escapeJs(entry.path)}', ${entry.is_dir}, '${this.escapeJs(entry.name)}');" class="text-left hover:text-primary transition-colors"><span class="font-medium">${this.escapeHtml(entry.name)}</span></button>` : `<span class="font-medium">${this.escapeHtml(entry.name)}</span>`}
+                        ${kindBadge ? `<span class="ml-2">${kindBadge}</span>` : ''}
                     </td>
                     <td>
                         ${entry.size <= 0 ? '-' : this.formatSize(entry.size)}
@@ -402,36 +447,22 @@ class FileBrowser {
                     <td>
                         ${entry.active_debrid ? `<span>${this.escapeHtml(entry.active_debrid)}</span>` : '-'}
                     </td>
-                    <td data-health-cell="${this.escapeAttr(entry.name)}">
-                        ${this.healthBadge(this.state.health.get(entry.name))}
+                    <td ${entry.kind === 'entry' ? `data-health-cell="${this.escapeAttr(entry.name)}"` : ''}>
+                        ${entry.kind === 'entry' ? this.healthBadge(this.state.health.get(entry.name)) : '—'}
                     </td>
                     <td onclick="event.stopPropagation();">
-                        <div class="dropdown dropdown-end">
-                            <label tabindex="0" class="btn btn-ghost btn-xs">
-                                <i class="bi bi-three-dots-vertical"></i>
-                            </label>
-                            <ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-200 rounded-box w-52 z-50">
-                                ${!entry.is_dir ? `
-                                    <li><a onclick="window.fileBrowser.downloadFile('${this.escapeJs(entry.path)}', '${this.escapeJs(entry.name)}')">
-                                        <i class="bi bi-download"></i> Download
-                                    </a></li>
-                                ` : ''}
-                                <li><a onclick="window.fileBrowser.recheckEntry('${this.escapeJs(entry.name)}')">
-                                    <i class="bi bi-search-heart"></i> Recheck health
-                                </a></li>
-                                ${entry.can_delete ? `
-                                    <li><a onclick="window.fileBrowser.deleteTorrent('${this.escapeJs(entry.info_hash)}', '${this.escapeJs(entry.name)}')" class="text-error">
-                                        <i class="bi bi-trash"></i> Delete
-                                    </a></li>
-                                ` : ''}
-                            </ul>
-                        </div>
+                        ${actionMenu}
                     </td>
                 </tr>
             `;
         }).join('');
 
         this.updateSelectionUI();
+    }
+
+    isActionableEntry(entry) {
+        if (!entry || ['system', 'provider', 'virtual'].includes(entry.kind)) return false;
+        return Boolean(entry.kind === 'entry' || entry.kind === 'file' || entry.can_delete || !entry.is_dir);
     }
 
     renderPagination() {
@@ -579,7 +610,7 @@ class FileBrowser {
     async deleteTorrent(infoHash, name) {
         this.hideContextMenu();
 
-        if (!confirm(`Delete "${name}"?\n\nThis will remove the item from the system.`)) {
+        if (!confirm(`Permanently delete the original item "${name}"?\n\nThis removes it from every library and virtual folder, and removes its placement from the provider. This cannot be undone from Decypharr.`)) {
             return;
         }
 
@@ -617,7 +648,12 @@ class FileBrowser {
         if (typeof text !== 'string') {
             text = JSON.stringify(text);
         }
-        return text.replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/'/g, '&#39;')
+            .replace(/"/g, '&quot;');
     }
 
     escapeJs(text) {
@@ -643,7 +679,7 @@ class FileBrowser {
 
     handleSelectAll(checked) {
         if (checked) {
-            this.state.entries.forEach(entry => {
+            this.state.entries.filter(entry => this.isActionableEntry(entry)).forEach(entry => {
                 const entryId = entry.info_hash || entry.path;
                 this.state.selectedEntries.add(entryId);
                 this.state.selectedEntryData.set(entryId, entry);
@@ -683,13 +719,15 @@ class FileBrowser {
 
         // Update select all checkbox state
         if (this.refs.selectAllCheckbox) {
-            const allSelected = this.state.entries.length > 0 &&
-                this.state.entries.every(entry => {
+            const actionableEntries = this.state.entries.filter(entry => this.isActionableEntry(entry));
+            const allSelected = actionableEntries.length > 0 &&
+                actionableEntries.every(entry => {
                     const entryId = entry.info_hash || entry.path;
                     return this.state.selectedEntries.has(entryId);
                 });
             this.refs.selectAllCheckbox.checked = allSelected;
             this.refs.selectAllCheckbox.indeterminate = selectedCount > 0 && !allSelected;
+            this.refs.selectAllCheckbox.disabled = actionableEntries.length === 0;
         }
     }
 
@@ -728,7 +766,7 @@ class FileBrowser {
         }
 
         const names = torrents.map(t => t.name).join('\n');
-        if (!confirm(`Delete ${torrents.length} torrent(s)?\n\n${names}\n\nThis will remove the items from the management system.`)) {
+        if (!confirm(`Permanently delete ${torrents.length} original item(s)?\n\n${names}\n\nThis removes them from every library and virtual folder, and removes their provider placements. This cannot be undone from Decypharr.`)) {
             return;
         }
 
@@ -740,7 +778,7 @@ class FileBrowser {
                 body: JSON.stringify({ids})
             });
             if (!response.ok) throw new Error('Failed to delete selected items');
-            window.createToast(`Deleted ${ids.length} torrent(s)`, 'success');
+            window.createToast(`Deleted ${ids.length} item(s)`, 'success');
             this.clearSelection();
             this.refresh();
         } catch (error) {

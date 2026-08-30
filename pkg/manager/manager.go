@@ -59,8 +59,12 @@ type Manager struct {
 	fixer *Fixer
 	ctx   context.Context
 
-	customFolders *CustomFolders
-	mountManager  MountManager
+	// strm reconciler
+	strm *Strm
+
+	virtualFoldersMu sync.RWMutex
+	virtualFolders   *VirtualFolders
+	mountManager     MountManager
 
 	startTime     time.Time
 	usenetTimeout time.Duration
@@ -123,9 +127,9 @@ func New() *Manager {
 		DisableCompression:     false, // Enable compression for better multiplexing
 		DialContext:            dialer.DialContext,
 		Proxy:                  http.ProxyFromEnvironment,
-		MaxResponseHeaderBytes: 1 << 20,  // 1MB header buffer for CDN responses
-		WriteBufferSize:        32 << 10, // 32KB write buffer
-		ReadBufferSize:         32 << 10, // 32KB read buffer
+		MaxResponseHeaderBytes: 1 << 20,   // 1MB header buffer for CDN responses
+		WriteBufferSize:        32 << 10,  // requests are tiny
+		ReadBufferSize:         256 << 10, // caps how much a single body.Read can return
 	}
 
 	streamClient := &http.Client{
@@ -216,11 +220,14 @@ func (m *Manager) init() {
 	// Initialize link service
 	m.initLinkService()
 
-	// Init custom folders
-	m.initCustomFolders()
+	// Initialize virtual folders.
+	m.initVirtualFolders()
 
 	// Initialize fixer
 	m.fixer = NewFixer(m)
+
+	// Initialize strm reconciler
+	m.strm = NewStrm(m)
 
 	// Set mount paths
 	m.setMountPaths()
@@ -404,6 +411,8 @@ func (m *Manager) Start(ctx context.Context) error {
 			m.logger.Info().Msg("Starting NZB file size correction as requested by environment variable")
 			m.fixNZBFileSizes(ctx)
 		}
+		// Converge the .strm export tree with config applied since last run.
+		m.strm.SweepAsync("startup")
 	}()
 
 	// Start workers
@@ -574,6 +583,11 @@ func (m *Manager) AddOrUpdate(entry *storage.Entry, callback func(t *storage.Ent
 	if err := m.storage.AddOrUpdate(entry); err != nil {
 		return err
 	}
+	// Keep .strm files derived state: any post-completion update (repair,
+	// refresh, provider switch) re-syncs them. Cheap and idempotent.
+	if entry.IsComplete {
+		m.strm.SyncEntryAsync(entry)
+	}
 	if callback != nil {
 		go callback(entry)
 	}
@@ -619,6 +633,7 @@ func (m *Manager) DeleteEntry(infohash string, removePlacements bool) error {
 	if err := m.storage.Delete(infohash); err != nil {
 		return err
 	}
+	m.strm.RemoveEntryAsync(torr)
 	// Refresh entry cache
 	m.RefreshEntries(true)
 	return nil

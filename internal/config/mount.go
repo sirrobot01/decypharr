@@ -72,6 +72,19 @@ type DFS struct {
 
 	DaemonTimeout string `json:"daemon_timeout,omitempty"` // Time after which the FUSE daemon will exit if idle
 
+	// BufferWritePolicy selects how downloaded bytes go through the streaming
+	// buffer: "write_through" (default — straight to disk outside the lock,
+	// kernel page cache serves re-reads) or "auto" (legacy RAM block caching).
+	BufferWritePolicy string `json:"buffer_write_policy,omitempty"`
+
+	// FuseMaxBackground caps how many background FUSE requests (readahead,
+	// async reads) the kernel keeps in flight. Kernel default is 12, which
+	// throttles streaming readahead; DFS defaults to 64. 0 = default.
+	FuseMaxBackground int `json:"fuse_max_background,omitempty"`
+	// FuseMaxReadAhead is the readahead window advertised to the kernel,
+	// e.g. "1MB". Empty = DFS default (1MB).
+	FuseMaxReadAhead string `json:"fuse_max_read_ahead,omitempty"`
+
 	// File system settings
 	UID   uint32 `json:"uid,omitempty"`   // User ID for mounted files
 	GID   uint32 `json:"gid,omitempty"`   // Group ID for mounted files
@@ -143,6 +156,14 @@ func (c *Config) applyMountEnvVars() {
 	}
 	if val := getEnv("MOUNT__DFS__DAEMON_TIMEOUT"); val != "" {
 		c.Mount.DFS.DaemonTimeout = val
+	}
+	if val := getEnv("MOUNT__DFS__FUSE_MAX_BACKGROUND"); val != "" {
+		if v, err := strconv.Atoi(val); err == nil {
+			c.Mount.DFS.FuseMaxBackground = v
+		}
+	}
+	if val := getEnv("MOUNT__DFS__FUSE_MAX_READ_AHEAD"); val != "" {
+		c.Mount.DFS.FuseMaxReadAhead = val
 	}
 	if val := getEnv("MOUNT__DFS__UID"); val != "" {
 		if v, err := strconv.ParseUint(val, 10, 32); err == nil {

@@ -61,21 +61,15 @@ func (r *RateLimitedLogger) shouldLog(key string) bool {
 	if r.seen.Size() >= r.maxItems {
 		cutoff := now.Add(-r.window)
 
-		r.seen.Range(func(key string, value time.Time) bool {
-			if value.Before(cutoff) {
-				r.seen.Delete(key)
-			}
-			return true
+		r.seen.DeleteMatching(func(_ string, value time.Time) (bool, bool) {
+			return value.Before(cutoff), false
 		})
 		// If still too large, clear half
 		if r.seen.Size() >= r.maxItems {
 			i := 0
-			r.seen.Range(func(key string, value time.Time) bool {
-				if i%2 == 0 {
-					r.seen.Delete(key)
-				}
+			r.seen.DeleteMatching(func(string, time.Time) (bool, bool) {
 				i++
-				return true
+				return i%2 == 1, false
 			})
 		}
 	}

@@ -176,6 +176,13 @@ type FoundRange struct {
 // FindAll repeatedly calls Find searching for r in rs and returning
 // present or absent ranges.
 func (rs Ranges) FindAll(r Range) (frs []FoundRange) {
+	return rs.FindAllInto(r, nil)
+}
+
+// FindAllInto is FindAll appending into a caller-supplied slice, so hot
+// callers can reuse a scratch buffer (e.g. a stack array) instead of
+// allocating a fresh result per call.
+func (rs Ranges) FindAllInto(r Range, frs []FoundRange) []FoundRange {
 	for !r.IsEmpty() {
 		var fr FoundRange
 		fr.R, r, fr.Present = rs.Find(r)
@@ -263,29 +270,65 @@ func (rs Ranges) FindMissing(r Range) (rout Range) {
 // the buffer pool punches a hole behind the read head so the persisted metadata
 // stops claiming bytes that are no longer on disk.
 func (rs *Ranges) Remove(r Range) {
-	if r.IsEmpty() || len(*rs) == 0 {
+	s := *rs
+	if r.IsEmpty() || len(s) == 0 {
 		return
 	}
 	end := r.End()
-	// Fresh slice: a straddling segment splits into two outputs, so we can't
-	// safely reuse the backing array (it could overwrite unread input).
-	out := make(Ranges, 0, len(*rs)+1)
-	for _, seg := range *rs {
-		// No overlap: keep the segment whole.
-		if seg.End() <= r.Pos || seg.Pos >= end {
-			out = append(out, seg)
-			continue
-		}
-		// Surviving head [seg.Pos, r.Pos).
-		if seg.Pos < r.Pos {
-			out = append(out, Range{Pos: seg.Pos, Size: r.Pos - seg.Pos})
-		}
-		// Surviving tail [end, seg.End()).
-		if seg.End() > end {
-			out = append(out, Range{Pos: end, Size: seg.End() - end})
-		}
+
+	// Locate the touched window [lo, hi): segments overlapping [r.Pos, end).
+	// Ranges are sorted and non-overlapping, so the window is contiguous.
+	lo := sort.Search(len(s), func(i int) bool { return s[i].End() > r.Pos })
+	if lo == len(s) || s[lo].Pos >= end {
+		return // no overlap
 	}
-	*rs = out
+	hi := lo
+	for hi < len(s) && s[hi].Pos < end {
+		hi++
+	}
+
+	// The window collapses to at most a surviving head (of the first touched
+	// segment) and a surviving tail (of the last touched one).
+	var head, tail Range
+	hasHead := s[lo].Pos < r.Pos
+	if hasHead {
+		head = Range{Pos: s[lo].Pos, Size: r.Pos - s[lo].Pos}
+	}
+	hasTail := s[hi-1].End() > end
+	if hasTail {
+		tail = Range{Pos: end, Size: s[hi-1].End() - end}
+	}
+	survivors := 0
+	if hasHead {
+		survivors++
+	}
+	if hasTail {
+		survivors++
+	}
+
+	if survivors <= hi-lo {
+		// Rewrite in place and shift the untouched tail left. No allocation.
+		idx := lo
+		if hasHead {
+			s[idx] = head
+			idx++
+		}
+		if hasTail {
+			s[idx] = tail
+			idx++
+		}
+		n := copy(s[idx:], s[hi:])
+		*rs = s[:idx+n]
+		return
+	}
+
+	// One segment split into head+tail: grow by one (allocates only when the
+	// backing array is at capacity) and shift the tail right.
+	s = append(s, Range{})
+	copy(s[hi+1:], s[hi:])
+	s[lo] = head
+	s[lo+1] = tail
+	*rs = s
 }
 
 // Clear removes all ranges

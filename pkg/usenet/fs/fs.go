@@ -25,6 +25,10 @@ type PrefetchableReaderAt interface {
 	ReadAtContext(ctx context.Context, p []byte, off int64) (int, error)
 	// Prefetch triggers segment downloads for the given byte range without blocking.
 	Prefetch(ct context.Context, off, length int64)
+	// OpenCursor returns an independent read cursor over the same data.
+	// Each concurrent consumer should use its own cursor so seek detection
+	// and eviction-window tracking don't interfere across consumers.
+	OpenCursor() reader.ReadCursor
 }
 
 // FS implements fs.FS for RAR volumes backed by NNTP Segments

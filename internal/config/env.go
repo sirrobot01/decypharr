@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 func getEnv(key string) string {
@@ -110,6 +111,12 @@ func (c *Config) applyEnvOverrides() {
 
 	c.applyMountEnvVars()
 
+	c.applyNFSEnvVars()
+
+	c.applySMBEnvVars()
+
+	c.applyShareCacheEnvVars()
+
 	c.applyDebridEnvVars()
 
 	c.applyUsenetEnvVars()
@@ -134,4 +141,79 @@ func (c *Config) applyEnvOverrides() {
 		}
 	}
 
+}
+
+func (c *Config) applyNFSEnvVars() {
+	if val := getEnv("NFS__ENABLED"); val != "" {
+		c.NFS.Enabled = parseBool(val)
+	}
+	if val := getEnv("NFS__BIND_ADDRESS"); val != "" {
+		c.NFS.BindAddress = val
+	}
+	if val := getEnv("NFS__PORT"); val != "" {
+		if v, err := strconv.ParseUint(val, 10, 16); err == nil {
+			c.NFS.Port = uint16(v)
+		}
+	}
+	if val := getEnv("NFS__ALLOWED_NETWORKS"); val != "" {
+		c.NFS.AllowedNetworks = strings.FieldsFunc(val, func(r rune) bool {
+			return r == ',' || r == ' ' || r == '\n'
+		})
+	}
+	c.setNFSDefaults()
+}
+
+func (c *Config) applySMBEnvVars() {
+	if val := getEnv("SMB__ENABLED"); val != "" {
+		c.SMB.Enabled = parseBool(val)
+	}
+	if val := getEnv("SMB__BIND_ADDRESS"); val != "" {
+		c.SMB.BindAddress = val
+	}
+	if val := getEnv("SMB__PORT"); val != "" {
+		if v, err := strconv.ParseUint(val, 10, 16); err == nil {
+			c.SMB.Port = uint16(v)
+		}
+	}
+	if val := getEnv("SMB__SHARE_NAME"); val != "" {
+		c.SMB.ShareName = val
+	}
+	if val := getEnv("SMB__USERNAME"); val != "" {
+		c.SMB.Username = val
+	}
+	if val := getEnv("SMB__PASSWORD"); val != "" {
+		c.SMB.Password = val
+	}
+	if val := getEnv("SMB__REQUIRE_SIGNING"); val != "" {
+		c.SMB.RequireSigning = parseBool(val)
+	}
+	if val := getEnv("SMB__ALLOWED_NETWORKS"); val != "" {
+		c.SMB.AllowedNetworks = strings.FieldsFunc(val, func(r rune) bool {
+			return r == ',' || r == ' ' || r == '\n'
+		})
+	}
+	c.setSMBDefaults()
+}
+
+func (c *Config) applyShareCacheEnvVars() {
+	if val := getEnv("SHARE_CACHE__ENABLED"); val != "" {
+		enabled := parseBool(val)
+		c.ShareCache.Enabled = &enabled
+	}
+	if val := getEnv("SHARE_CACHE__DIR"); val != "" {
+		c.ShareCache.Dir = val
+	}
+	if val := getEnv("SHARE_CACHE__MAX_SIZE"); val != "" {
+		c.ShareCache.MaxSize = val
+	}
+	if val := getEnv("SHARE_CACHE__MAX_AGE"); val != "" {
+		c.ShareCache.MaxAge = val
+	}
+	if val := getEnv("SHARE_CACHE__CHUNK_SIZE"); val != "" {
+		c.ShareCache.ChunkSize = val
+	}
+	if val := getEnv("SHARE_CACHE__READ_AHEAD"); val != "" {
+		c.ShareCache.ReadAhead = val
+	}
+	c.setShareCacheDefaults()
 }

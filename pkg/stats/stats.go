@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -138,6 +139,9 @@ func (c *Collector) collect() *Snapshot {
 
 	// --- Mount ---
 	snap.Mount = c.collectMount(cfg)
+
+	// --- Access servers (WebDAV) ---
+	snap.Access = collectAccess(cfg)
 
 	// --- Usenet ---
 	if c.mgr.HasUsenet() {
@@ -285,6 +289,30 @@ func (c *Collector) getProfiles() map[string]*debridTypes.Profile {
 	c.profileMu.Unlock()
 
 	return fresh
+}
+
+// collectAccess reports the network file servers (WebDAV, NFS, SMB) and how
+// to reach them. Ports/paths only — the host is supplied by the dashboard.
+func collectAccess(cfg *config.Config) AccessStats {
+	webdavPath := strings.TrimSuffix(cfg.URLBase, "/") + "/webdav"
+	return AccessStats{
+		WebDAV: WebDAVAccess{
+			Enabled:      !cfg.DisableWebDav,
+			Path:         webdavPath,
+			Port:         cfg.Port,
+			AuthRequired: cfg.UseAuth && cfg.EnableWebdavAuth,
+		},
+		NFS: NFSAccess{
+			Enabled: cfg.NFS.Enabled,
+			Port:    cfg.NFS.Port,
+		},
+		SMB: SMBAccess{
+			Enabled:   cfg.SMB.Enabled,
+			Port:      cfg.SMB.Port,
+			ShareName: cfg.SMB.ShareName,
+			Username:  cfg.SMB.Username,
+		},
+	}
 }
 
 // collectMount gathers mount stats.

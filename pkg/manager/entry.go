@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/sirrobot01/decypharr/internal/utils"
@@ -18,6 +17,12 @@ const (
 	EntryBadFolder     string = "__bad__"
 	EntryTorrentFolder string = "torrents"
 	EntryNZBFolder     string = "nzbs"
+
+	EntryKindSystem   string = "system"
+	EntryKindProvider string = "provider"
+	EntryKindVirtual  string = "virtual"
+	EntryKindEntry    string = "entry"
+	EntryKindFile     string = "file"
 )
 
 // FileInfo implements os.FileInfo
@@ -33,6 +38,7 @@ type FileInfo struct {
 	canDelete    bool
 	byteRange    *[2]int64
 	infohash     string
+	kind         string
 	sys          any // For caching fuse nodes
 }
 
@@ -50,6 +56,7 @@ func (f *FileInfo) CanDelete() bool      { return f.canDelete }
 func (f *FileInfo) IsRemote() bool       { return len(f.content) == 0 }
 func (f *FileInfo) ByteRange() *[2]int64 { return f.byteRange }
 func (f *FileInfo) InfoHash() string     { return f.infohash }
+func (f *FileInfo) Kind() string         { return f.kind }
 
 // GetTorrentMountPath returns the full mount path for a torrent
 // Returns the path based on the new unified mount structure
@@ -61,6 +68,7 @@ func (m *Manager) setMountPaths() {
 	m.rootInfo = &FileInfo{
 		name:    "",
 		size:    0,
+		kind:    EntryKindSystem,
 		modTime: utils.Now(),
 		isDir:   true,
 	}
@@ -71,6 +79,7 @@ func (m *Manager) RootInfo() *FileInfo {
 		m.rootInfo = &FileInfo{
 			name:    "",
 			size:    0,
+			kind:    EntryKindSystem,
 			modTime: utils.Now(),
 			isDir:   true,
 		}
@@ -79,7 +88,7 @@ func (m *Manager) RootInfo() *FileInfo {
 }
 
 // GetEntries returns the subdirectories under a given mount name
-// it would show __all__, __bad__, torrents, nzbs, per-provider folders and any custom folders
+// It shows built-in, per-provider, and virtual folders.
 func (m *Manager) GetEntries() []FileInfo {
 	now := utils.Now()
 	var subDirs []FileInfo
@@ -90,6 +99,7 @@ func (m *Manager) GetEntries() []FileInfo {
 			isDir:   true,
 			modTime: now,
 			size:    0,
+			kind:    EntryKindSystem,
 		})
 	}
 
@@ -100,18 +110,20 @@ func (m *Manager) GetEntries() []FileInfo {
 			isDir:   true,
 			modTime: now,
 			size:    0,
+			kind:    EntryKindProvider,
 		})
 		return true
 	})
 
-	// AddOrUpdate custom folders
-	if m.customFolders != nil {
-		for _, folderName := range m.customFolders.folders {
+	// Add virtual folders.
+	if virtualFolders := m.virtualFoldersSnapshot(); virtualFolders != nil {
+		for _, folderName := range virtualFolders.folders {
 			subDirs = append(subDirs, FileInfo{
 				name:    folderName,
 				isDir:   true,
 				modTime: now,
 				size:    0,
+				kind:    EntryKindVirtual,
 			})
 		}
 	}
@@ -125,6 +137,7 @@ func (m *Manager) GetEntries() []FileInfo {
 		modTime: now,
 		size:    int64(len(versionContent)),
 		content: versionContent,
+		kind:    EntryKindSystem,
 	})
 	return subDirs
 }
@@ -168,6 +181,7 @@ func (m *Manager) GetEntryInfo(name string) (*FileInfo, error) {
 		modTime:   modTime,
 		isDir:     true,
 		canDelete: true,
+		kind:      EntryKindEntry,
 	}, nil
 }
 
@@ -188,12 +202,13 @@ func (m *Manager) GetTorrentFile(torrentName, fileName string) (*FileInfo, error
 		isDir:     false,
 		parent:    entry.Name,
 		canDelete: true,
+		kind:      EntryKindFile,
 		byteRange: file.ByteRange,
 	}, nil
 }
 
 // getEntryChildren
-// Groups are __all__, __bad__, custom folders
+// Groups are built-in, provider, or virtual folders.
 // Uses metadata-only iteration (no disk reads, no protobuf deserialization)
 func (m *Manager) getEntryChildren(group string) (*FileInfo, []FileInfo) {
 	currentDir := &FileInfo{
@@ -204,6 +219,7 @@ func (m *Manager) getEntryChildren(group string) (*FileInfo, []FileInfo) {
 	}
 	switch group {
 	case EntryAllFolder:
+		currentDir.kind = EntryKindSystem
 		// This returns all entries - using metadata-only iteration (no disk reads)
 		var infos []FileInfo
 		seen := make(map[string]struct{})
@@ -220,6 +236,7 @@ func (m *Manager) getEntryChildren(group string) (*FileInfo, []FileInfo) {
 				isDir:        true,
 				activeDebrid: meta.Provider,
 				canDelete:    true,
+				kind:         EntryKindEntry,
 			})
 			return nil
 		})
@@ -228,6 +245,7 @@ func (m *Manager) getEntryChildren(group string) (*FileInfo, []FileInfo) {
 		}
 		return currentDir, infos
 	case EntryTorrentFolder:
+		currentDir.kind = EntryKindSystem
 		// This returns all torrents - using metadata-only iteration
 		var infos []FileInfo
 		seen := make(map[string]struct{})
@@ -245,6 +263,7 @@ func (m *Manager) getEntryChildren(group string) (*FileInfo, []FileInfo) {
 					isDir:        true,
 					activeDebrid: meta.Provider,
 					canDelete:    true,
+					kind:         EntryKindEntry,
 				})
 			}
 			return nil
@@ -254,6 +273,7 @@ func (m *Manager) getEntryChildren(group string) (*FileInfo, []FileInfo) {
 		}
 		return currentDir, infos
 	case EntryNZBFolder:
+		currentDir.kind = EntryKindSystem
 		// This returns all nzbs - using metadata-only iteration
 		var infos []FileInfo
 		seen := make(map[string]struct{})
@@ -271,6 +291,7 @@ func (m *Manager) getEntryChildren(group string) (*FileInfo, []FileInfo) {
 					isDir:        true,
 					activeDebrid: meta.Provider,
 					canDelete:    true,
+					kind:         EntryKindEntry,
 				})
 			}
 			return nil
@@ -280,6 +301,7 @@ func (m *Manager) getEntryChildren(group string) (*FileInfo, []FileInfo) {
 		}
 		return currentDir, infos
 	case EntryBadFolder:
+		currentDir.kind = EntryKindSystem
 		// Filter for bad entries - using metadata-only iteration
 		var infos []FileInfo
 		seen := make(map[string]struct{})
@@ -297,6 +319,7 @@ func (m *Manager) getEntryChildren(group string) (*FileInfo, []FileInfo) {
 					isDir:        true,
 					activeDebrid: meta.Provider,
 					canDelete:    true,
+					kind:         EntryKindEntry,
 				})
 			}
 			return nil
@@ -306,6 +329,7 @@ func (m *Manager) getEntryChildren(group string) (*FileInfo, []FileInfo) {
 		}
 		return currentDir, infos
 	case "version.txt":
+		currentDir.kind = EntryKindFile
 		currentDir.content = []byte(version.GetInfo().String() + "\n")
 		currentDir.size = int64(len(currentDir.content))
 		currentDir.isDir = false
@@ -313,6 +337,7 @@ func (m *Manager) getEntryChildren(group string) (*FileInfo, []FileInfo) {
 	default:
 		// Per-provider folder if the name matches a configured client
 		if _, ok := m.clients.Load(group); ok {
+			currentDir.kind = EntryKindProvider
 			var infos []FileInfo
 			seen := make(map[string]struct{})
 			err := m.storage.ForEachMeta(func(meta *storage.EntryMetaInfo) error {
@@ -329,6 +354,7 @@ func (m *Manager) getEntryChildren(group string) (*FileInfo, []FileInfo) {
 						isDir:        true,
 						activeDebrid: meta.Provider,
 						canDelete:    true,
+						kind:         EntryKindEntry,
 					})
 				}
 				return nil
@@ -338,8 +364,12 @@ func (m *Manager) getEntryChildren(group string) (*FileInfo, []FileInfo) {
 			}
 			return currentDir, infos
 		}
-		// Custom folder
-		return currentDir, m.getCustomFolderChildren(group)
+		virtualFolders := m.virtualFoldersSnapshot()
+		if !virtualFolders.has(group) {
+			return nil, nil
+		}
+		currentDir.kind = EntryKindVirtual
+		return currentDir, m.getVirtualFolderChildren(virtualFolders, group)
 	}
 }
 
@@ -362,6 +392,7 @@ func (m *Manager) getTorrentChildren(name string) (*FileInfo, []FileInfo) {
 			parent:    entry.Name,
 			canDelete: true,
 			byteRange: file.ByteRange,
+			kind:      EntryKindFile,
 		})
 		size += file.Size
 	}
@@ -374,6 +405,7 @@ func (m *Manager) getTorrentChildren(name string) (*FileInfo, []FileInfo) {
 		size:    size,
 		modTime: infos[0].modTime,
 		isDir:   true,
+		kind:    EntryKindEntry,
 	}
 	return currentDir, infos
 }
@@ -497,34 +529,12 @@ func (m *Manager) RemoveTorrentFile(torrentName, filename string) error {
 	return nil
 }
 
-func (m *Manager) getCustomFolderChildren(folder string) []FileInfo {
-	filters := m.customFolders.filters[folder]
-	if len(filters) == 0 {
-		return nil
-	}
-
+func (m *Manager) getVirtualFolderChildren(virtualFolders *VirtualFolders, folder string) []FileInfo {
 	// Use metadata-only iteration (no disk reads)
 	var infos []FileInfo
 	seen := make(map[string]struct{})
 	err := m.storage.ForEachMeta(func(meta *storage.EntryMetaInfo) error {
-		if meta.Bad {
-			return nil
-		}
-		getFileNames := func() []string {
-			item, err := m.storage.GetEntryItem(meta.Name)
-			if err != nil || item == nil {
-				return nil
-			}
-			names := make([]string, 0, len(item.Files))
-			for fn := range item.Files {
-				names = append(names, strings.ToLower(fn))
-			}
-			return names
-		}
-		if m.customFolders.matchesFilter(folder, &FileInfo{
-			name: meta.Name,
-			size: meta.Size,
-		}, meta.AddedOn, getFileNames) {
+		if virtualFolders.matchesFilter(folder, meta, m.virtualFolderFileNames(meta)) {
 			if _, ok := seen[meta.Name]; ok {
 				return nil
 			}
@@ -537,6 +547,7 @@ func (m *Manager) getCustomFolderChildren(folder string) []FileInfo {
 				isDir:        true,
 				activeDebrid: meta.Provider,
 				canDelete:    true,
+				kind:         EntryKindEntry,
 			})
 		}
 		return nil

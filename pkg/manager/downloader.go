@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,17 +15,16 @@ import (
 	grab "github.com/cavaliergopher/grab/v3"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"github.com/sirrobot01/decypharr/pkg/manager/link"
 	"github.com/sirrobot01/decypharr/pkg/notifications"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sourcegraph/conc/pool"
 )
 
 type Downloader struct {
-	manager   *Manager
-	strmURL   string
-	mountPath string
-	dest      string
-	logger    zerolog.Logger
+	manager *Manager
+	logger  zerolog.Logger
 }
 
 const (
@@ -52,24 +50,11 @@ type downloadLogMeta struct {
 	parts           int
 }
 
-// NewDownloadManager creates a new strm manager
+// NewDownloadManager creates a new download manager
 func NewDownloadManager(manager *Manager) *Downloader {
-	cfg := config.Get()
-	strmURL := cfg.AppURL
-	if strmURL == "" {
-		bindAddress := cfg.BindAddress
-		if bindAddress == "" {
-			bindAddress = "localhost"
-		}
-
-		strmURL = fmt.Sprintf("http://%s:%s", bindAddress, cfg.Port)
-	}
 	return &Downloader{
-		manager:   manager,
-		strmURL:   strmURL,
-		mountPath: cfg.Mount.MountPath,
-		logger:    manager.logger.With().Str("component", "downloader").Logger(),
-		dest:      cfg.DownloadFolder,
+		manager: manager,
+		logger:  manager.logger.With().Str("component", "downloader").Logger(),
 	}
 }
 
@@ -114,8 +99,6 @@ func (d *Downloader) process(entry *storage.Entry, mountPath string) error {
 		return d.processDownload(entry)
 	case config.DownloadActionSymlink:
 		return d.processSymlink(entry, mountPath)
-	case config.DownloadActionStrm:
-		return d.processStrm(entry)
 	case config.DownloadActionNone:
 		d.completeEntry(entry)
 		// Remove entry from queue
@@ -128,6 +111,7 @@ func (d *Downloader) process(entry *storage.Entry, mountPath string) error {
 
 func (d *Downloader) completeEntry(entry *storage.Entry) {
 	d.markAsCompleted(entry)
+	d.manager.strm.SyncEntryAsync(entry)
 	d.notifyCompleted(entry)
 	d.triggerArrRefresh(entry)
 }
@@ -254,6 +238,13 @@ func (d *Downloader) createSymlinksWhenMountFilesAppear(entry *storage.Entry, fi
 			entryName := item.Name()
 			fullPath := filepath.Join(dirPath, entryName)
 
+			if item.IsDir() {
+				if err := checkDirectory(fullPath); err != nil {
+					return err
+				}
+				continue
+			}
+
 			if file, exists := remainingFiles[entryName]; exists {
 				fileSymlinkPath := filepath.Join(symlinkDir, file.Name)
 				if err := os.Symlink(fullPath, fileSymlinkPath); err != nil && !os.IsExist(err) {
@@ -263,12 +254,6 @@ func (d *Downloader) createSymlinksWhenMountFilesAppear(entry *storage.Entry, fi
 				delete(remainingFiles, entryName)
 				d.logger.Info().Msgf("File is ready: %s/%s", entry.GetFolder(), file.Name)
 				continue
-			}
-
-			if item.IsDir() {
-				if err := checkDirectory(fullPath); err != nil {
-					return err
-				}
 			}
 		}
 		return nil
@@ -509,10 +494,13 @@ func (d *Downloader) processTorrentDownload(entry *storage.Entry) error {
 	}
 	var tasks []downloadTask
 	for _, file := range files {
-		downloadLink, err := d.manager.linkService.GetLink(context.Background(), entry, file.Name)
+		downloadLink, err := d.resolveLinkWithRetry(d.operationContext(), entry, file.Name)
 		if err != nil {
-			d.logger.Error().Msgf("Failed to get download link for %s: %v", file.Name, err)
-			continue
+			// Do not silently skip a file: proceeding would download a subset
+			// and then mark the entry complete while it is missing files
+			// (#315). Fail the whole batch so it is retried, not falsely
+			// completed.
+			return fmt.Errorf("resolve download link for %s: %w", file.Name, err)
 		}
 		tasks = append(tasks, downloadTask{file: file, link: downloadLink.DownloadLink})
 	}
@@ -545,6 +533,40 @@ func (d *Downloader) processTorrentDownload(entry *storage.Entry) error {
 	d.completeEntry(entry)
 	d.logger.Info().Msgf("Downloaded all files for %s", entry.Name)
 	return nil
+}
+
+// resolveLinkWithRetry fetches a download link, retrying transient failures
+// (429/5xx/network) with backoff and giving up immediately on permanent ones.
+// It exists so a batch download never silently drops a file whose link fetch
+// hit a passing blip (#315/#258); a returned error fails the whole batch.
+func (d *Downloader) resolveLinkWithRetry(ctx context.Context, entry *storage.Entry, filename string) (types.DownloadLink, error) {
+	const maxAttempts = 4
+	delay := config.DefaultRetryDelay
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		dl, err := d.manager.linkService.GetLink(ctx, entry, filename)
+		if err == nil {
+			return dl, nil
+		}
+		lastErr = err
+		// Permanent errors won't improve with retries — surface immediately.
+		if linkErr := link.GetLinkError(err); linkErr != nil && !linkErr.IsRetryable() {
+			return types.DownloadLink{}, err
+		}
+		if attempt < maxAttempts {
+			d.logger.Warn().Err(err).Str("file", filename).Int("attempt", attempt).
+				Msg("link fetch failed, retrying")
+			select {
+			case <-ctx.Done():
+				return types.DownloadLink{}, ctx.Err()
+			case <-time.After(delay):
+			}
+			if delay *= 2; delay > config.DefaultRetryDelayMax {
+				delay = config.DefaultRetryDelayMax
+			}
+		}
+	}
+	return types.DownloadLink{}, fmt.Errorf("link unresolved after %d attempts: %w", maxAttempts, lastErr)
 }
 
 // processUsenetDownload downloads NZB files via parallel NNTP segment fetching
@@ -623,41 +645,6 @@ func (d *Downloader) processUsenetDownload(entry *storage.Entry) error {
 	return nil
 }
 
-// processStrm creates symlinks for torrent files
-func (d *Downloader) processStrm(torrent *storage.Entry) error {
-	files := torrent.GetActiveFiles()
-	d.logger.Info().Msgf("Creating .strm for %d files ...", len(files))
-
-	torrentSymlinkPath := torrent.DownloadPath()
-
-	// Create symlink directory
-	err := os.MkdirAll(torrentSymlinkPath, os.ModePerm)
-	if err != nil {
-		return fmt.Errorf("failed to create directory: %s: %v", torrentSymlinkPath, err)
-	}
-
-	for _, file := range files {
-		strmFilePath := filepath.Join(torrentSymlinkPath, file.Name+".strm")
-		streamURL, err := url.JoinPath(
-			d.strmURL,
-			"webdav",
-			"stream",
-			EntryAllFolder,
-			url.PathEscape(torrent.GetFolder()),
-			url.PathEscape(file.Name),
-		)
-		if err != nil {
-			continue
-		}
-		if err := os.WriteFile(strmFilePath, []byte(streamURL), 0644); err != nil {
-			return fmt.Errorf("failed to create .strm file: %s: %v", strmFilePath, err)
-		}
-	}
-	d.completeEntry(torrent)
-	d.logger.Info().Str("destination", torrentSymlinkPath).Msgf("Created .strm files for %s", torrent.Name)
-	return nil
-}
-
 func (d *Downloader) detectMultiSeason(torrent *storage.Entry) (bool, []SeasonInfo) {
 	torrentName := torrent.Name
 	files := torrent.GetActiveFiles()
@@ -671,8 +658,6 @@ func (d *Downloader) detectMultiSeason(torrent *storage.Entry) (bool, []SeasonIn
 	if !isMultiSeason {
 		return false, nil
 	}
-
-	d.logger.Info().Msgf("Multi-season torrent detected with seasons: %v", getSortedSeasons(seasonsFound))
 
 	// Group files by season
 	seasonGroups := groupFilesBySeason(files, seasonsFound)
@@ -694,6 +679,13 @@ func (d *Downloader) detectMultiSeason(torrent *storage.Entry) (bool, []SeasonIn
 			Name:         seasonName,
 		})
 	}
+
+	// Only convert to multi-season if multiple season entries were actually created
+	if len(seasons) <= 1 {
+		return false, nil
+	}
+
+	d.logger.Info().Msgf("Multi-season torrent detected with seasons: %v", getSortedSeasons(seasonsFound))
 
 	return true, seasons
 }

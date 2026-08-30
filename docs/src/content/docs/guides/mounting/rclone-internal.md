@@ -1,9 +1,11 @@
 ---
-title: Rclone Mounting
-description: Using embedded Rclone for mounting.
+title: Rclone (Internal)
+description: Use the embedded Rclone instance to mount.
 ---
 
-Decypharr includes an embedded Rclone instance with full VFS support.
+Decypharr includes an embedded Rclone instance with full VFS support. Decypharr starts and stops this instance for you.
+
+To use an Rclone process that you start yourself, see [Rclone (External)](../rclone-external/).
 
 ## Configuration
 
@@ -63,29 +65,6 @@ Decypharr includes an embedded Rclone instance with full VFS support.
 ```
 
 Limits to 10 MB/s.
-
-## External Rclone
-
-Connect to an existing Rclone instance:
-
-```json
-{
-  "mount": {
-    "type": "external_rclone",
-    "external_rclone": {
-      "rc_url": "http://localhost:5572",
-      "rc_username": "user",
-      "rc_password": "pass"
-    }
-  }
-}
-```
-
-Start Rclone with RC:
-
-```bash
-rclone rcd --rc-addr=:5572 --rc-user=user --rc-pass=pass
-```
 
 ## Troubleshooting
 

@@ -94,6 +94,21 @@ type Stats struct {
 	BytesReclaimed int64
 }
 
+// WritePolicy selects how WriteAt uses the RAM block cache.
+type WritePolicy int
+
+const (
+	// WriteAuto (default): cache writes in RAM blocks while there is budget,
+	// spilling to write-through under pressure. Best when the workload
+	// re-reads or rewrites recently-written bytes through the buffer.
+	WriteAuto WritePolicy = iota
+	// WriteThrough: pwrite straight to disk (outside the lock) unless the
+	// block is already RAM-resident. Suits write-once streaming: the kernel
+	// page cache serves the immediate re-read and completed blocks go
+	// stateFastDisk, so no block ever needs the exclusive-lock cached path.
+	WriteThrough
+)
+
 // Config configures a new Buffer.
 type Config struct {
 	// MemorySize is the maximum bytes held in RAM across all blocks. When
@@ -120,6 +135,10 @@ type Config struct {
 	// as empty and ReadAt would return ErrNotPresent for already-cached
 	// data. Ranges may overlap or be out of order; the tracker normalizes.
 	InitialRanges []Range
+
+	// WritePolicy selects how WriteAt uses the RAM block cache. Zero value is
+	// WriteAuto (cache while there is budget).
+	WritePolicy WritePolicy
 
 	// OnEvict, if non-nil, is invoked after the owning Pool punches a hole
 	// behind the read head to reclaim disk (DiskLimit pressure). It reports
@@ -354,8 +373,13 @@ func (b *Buffer) writeRegion(blockOff int64, lo, hi int, src []byte) error {
 	_, resident := b.blocks[blockOff]
 	// Cache a new block only if there's room under both the per-stream ceiling
 	// and the pool budget; otherwise take the write-through path (to disk, no
-	// RAM growth).
-	canCache := b.bytesInRAM+blockSize <= b.maxBytes && !b.pool.wouldExceedMemory()
+	// RAM growth). WriteThrough never admits new blocks, but a block that is
+	// already resident stays on the cached path — a resident block is
+	// authoritative and must see every write (see the mirror edge below).
+	canCache := false
+	if b.cfg.WritePolicy == WriteAuto {
+		canCache = b.bytesInRAM+blockSize <= b.maxBytes && !b.pool.wouldExceedMemory()
+	}
 	b.mu.RUnlock()
 
 	// Resident block, or room to cache one → cached path. Needs the
@@ -859,7 +883,7 @@ func (b *Buffer) Close() error {
 // cache is pure write-order LRU. Pass 0 to clear (no disk punching). Cheap,
 // atomic, no lock.
 //
-// Driven from the streaming cursor: usenet's SegmentCache.MarkConsumed and
+// Driven from the streaming cursor: usenet's SegmentCache.SetConsumedFloor and
 // DFS's ReadAtContext both call this as playback advances, so eviction never
 // fights the data the reader is about to ask for.
 //
