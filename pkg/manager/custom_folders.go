@@ -2,195 +2,353 @@ package manager
 
 import (
 	"fmt"
-	"os"
 	"regexp"
-	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
-const (
-	filterByInclude string = "include"
-	filterByExclude string = "exclude"
-
-	filterByStartsWith    string = "starts_with"
-	filterByEndsWith      string = "ends_with"
-	filterByNotStartsWith string = "not_starts_with"
-	filterByNotEndsWith   string = "not_ends_with"
-
-	filterByRegex    string = "regex"
-	filterByNotRegex string = "not_regex"
-
-	filterByExactMatch    string = "exact_match"
-	filterByNotExactMatch string = "not_exact_match"
-
-	filterBySizeGT string = "size_gt"
-	filterBySizeLT string = "size_lt"
-
-	filterBLastAdded string = "last_added"
-
-	filterByFileCountGT   string = "file_count_gt"
-	filterByFileCountLT   string = "file_count_lt"
-	filterByFilesRegex    string = "files_regex"
-	filterByNotFilesRegex string = "not_files_regex"
-)
-
-type CustomFolders struct {
-	filters map[string][]directoryFilter
+type VirtualFolders struct {
+	byName  map[string]compiledVirtualFolder
 	folders []string
 }
 
+type compiledVirtualFolder struct {
+	definition config.VirtualFolder
+	conditions []directoryFilter
+}
+
 type directoryFilter struct {
-	filterType     string
-	value          string
-	regex          *regexp.Regexp // only for regex/not_regex/files_regex/not_files_regex
-	sizeThreshold  int64          // only for size_gt/size_lt
-	ageThreshold   time.Duration  // only for last_added
-	countThreshold int            // only for file_count_gt/file_count_lt
+	definition     config.VirtualFolderCondition
+	regex          *regexp.Regexp
+	sizeThreshold  int64
+	ageThreshold   time.Duration
+	countThreshold int
 }
 
-func (m *Manager) initCustomFolders() {
-	var customFolders []string
-	dirFilters := map[string][]directoryFilter{}
-	for name, value := range m.config.CustomFolders {
-		for filterType, v := range value.Filters {
-			df := directoryFilter{filterType: filterType, value: v}
-			switch filterType {
-			case filterByRegex, filterByNotRegex, filterByFilesRegex, filterByNotFilesRegex:
-				df.regex = regexp.MustCompile(v)
-			case filterBySizeGT, filterBySizeLT:
-				df.sizeThreshold, _ = config.ParseSize(v)
-			case filterBLastAdded:
-				df.ageThreshold, _ = utils.ParseDuration(v)
-			case filterByFileCountGT, filterByFileCountLT:
-				_, _ = fmt.Sscanf(v, "%d", &df.countThreshold)
-			}
-			dirFilters[name] = append(dirFilters[name], df)
+type VirtualFolderPreviewItem struct {
+	Name     string `json:"name"`
+	Provider string `json:"provider,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
+	Size     int64  `json:"size"`
+}
+
+func compileVirtualFolders(definitions []config.VirtualFolder) (*VirtualFolders, error) {
+	compiled := &VirtualFolders{
+		byName:  make(map[string]compiledVirtualFolder, len(definitions)),
+		folders: make([]string, 0, len(definitions)),
+	}
+
+	for _, definition := range definitions {
+		config.NormalizeVirtualFolder(&definition)
+		if err := config.ValidateVirtualFolder(definition, nil); err != nil {
+			return nil, fmt.Errorf("virtual folder %q: %w", definition.Name, err)
 		}
-		customFolders = append(customFolders, name)
+
+		folder := compiledVirtualFolder{definition: definition}
+		for _, condition := range definition.Conditions {
+			filter := directoryFilter{definition: condition}
+			var err error
+			switch condition.Field {
+			case config.VirtualFolderFieldEntryName, config.VirtualFolderFieldFileName, config.VirtualFolderFieldCategory:
+				if condition.Operator == config.VirtualFolderOperatorMatchesRegex || condition.Operator == config.VirtualFolderOperatorNotMatchesRegex {
+					pattern := condition.Value
+					if !condition.CaseSensitive {
+						pattern = "(?i:" + pattern + ")"
+					}
+					filter.regex, err = regexp.Compile(pattern)
+				}
+			case config.VirtualFolderFieldSize:
+				filter.sizeThreshold, err = config.ParseSize(condition.Value)
+			case config.VirtualFolderFieldAdded:
+				filter.ageThreshold, err = utils.ParseDuration(condition.Value)
+			case config.VirtualFolderFieldFileCount:
+				filter.countThreshold, err = strconv.Atoi(condition.Value)
+			}
+			if err != nil {
+				return nil, fmt.Errorf("virtual folder %q condition %s/%s: %w", definition.Name, condition.Field, condition.Operator, err)
+			}
+			folder.conditions = append(folder.conditions, filter)
+		}
+
+		compiled.byName[definition.Name] = folder
+		compiled.folders = append(compiled.folders, definition.Name)
 	}
-	m.customFolders = &CustomFolders{
-		filters: dirFilters,
-		folders: customFolders,
-	}
+	return compiled, nil
 }
 
-func (m *Manager) GetCustomFolders() []string {
-	return m.customFolders.folders
+func (m *Manager) initVirtualFolders() {
+	compiled := &VirtualFolders{
+		byName:  make(map[string]compiledVirtualFolder, len(m.config.VirtualFolders)),
+		folders: make([]string, 0, len(m.config.VirtualFolders)),
+	}
+	for _, definition := range m.config.VirtualFolders {
+		one, err := compileVirtualFolders([]config.VirtualFolder{definition})
+		if err != nil {
+			m.logger.Error().Err(err).Msg("Ignoring invalid virtual folder")
+			continue
+		}
+		for name, folder := range one.byName {
+			compiled.byName[name] = folder
+			compiled.folders = append(compiled.folders, name)
+		}
+	}
+	m.virtualFoldersMu.Lock()
+	m.virtualFolders = compiled
+	m.virtualFoldersMu.Unlock()
 }
 
-// matchesFilter checks if a torrent matches all filters for a folder.
-// getFileNames is a lazy loader called only when files_regex/not_files_regex/file_count filters are needed.
-func (cf *CustomFolders) matchesFilter(folderName string, fileInfo os.FileInfo, addedTime time.Time, getFileNames func() []string) bool {
-	filters, ok := cf.filters[folderName]
+// ApplyVirtualFolders atomically replaces the compiled definitions, clears all
+// directory caches, and invalidates the mount root so additions/removals become
+// visible without a service restart.
+func (m *Manager) ApplyVirtualFolders(definitions []config.VirtualFolder) error {
+	compiled, err := compileVirtualFolders(definitions)
+	if err != nil {
+		return err
+	}
+
+	m.virtualFoldersMu.Lock()
+	m.virtualFolders = compiled
+	m.virtualFoldersMu.Unlock()
+
+	if m.entry != nil {
+		m.entry.Refresh()
+	}
+	if m.mountManager != nil {
+		go func() {
+			if err := m.mountManager.Refresh([]string{""}); err != nil {
+				m.logger.Warn().Err(err).Msg("Failed to refresh mount after virtual-folder update")
+			}
+		}()
+	}
+	return nil
+}
+
+func (m *Manager) virtualFoldersSnapshot() *VirtualFolders {
+	m.virtualFoldersMu.RLock()
+	defer m.virtualFoldersMu.RUnlock()
+	return m.virtualFolders
+}
+
+func (m *Manager) GetVirtualFolders() []string {
+	virtualFolders := m.virtualFoldersSnapshot()
+	if virtualFolders == nil {
+		return nil
+	}
+	return append([]string(nil), virtualFolders.folders...)
+}
+
+func (cf *VirtualFolders) has(folderName string) bool {
+	if cf == nil {
+		return false
+	}
+	_, ok := cf.byName[folderName]
+	return ok
+}
+
+func (cf *VirtualFolders) isTimeSensitive(folderName string) bool {
+	if cf == nil {
+		return false
+	}
+	folder, ok := cf.byName[folderName]
 	if !ok {
 		return false
 	}
-
-	// Separate regex and files_regex filters — when both are present, treat as OR
-	var regexFilters []directoryFilter
-	var filesRegexFilters []directoryFilter
-	var otherFilters []directoryFilter
-
-	for _, f := range filters {
-		switch f.filterType {
-		case filterByRegex:
-			regexFilters = append(regexFilters, f)
-		case filterByFilesRegex:
-			filesRegexFilters = append(filesRegexFilters, f)
-		default:
-			otherFilters = append(otherFilters, f)
+	for _, condition := range folder.conditions {
+		if condition.definition.Field == config.VirtualFolderFieldAdded {
+			return true
 		}
 	}
+	return false
+}
 
-	// If both regex and files_regex present: OR logic (folder name OR file contents match)
-	if len(regexFilters) > 0 && len(filesRegexFilters) > 0 {
-		name := fileInfo.Name()
-		nameMatched := false
-		for _, f := range regexFilters {
-			if f.regex.MatchString(name) {
-				nameMatched = true
-				break
-			}
-		}
-		if !nameMatched {
-			fileNames := getFileNames()
-			filesMatched := false
-			for _, f := range filesRegexFilters {
-				if slices.ContainsFunc(fileNames, f.regex.MatchString) {
-					filesMatched = true
-				}
-				if filesMatched {
-					break
-				}
-			}
-			if !filesMatched {
-				return false
-			}
-		}
-	} else {
-		// Single type present — AND logic
-		for _, filter := range append(regexFilters, filesRegexFilters...) {
-			if !cf.checkSingleFilter(filter, fileInfo, addedTime, getFileNames) {
-				return false
-			}
-		}
+func (cf *VirtualFolders) matchesFilter(folderName string, meta *storage.EntryMetaInfo, getFileNames func() []string) bool {
+	folder, ok := cf.byName[folderName]
+	if !ok || meta == nil {
+		return false
+	}
+	if meta.Bad && !folder.definition.IncludeBad {
+		return false
+	}
+	if len(folder.conditions) == 0 {
+		return true
 	}
 
-	// All other filters AND match
-	for _, filter := range otherFilters {
-		if !cf.checkSingleFilter(filter, fileInfo, addedTime, getFileNames) {
+	matchAny := folder.definition.Match == config.VirtualFolderMatchAny
+	for _, filter := range folder.conditions {
+		matched := checkSingleFilter(filter, meta, getFileNames)
+		if matchAny && matched {
+			return true
+		}
+		if !matchAny && !matched {
 			return false
 		}
 	}
-
-	return true
+	return !matchAny
 }
 
-// checkSingleFilter checks if a single filter matches
-func (cf *CustomFolders) checkSingleFilter(filter directoryFilter, fileInfo os.FileInfo, addedTime time.Time, getFileNames func() []string) bool {
-	name := fileInfo.Name()
-	size := fileInfo.Size()
-
-	switch filter.filterType {
-	case filterByInclude:
-		return strings.Contains(name, filter.value)
-	case filterByExclude:
-		return !strings.Contains(name, filter.value)
-	case filterByStartsWith:
-		return regexp.MustCompile("^" + regexp.QuoteMeta(filter.value)).MatchString(name)
-	case filterByEndsWith:
-		return regexp.MustCompile(regexp.QuoteMeta(filter.value) + "$").MatchString(name)
-	case filterByNotStartsWith:
-		return !regexp.MustCompile("^" + regexp.QuoteMeta(filter.value)).MatchString(name)
-	case filterByNotEndsWith:
-		return !regexp.MustCompile(regexp.QuoteMeta(filter.value) + "$").MatchString(name)
-	case filterByRegex:
-		return filter.regex.MatchString(name)
-	case filterByNotRegex:
-		return !filter.regex.MatchString(name)
-	case filterByExactMatch:
-		return name == filter.value
-	case filterByNotExactMatch:
-		return name != filter.value
-	case filterBySizeGT:
-		return size > filter.sizeThreshold
-	case filterBySizeLT:
-		return size < filter.sizeThreshold
-	case filterBLastAdded:
-		return time.Since(addedTime) <= filter.ageThreshold
-	case filterByFileCountGT:
-		return len(getFileNames()) > filter.countThreshold
-	case filterByFileCountLT:
+func checkSingleFilter(filter directoryFilter, meta *storage.EntryMetaInfo, getFileNames func() []string) bool {
+	condition := filter.definition
+	switch condition.Field {
+	case config.VirtualFolderFieldEntryName:
+		return matchText(meta.Name, condition, filter.regex)
+	case config.VirtualFolderFieldFileName:
+		fileNames := getFileNames()
+		negative := isNegativeOperator(condition.Operator)
+		for _, name := range fileNames {
+			if matchText(name, positiveCondition(condition), filter.regex) {
+				return !negative
+			}
+		}
+		return negative
+	case config.VirtualFolderFieldSize:
+		if condition.Operator == config.VirtualFolderOperatorGreaterThan {
+			return meta.Size > filter.sizeThreshold
+		}
+		return meta.Size < filter.sizeThreshold
+	case config.VirtualFolderFieldAdded:
+		return time.Since(meta.AddedOn) <= filter.ageThreshold
+	case config.VirtualFolderFieldFileCount:
+		if condition.Operator == config.VirtualFolderOperatorGreaterThan {
+			return len(getFileNames()) > filter.countThreshold
+		}
 		return len(getFileNames()) < filter.countThreshold
-	case filterByFilesRegex:
-		return slices.ContainsFunc(getFileNames(), filter.regex.MatchString)
-	case filterByNotFilesRegex:
-		return !slices.ContainsFunc(getFileNames(), filter.regex.MatchString)
+	case config.VirtualFolderFieldProtocol:
+		return matchEquality(meta.Protocol, condition.Value, condition.Operator, false)
+	case config.VirtualFolderFieldProvider:
+		return matchEquality(meta.Provider, condition.Value, condition.Operator, condition.CaseSensitive)
+	case config.VirtualFolderFieldCategory:
+		return matchText(meta.Category, condition, filter.regex)
 	default:
 		return false
 	}
+}
+
+func matchText(candidate string, condition config.VirtualFolderCondition, compiledRegex *regexp.Regexp) bool {
+	wanted := condition.Value
+	if !condition.CaseSensitive && condition.Operator != config.VirtualFolderOperatorMatchesRegex && condition.Operator != config.VirtualFolderOperatorNotMatchesRegex {
+		candidate = strings.ToLower(candidate)
+		wanted = strings.ToLower(wanted)
+	}
+
+	switch condition.Operator {
+	case config.VirtualFolderOperatorContains:
+		return strings.Contains(candidate, wanted)
+	case config.VirtualFolderOperatorNotContains:
+		return !strings.Contains(candidate, wanted)
+	case config.VirtualFolderOperatorStartsWith:
+		return strings.HasPrefix(candidate, wanted)
+	case config.VirtualFolderOperatorNotStartsWith:
+		return !strings.HasPrefix(candidate, wanted)
+	case config.VirtualFolderOperatorEndsWith:
+		return strings.HasSuffix(candidate, wanted)
+	case config.VirtualFolderOperatorNotEndsWith:
+		return !strings.HasSuffix(candidate, wanted)
+	case config.VirtualFolderOperatorEquals:
+		return candidate == wanted
+	case config.VirtualFolderOperatorNotEquals:
+		return candidate != wanted
+	case config.VirtualFolderOperatorMatchesRegex:
+		return compiledRegex != nil && compiledRegex.MatchString(candidate)
+	case config.VirtualFolderOperatorNotMatchesRegex:
+		return compiledRegex == nil || !compiledRegex.MatchString(candidate)
+	default:
+		return false
+	}
+}
+
+func isNegativeOperator(operator string) bool {
+	switch operator {
+	case config.VirtualFolderOperatorNotContains,
+		config.VirtualFolderOperatorNotStartsWith,
+		config.VirtualFolderOperatorNotEndsWith,
+		config.VirtualFolderOperatorNotEquals,
+		config.VirtualFolderOperatorNotMatchesRegex:
+		return true
+	default:
+		return false
+	}
+}
+
+func positiveCondition(condition config.VirtualFolderCondition) config.VirtualFolderCondition {
+	switch condition.Operator {
+	case config.VirtualFolderOperatorNotContains:
+		condition.Operator = config.VirtualFolderOperatorContains
+	case config.VirtualFolderOperatorNotStartsWith:
+		condition.Operator = config.VirtualFolderOperatorStartsWith
+	case config.VirtualFolderOperatorNotEndsWith:
+		condition.Operator = config.VirtualFolderOperatorEndsWith
+	case config.VirtualFolderOperatorNotEquals:
+		condition.Operator = config.VirtualFolderOperatorEquals
+	case config.VirtualFolderOperatorNotMatchesRegex:
+		condition.Operator = config.VirtualFolderOperatorMatchesRegex
+	}
+	return condition
+}
+
+func matchEquality(candidate, wanted, operator string, caseSensitive bool) bool {
+	if !caseSensitive {
+		candidate = strings.ToLower(candidate)
+		wanted = strings.ToLower(wanted)
+	}
+	equal := candidate == wanted
+	if operator == config.VirtualFolderOperatorNotEquals {
+		return !equal
+	}
+	return equal
+}
+
+func (m *Manager) virtualFolderFileNames(meta *storage.EntryMetaInfo) func() []string {
+	var loaded bool
+	var names []string
+	return func() []string {
+		if loaded {
+			return names
+		}
+		loaded = true
+		item, err := m.storage.Get(meta.InfoHash)
+		if err != nil || item == nil {
+			return nil
+		}
+		names = make([]string, 0, len(item.Files))
+		for name := range item.Files {
+			names = append(names, name)
+		}
+		return names
+	}
+}
+
+func (m *Manager) PreviewVirtualFolder(definition config.VirtualFolder, limit int) (int, []VirtualFolderPreviewItem, error) {
+	compiled, err := compileVirtualFolders([]config.VirtualFolder{definition})
+	if err != nil {
+		return 0, nil, err
+	}
+	if limit < 1 || limit > 20 {
+		limit = 5
+	}
+
+	total := 0
+	samples := make([]VirtualFolderPreviewItem, 0, limit)
+	seen := make(map[string]struct{})
+	err = m.storage.ForEachMeta(func(meta *storage.EntryMetaInfo) error {
+		if !compiled.matchesFilter(definition.Name, meta, m.virtualFolderFileNames(meta)) {
+			return nil
+		}
+		if _, ok := seen[meta.Name]; ok {
+			return nil
+		}
+		seen[meta.Name] = struct{}{}
+		total++
+		if len(samples) < limit {
+			samples = append(samples, VirtualFolderPreviewItem{
+				Name: meta.Name, Provider: meta.Provider, Protocol: meta.Protocol, Size: meta.Size,
+			})
+		}
+		return nil
+	})
+	return total, samples, err
 }

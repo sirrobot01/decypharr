@@ -1,17 +1,21 @@
 package storage
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/sirrobot01/decypharr/pkg/storage/hybrid"
+	"github.com/sirrobot01/appendstore"
 	"google.golang.org/protobuf/proto"
 )
 
 // AddOrUpdate adds or updates an entry
 func (s *Storage) AddOrUpdate(entry *Entry) error {
 	entry.UpdatedAt = time.Now()
+
+	s.assignFileIDs(entry)
 
 	// Handle name index
 	s.updateEntryItem(entry)
@@ -23,18 +27,7 @@ func (s *Storage) AddOrUpdate(entry *Entry) error {
 		return fmt.Errorf("failed to marshal entry: %w", err)
 	}
 
-	meta := &hybrid.EntryMeta{
-		Category:  entry.Category,
-		Provider:  entry.ActiveProvider,
-		Status:    string(entry.Status),
-		Name:      entry.GetFolder(), // Store computed folder name for fast listings
-		TotalSize: entry.Size,
-		Protocol:  string(entry.Protocol),
-		Bad:       entry.Bad,
-		AddedOn:   entry.AddedOn.Unix(),
-	}
-
-	return s.entries.Put(entry.InfoHash, data, meta)
+	return s.entries.Put(entry.InfoHash, data, entryPutOptions(entry))
 }
 
 // BatchAddOrUpdate adds or updates multiple entries
@@ -45,6 +38,44 @@ func (s *Storage) BatchAddOrUpdate(entries []*Entry) error {
 		}
 	}
 	return nil
+}
+
+// assignFileIDs gives every file a stable ID before it is persisted. Callers
+// often rebuild entries from provider responses, so IDs already persisted for
+// this infohash are carried over by filename; only genuinely new files get a
+// fresh ID.
+func (s *Storage) assignFileIDs(entry *Entry) {
+	missing := false
+	for _, f := range entry.Files {
+		if f.ID == "" {
+			missing = true
+			break
+		}
+	}
+	if !missing {
+		return
+	}
+	if existing, err := s.Get(entry.InfoHash); err == nil {
+		for name, f := range entry.Files {
+			if f.ID == "" {
+				if old, ok := existing.Files[name]; ok {
+					f.ID = old.ID
+				}
+			}
+		}
+	}
+	for _, f := range entry.Files {
+		if f.ID == "" {
+			f.ID = NewFileID()
+		}
+	}
+}
+
+// NewFileID returns a random stable file identifier.
+func NewFileID() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // Exists checks if an entry exists
@@ -138,21 +169,23 @@ type EntryMetaInfo struct {
 	AddedOn  time.Time
 	Provider string
 	Protocol string
+	Category string
 	Bad      bool
 }
 
 // ForEachMeta iterates over entry metadata without reading full entries from disk.
 // This is O(n) in-memory only - no disk reads, no protobuf deserialization.
 func (s *Storage) ForEachMeta(fn func(*EntryMetaInfo) error) error {
-	return s.entries.ForEachMeta(func(key string, meta *hybrid.IndexEntry) error {
+	return s.entries.ForEachMetadata(func(key string, meta *appendstore.Metadata) error {
 		return fn(&EntryMetaInfo{
 			InfoHash: key,
-			Name:     meta.Name,
-			Size:     meta.TotalSize,
-			AddedOn:  time.Unix(meta.AddedOn, 0),
-			Provider: meta.Provider,
-			Protocol: meta.Protocol,
-			Bad:      meta.Bad,
+			Name:     meta.Attribute(attributeName),
+			Size:     metadataInt64(meta, attributeTotalSize),
+			AddedOn:  time.Unix(metadataInt64(meta, attributeAddedOn), 0),
+			Provider: meta.Attribute(attributeProvider),
+			Protocol: meta.Attribute(attributeProtocol),
+			Category: meta.Attribute(attributeCategory),
+			Bad:      metadataBool(meta, attributeBad),
 		})
 	})
 }
@@ -165,13 +198,13 @@ func (s *Storage) MigrateMetadata() (int, error) {
 	// First, collect all keys that need migration
 	// We check if Protocol is empty as indicator of unmigrated data
 	var keysToMigrate []string
-	_ = s.entries.ForEachMeta(func(key string, meta *hybrid.IndexEntry) error {
+	_ = s.entries.ForEachMetadata(func(key string, meta *appendstore.Metadata) error {
 		// Skip special keys
 		if strings.HasPrefix(key, "__") {
 			return nil
 		}
 		// Check if metadata needs migration (Protocol empty = old format)
-		if meta.Protocol == "" {
+		if meta.Attribute(attributeProtocol) == "" {
 			keysToMigrate = append(keysToMigrate, key)
 		}
 		return nil
@@ -311,18 +344,7 @@ func (s *Storage) UpdateQueue(entry *Entry) error {
 		return err
 	}
 
-	meta := &hybrid.EntryMeta{
-		Category:  entry.Category,
-		Provider:  entry.ActiveProvider,
-		Status:    string(entry.Status),
-		Name:      entry.GetFolder(), // Store computed folder name for fast listings
-		TotalSize: entry.Size,
-		Protocol:  string(entry.Protocol),
-		Bad:       entry.Bad,
-		AddedOn:   entry.AddedOn.Unix(),
-	}
-
-	return s.queue.Put(strings.ToLower(entry.InfoHash), data, meta)
+	return s.queue.Put(strings.ToLower(entry.InfoHash), data, entryPutOptions(entry))
 }
 
 // GetQueued retrieves a queued entry

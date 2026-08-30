@@ -32,6 +32,7 @@ type FileProto struct {
 	HasByteRange   bool                   `protobuf:"varint,7,opt,name=has_byte_range,json=hasByteRange,proto3" json:"has_byte_range,omitempty"`
 	Deleted        bool                   `protobuf:"varint,8,opt,name=deleted,proto3" json:"deleted,omitempty"`
 	InfoHash       string                 `protobuf:"bytes,9,opt,name=info_hash,json=infoHash,proto3" json:"info_hash,omitempty"`
+	Id             string                 `protobuf:"bytes,10,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -125,6 +126,13 @@ func (x *FileProto) GetDeleted() bool {
 func (x *FileProto) GetInfoHash() string {
 	if x != nil {
 		return x.InfoHash
+	}
+	return ""
+}
+
+func (x *FileProto) GetId() string {
+	if x != nil {
+		return x.Id
 	}
 	return ""
 }
@@ -1233,7 +1241,7 @@ var File_pkg_storage_storage_proto protoreflect.FileDescriptor
 
 const file_pkg_storage_storage_proto_rawDesc = "" +
 	"\n" +
-	"\x19pkg/storage/storage.proto\x12\astorage\"\x98\x02\n" +
+	"\x19pkg/storage/storage.proto\x12\astorage\"\xa8\x02\n" +
 	"\tFileProto\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\"\n" +
@@ -1243,7 +1251,9 @@ const file_pkg_storage_storage_proto_rawDesc = "" +
 	"\x0ebyte_range_end\x18\x06 \x01(\x03R\fbyteRangeEnd\x12$\n" +
 	"\x0ehas_byte_range\x18\a \x01(\bR\fhasByteRange\x12\x18\n" +
 	"\adeleted\x18\b \x01(\bR\adeleted\x12\x1b\n" +
-	"\tinfo_hash\x18\t \x01(\tR\binfoHash\"K\n" +
+	"\tinfo_hash\x18\t \x01(\tR\binfoHash\x12\x0e\n" +
+	"\x02id\x18\n" +
+	" \x01(\tR\x02id\"K\n" +
 	"\x11ProviderFileProto\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04link\x18\x02 \x01(\tR\x04link\x12\x12\n" +

@@ -1,0 +1,172 @@
+{{ define "download" }}
+<div class="space-y-6">
+    {{ if .SetupError }}
+    <div role="alert" class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle text-xl"></i>
+        <div>
+            <h3 class="font-bold">Configuration Required</h3>
+            <div class="text-sm">Your configuration is incomplete({{ .SetupError }}) Please complete the setup in the <a
+                    href="{{.URLBase}}settings" class="link link-hover font-semibold">Settings page</a>.
+            </div>
+        </div>
+    </div>
+    {{ end }}
+
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-body">
+            <form id="downloadForm" enctype="multipart/form-data" class="space-y-6">
+                <div class="flex flex-col gap-4">
+                    <div class="flex gap-4">
+                        <div class="fieldset flex-1">
+                            <label class="label">
+                                <span class="label-text font-semibold">
+                                    <i class="bi bi-file-earmark-arrow-up mr-2 text-secondary"></i>Magnet Links or Torrent Files
+                                </span>
+                                <span class="text-sm opacity-70">Paste magnet links or upload .torrent files</span>
+                            </label>
+                            <textarea class="textarea h-24 font-mono text-sm mb-2"
+                                      id="magnetURI"
+                                      name="urls"
+                                      placeholder="Paste your magnet links or torrent URLs here, one per line..."></textarea>
+                            <input type="file"
+                                   class="file-input w-full"
+                                   id="torrentFiles"
+                                   name="torrents"
+                                   multiple
+                                   accept=".torrent">
+                        </div>
+
+                        <div class="divider divider-horizontal">OR</div>
+
+                        <div class="fieldset flex-1">
+                            <label class="label">
+                                <span class="label-text font-semibold">
+                                    <i class="bi bi-newspaper mr-2 text-accent"></i>NZB URLs or Upload
+                                </span>
+                                <span class="text-sm opacity-70">Paste NZB URLs (one per line) or select multiple .nzb files</span>
+                            </label>
+                            <textarea type="text"
+                                      class="textarea h-24 font-mono text-sm mb-2"
+                                      id="nzbURL"
+                                      name="nzbURL"
+                                      placeholder="Paste your NZB URLs here, one per line...&#10;https://example.com/file1.nzb&#10;https://example.com/file2.nzb"></textarea>
+                            <input type="file"
+                                   class="file-input w-full"
+                                   id="nzbFile"
+                                   name="nzb"
+                                   multiple
+                                   accept=".nzb">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="divider">Download Settings</div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 space-y-4">
+                    <div>
+                        <label class="label" for="downloadAction">
+                            <span>Post Download Action</span>
+                        </label>
+                        <select class="select w-full" id="downloadAction" name="downloadAction">
+                            <option value="symlink" selected>Create Symlink</option>
+                            <option value="strm" selected>Create STRM Files</option>
+                            <option value="download">Download Files</option>
+                            <option value="none">No Action</option>
+                        </select>
+                        <span class="text-sm opacity-70">How to handle files after download completion</span>
+                    </div>
+
+                    <div>
+                        <label class="label" for="downloadFolder">
+                            <span>Download Folder</span>
+                        </label>
+                        <input type="text"
+                               class="input w-full"
+                               id="downloadFolder"
+                               name="downloadFolder"
+                               placeholder="/downloads/torrents">
+                        <span class="text-sm opacity-70">Leave empty to use default qBittorrent folder</span>
+                    </div>
+
+                    <div>
+                        <label class="label" for="arr">
+                            <span>Arr Category</span>
+                        </label>
+                        <input type="text"
+                               class="input w-full"
+                               id="arr"
+                               name="arr"
+                               placeholder="sonarr, radarr, etc.">
+                        <span class="text-sm opacity-70">Optional: Specify which Arr service should handle this</span>
+                    </div>
+
+                    {{ if .HasMultiDebrid }}
+                    <div>
+                        <label class="label" for="debrid">
+                            <span>Debrid Service</span>
+                        </label>
+                        <select class="select w-full" id="debrid" name="debrid">
+                            <option value="" selected>Auto(Try all available)</option>
+                            {{ range $index, $debrid := .Debrids }}
+                            <option value="{{ $debrid }}">
+                                {{ $debrid }}
+                            </option>
+                            {{ end }}
+                        </select>
+                        <span class="text-sm opacity-70">Choose which debrid service to use</span>
+                    </div>
+                    {{ end }}
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 space-y-4">
+                    <div>
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input type="checkbox" class="checkbox checkbox-primary" name="downloadUncached"
+                                   id="downloadUncached">
+                            <div>
+                                <span class="label-text font-medium">Download Uncached Content</span>
+                                <div class="label-text-alt">Allow downloading of content not cached by debrid service
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+                    <div>
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input type="checkbox" class="checkbox checkbox-primary" name="skipMultiSeason"
+                                   id="skipMultiSeason">
+                            <div>
+                                <span class="label-text font-medium">Skip Multi-Season Checker</span>
+                                <div class="label-text-alt">Skip the multi-season episode checker for TV shows</div>
+                            </div>
+                        </label>
+                    </div>
+                    <div>
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input type="checkbox" class="checkbox checkbox-primary" name="rmTrackerUrls"
+                                   id="rmTrackerUrls" {{ if .AlwaysRmTrackerUrls }}checked disabled{{ end }}>
+                            <div>
+                                <span class="label-text font-medium">Remove Tracker</span>
+                                <div class="label-text-alt">Allows you to download private tracker torrents with lower
+                                    risk
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <div>
+                    <button type="submit" class="btn btn-primary btn-lg" id="submitDownload">
+                        <i class="bi bi-cloud-upload mr-2"></i>Add to Download Queue
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        let downloadFolder = "{{ .DownloadFolder }}" || '';
+        window.downloadManager = new DownloadManager(downloadFolder);
+    });
+</script>
+{{ end }}

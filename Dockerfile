@@ -69,9 +69,10 @@ RUN apk add --no-cache fuse3 ca-certificates su-exec shadow curl unzip tzdata &&
     rm -rf rclone-* && \
     apk del curl unzip
 
-# Copy binaries and entrypoint
+# Copy binaries, frontend, and entrypoint
 COPY --from=builder /decypharr /usr/bin/decypharr
 COPY --from=builder /healthcheck /usr/bin/healthcheck
+COPY --from=builder /app/frontend /app/frontend
 COPY scripts/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

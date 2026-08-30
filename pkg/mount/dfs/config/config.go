@@ -12,6 +12,7 @@ import (
 type FuseConfig struct {
 	MountPath string
 	CacheDir  string
+	Client    string
 
 	// Cache
 	CacheDiskSize        int64 // in bytes
@@ -28,6 +29,17 @@ type FuseConfig struct {
 	ReadAheadSize int64
 	DaemonTimeout time.Duration
 
+	// FUSE kernel tuning (hanwen backend). FuseMaxBackground raises the
+	// kernel's in-flight background request cap (default 12) so readahead can
+	// actually fill the pipe; FuseMaxReadAhead is the readahead window
+	// advertised at init.
+	FuseMaxBackground int
+	FuseMaxReadAhead  int
+
+	// BufferWriteAuto reverts the streaming buffer to the legacy RAM
+	// block-caching write path ("auto"). Default false = write-through.
+	BufferWriteAuto bool
+
 	// DropBehindMargin, when > 0, makes the read path release the disk file's
 	// page cache for data more than this many bytes behind the current read
 	// offset (keeping the trailing margin resident so readahead/short
@@ -40,9 +52,9 @@ type FuseConfig struct {
 	Retries int
 
 	// File system settings
-	UID                uint32
-	GID                uint32
-	Umask              uint32
+	UID   uint32
+	GID   uint32
+	Umask uint32
 }
 
 // DefaultFuseConfig returns a streaming-optimized default configuration
@@ -52,8 +64,11 @@ func DefaultFuseConfig() *FuseConfig {
 		DaemonTimeout:        time.Second * 10, // Longer timeout for reliability
 		CacheExpiry:          24 * time.Hour,   // Longer cache for popular content
 		CacheCleanupInterval: 5 * time.Minute,  // More frequent cleanup
-		ChunkSize:     4 * 1024 * 1024,  // 4MB chunks (matches beta baseline)
-		ReadAheadSize: 16 * 1024 * 1024, // 16MB read-ahead (4 chunks ahead)
+		ChunkSize:            4 * 1024 * 1024,  // 4MB chunks (matches beta baseline)
+		ReadAheadSize:        16 * 1024 * 1024, // 16MB read-ahead (4 chunks ahead)
+		FuseMaxBackground:    64,
+		FuseMaxReadAhead:     1 << 20,
+		Client:               "DFS",
 
 		Retries: 3,
 
@@ -66,12 +81,15 @@ func DefaultFuseConfig() *FuseConfig {
 
 // ParseFuseConfig converts config.DFS to internal FuseConfig
 func ParseFuseConfig() *FuseConfig {
-	fuseConfig := DefaultFuseConfig()
 	mainCfg := config.Get()
-	cfg := mainCfg.Mount.DFS
+	return Parse(mainCfg.Mount.DFS, mainCfg.Mount.MountPath, mainCfg.Retries)
+}
+
+func Parse(cfg config.DFS, mountPath string, retries int) *FuseConfig {
+	fuseConfig := DefaultFuseConfig()
 
 	fuseConfig.CacheDir = cfg.CacheDir
-	fuseConfig.MountPath = mainCfg.Mount.MountPath
+	fuseConfig.MountPath = mountPath
 	fuseConfig.BufferMemory = cfg.BufferMemoryBytes()
 
 	if cfg.DaemonTimeout != "" {
@@ -124,6 +142,16 @@ func ParseFuseConfig() *FuseConfig {
 			fuseConfig.DropBehindMargin = size
 		}
 	}
+	if cfg.FuseMaxBackground > 0 {
+		fuseConfig.FuseMaxBackground = cfg.FuseMaxBackground
+	}
+	fuseConfig.BufferWriteAuto = cfg.BufferWritePolicy == "auto"
+	if cfg.FuseMaxReadAhead != "" {
+		size, err := config.ParseSize(cfg.FuseMaxReadAhead)
+		if err == nil && size > 0 {
+			fuseConfig.FuseMaxReadAhead = int(size)
+		}
+	}
 	fuseConfig.UID = cfg.UID
 	fuseConfig.GID = cfg.GID
 
@@ -135,7 +163,7 @@ func ParseFuseConfig() *FuseConfig {
 	}
 
 	// retry settings
-	fuseConfig.Retries = mainCfg.Retries
+	fuseConfig.Retries = retries
 
 	return fuseConfig
 }

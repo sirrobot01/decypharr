@@ -118,7 +118,7 @@ func (dl *DebridLink) doGet(endpoint string, queryParams map[string]string, resu
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer request.DrainAndClose(resp.Body)
 
 	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
 		if err := json.ConfigDefault.NewDecoder(resp.Body).Decode(result); err != nil {
@@ -311,7 +311,7 @@ func (dl *DebridLink) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer request.DrainAndClose(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bd, _ := io.ReadAll(resp.Body)
@@ -400,7 +400,7 @@ func (dl *DebridLink) DeleteTorrent(torrentId string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer request.DrainAndClose(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("debridlink API error: Status: %d", resp.StatusCode)
@@ -485,7 +485,7 @@ func (dl *DebridLink) _fetchDownloadLinks(account *account.Account, page, limit 
 	if err != nil {
 		return links, err
 	}
-	defer resp.Body.Close()
+	defer request.DrainAndClose(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return links, fmt.Errorf("debridlink API error: Status: %d", resp.StatusCode)
@@ -616,7 +616,7 @@ func (dl *DebridLink) CheckFile(ctx context.Context, _, link string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer request.DrainAndClose(resp.Body)
 
 	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
 		return customerror.HosterUnavailableError
@@ -696,6 +696,7 @@ func (dl *DebridLink) deleteDownloadLink(account *account.Account, downloadLink 
 	if err != nil {
 		return err
 	}
+	defer request.DrainAndClose(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("debridlink API error: Status: %d", resp.StatusCode)

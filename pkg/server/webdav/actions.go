@@ -99,27 +99,27 @@ func (h *Handler) handleDownload(info *manager.FileInfo, w http.ResponseWriter, 
 		return
 	}
 
-	if err := h.StreamResponse(entry, info, w, r); err != nil {
+	if err := h.StreamResponse(entry, info.Name(), info.Size(), w, r); err != nil {
 		// Use the file path as key for rate limiting - same file error logged once per 30s
-		logKey := fmt.Sprintf("%s/%s", info.Parent(), info.Name())
+		h.writeStreamError(fmt.Sprintf("%s/%s", info.Parent(), info.Name()), err, w)
+	}
+}
 
-		var streamErr *customerror.Error
-		if errors.As(err, &streamErr) {
-			if !streamErr.HeadersWritten {
-				http.Error(w, streamErr.Error(), http.StatusInternalServerError)
-			}
-			if !streamErr.IsSilent() {
-				h.logger.Rate(logKey).Error().Err(err).Msgf("Error streaming file: %s", logKey)
-			}
-			return
+func (h *Handler) writeStreamError(logKey string, err error, w http.ResponseWriter) {
+	var streamErr *customerror.Error
+	if errors.As(err, &streamErr) {
+		if !streamErr.HeadersWritten {
+			http.Error(w, streamErr.Error(), http.StatusInternalServerError)
 		}
-
-		// Generic error - only write if we haven't started the response
-		if !customerror.IsSilentError(err) {
+		if !streamErr.IsSilent() {
 			h.logger.Rate(logKey).Error().Err(err).Msgf("Error streaming file: %s", logKey)
 		}
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
+	// Generic error - only write if we haven't started the response
+	if !customerror.IsSilentError(err) {
+		h.logger.Rate(logKey).Error().Err(err).Msgf("Error streaming file: %s", logKey)
+	}
+	http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 }

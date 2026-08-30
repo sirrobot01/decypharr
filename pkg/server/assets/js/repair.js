@@ -57,10 +57,10 @@ class RepairManager {
         if (!modal) return;
         const ignore = document.getElementById('runIgnoreLastChecked');
         const autoRepair = document.getElementById('runAutoRepair');
-        const unrestrictLink = document.getElementById('runUnrestrictLink');
+        const verifyContent = document.getElementById('runVerifyContent');
         if (ignore) ignore.checked = false;
         if (autoRepair) autoRepair.checked = !!this.repairConfig.auto_repair;
-        if (unrestrictLink) unrestrictLink.checked = false;
+        if (verifyContent) verifyContent.checked = !!this.repairConfig.verify_content;
         const defaultProtocol = this.repairConfig.skip_nzb_repair ? 'torrent' : 'all';
         const protocol = document.querySelector(`input[name="runProtocol"][value="${defaultProtocol}"]`)
             || document.getElementById('runProtocolAll');
@@ -224,7 +224,7 @@ class RepairManager {
         try {
             const ignoreLastChecked = !!document.getElementById('runIgnoreLastChecked')?.checked;
             const autoRepair = !!document.getElementById('runAutoRepair')?.checked;
-            const unrestrictLink = !!document.getElementById('runUnrestrictLink')?.checked;
+            const verifyContent = !!document.getElementById('runVerifyContent')?.checked;
             const protocol = document.querySelector('input[name="runProtocol"]:checked')?.value || 'all';
             const res = await fetch(`${this.api}/repair/run`, {
                 method: 'POST',
@@ -232,7 +232,10 @@ class RepairManager {
                 body: JSON.stringify({
                     ignore_last_checked: ignoreLastChecked,
                     auto_repair: autoRepair,
-                    unrestrict_link: unrestrictLink,
+                    // One-off runs always probe torrents via link generation;
+                    // the toggle was removed in favor of this default.
+                    unrestrict_link: true,
+                    verify_content: verifyContent,
                     protocol,
                 }),
             });

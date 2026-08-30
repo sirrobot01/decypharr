@@ -111,6 +111,10 @@ func (h *Handler) handleRoot(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleGroup(w http.ResponseWriter, r *http.Request) {
 	group := utils.PathUnescape(chi.URLParam(r, "group"))
 	currentInfo, rawEntries := h.manager.GetEntryChildren(group)
+	if currentInfo == nil {
+		http.Error(w, "Not Found", http.StatusNotFound)
+		return
+	}
 	h.handler(currentInfo, rawEntries, w, r)
 
 }

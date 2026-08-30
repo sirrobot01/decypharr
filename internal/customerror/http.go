@@ -14,6 +14,12 @@ var UsenetSegmentMissingError = &Error{
 	Code:       "usenet_segment_missing",
 }
 
+var UsenetCorruptContentError = &Error{
+	statusCode: 422,
+	err:        errors.New("usenet file content is corrupt"),
+	Code:       "usenet_corrupt_content",
+}
+
 var TrafficExceededError = &Error{
 	statusCode: 503,
 	err:        errors.New("traffic limit exceeded"),

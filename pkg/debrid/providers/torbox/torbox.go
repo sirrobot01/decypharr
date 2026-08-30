@@ -62,11 +62,20 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Torbox, er
 	}
 	_log := logger.New(dc.Name)
 
+	// TorBox enforces a hard cap of 300 req/min per API key, applied
+	// synchronously across all servers since v8.4 (Feb 2026, GAP-002).
+	// Default to that limit if the user has not configured one explicitly.
+	mainRL := ratelimits["main"]
+	if mainRL == nil {
+		mainRL = ratelimit.New(300, ratelimit.Per(time.Minute), ratelimit.WithSlack(30))
+	}
+
 	opts := []request.ClientOption{
 		request.WithHeaders(headers),
-		request.WithRateLimiter(ratelimits["main"]),
+		request.WithRateLimiter(mainRL),
 		request.WithMaxRetries(cfg.Retries),
 		request.WithRetryableStatus(http.StatusTooManyRequests, http.StatusBadGateway),
+		request.WithLogger(_log),
 	}
 	if dc.Proxy != "" {
 		opts = append(opts, request.WithProxy(dc.Proxy))
@@ -121,7 +130,7 @@ func (tb *Torbox) doGet(endpoint string, queryParams map[string]string, result a
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer request.DrainAndClose(resp.Body)
 
 	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
 		if err := json.ConfigDefault.NewDecoder(resp.Body).Decode(result); err != nil {
@@ -149,7 +158,7 @@ func (tb *Torbox) doPostForm(endpoint string, formData map[string]string, result
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer request.DrainAndClose(resp.Body)
 
 	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
 		if err := json.ConfigDefault.NewDecoder(resp.Body).Decode(result); err != nil {
@@ -181,7 +190,7 @@ func (tb *Torbox) doDelete(endpoint string, payload any) (*http.Response, error)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer request.DrainAndClose(resp.Body)
 
 	return resp, nil
 }
@@ -510,7 +519,7 @@ func (tb *Torbox) GetTorrents() ([]*types.Torrent, error) {
 	for {
 		torrents, err := tb.getTorrents(offset)
 		if err != nil {
-			break
+			return nil, fmt.Errorf("get TorBox torrents at offset %d: %w", offset, err)
 		}
 		if len(torrents) == 0 {
 			break
@@ -524,7 +533,10 @@ func (tb *Torbox) GetTorrents() ([]*types.Torrent, error) {
 func (tb *Torbox) getTorrents(offset int) ([]*types.Torrent, error) {
 	var res TorrentsListResponse
 
-	resp, err := tb.doGet("/api/torrents/mylist", map[string]string{"offset": fmt.Sprintf("%d", offset)}, &res)
+	resp, err := tb.doGet("/api/torrents/mylist", map[string]string{
+		"bypass_cache": "true",
+		"offset":       strconv.Itoa(offset),
+	}, &res)
 	if err != nil {
 		return nil, err
 	}

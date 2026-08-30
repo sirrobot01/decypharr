@@ -110,7 +110,7 @@ func (pm *Premiumize) do(req *http.Request, out any) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer request.DrainAndClose(resp.Body)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -526,7 +526,7 @@ func (pm *Premiumize) CheckFile(ctx context.Context, infohash, fileID string) er
 		if err != nil {
 			return err
 		}
-		defer resp.Body.Close()
+		defer request.DrainAndClose(resp.Body)
 		if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
 			return customerror.HosterUnavailableError
 		}
@@ -567,7 +567,7 @@ func (pm *Premiumize) getClientProfile(client *request.Client) (*types.Profile, 
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer request.DrainAndClose(resp.Body)
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err

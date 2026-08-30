@@ -14,6 +14,7 @@ import (
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/customerror"
 	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/manager"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
@@ -28,17 +29,19 @@ type BrowseEntry struct {
 	InfoHash     string `json:"info_hash,omitempty"`  // For torrent folders
 	CanDelete    bool   `json:"can_delete,omitempty"` // Whether this can be deleted
 	ActiveDebrid string `json:"active_debrid"`
+	Kind         string `json:"kind,omitempty"`
 }
 
 // BrowseResponse is the response for browse requests
 type BrowseResponse struct {
-	Entries    []BrowseEntry `json:"entries"`
-	Total      int           `json:"total"`
-	Page       int           `json:"page"`
-	Limit      int           `json:"limit"`
-	TotalPages int           `json:"total_pages"`
-	CurrentDir string        `json:"current_dir"`
-	ParentDir  string        `json:"parent_dir,omitempty"`
+	Entries     []BrowseEntry `json:"entries"`
+	Total       int           `json:"total"`
+	Page        int           `json:"page"`
+	Limit       int           `json:"limit"`
+	TotalPages  int           `json:"total_pages"`
+	CurrentDir  string        `json:"current_dir"`
+	ParentDir   string        `json:"parent_dir,omitempty"`
+	CurrentKind string        `json:"current_kind,omitempty"`
 }
 
 func getBrowseSortParams(r *http.Request) (string, string) {
@@ -127,6 +130,7 @@ func (s *Server) handleBrowseMount(w http.ResponseWriter, r *http.Request) {
 			ModTime:      child.ModTime().Format("2006-01-02 15:04:05"),
 			IsDir:        child.IsDir(),
 			ActiveDebrid: child.ActiveDebrid(),
+			Kind:         child.Kind(),
 		})
 	}
 	sortBrowseEntries(entries, sortBy, sortOrder)
@@ -145,16 +149,17 @@ func (s *Server) handleBrowseMount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.JSONResponse(w, BrowseResponse{
-		Entries:    paginatedEntries,
-		Total:      total,
-		Page:       page,
-		Limit:      limit,
-		TotalPages: totalPages,
-		CurrentDir: "/",
+		Entries:     paginatedEntries,
+		Total:       total,
+		Page:        page,
+		Limit:       limit,
+		TotalPages:  totalPages,
+		CurrentDir:  "/",
+		CurrentKind: manager.EntryKindSystem,
 	}, http.StatusOK)
 }
 
-// handleBrowseGroup returns torrents in a group (__all__, __bad__, custom folder)
+// handleBrowseGroup returns items in a built-in, provider, or virtual folder.
 func (s *Server) handleBrowseGroup(w http.ResponseWriter, r *http.Request) {
 	group := utils.PathUnescape(chi.URLParam(r, "group"))
 
@@ -200,6 +205,7 @@ func (s *Server) handleBrowseGroup(w http.ResponseWriter, r *http.Request) {
 			InfoHash:     child.InfoHash(),
 			CanDelete:    canDelete,
 			ActiveDebrid: child.ActiveDebrid(),
+			Kind:         child.Kind(),
 		})
 	}
 	sortBrowseEntries(entries, sortBy, sortOrder)
@@ -218,13 +224,14 @@ func (s *Server) handleBrowseGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.JSONResponse(w, BrowseResponse{
-		Entries:    paginatedEntries,
-		Total:      total,
-		Page:       page,
-		Limit:      limit,
-		TotalPages: totalPages,
-		CurrentDir: "/" + group,
-		ParentDir:  "/",
+		Entries:     paginatedEntries,
+		Total:       total,
+		Page:        page,
+		Limit:       limit,
+		TotalPages:  totalPages,
+		CurrentDir:  "/" + group,
+		ParentDir:   "/",
+		CurrentKind: currentInfo.Kind(),
 	}, http.StatusOK)
 }
 
@@ -271,6 +278,7 @@ func (s *Server) handleBrowseTorrentFiles(w http.ResponseWriter, r *http.Request
 			IsDir:        child.IsDir(),
 			InfoHash:     child.InfoHash(),
 			ActiveDebrid: child.ActiveDebrid(),
+			Kind:         child.Kind(),
 		})
 	}
 	sortBrowseEntries(entries, sortBy, sortOrder)
@@ -293,13 +301,14 @@ func (s *Server) handleBrowseTorrentFiles(w http.ResponseWriter, r *http.Request
 	currentPath := parentPath + "/" + torrent
 
 	response := BrowseResponse{
-		Entries:    paginatedEntries,
-		Total:      total,
-		Page:       page,
-		Limit:      limit,
-		TotalPages: totalPages,
-		CurrentDir: currentPath,
-		ParentDir:  parentPath,
+		Entries:     paginatedEntries,
+		Total:       total,
+		Page:        page,
+		Limit:       limit,
+		TotalPages:  totalPages,
+		CurrentDir:  currentPath,
+		ParentDir:   parentPath,
+		CurrentKind: currentInfo.Kind(),
 	}
 
 	utils.JSONResponse(w, response, http.StatusOK)

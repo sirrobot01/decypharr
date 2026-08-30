@@ -2,7 +2,6 @@ package arr
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	gourl "net/url"
 	"time"
@@ -153,14 +152,14 @@ type ManualImportRequestSchema struct {
 	ImportMode string                    `json:"importMode"`
 }
 
-func (a *Arr) Import(downloadID string) (io.ReadCloser, error) {
+func (a *Arr) Import(downloadID string) error {
 	query := gourl.Values{}
 	query.Add("downloadId", downloadID)
 	url := "api/v3/manualimport" + "?" + query.Encode()
 	var data []ImportResponseSchema
 	_, err := a.Request(http.MethodGet, url, nil, &data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to import: %w", err)
+		return fmt.Errorf("failed to import: %w", err)
 	}
 	var files []ManualImportRequestFile
 	for _, d := range data {
@@ -194,9 +193,8 @@ func (a *Arr) Import(downloadID string) (io.ReadCloser, error) {
 	}
 
 	url = "api/v3/command"
-	resp, err := a.Request(http.MethodPost, url, request, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to import: %w", err)
+	if _, err := a.Request(http.MethodPost, url, request, nil); err != nil {
+		return fmt.Errorf("failed to import: %w", err)
 	}
-	return resp.Body, nil
+	return nil
 }

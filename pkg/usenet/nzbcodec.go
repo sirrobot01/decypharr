@@ -37,7 +37,13 @@ var (
 
 func init() {
 	// EncodeAll/DecodeAll on these shared instances are safe for concurrent use.
-	zstdEnc, _ = zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
+	// .meta blobs are small, so cap concurrency and the window instead of
+	// letting each of GOMAXPROCS encoder states hold an 8MB history.
+	zstdEnc, _ = zstd.NewWriter(nil,
+		zstd.WithEncoderLevel(zstd.SpeedDefault),
+		zstd.WithEncoderConcurrency(2),
+		zstd.WithWindowSize(1<<20),
+	)
 	zstdDec, _ = zstd.NewReader(nil, zstd.WithDecoderConcurrency(0))
 }
 

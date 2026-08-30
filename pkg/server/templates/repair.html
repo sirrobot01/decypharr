@@ -217,13 +217,13 @@
                 </div>
                 <label class="flex cursor-pointer items-start justify-between gap-4 px-6 py-4 hover:bg-base-200/60">
                     <span class="flex gap-3">
-                        <i class="bi bi-link-45deg text-lg text-primary mt-0.5"></i>
+                        <i class="bi bi-file-earmark-check text-lg text-primary mt-0.5"></i>
                         <span>
-                            <span class="block font-medium">Unrestrict link</span>
-                            <span class="block text-sm opacity-70">Use provider download-link generation for torrent probes instead of the provider check endpoint.</span>
+                            <span class="block font-medium">Verify NZB content</span>
+                            <span class="block text-sm opacity-70">Read each media file's head and check for a valid container signature. Finds files whose articles exist but were assembled wrong. Downloads one article per file probed.</span>
                         </span>
                     </span>
-                    <input type="checkbox" class="toggle toggle-primary mt-1" id="runUnrestrictLink">
+                    <input type="checkbox" class="toggle toggle-primary mt-1" id="runVerifyContent">
                 </label>
                 <label class="flex cursor-pointer items-start justify-between gap-4 px-6 py-4 hover:bg-base-200/60">
                     <span class="flex gap-3">

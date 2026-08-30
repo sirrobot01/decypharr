@@ -13,6 +13,7 @@ import (
 
 func fileToProto(f *File) *FileProto {
 	pb := &FileProto{
+		Id:       f.ID,
 		Name:     f.Name,
 		Path:     f.Path,
 		Size:     f.Size,
@@ -32,6 +33,7 @@ func fileToProto(f *File) *FileProto {
 
 func protoToFile(pb *FileProto) *File {
 	f := &File{
+		ID:       pb.Id,
 		Name:     pb.Name,
 		Path:     pb.Path,
 		Size:     pb.Size,

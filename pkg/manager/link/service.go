@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/rs/zerolog"
@@ -19,6 +20,18 @@ import (
 
 const (
 	MaxReinsertionAttempt = 3
+	// maxValidatedEntries caps the validated-link memo map (see GetLink).
+	maxValidatedEntries = 8192
+
+	// Retry config for transient errors (429, 502, 503, 504) during link validation.
+	maxRetryableAttempts = 5
+	retryableBaseDelay   = 2 * time.Second
+	retryableMaxDelay    = 30 * time.Second
+
+	// After a 404 refetch, block further requestdl calls for this window.
+	// Prevents hammering the provider API when a file is persistently
+	// unavailable (still processing or genuinely gone from the debrid cache).
+	refetchCooldownDuration = 5 * time.Minute
 )
 
 var (
@@ -33,15 +46,16 @@ type EntrySaver func(entry *storage.Entry) error
 // Service handles download link fetching and validation.
 // It uses the account-level cache for storing links and only tracks validation state.
 type Service struct {
-	validated      *xsync.Map[string, error]
-	singleflight   singleflight.Group
-	clients        *xsync.Map[string, debrid.Client]
-	entryRefresher EntryRefresher
-	repairer       EntryRepairer
-	entrySaver     EntrySaver
-	httpClient     *http.Client
-	retries        int
-	logger         zerolog.Logger
+	validated        *xsync.Map[string, error]
+	refetchCooldowns *xsync.Map[string, time.Time]
+	singleflight     singleflight.Group
+	clients          *xsync.Map[string, debrid.Client]
+	entryRefresher   EntryRefresher
+	repairer         EntryRepairer
+	entrySaver       EntrySaver
+	httpClient       *http.Client
+	retries          int
+	logger           zerolog.Logger
 }
 
 // New creates a new LinkService
@@ -55,14 +69,15 @@ func New(
 	logger zerolog.Logger,
 ) *Service {
 	return &Service{
-		validated:      xsync.NewMap[string, error](),
-		clients:        clients,
-		entryRefresher: entryRefresher,
-		repairer:       entryReinsert,
-		entrySaver:     entrySaver,
-		httpClient:     httpClient,
-		retries:        retries,
-		logger:         logger,
+		validated:        xsync.NewMap[string, error](),
+		refetchCooldowns: xsync.NewMap[string, time.Time](),
+		clients:          clients,
+		entryRefresher:   entryRefresher,
+		repairer:         entryReinsert,
+		entrySaver:       entrySaver,
+		httpClient:       httpClient,
+		retries:          retries,
+		logger:           logger,
 	}
 }
 
@@ -79,6 +94,24 @@ func (s *Service) GetLink(ctx context.Context, entry *storage.Entry, filename st
 		return emptyDownloadLink, err
 	}
 
+	return v.(types.DownloadLink), nil
+}
+
+// Refresh invalidates a link that failed mid-stream and fetches a replacement.
+// It shares GetLink's singleflight key, so a concurrent GetLink may win the
+// race and hand back the stale link once more; callers operate on bounded
+// retry budgets, so the follow-up attempt lands after the refresh completes.
+func (s *Service) Refresh(ctx context.Context, entry *storage.Entry, bad types.DownloadLink) (types.DownloadLink, error) {
+	if bad.Filename == "" {
+		return emptyDownloadLink, NewPermanentError(ErrEmptyLink, "empty_link")
+	}
+	key := entry.InfoHash + ":" + bad.Filename
+	v, err, _ := s.singleflight.Do(key, func() (any, error) {
+		return s.invalidateAndRefetch(ctx, entry, bad, 0)
+	})
+	if err != nil {
+		return emptyDownloadLink, err
+	}
 	return v.(types.DownloadLink), nil
 }
 
@@ -112,7 +145,11 @@ func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, fi
 		// Previous validation failed - check if we should retry
 		if linkErr := GetLinkError(validationErr); linkErr != nil {
 			if linkErr.ShouldRefetch() {
-				// Invalidate and refetch
+				fileKey := entry.InfoHash + ":" + filename
+				if !s.refetchAllowed(fileKey) {
+					return emptyDownloadLink, validationErr
+				}
+				s.setRefetchCooldown(fileKey)
 				return s.invalidateAndRefetch(ctx, entry, link, attempt)
 			}
 		}
@@ -139,19 +176,44 @@ func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, fi
 					return s.fetchAndValidate(ctx, entry, filename, attempt)
 				}
 			} else if linkErr.ShouldRefetch() {
-				// Invalidate and refetch
+				fileKey := entry.InfoHash + ":" + filename
+				if !s.refetchAllowed(fileKey) {
+					return emptyDownloadLink, validationErr
+				}
+				s.setRefetchCooldown(fileKey)
 				return s.invalidateAndRefetch(ctx, entry, link, attempt)
 			}
 		}
 	}
 
 	// Store validation result
+	// Keys are full download URLs and links rotate on refresh/expiry, so cap
+	// the map; resetting merely costs a re-validation per link.
+	if s.validated.Size() > maxValidatedEntries {
+		s.validated.Clear()
+	}
 	s.validated.Store(link.DownloadLink, validationErr)
 
 	if validationErr == nil {
+		// File is accessible — clear any pending refetch cooldown so that
+		// future requests are not artificially delayed.
+		s.refetchCooldowns.Delete(entry.InfoHash + ":" + filename)
 		return link, nil
 	}
 	return emptyDownloadLink, validationErr
+}
+
+// refetchAllowed returns true if a new requestdl call is permitted for this
+// file key. Returns false when the file is within its post-404 cooldown window.
+func (s *Service) refetchAllowed(fileKey string) bool {
+	if until, ok := s.refetchCooldowns.Load(fileKey); ok {
+		return time.Now().After(until)
+	}
+	return true
+}
+
+func (s *Service) setRefetchCooldown(fileKey string) {
+	s.refetchCooldowns.Store(fileKey, time.Now().Add(refetchCooldownDuration))
 }
 
 func (s *Service) handleBadLink(ctx context.Context, err error, entry *storage.Entry, dl types.DownloadLink, attempt int) (types.DownloadLink, error) {

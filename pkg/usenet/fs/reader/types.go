@@ -228,25 +228,27 @@ type ReaderStats struct {
 	DownloadErrors  atomic.Int64
 
 	// Prefetch
-	PrefetchHits   atomic.Int64
-	PrefetchMisses atomic.Int64
+	PrefetchHits      atomic.Int64
+	PrefetchMisses    atomic.Int64
+	PrefetchCancelled atomic.Int64 // hints dropped because a seek abandoned their window
 }
 
 // Snapshot returns a copy of the current stats.
 func (s *ReaderStats) Snapshot() map[string]int64 {
 	return map[string]int64{
-		"reads":            s.Reads.Load(),
-		"bytes_read":       s.BytesRead.Load(),
-		"read_errors":      s.ReadErrors.Load(),
-		"cache_hits":       s.CacheHits.Load(),
-		"cache_misses":     s.CacheMisses.Load(),
-		"evictions":        s.Evictions.Load(),
-		"downloads":        s.Downloads.Load(),
-		"download_bytes":   s.DownloadBytes.Load(),
-		"download_retries": s.DownloadRetries.Load(),
-		"download_errors":  s.DownloadErrors.Load(),
-		"prefetch_hits":    s.PrefetchHits.Load(),
-		"prefetch_misses":  s.PrefetchMisses.Load(),
+		"reads":              s.Reads.Load(),
+		"bytes_read":         s.BytesRead.Load(),
+		"read_errors":        s.ReadErrors.Load(),
+		"cache_hits":         s.CacheHits.Load(),
+		"cache_misses":       s.CacheMisses.Load(),
+		"evictions":          s.Evictions.Load(),
+		"downloads":          s.Downloads.Load(),
+		"download_bytes":     s.DownloadBytes.Load(),
+		"download_retries":   s.DownloadRetries.Load(),
+		"download_errors":    s.DownloadErrors.Load(),
+		"prefetch_hits":      s.PrefetchHits.Load(),
+		"prefetch_misses":    s.PrefetchMisses.Load(),
+		"prefetch_cancelled": s.PrefetchCancelled.Load(),
 	}
 }
 

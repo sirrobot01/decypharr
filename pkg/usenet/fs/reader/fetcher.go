@@ -81,11 +81,14 @@ func NewSegmentFetcher(
 		cancel:         cancel,
 	}
 
-	// Start fewer prefetch workers than foreground connection slots. Seeky
-	// callers such as ffprobe can jump to the tail while head read-ahead is
-	// still running; reserving at least one slot prevents background prefetch
-	// from starving the blocking read that the caller is waiting on.
-	numPrefetchWorkers := maxConns - 1
+	// Start fewer prefetch workers than foreground connection slots: seeky
+	// callers such as ffprobe jump while read-ahead is still in flight, and
+	// reserving two slots keeps a post-seek foreground read from queueing
+	// behind the prefetch fleet.
+	numPrefetchWorkers := 0
+	if maxConns >= 2 {
+		numPrefetchWorkers = max(1, maxConns-2)
+	}
 	if numPrefetchWorkers > 0 {
 		for i := range numPrefetchWorkers {
 			sf.prefetchWg.Add(1)
@@ -354,20 +357,66 @@ func (sf *SegmentFetcher) prefetchOne(segIdx int) {
 }
 
 // EnsureSegments fetches all segments in the range, returning when all are
-// available. Segments are fetched in order; in steady-state playback the
-// background prefetch workers have already downloaded them, so this loop
-// usually just confirms cache presence. fetchWithRetry keeps a single
-// transient segment failure from tearing down the whole stream.
+// available. Missing segments are fetched concurrently — the connection
+// semaphore still caps real parallelism — so a cold multi-segment read (a
+// seek, or playback catching up to the prefetch front) pays roughly one
+// download's latency instead of one per segment. In steady-state playback the
+// background prefetch workers have already downloaded them, so this usually
+// just confirms cache presence. fetchWithRetry keeps a single transient
+// segment failure from tearing down the whole stream.
 func (sf *SegmentFetcher) EnsureSegments(ctx context.Context, startSeg, endSeg int) error {
+	var missing []int
 	for i := startSeg; i <= endSeg; i++ {
-		state := sf.cache.GetState(i)
-		if state != StateOnDisk {
-			if err := sf.fetchWithRetry(ctx, i); err != nil {
-				return err
-			}
+		if sf.cache.GetState(i) != StateOnDisk {
+			missing = append(missing, i)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	if len(missing) == 1 {
+		return sf.fetchWithRetry(ctx, missing[0])
+	}
+
+	errs := make([]error, len(missing))
+	var wg sync.WaitGroup
+	for j, segIdx := range missing {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[j] = sf.fetchWithRetry(ctx, segIdx)
+		}()
+	}
+	wg.Wait()
+
+	// Report the failure of the lowest segment: that's where the caller's
+	// read would have stopped under the old sequential behavior.
+	for _, err := range errs {
+		if err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// CancelPendingPrefetch drains every queued prefetch hint. The reader calls
+// this when it detects a seek: hints for the abandoned window would otherwise
+// keep the prefetch workers — and the connection slots they hold — busy
+// downloading data the player just jumped away from (up to a full read-ahead
+// window of stale segments) while the blocking foreground read competes for
+// leftovers. In-flight downloads are left to finish: a segment completes in
+// well under a second and lands in the cache anyway; only not-yet-started
+// work is dropped.
+func (sf *SegmentFetcher) CancelPendingPrefetch() {
+	for {
+		select {
+		case segIdx := <-sf.prefetchCh:
+			sf.clearPrefetchQueued(segIdx)
+			sf.stats.PrefetchCancelled.Add(1)
+		default:
+			return
+		}
+	}
 }
 
 // fetchWithRetry fetches a single segment, retrying transient failures so a
@@ -403,6 +452,12 @@ func (sf *SegmentFetcher) fetchWithRetry(ctx context.Context, segIdx int) error 
 
 		// Don't retry permanent errors or cancellations.
 		if nntp.IsArticleNotFoundError(err) || ctx.Err() != nil || sf.ctx.Err() != nil {
+			return err
+		}
+		// The failover layer already retried per provider and across
+		// providers for this error; allow one outer pass for transient
+		// blips, then stop rather than multiplying the attempt budget.
+		if nntp.IsAllProvidersFailed(err) && attempt >= 1 {
 			return err
 		}
 	}

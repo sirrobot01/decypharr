@@ -1,0 +1,157 @@
+{{ define "browse" }}
+<div class="space-y-4">
+    <!-- Breadcrumb Navigation -->
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-header">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 p-6 border-b border-base-200">
+                <h5 class="card-title">
+                    <div class="breadcrumbs text-sm">
+                        <ul id="breadcrumbNav">
+                            <li><a href="{{.URLBase}}browse" data-path="/">
+                                <i class="bi bi-house-door"></i> Home
+                            </a></li>
+                        </ul>
+                    </div>
+                </h5>
+                <div class="flex flex-wrap gap-2">
+                    <div>
+                        <input type="text" placeholder="Search files..."
+                               class="input input-sm flex-1 min-w-48"
+                               id="searchInput">
+                    </div>
+                    <div>
+                        <select class="select select-sm" id="pageSizeSelect">
+                            <option value="20" selected>20 per page</option>
+                            <option value="50">50 per page</option>
+                            <option value="100">100 per page</option>
+                        </select>
+                    </div>
+                    <div class="flex gap-2">
+                        <button class="btn btn-outline btn-sm" id="refreshBtn">
+                            <i class="bi bi-arrow-clockwise"></i>
+                            <span class="hidden sm:inline">Refresh</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Actions Bar -->
+    <div id="bulkActionsBar" class="card bg-base-100 shadow-xl hidden">
+        <div class="card-body py-3 px-6">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <span class="text-sm font-medium">
+                        <span id="selectedCount">0</span> items selected
+                    </span>
+                </div>
+                <div class="flex gap-2">
+                    <button class="btn btn-sm btn-primary" id="bulkDownloadBtn">
+                        <i class="bi bi-download"></i>
+                        <span class="hidden sm:inline">Download</span>
+                    </button>
+                    <button class="btn btn-sm btn-error" id="bulkDeleteBtn">
+                        <i class="bi bi-trash"></i>
+                        <span class="hidden sm:inline">Delete</span>
+                    </button>
+                    <button class="btn btn-sm btn-ghost" id="clearSelectionBtn">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- File Browser Table -->
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-body p-0">
+            <table class="table table-hover">
+                <thead class="bg-base-200">
+                <tr>
+                    <th class="w-12">
+                        <label class="cursor-pointer">
+                            <input type="checkbox" class="checkbox checkbox-sm checkbox-primary" id="selectAllCheckbox">
+                        </label>
+                    </th>
+                    <th class="w-12">
+                        <i class="bi bi-file-earmark"></i>
+                    </th>
+                    <th class="font-semibold">
+                        <button type="button"
+                                class="inline-flex items-center gap-1 hover:text-primary transition-colors"
+                                data-sort-key="name">
+                            <i class="bi bi-file-text"></i>Name
+                            <i class="bi bi-arrow-down-up text-xs" id="sortIndicator-name"></i>
+                        </button>
+                    </th>
+                    <th class="font-semibold">
+                        <button type="button"
+                                class="inline-flex items-center gap-1 hover:text-primary transition-colors"
+                                data-sort-key="size">
+                            <i class="bi bi-hdd"></i>Size
+                            <i class="bi bi-arrow-down-up text-xs" id="sortIndicator-size"></i>
+                        </button>
+                    </th>
+                    <th class="font-semibold">
+                        <button type="button"
+                                class="inline-flex items-center gap-1 hover:text-primary transition-colors"
+                                data-sort-key="mod_time">
+                            <i class="bi bi-calendar"></i>Modified
+                            <i class="bi bi-arrow-down-up text-xs" id="sortIndicator-mod_time"></i>
+                        </button>
+                    </th>
+                    <th class="font-semibold">
+                        <button type="button"
+                                class="inline-flex items-center gap-1 hover:text-primary transition-colors"
+                                data-sort-key="active_debrid">
+                            <i class="bi bi-cloud"></i>Selected Provider
+                            <i class="bi bi-arrow-down-up text-xs" id="sortIndicator-active_debrid"></i>
+                        </button>
+                    </th>
+                    <th class="font-semibold">
+                        <i class="bi bi-heart-pulse"></i> Health
+                    </th>
+                    <th class="font-semibold w-32">Actions</th>
+                </tr>
+                </thead>
+                <tbody id="fileBrowserList">
+                <!-- Files will be loaded here -->
+                </tbody>
+            </table>
+
+            <div class="flex flex-col sm:flex-row justify-between items-center p-6 border-t border-base-200 gap-4">
+                <div class="text-sm text-base-content/70">
+                    <span id="paginationInfo">Loading...</span>
+                </div>
+                <div class="join" id="paginationControls"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Empty State -->
+    <div class="card bg-base-100 shadow-xl hidden" id="emptyState">
+        <div class="card-body text-center py-16">
+            <div class="text-6xl text-base-content/30 mb-4">
+                <i class="bi bi-inbox"></i>
+            </div>
+            <h3 class="text-2xl font-bold mb-2">Empty Folder</h3>
+            <p class="text-base-content/70">No files or folders found here</p>
+        </div>
+    </div>
+</div>
+
+<!-- Context Menu -->
+<div id="contextMenu" class="dropdown dropdown-open hidden absolute z-50">
+    <div class="menu bg-base-200 rounded-box shadow-lg w-52 p-2">
+        <li id="contextDownload" class="hidden"><a><i class="bi bi-download"></i> Download</a></li>
+        <li id="contextDelete" class="hidden"><a class="text-error"><i class="bi bi-trash"></i> Delete Entry</a></li>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        window.fileBrowser = new FileBrowser();
+    });
+</script>
+{{ end }}

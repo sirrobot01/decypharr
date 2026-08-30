@@ -2,6 +2,11 @@ package config
 
 import "time"
 
+const (
+	DefaultNFSPort uint16 = 20490
+	DefaultSMBPort uint16 = 1445
+)
+
 var (
 	DefaultPort     = "8282"
 	DefaultLogLevel = "info"

@@ -14,6 +14,7 @@ Usenet streaming.
 - Mock Qbittorent and Sabnzbd API that supports the Arrs (Sonarr, Radarr, Lidarr etc)
 - Multiple Debrid and usenet providers support with a single interface
 - Direct Usenet streaming via NNTP (no separate download client required)
+- Read-only NFSv4 and SMB servers for the same libraries, including custom virtual folders
 
 ## Supported Debrid Providers
 
@@ -34,6 +35,10 @@ services:
     container_name: decypharr
     ports:
       - "8282:8282"
+      # Optional: NFSv4 (when NFS is enabled in Settings)
+      # - "2049:20490/tcp"
+      # Optional: SMB — Windows clients require host port 445 (when SMB is enabled in Settings)
+      # - "445:1445/tcp"
     volumes:
       - /mnt/:/mnt:rshared
       - ./configs/:/app # config.json must be in this directory

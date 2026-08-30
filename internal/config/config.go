@@ -39,7 +39,6 @@ const (
 const (
 	DownloadActionSymlink  DownloadAction = "symlink"
 	DownloadActionDownload DownloadAction = "download"
-	DownloadActionStrm     DownloadAction = "strm"
 	DownloadActionNone     DownloadAction = "none"
 )
 
@@ -173,6 +172,30 @@ type CustomFolders struct {
 	Filters map[string]string `json:"filters,omitempty"`
 }
 
+// VirtualFolder is the canonical, ordered representation of a filtered library
+// view. CustomFolders above is kept only so older config.json files can be
+// migrated without user intervention.
+type VirtualFolder struct {
+	Name       string                   `json:"name"`
+	Match      VirtualFolderMatch       `json:"match,omitempty"`
+	IncludeBad bool                     `json:"include_bad,omitempty"`
+	Conditions []VirtualFolderCondition `json:"conditions,omitempty"`
+}
+
+type VirtualFolderMatch string
+
+const (
+	VirtualFolderMatchAll VirtualFolderMatch = "all"
+	VirtualFolderMatchAny VirtualFolderMatch = "any"
+)
+
+type VirtualFolderCondition struct {
+	Field         string `json:"field"`
+	Operator      string `json:"operator"`
+	Value         string `json:"value"`
+	CaseSensitive bool   `json:"case_sensitive,omitempty"`
+}
+
 type Auth struct {
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
@@ -201,12 +224,27 @@ type RepairConfig struct {
 	Arrs                  []string     `json:"arrs,omitempty"`
 	AutoRepair            bool         `json:"auto_repair,omitempty"`
 	SkipNZBRepair         bool         `json:"skip_nzb_repair,omitempty"`
+
+	// VerifyContent makes NZB probes also read each media file's head through
+	// the streaming stack and check for a valid container signature, catching
+	// files whose articles exist but were assembled wrong. Costs one article
+	// download per file probed.
+	VerifyContent bool `json:"verify_content,omitempty"`
+
+	// StopSchedule, when set, stops an in-progress repair sweep at this time/interval
+	// (same formats as Schedule: clock time, cron expression, or duration).
+	// A repair sweep still running when StopSchedule fires is cancelled before it
+	// finishes enumerating/probing every candidate. Empty disables the stop
+	// schedule entirely - the repair sweep always runs to completion. When a stop
+	// fires mid-repair-sweep, AutoRepair decides what happens to whatever was
+	// already found broken: repaired if true, left alone if false.
+	StopSchedule string `json:"stop_schedule,omitempty"`
 }
 
 func (r RepairConfig) IsZero() bool {
 	return !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
 		r.NNTPConnectionPercent == 0 && r.Strategy == "" && r.RecheckInterval == "" && len(r.Arrs) == 0 &&
-		!r.AutoRepair && !r.SkipNZBRepair
+		!r.AutoRepair && !r.SkipNZBRepair && r.StopSchedule == ""
 }
 
 type Config struct {
@@ -224,6 +262,9 @@ type Config struct {
 	QBitTorrent QBitTorrent `json:"qbittorrent,omitzero"` // Deprecated: use Manager instead
 	Rclone      Rclone      `json:"rclone,omitzero"`      // Deprecated: use Mounts instead
 	Mount       Mount       `json:"mount,omitzero"`
+	NFS         NFS         `json:"nfs,omitzero"`
+	SMB         SMB         `json:"smb,omitzero"`
+	ShareCache  ShareCache  `json:"share_cache,omitzero"` // Read cache shared by the NFS and SMB exports
 
 	AllowedExt         []string `json:"allowed_file_types,omitempty"`
 	AllowSamples       bool     `json:"allow_samples,omitempty"`
@@ -254,7 +295,8 @@ type Config struct {
 	AlwaysRmTrackerUrls   bool                     `json:"always_rm_tracker_urls,omitempty"`
 	Categories            []string                 `json:"categories,omitempty"`
 	FolderNaming          WebDavFolderNaming       `json:"folder_naming,omitempty"`
-	CustomFolders         map[string]CustomFolders `json:"custom_folders,omitempty"`
+	CustomFolders         map[string]CustomFolders `json:"custom_folders,omitempty"` // Deprecated: migrated to VirtualFolders.
+	VirtualFolders        []VirtualFolder          `json:"virtual_folders,omitempty"`
 	DefaultDownloadAction DownloadAction           `json:"default_download_action,omitempty"`
 
 	RefreshDirs  string `json:"refresh_dirs,omitempty"`
@@ -262,6 +304,8 @@ type Config struct {
 	SkipAutoMove bool   `json:"skip_auto_move,omitempty"`
 
 	Repair RepairConfig `json:"repair,omitzero"`
+
+	Strm Strm `json:"strm,omitzero"`
 
 	// QueueCleanup is the global arr queue-cleanup policy (see CleanupQueue).
 	QueueCleanup QueueCleanup `json:"queue_cleanup"`
@@ -300,12 +344,19 @@ func (c *Config) loadConfig() error {
 	if err := json.Unmarshal(data, &c); err != nil {
 		return fmt.Errorf("error parsing config JSON: %w", err)
 	}
+	hadStrmSecret := c.Strm.Secret != ""
 
 	// Set defaults for any missing values
 	c.setDefaults()
 
 	// Apply environment variable overrides
 	c.applyEnvOverrides()
+
+	// Persist a first-load generated STRM secret; signatures must survive
+	// restarts.
+	if !hadStrmSecret {
+		return c.Save()
+	}
 
 	return nil
 }
@@ -326,6 +377,10 @@ func (c *Config) Validate() error {
 	// If either debrid or usenet is enabled, at least one must be configured
 	if len(c.Debrids) == 0 && len(c.Usenet.Providers) == 0 {
 		return errors.New("at least one debrid provider or usenet provider must be configured")
+	}
+
+	if err := c.ValidateVirtualFolders(); err != nil {
+		return err
 	}
 
 	return nil
@@ -481,6 +536,7 @@ func (c *Config) setDefaults() {
 	// Migrate deprecated fields to Manager (backward compatibility)
 	c.migrateQBitTorrentToManager()
 	c.migrateNotifications()
+	c.MigrateVirtualFolders()
 
 	if c.DefaultDownloadAction == "" {
 		c.DefaultDownloadAction = DownloadActionSymlink
@@ -642,7 +698,12 @@ func (c *Config) setDefaults() {
 		c.FolderNaming = WebDavFolderNaming(c.Debrids[0].FolderNaming)
 	}
 
+	c.setNFSDefaults()
+	c.setSMBDefaults()
+	c.setShareCacheDefaults()
+
 	c.applyRepairDefaults()
+	c.setStrmDefaults()
 }
 
 func (c *Config) applyRepairDefaults() {
@@ -723,11 +784,16 @@ func clearHotFields(c *Config) {
 	c.Categories = nil
 	c.FolderNaming = ""
 	c.CustomFolders = nil
+	c.VirtualFolders = nil
 	c.DefaultDownloadAction = ""
 	c.RefreshDirs = ""
 	c.Retries = 0
 	c.SkipAutoMove = false
 	c.Repair = RepairConfig{}
+
+	// STRM settings are read live on every URL build, stream request, and
+	// reconciler pass; a config change triggers a resweep, not a restart.
+	c.Strm = Strm{}
 
 	// Queue cleanup rules are read live via config.Get() inside CleanupQueue,
 	// so changes apply on the next cleanup cycle without a restart.

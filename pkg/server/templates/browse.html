@@ -15,19 +15,21 @@
                 </h5>
                 <div class="flex flex-wrap gap-2">
                     <div>
-                        <input type="text" placeholder="Search files..."
+                        <label class="sr-only" for="searchInput">Search the current folder</label>
+                        <input type="search" placeholder="Search this folder…" aria-label="Search the current folder"
                                class="input input-sm flex-1 min-w-48"
                                id="searchInput">
                     </div>
                     <div>
-                        <select class="select select-sm" id="pageSizeSelect">
+                        <label class="sr-only" for="pageSizeSelect">Items per page</label>
+                        <select class="select select-sm" id="pageSizeSelect" aria-label="Items per page">
                             <option value="20" selected>20 per page</option>
                             <option value="50">50 per page</option>
                             <option value="100">100 per page</option>
                         </select>
                     </div>
                     <div class="flex gap-2">
-                        <button class="btn btn-outline btn-sm" id="refreshBtn">
+                        <button type="button" class="btn btn-outline btn-sm" id="refreshBtn">
                             <i class="bi bi-arrow-clockwise"></i>
                             <span class="hidden sm:inline">Refresh</span>
                         </button>
@@ -35,6 +37,15 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <div id="currentViewNotice" class="alert alert-info hidden items-start" role="note">
+        <i class="bi bi-folder-symlink mt-0.5" aria-hidden="true"></i>
+        <div class="flex-1">
+            <p class="font-medium">You are browsing a virtual folder</p>
+            <p class="text-sm">This is a filtered view. Deleting an item here deletes the original from every view and removes its provider placement.</p>
+        </div>
+        <a href="{{.URLBase}}settings#tab-virtual-folders" class="btn btn-sm btn-outline">Edit virtual folders</a>
     </div>
 
     <!-- Bulk Actions Bar -->
@@ -66,12 +77,14 @@
     <!-- File Browser Table -->
     <div class="card bg-base-100 shadow-xl">
         <div class="card-body p-0">
+            <div class="overflow-x-auto">
             <table class="table table-hover">
+                <caption class="sr-only">Files and folders in the current location</caption>
                 <thead class="bg-base-200">
                 <tr>
                     <th class="w-12">
                         <label class="cursor-pointer">
-                            <input type="checkbox" class="checkbox checkbox-sm checkbox-primary" id="selectAllCheckbox">
+                            <input type="checkbox" class="checkbox checkbox-sm checkbox-primary" id="selectAllCheckbox" aria-label="Select all actionable items on this page">
                         </label>
                     </th>
                     <th class="w-12">
@@ -119,6 +132,7 @@
                 <!-- Files will be loaded here -->
                 </tbody>
             </table>
+            </div>
 
             <div class="flex flex-col sm:flex-row justify-between items-center p-6 border-t border-base-200 gap-4">
                 <div class="text-sm text-base-content/70">
@@ -136,7 +150,8 @@
                 <i class="bi bi-inbox"></i>
             </div>
             <h3 class="text-2xl font-bold mb-2">Empty Folder</h3>
-            <p class="text-base-content/70">No files or folders found here</p>
+            <p class="text-base-content/70" id="emptyStateMessage">No files or folders found here</p>
+            <a href="{{.URLBase}}settings#tab-virtual-folders" id="emptyStateVirtualFolderLink" class="btn btn-sm btn-outline btn-info mt-5 hidden">Review conditions</a>
         </div>
     </div>
 </div>
@@ -144,8 +159,8 @@
 <!-- Context Menu -->
 <div id="contextMenu" class="dropdown dropdown-open hidden absolute z-50">
     <div class="menu bg-base-200 rounded-box shadow-lg w-52 p-2">
-        <li id="contextDownload" class="hidden"><a><i class="bi bi-download"></i> Download</a></li>
-        <li id="contextDelete" class="hidden"><a class="text-error"><i class="bi bi-trash"></i> Delete Entry</a></li>
+        <li id="contextDownload" class="hidden"><button type="button"><i class="bi bi-download" aria-hidden="true"></i> Download</button></li>
+        <li id="contextDelete" class="hidden"><button type="button" class="text-error"><i class="bi bi-trash" aria-hidden="true"></i> Delete original item</button></li>
     </div>
 </div>
 

@@ -341,8 +341,7 @@ func (a *Arr) removeQueueItems(items map[int]bool, blocklist, skipRedownload boo
 
 func (a *Arr) ManualImportItems(items map[string]bool) error {
 	for downloadId := range items {
-		_, err := a.Import(downloadId)
-		if err != nil {
+		if err := a.Import(downloadId); err != nil {
 			// log error
 			fmt.Println(err)
 		}

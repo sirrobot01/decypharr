@@ -46,6 +46,11 @@ type Usenet struct {
 	SocketWriteBuffer string `json:"socket_write_buffer,omitempty"`
 	// Processing timeout
 	ProcessingTimeout string `json:"processing_timeout,omitempty"` // Timeout for NZB processing e.g. "5m", "10m" (default: 10m). Mark as bad if exceeded.
+	// ConnIdleTimeout is how long an unused pooled NNTP connection is kept
+	// warm (and keepalive-pinged) before being closed, e.g. "5m". Players
+	// read in bursts with quiet gaps; closing too early forces a
+	// TCP+TLS+AUTH reconnect storm on every resume. Default: 5m.
+	ConnIdleTimeout string `json:"conn_idle_timeout,omitempty"`
 	// Availability check sampling
 	AvailabilitySamplePercent       int    `json:"availability_sample_percent,omitempty"`        // Percentage of segments to check during repair (1-100, default: 10)
 	ImportAvailabilitySamplePercent int    `json:"import_availability_sample_percent,omitempty"` // Percentage of segments to check when adding an NZB (1-100, default: 1)
@@ -135,6 +140,13 @@ func (c *Config) updateUsenetProvider(index int, u UsenetProvider) UsenetProvide
 	}
 	if u.Priority == 0 {
 		u.Priority = index + 1 // Default priority based on order
+	}
+	// Auto-enable TLS for ports that only speak implicit TLS.
+	// Users who set port 563 (NNTPS) or 443 without ssl:true get a
+	// plain-TCP connection; the server waits for a TLS ClientHello and
+	// never sends the greeting, causing a 10-second i/o timeout.
+	if !u.SSL && (u.Port == 563 || u.Port == 443) {
+		u.SSL = true
 	}
 	return u
 }

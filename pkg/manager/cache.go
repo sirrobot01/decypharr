@@ -2,6 +2,7 @@ package manager
 
 import (
 	"strings"
+	"sync/atomic"
 
 	"github.com/puzpuzpuz/xsync/v4"
 	"golang.org/x/sync/singleflight"
@@ -24,6 +25,7 @@ type EntryCache struct {
 	manager    *Manager
 	entries    *xsync.Map[string, EntryCacheItem]
 	refreshing singleflight.Group
+	generation atomic.Uint64
 }
 
 func NewEntryCache(manager *Manager) *EntryCache {
@@ -34,6 +36,11 @@ func NewEntryCache(manager *Manager) *EntryCache {
 }
 
 func (e *EntryCache) Get(name string) (*FileInfo, []FileInfo) {
+	// Relative-time views change as the clock advances even when library
+	// metadata does not, so never retain their children in the entry cache.
+	if !strings.HasPrefix(name, torrentEntryCachePrefix) && e.manager.virtualFoldersSnapshot().isTimeSensitive(name) {
+		return e.manager.getEntryChildren(name)
+	}
 	item, ok := e.entries.Load(name)
 	if !ok {
 		item = e.refreshEntry(name)
@@ -49,6 +56,7 @@ func (e *EntryCache) refreshEntry(name string) EntryCacheItem {
 }
 
 func (e *EntryCache) _refreshEntry(name string) EntryCacheItem {
+	generation := e.generation.Load()
 	if after, ok := strings.CutPrefix(name, torrentEntryCachePrefix); ok {
 		// This is a torrent folder
 		torrentName := after
@@ -57,35 +65,30 @@ func (e *EntryCache) _refreshEntry(name string) EntryCacheItem {
 			current:  current,
 			children: children,
 		}
-		e.entries.Store(name, item)
+		if e.generation.Load() == generation {
+			e.entries.Store(name, item)
+		}
 		return item
 	}
 
-	// This is either a __all__, __bad__ or custom folder
+	// This is a built-in, provider, or virtual folder.
 	current, children := e.manager.getEntryChildren(name)
 	item := EntryCacheItem{
 		current:  current,
 		children: children,
 	}
-	e.entries.Store(name, item)
+	if e.generation.Load() == generation {
+		e.entries.Store(name, item)
+	}
 	return item
 }
 
 // Refresh triggers a cache refresh with debouncing.
 // If called multiple times rapidly, only one refresh will occur.
 func (e *EntryCache) Refresh() {
-	e.entries.Delete(EntryAllFolder)
-	e.entries.Delete(EntryBadFolder)
-	e.entries.Delete(EntryTorrentFolder)
-	e.entries.Delete(EntryNZBFolder)
-	for k := range e.manager.config.CustomFolders {
-		e.entries.Delete(k)
-	}
-	// Also clear torrent-level cache entries to prevent stale file listings
-	e.entries.Range(func(key string, _ EntryCacheItem) bool {
-		if strings.HasPrefix(key, torrentEntryCachePrefix) {
-			e.entries.Delete(key)
-		}
-		return true
-	})
+	e.generation.Add(1)
+	// Clear every group and torrent entry. This is deliberately independent of
+	// the current config so renamed/removed virtual folders cannot survive in the
+	// cache after a live update.
+	e.entries.Clear()
 }

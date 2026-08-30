@@ -1,0 +1,165 @@
+{{ define "index" }}
+<div class="space-y-6">
+
+    {{ if .SetupError }}
+    <div role="alert" class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle text-xl"></i>
+        <div>
+            <h3 class="font-bold">Configuration Required</h3>
+            <div class="text-sm">Your configuration is incomplete ({{ .SetupError }}). Please complete the setup in the
+                <a href="{{.URLBase}}settings" class="link link-hover font-semibold">Settings page</a>.
+            </div>
+        </div>
+    </div>
+    {{ end }}
+
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-body">
+            <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+                <div class="flex items-center gap-2">
+                    <button class="btn btn-secondary btn-sm hidden" id="batchDeleteBtn">
+                        <i class="bi bi-trash"></i>
+                        <span class="hidden sm:inline">Delete Selected</span>
+                    </button>
+                    <button class="btn btn-error btn-sm hidden" id="batchDeleteDebridBtn">
+                        <i class="bi bi-cloud-slash"></i>
+                        <span class="hidden sm:inline">Remove From Provider</span>
+                    </button>
+                    <button class="btn btn-outline btn-sm" id="refreshBtn">
+                        <i class="bi bi-arrow-clockwise"></i>
+                        <span class="hidden sm:inline">Refresh</span>
+                    </button>
+                </div>
+
+                <div class="flex flex-wrap gap-2">
+                    <div>
+                        <input type="text" placeholder="Search queues..."
+                               class="input input-sm"
+                               id="searchInput">
+                    </div>
+                    <div>
+                        <select class="select select-sm" id="stateFilter">
+                            <option value="">All States</option>
+                            <option value="pausedUP">Completed</option>
+                            <option value="downloading">Downloading</option>
+                            <option value="error">Error</option>
+                        </select>
+                    </div>
+                    <div>
+                        <select class="select select-sm" id="categoryFilter">
+                            <option value="">All Categories</option>
+                        </select>
+                    </div>
+                    <div>
+                        <select class="select select-sm" id="sortSelector">
+                            <option value="added_on" selected>Date Added (Newest First)</option>
+                            <option value="added_on_asc">Date Added (Oldest First)</option>
+                            <option value="name_asc">Name (A-Z)</option>
+                            <option value="name_desc">Name (Z-A)</option>
+                            <option value="size_desc">Size (Largest First)</option>
+                            <option value="size_asc">Size (Smallest First)</option>
+                            <option value="progress_desc">Progress (Most First)</option>
+                            <option value="progress_asc">Progress (Least First)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-body p-0">
+            <div class="overflow-x-auto">
+                <table class="table table-hover">
+                    <thead class="bg-base-200">
+                    <tr>
+                        <th class="w-12">
+                            <label class="cursor-pointer">
+                                <input type="checkbox" class="checkbox checkbox-sm checkbox-primary" id="selectAll">
+                            </label>
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-file-text mr-2"></i>Name
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-hdd mr-2"></i>Size
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-speedometer2 mr-2"></i>Progress
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-download mr-2"></i>Speed
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-tag mr-2"></i>Category
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-diagram-3 mr-2"></i>Protocol
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-cloud mr-2"></i>Provider
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-people mr-2"></i>Seeders
+                        </th>
+                        <th class="font-semibold">
+                            <i class="bi bi-activity mr-2"></i>State
+                        </th>
+                        <th class="font-semibold w-32">Actions</th>
+                    </tr>
+                    </thead>
+                    <tbody id="torrentsList">
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="flex flex-col sm:flex-row justify-between items-center p-6 border-t border-base-200 gap-4">
+                <div class="text-sm text-base-content/70">
+                    <span id="paginationInfo">Loading queues...</span>
+                </div>
+                <div class="join" id="paginationControls"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card bg-base-100 shadow-xl hidden" id="emptyState">
+        <div class="card-body text-center py-16">
+            <div class="text-6xl text-base-content/30 mb-4">
+                <i class="bi bi-inbox"></i>
+            </div>
+            <h3 class="text-2xl font-bold mb-2">No Queues Found</h3>
+            <p class="text-base-content/70 mb-6">You haven't added any items yet. Start by adding your first
+                download!</p>
+            <a href="{{.URLBase}}download" class="btn btn-primary">
+                <i class="bi bi-plus-circle mr-2"></i>Add New Download
+            </a>
+        </div>
+    </div>
+</div>
+
+<ul class="menu bg-base-100 shadow-lg rounded-box context-menu hidden fixed z-50" id="torrentContextMenu">
+    <li class="menu-title">
+        <span class="torrent-name text-sm font-bold truncate max-w-48"></span>
+    </li>
+    <hr/>
+    <li><a class="menu-item text-sm" data-action="copy-magnet">
+        <i class="bi bi-magnet text-primary"></i>Copy Magnet Link
+    </a></li>
+    <li><a class="menu-item text-sm" data-action="copy-name">
+        <i class="bi bi-clipboard text-info"></i>Copy Name
+    </a></li>
+    <hr/>
+    <li><a class="menu-item text-sm text-error" data-action="delete">
+        <i class="bi bi-trash"></i>Delete Entry
+    </a></li>
+    <li><a class="menu-item text-sm text-error" data-action="debrid-delete">
+        <i class="bi bi-cloud-slash"></i> Remove from Provider
+    </a></li>
+</ul>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        window.dashboard = new TorrentDashboard();
+    });
+</script>
+{{ end }}

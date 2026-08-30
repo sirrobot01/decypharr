@@ -1,0 +1,43 @@
+{{ define "setup_layout" }}
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Decypharr - Setup Wizard</title>
+
+    <link href="{{.URLBase}}assets/css/styles.css" rel="stylesheet" type="text/css"/>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="{{.URLBase}}images/favicon/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{.URLBase}}images/favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{.URLBase}}images/favicon/favicon-16x16.png">
+    <link rel="manifest" href="{{.URLBase}}images/favicon/site.webmanifest">
+
+    <script>
+        // Early theme detection to prevent FOUC
+        (function () {
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme) {
+                document.documentElement.setAttribute('data-theme', savedTheme);
+            } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            } else {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+
+        // Set global URL base
+        window.urlBase = "{{.URLBase}}";
+    </script>
+</head>
+<body class="min-h-screen bg-base-200">
+<div class="toast-container fixed bottom-4 right-4 z-50 space-y-2"></div>
+
+{{ template "setup" . }}
+
+<script src="{{.URLBase}}assets/js/jquery-3.7.1.min.js"></script>
+<script src="{{.URLBase}}assets/js/common.js"></script>
+<script src="{{.URLBase}}assets/js/setup.js"></script>
+</body>
+</html>
+{{ end }}

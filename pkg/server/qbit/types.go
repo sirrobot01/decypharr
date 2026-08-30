@@ -401,15 +401,19 @@ type TorrentFile struct {
 	Availability float64 `json:"availability,omitempty"`
 }
 
+const qbitInfiniteETA int64 = 8640000
+
 // ToQBitTorrent converts to QBitTorrent format for API compatibility
 func convertToQBitTorrentTorrent(t *storage.Entry) Torrent {
+	amountLeft := max(int64(float64(t.Size)*(1-t.Progress)), 0)
+
 	qbitTorrent := Torrent{
 		Hash:         t.InfoHash,
 		Name:         t.Name,
 		Size:         t.Size,
 		Progress:     t.Progress,
 		Dlspeed:      t.Speed,
-		Eta:          int64(0), // ETA not tracked
+		Eta:          calculateETA(amountLeft, t.Speed),
 		NumSeeds:     t.Seeders,
 		State:        t.State,
 		Category:     t.Category,
@@ -419,7 +423,7 @@ func convertToQBitTorrentTorrent(t *storage.Entry) Torrent {
 		CompletionOn: 0,
 		Debrid:       t.ActiveProvider,
 		DebridID:     "",
-		AmountLeft:   int64(float64(t.Size) * (1 - t.Progress)),
+		AmountLeft:   amountLeft,
 		Downloaded:   int64(float64(t.Size) * t.Progress),
 		MagnetURI:    t.Magnet,
 		Files:        getTorrentFiles(t),
@@ -436,6 +440,21 @@ func convertToQBitTorrentTorrent(t *storage.Entry) Torrent {
 	}
 
 	return qbitTorrent
+}
+
+func calculateETA(amountLeft, downloadSpeed int64) int64 {
+	if amountLeft <= 0 {
+		return 0
+	}
+	if downloadSpeed <= 0 {
+		return qbitInfiniteETA
+	}
+
+	eta := amountLeft / downloadSpeed
+	if amountLeft%downloadSpeed != 0 {
+		eta++
+	}
+	return min(eta, qbitInfiniteETA)
 }
 
 func getTorrentFiles(t *storage.Entry) []TorrentFile {

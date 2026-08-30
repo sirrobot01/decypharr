@@ -18,6 +18,7 @@ message FileProto {
   bool has_byte_range = 7;
   bool deleted = 8;
   string info_hash = 9;
+  string id = 10;
 }
 
 message ProviderFileProto {

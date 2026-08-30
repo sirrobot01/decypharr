@@ -42,6 +42,10 @@ type Client struct {
 
 	retries int // Number of retries per provider for transient errors
 
+	// slotFreed is poked (non-blocking, buffered 1) whenever any pool slot
+	// is released; waitForConnection parks on it.
+	slotFreed chan struct{}
+
 	closed atomic.Bool
 	// Speed test results storage
 	speedTestResults *xsync.Map[string, SpeedTestResult]
@@ -61,6 +65,14 @@ type Client struct {
 	// (≈ buffer ÷ RTT), so it must cover the bandwidth-delay product.
 	sockReadBuf  int
 	sockWriteBuf int
+
+	// Pool lifecycle tuning, resolved at construction from DefaultTimeouts
+	// with an optional cfg.Usenet.ConnIdleTimeout override. Kept per-client
+	// (rather than on the package-level timeouts var) so config reloads that
+	// rebuild the client can't race connections still using the old one.
+	idleTimeout    time.Duration // close pooled conns unused for this long
+	staleThreshold time.Duration // verify-ping on checkout after this much inactivity
+	pingInterval   time.Duration // reaper keepalive-ping cadence for idle conns
 }
 
 // SpeedTestResult holds the result of a provider speed test
@@ -78,6 +90,19 @@ type connectionEntry struct {
 	conn     *Connection
 	provider config.UsenetProvider
 	lastUsed time.Time
+	// lastPing is when the reaper last keepalive-pinged this idle entry.
+	// Kept separate from lastUsed so pings keep the session alive without
+	// counting as use — idle expiry stays keyed to real work only.
+	lastPing time.Time
+}
+
+// lastActivity returns the most recent proof the connection was alive:
+// either real use or a successful keepalive ping.
+func (e *connectionEntry) lastActivity() time.Time {
+	if e.lastPing.After(e.lastUsed) {
+		return e.lastPing
+	}
+	return e.lastUsed
 }
 
 var connectionEntryPool = sync.Pool{
@@ -119,21 +144,31 @@ type TimeoutConfig struct {
 	StaleThreshold time.Duration
 	// Close connections idle longer than this
 	IdleTimeout time.Duration
+	// Keepalive-ping idle pooled connections whose last activity (use or
+	// ping) is older than this, instead of letting them go stale
+	PingInterval time.Duration
 	// How often to check for idle connections
 	ReaperInterval time.Duration
 }
 
 // DefaultTimeouts returns production-tuned timeout values.
-// These are aggressive to prevent "connection reset by peer" errors
-// from long-idle connections.
+//
+// IdleTimeout is deliberately long: players read in bursts (fill their
+// buffer, go quiet for tens of seconds, read again), and closing warm
+// connections between bursts forces a TCP+TLS+AUTH reconnect storm on
+// every resume — measured at ~38k reconnects/week in production with the
+// old 20s value. Stale sessions are handled by keepalive DATE pings
+// (PingInterval, in the reaper) plus a verify-ping on checkout
+// (StaleThreshold), not by closing early.
 var DefaultTimeouts = TimeoutConfig{
 	DialTimeout:       10 * time.Second,
 	KeepAlive:         30 * time.Second,
 	HandshakeTimeout:  10 * time.Second,
 	StreamBodyTimeout: 60 * time.Second,
 	PingTimeout:       1500 * time.Millisecond,
-	StaleThreshold:    10 * time.Second,
-	IdleTimeout:       20 * time.Second,
+	StaleThreshold:    60 * time.Second,
+	IdleTimeout:       5 * time.Minute,
+	PingInterval:      30 * time.Second,
 	ReaperInterval:    5 * time.Second,
 }
 
@@ -157,7 +192,7 @@ func normalizeTimeouts(in TimeoutConfig) TimeoutConfig {
 		in.PingTimeout = 1500 * time.Millisecond
 	}
 	if in.IdleTimeout <= 0 {
-		in.IdleTimeout = 20 * time.Second
+		in.IdleTimeout = 5 * time.Minute
 	}
 	// Keep stale checks meaningful: stale must be >0 and below idle timeout.
 	if in.StaleThreshold <= 0 || in.StaleThreshold >= in.IdleTimeout {
@@ -165,6 +200,10 @@ func normalizeTimeouts(in TimeoutConfig) TimeoutConfig {
 		if in.StaleThreshold <= 0 {
 			in.StaleThreshold = 10 * time.Second
 		}
+	}
+	// Keepalive pings must fire well inside the idle window to be useful.
+	if in.PingInterval <= 0 || in.PingInterval >= in.IdleTimeout {
+		in.PingInterval = min(30*time.Second, in.IdleTimeout/2)
 	}
 	if in.ReaperInterval <= 0 {
 		in.ReaperInterval = 5 * time.Second
@@ -214,15 +253,45 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		providers:        providers,
 		retries:          cfg.Retries,
 		logger:           logger.New("nntp-client"),
+		slotFreed:        make(chan struct{}, 1),
 		speedTestResults: xsync.NewMap[string, SpeedTestResult](),
 		sockReadBuf:      parseSockBuf(cfg.Usenet.SocketReadBuffer),
 		sockWriteBuf:     parseSockBuf(cfg.Usenet.SocketWriteBuffer),
+		idleTimeout:      timeouts.IdleTimeout,
+		staleThreshold:   timeouts.StaleThreshold,
+		pingInterval:     timeouts.PingInterval,
+	}
+	if cfg.Usenet.ConnIdleTimeout != "" {
+		if d, err := utils.ParseDuration(cfg.Usenet.ConnIdleTimeout); err != nil || d <= 0 {
+			cm.logger.Warn().Str("conn_idle_timeout", cfg.Usenet.ConnIdleTimeout).
+				Msg("invalid conn_idle_timeout, using default")
+		} else {
+			cm.idleTimeout = d
+			// Keep the derived thresholds inside the configured window.
+			if cm.staleThreshold >= cm.idleTimeout {
+				cm.staleThreshold = cm.idleTimeout / 2
+			}
+			if cm.pingInterval >= cm.idleTimeout {
+				cm.pingInterval = cm.idleTimeout / 2
+			}
+		}
 	}
 	cm.repairPool = cm.newRepairPool(cfg.Repair.NNTPConnectionPercent)
 
 	// Start background reaper
 	go cm.reaper()
 	return cm, nil
+}
+
+// releaseSlot frees one slot on pp and pokes any acquirer parked in
+// waitForConnection. Every slot release must go through here, or a parked
+// acquirer waits out its fallback tick.
+func (c *Client) releaseSlot(pp *ProviderPool) {
+	<-pp.slots
+	select {
+	case c.slotFreed <- struct{}{}:
+	default:
+	}
 }
 
 // put returns a connection to the pool and releases the slot.
@@ -242,13 +311,13 @@ func (c *Client) put(conn *Connection, provider config.UsenetProvider) {
 	// Don't return closed connections to pool
 	if conn.IsClosed() {
 		_ = conn.Close()
-		<-pp.slots // Release slot
+		c.releaseSlot(pp)
 		return
 	}
 
 	if c.closed.Load() {
 		_ = conn.Close()
-		<-pp.slots // Release slot
+		c.releaseSlot(pp)
 		return
 	}
 
@@ -259,13 +328,13 @@ func (c *Client) put(conn *Connection, provider config.UsenetProvider) {
 	if len(pp.conns) >= pp.max {
 		pp.mu.Unlock()
 		_ = conn.Close()
-		<-pp.slots // Release slot
+		c.releaseSlot(pp)
 		return
 	}
 	pp.conns = append(pp.conns, entry) // Push to stack
 	pp.mu.Unlock()
 
-	<-pp.slots // Release slot - connection is now available for reuse
+	c.releaseSlot(pp) // connection is now available for reuse
 }
 
 // release closes a connection without returning it (for error cases)
@@ -274,7 +343,7 @@ func (c *Client) release(conn *Connection) {
 		_ = conn.Close()
 		if pp, ok := c.pools[conn.address]; ok {
 			pp.activeConns.Delete(conn) // Deregister from active tracking
-			<-pp.slots                  // Release slot
+			c.releaseSlot(pp)
 		}
 	}
 }
@@ -288,9 +357,10 @@ func (c *Client) isHealthy(entry *connectionEntry) bool {
 	if entry.conn.IsClosed() {
 		return false
 	}
-	// Check if already closed/expired (though normally caught by reaper)
-	// Or check stale threshold
-	if time.Since(entry.lastUsed) > timeouts.StaleThreshold {
+	// Verify with a ping if we haven't heard from this connection recently.
+	// A successful reaper keepalive counts as activity, so freshly-pinged
+	// connections skip the extra checkout round-trip.
+	if time.Since(entry.lastActivity()) > c.staleThreshold {
 		if err := entry.conn.ping(); err != nil {
 			return false
 		}
@@ -298,11 +368,13 @@ func (c *Client) isHealthy(entry *connectionEntry) bool {
 	return true
 }
 
-func isIdleExpired(lastUsed time.Time, now time.Time) bool {
+// isIdleExpired reports whether a pooled connection has gone unused (by
+// real work, not keepalive pings) long enough to close.
+func (c *Client) isIdleExpired(lastUsed time.Time, now time.Time) bool {
 	if lastUsed.IsZero() {
 		return false
 	}
-	return now.Sub(lastUsed) > timeouts.IdleTimeout
+	return now.Sub(lastUsed) > c.idleTimeout
 }
 
 // ExecuteWithFailover executes an operation with automatic provider failover and retry logic.
@@ -439,9 +511,19 @@ func (c *Client) ExecuteWithFailover(ctx context.Context, fn func(conn *Connecti
 	}
 
 	if lastErr != nil {
-		return lastErr
+		return fmt.Errorf("%w: %w", ErrAllProvidersFailed, lastErr)
 	}
-	return errors.New("all providers failed")
+	return ErrAllProvidersFailed
+}
+
+// ErrAllProvidersFailed marks an error returned after ExecuteWithFailover
+// exhausted both its per-provider retries and provider failover; outer retry
+// loops should not multiply attempts on it.
+var ErrAllProvidersFailed = errors.New("all providers failed")
+
+// IsAllProvidersFailed reports whether err carries ErrAllProvidersFailed.
+func IsAllProvidersFailed(err error) bool {
+	return errors.Is(err, ErrAllProvidersFailed)
 }
 
 // returnOrReleaseConn returns a connection to the pool or releases it if closed
@@ -467,7 +549,7 @@ func (c *Client) getConnectionFromProvider(ctx context.Context, provider config.
 	case pp.slots <- struct{}{}:
 		conn, err := c.getOrCreateFromPool(ctx, pp, provider)
 		if err != nil {
-			<-pp.slots
+			c.releaseSlot(pp)
 			return nil, provider, err
 		}
 		return conn, provider, nil
@@ -532,8 +614,8 @@ func (c *Client) getAnyAvailableConnection(ctx context.Context, exclusions provi
 			// Got a slot - try to get or create connection
 			conn, err := c.getOrCreateFromPool(ctx, pp, provider)
 			if err != nil {
-				<-pp.slots // Release slot on error
-				continue   // Try next provider
+				c.releaseSlot(pp) // Release slot on error
+				continue          // Try next provider
 			}
 			return conn, provider, nil
 		default:
@@ -546,134 +628,60 @@ func (c *Client) getAnyAvailableConnection(ctx context.Context, exclusions provi
 		return nil, config.UsenetProvider{}, errors.New("no eligible providers available")
 	}
 
-	// Phase 2: All providers in this tier busy - race for first available
-	// slot in the tier. When the primary tier is in use this is the wait
-	// that lets a backup remain idle rather than getting roped in.
+	// Phase 2: All providers in this tier busy - block until a slot frees.
+	// When the primary tier is in use this is the wait that lets a backup
+	// remain idle rather than getting roped in.
 	eligible := make([]config.UsenetProvider, 0, eligibleCount)
 	for _, provider := range c.providers {
 		if provider.Backup == useBackups && !exclusions.excludes(provider) {
 			eligible = append(eligible, provider)
 		}
 	}
-	return c.raceForConnection(ctx, eligible)
+	return c.waitForConnection(ctx, eligible)
 }
 
-// raceForConnection spawns goroutines that race to acquire a connection slot.
-// Returns as soon as any provider has availability.
-//
-// Each goroutine reports exactly one result (success or error) via resultCh, or
-// exits silently if it never acquired a slot. A WaitGroup + channel-close ensures
-// the receiver loop always terminates, and any extra connections won by multiple
-// goroutines are properly returned to the pool — preventing slot leaks under heavy
-// concurrent import load.
-func (c *Client) raceForConnection(ctx context.Context, eligible []config.UsenetProvider) (*Connection, config.UsenetProvider, error) {
-	type result struct {
-		conn     *Connection
-		provider config.UsenetProvider
-		err      error
-	}
+// waitForConnection blocks until a slot frees on any eligible provider, then
+// acquires it: scan all eligible pools non-blocking; if none has a slot, park
+// on slotFreed and re-scan. Spurious wakeups just cost a scan; fairness is
+// best-effort.
+func (c *Client) waitForConnection(ctx context.Context, eligible []config.UsenetProvider) (*Connection, config.UsenetProvider, error) {
+	// The fallback tick guards against a slot release that bypasses
+	// releaseSlot turning into an indefinite park.
+	const wakeFallback = 250 * time.Millisecond
+	timer := time.NewTimer(wakeFallback)
+	defer timer.Stop()
 
-	innerCtx, cancel := context.WithCancel(ctx)
-
-	// Buffer for all possible results — goroutines that win the slot race send here.
-	resultCh := make(chan result, len(eligible))
-	var wg sync.WaitGroup
-
-	for _, provider := range eligible {
-		wg.Add(1)
-		go func(p config.UsenetProvider) {
-			defer wg.Done()
-			pp := c.pools[p.Host]
-
-			// Block waiting for slot (respects context)
+	var lastErr error
+	for {
+		busy := 0
+		failed := 0
+		for _, provider := range eligible {
+			pp := c.pools[provider.Host]
 			select {
 			case pp.slots <- struct{}{}:
-				// Got slot
-			case <-innerCtx.Done():
-				return // Context cancelled before we got a slot — no send needed
-			}
-
-			// Check if context was cancelled while we were waiting
-			if innerCtx.Err() != nil {
-				<-pp.slots // Release slot
-				return
-			}
-
-			// Try to get or create connection
-			conn, err := c.getOrCreateFromPool(innerCtx, pp, p)
-			if err != nil {
-				<-pp.slots // Release slot on error
-				select {
-				case resultCh <- result{nil, p, err}:
-				case <-innerCtx.Done():
+				conn, err := c.getOrCreateFromPool(ctx, pp, provider)
+				if err != nil {
+					c.releaseSlot(pp)
+					lastErr = err
+					failed++
+					continue
 				}
-				return
+				return conn, provider, nil
+			default:
+				busy++
 			}
+		}
+		// Every provider had a free slot and failed to produce a connection:
+		// surface the error instead of spinning on dial failures.
+		if busy == 0 && failed > 0 {
+			return nil, config.UsenetProvider{}, lastErr
+		}
 
-			// Send the result; if the inner context was already cancelled (another
-			// goroutine won), return our connection to the pool immediately.
-			select {
-			case resultCh <- result{conn, p, nil}:
-				// Slot is still held — the receiver will call returnOrReleaseConn.
-			case <-innerCtx.Done():
-				c.put(conn, p) // releases slot
-			}
-		}(provider)
-	}
-
-	// Close resultCh once all goroutines have finished so the receiver loop below
-	// can terminate without needing an explicit count.
-	go func() {
-		wg.Wait()
-		close(resultCh)
-		cancel()
-	}()
-
-	// Drain all results:
-	//  - First success becomes the winner; cancel() is called to stop remaining goroutines.
-	//  - Any subsequent successes (from goroutines that raced to completion before cancel
-	//    reached them) have their connections returned to the pool to prevent slot leaks.
-	//  - Errors are collected so we can return a meaningful error if there is no winner.
-	var winConn *Connection
-	var winProvider config.UsenetProvider
-	var lastErr error
-
-	for {
+		timer.Reset(wakeFallback)
 		select {
-		case r, ok := <-resultCh:
-			if !ok {
-				// Channel closed — all goroutines have finished.
-				if winConn != nil {
-					return winConn, winProvider, nil
-				}
-				if lastErr != nil {
-					return nil, config.UsenetProvider{}, lastErr
-				}
-				return nil, config.UsenetProvider{}, errors.New("failed to get connection from any provider")
-			}
-			if r.err == nil && r.conn != nil {
-				if winConn == nil {
-					winConn = r.conn
-					winProvider = r.provider
-					cancel() // Tell losing goroutines to stop ASAP.
-				} else {
-					// Extra winner arrived before cancel propagated — release it.
-					c.returnOrReleaseConn(r.conn, r.provider)
-				}
-			} else if r.err != nil {
-				lastErr = r.err
-			}
+		case <-c.slotFreed:
+		case <-timer.C:
 		case <-ctx.Done():
-			// Parent context cancelled — cancel inner, drain remaining connections
-			// in background so we don't block the caller.
-			cancel()
-			go func() {
-				for r := range resultCh {
-					if r.conn != nil {
-						c.returnOrReleaseConn(r.conn, r.provider)
-					}
-				}
-			}()
 			return nil, config.UsenetProvider{}, ctx.Err()
 		}
 	}
@@ -694,7 +702,7 @@ func (c *Client) getOrCreateFromPool(ctx context.Context, pp *ProviderPool, prov
 			pp.mu.Unlock()
 
 			now := utils.Now()
-			if isIdleExpired(entry.lastUsed, now) {
+			if c.isIdleExpired(entry.lastUsed, now) {
 				conn := entry.conn
 				releaseConnectionEntry(entry)
 				_ = conn.Close()
@@ -821,8 +829,11 @@ func (c *Client) createConnection(ctx context.Context, provider config.UsenetPro
 		}
 	}
 
-	reader := bufio.NewReaderSize(netConn, 512*1024)
-	writer := bufio.NewWriterSize(netConn, 64*1024)
+	// The reader matches the 128KB chunks the body copier consumes (the
+	// socket buffer, not bufio, is the RTT window); the writer carries only
+	// short command lines.
+	reader := bufio.NewReaderSize(netConn, 128*1024)
+	writer := bufio.NewWriterSize(netConn, 4*1024)
 
 	conn := &Connection{
 		conn:     netConn,
@@ -862,6 +873,10 @@ func (c *Client) createConnection(ctx context.Context, provider config.UsenetPro
 	// Clear deadline for normal operation
 	_ = netConn.SetDeadline(time.Time{})
 
+	// Registered with the body-idle janitor for the connection's lifetime;
+	// idleNS=0 disarms it whenever no body copy is in flight.
+	bodyIdleJanitor.add(conn)
+
 	return conn, nil
 }
 
@@ -881,38 +896,102 @@ func (c *Client) reaper() {
 func (c *Client) reapIdleConnections() {
 	now := utils.Now()
 	for _, pp := range c.pools {
+		var toClose, toPing []*connectionEntry
+
+		// Cap how many entries one sweep may hold slots for: after a playback
+		// pause every pooled connection crosses pingInterval in the same
+		// sweep, and pinging them all at once would leave a resuming reader
+		// with no free slots. The remainder is pinged on later sweeps.
+		maxPing := max(1, pp.max/4)
+
 		pp.mu.Lock()
-
-		// LIFO Stack: Oldest (least recently used) items are at index 0.
-		// Find first non-expired connection; all after it are newer and valid.
-		expiredCount := 0
+		kept := pp.conns[:0]
 		for _, entry := range pp.conns {
-			if isIdleExpired(entry.lastUsed, now) {
-				_ = entry.conn.Close()
-				expiredCount++
-			} else {
-				// Found a valid one - stop here
-				break
+			switch {
+			case c.isIdleExpired(entry.lastUsed, now):
+				toClose = append(toClose, entry)
+			case now.Sub(entry.lastActivity()) > c.pingInterval && len(toPing) < maxPing:
+				// Candidate for a keepalive ping. Take a connection slot so
+				// the provider's total stays capped while the entry is out of
+				// the pool being pinged — otherwise a checkout burst could
+				// dial replacements and briefly exceed max_connections. If no
+				// slot is free the pool is busy and the conn will either be
+				// used (real activity) or expire soon; skip this sweep.
+				select {
+				case pp.slots <- struct{}{}:
+					toPing = append(toPing, entry)
+				default:
+					kept = append(kept, entry)
+				}
+			default:
+				kept = append(kept, entry)
 			}
 		}
-
-		// Remove expired connections from the front of the slice
-		if expiredCount > 0 {
-			for i := 0; i < expiredCount; i++ {
-				releaseConnectionEntry(pp.conns[i])
-			}
-			// Shift remaining items to front
-			remaining := len(pp.conns) - expiredCount
-			copy(pp.conns, pp.conns[expiredCount:])
-			// Nil out trailing pointers to help GC
-			for i := remaining; i < len(pp.conns); i++ {
-				pp.conns[i] = nil
-			}
-			pp.conns = pp.conns[:remaining]
+		// Nil out trailing pointers to help GC
+		for i := len(kept); i < len(pp.conns); i++ {
+			pp.conns[i] = nil
 		}
-
+		pp.conns = kept
 		pp.mu.Unlock()
+
+		for _, entry := range toClose {
+			conn := entry.conn
+			releaseConnectionEntry(entry)
+			_ = conn.Close()
+		}
+		// Ping outside the pool lock, in parallel, so slot-held time stays
+		// one round-trip rather than the whole batch's.
+		if len(toPing) > 0 {
+			var wg sync.WaitGroup
+			workers := min(len(toPing), 4)
+			pingCh := make(chan *connectionEntry, len(toPing))
+			for _, entry := range toPing {
+				pingCh <- entry
+			}
+			close(pingCh)
+			for range workers {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for entry := range pingCh {
+						c.keepAlive(pp, entry, now)
+					}
+				}()
+			}
+			wg.Wait()
+		}
 	}
+}
+
+// keepAlive pings an idle connection that was removed from the pool (with a
+// slot held) and returns it on success. Failed pings close the connection —
+// exactly the sessions the old aggressive idle timeout existed to avoid
+// handing out, caught here without sacrificing the warm pool.
+func (c *Client) keepAlive(pp *ProviderPool, entry *connectionEntry, now time.Time) {
+	discard := func() {
+		conn := entry.conn
+		releaseConnectionEntry(entry)
+		_ = conn.Close()
+		c.releaseSlot(pp)
+	}
+
+	if err := entry.conn.ping(); err != nil {
+		c.logger.Debug().Err(err).Str("provider", entry.provider.Host).
+			Msg("keepalive ping failed, closing idle connection")
+		discard()
+		return
+	}
+	entry.lastPing = now
+
+	pp.mu.Lock()
+	if c.closed.Load() || len(pp.conns) >= pp.max {
+		pp.mu.Unlock()
+		discard()
+		return
+	}
+	pp.conns = append(pp.conns, entry)
+	pp.mu.Unlock()
+	c.releaseSlot(pp) // connection is available again
 }
 
 // Stats returns current pool statistics

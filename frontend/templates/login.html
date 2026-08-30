@@ -1,0 +1,65 @@
+{{ define "login" }}
+<div class="flex min-h-screen items-center justify-center bg-base-200">
+    <div class="card w-full max-w-sm bg-base-100 shadow-xl">
+        <div class="card-body">
+            <h2 class="card-title justify-center mb-6">Login</h2>
+            <form id="loginForm" class="space-y-4">
+                <div>
+                    <label class="label" for="username">
+                        <span>Username</span>
+                    </label>
+                    <input type="text" class="input w-full" id="username" name="username" required>
+                </div>
+                <div>
+                    <label class="label" for="password">
+                        <span>Password</span>
+                    </label>
+                    <input type="password" class="input w-full" id="password" name="password" required>
+                </div>
+                <div class="mt-6">
+                    <button type="submit" class="btn btn-primary w-full">Login</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        let loginBtn = document.querySelector('#loginForm button[type="submit"]');
+
+        const formData = {
+            username: document.getElementById('username').value,
+            password: document.getElementById('password').value
+        };
+
+        try {
+            const response = await window.decypharrUtils.fetcher('/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(formData)
+            });
+
+            if (response.ok) {
+                window.decypharrUtils.createToast('Login successful! Redirecting...', 'success');
+
+                // Redirect after a short delay
+                setTimeout(() => {
+                    window.location.href = window.urlBase || '/';
+                }, 1000);
+            } else {
+                const errorText = await response.text();
+                throw new Error(errorText || 'Invalid credentials');
+            }
+        } catch (error) {
+            console.error('Login error:', error);
+            window.decypharrUtils.createToast(error.message || 'Login failed. Please try again.', 'error');
+        } finally {
+            window.decypharrUtils.setButtonLoading(loginBtn, false);
+        }
+    });
+</script>
+{{ end }}
