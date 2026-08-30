@@ -1,0 +1,354 @@
+{{ define "repair" }}
+<div class="space-y-6">
+    {{ if .SetupError }}
+    <div role="alert" class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle text-xl"></i>
+        <div>
+            <h3 class="font-bold">Configuration Required</h3>
+            <div class="text-sm">Your configuration is incomplete ({{ .SetupError }}). Please complete the setup in the
+                <a href="{{.URLBase}}settings" class="link link-hover font-semibold">Settings page</a>.
+            </div>
+        </div>
+    </div>
+    {{ end }}
+
+    <!-- Status strip -->
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-body">
+            <div class="flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between">
+                <div>
+                    <h2 class="card-title text-2xl">
+                        <i class="bi bi-heart-pulse mr-2 text-primary"></i>Health Checker
+                    </h2>
+                    <p class="text-sm opacity-70 mt-1" id="repairStatusLine">Loading…</p>
+                    <p class="text-xs opacity-60 mt-1">
+                        Configure repair in
+                        <a href="{{.URLBase}}settings#repair" class="link link-hover font-medium">Settings → Repair</a>.
+                    </p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button id="runNowBtn" class="btn btn-primary btn-sm">
+                        <i class="bi bi-play-fill mr-1"></i>Run
+                    </button>
+                    <button id="viewBrokenBtn" class="btn btn-outline btn-sm"
+                            title="See broken entries and their files">
+                        <i class="bi bi-bug mr-1"></i>View broken
+                        <span id="brokenCountBadge" class="badge badge-error badge-sm ml-1 hidden">0</span>
+                    </button>
+                    <button id="fixBrokenBtn" class="btn btn-error btn-outline btn-sm"
+                            title="Trigger Arr delete + re-search on currently broken entries">
+                        <i class="bi bi-bandaid mr-1"></i>Fix broken
+                    </button>
+                    <button id="clearStateBtn" class="btn btn-warning btn-outline btn-sm"
+                            title="Clear persisted repair state locally">
+                        <i class="bi bi-eraser mr-1"></i>Clear State
+                    </button>
+                    <button id="stopRunBtn" class="btn btn-warning btn-sm" disabled>
+                        <i class="bi bi-stop-fill mr-1"></i>Stop
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mt-4" id="healthCountsGrid">
+                <!-- filled by JS -->
+            </div>
+
+            <div id="activeRunPanel" class="mt-4 hidden bg-base-200/60 rounded-lg p-4">
+                <div class="flex flex-col gap-3 mb-3">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div class="font-medium">
+                            <i class="bi bi-arrow-repeat animate-spin mr-1"></i>
+                            Sweep in progress
+                        </div>
+                        <span class="badge badge-ghost" id="activeRunStage">-</span>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div class="bg-base-100/70 rounded-lg px-3 py-2">
+                            <div class="text-[10px] uppercase tracking-wide opacity-60">Run ID</div>
+                            <div class="font-mono text-xs break-all mt-1" id="activeRunIdText">-</div>
+                        </div>
+                        <div class="bg-base-100/70 rounded-lg px-3 py-2">
+                            <div class="text-[10px] uppercase tracking-wide opacity-60">Started</div>
+                            <div class="text-xs mt-1" id="activeRunStarted">-</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 text-sm" id="activeRunStats">
+                    <!-- filled by JS -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Targeted recheck (by Arr media id) -->
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-body">
+            <h3 class="card-title text-xl">
+                <i class="bi bi-bullseye mr-2 text-primary"></i>Recheck a specific media
+            </h3>
+            <p class="text-sm opacity-70 mt-1">
+                Targeted one-off check by Arr media id (Sonarr series id, Radarr movie id, tvdb / tmdb id).
+                Useful when something failed to play and you only want to re-verify that one show or movie.
+            </p>
+
+            <form id="recheckMediaForm" class="grid grid-cols-1 md:grid-cols-12 gap-3 mt-4 items-end">
+                <div class="form-control md:col-span-3">
+                    <label class="label py-1" for="recheckArr">
+                        <span class="label-text font-medium">Arr <span class="opacity-60 font-normal">(optional)</span></span>
+                    </label>
+                    <select class="select select-bordered" id="recheckArr">
+                        <option value="">Auto-detect</option>
+                    </select>
+                </div>
+                <div class="form-control md:col-span-5">
+                    <label class="label py-1" for="recheckMediaId">
+                        <span class="label-text font-medium">Media id</span>
+                    </label>
+                    <input type="text" class="input input-bordered" id="recheckMediaId"
+                           placeholder="e.g. 12345" required>
+                </div>
+                <div class="form-control md:col-span-2">
+                    <label class="label cursor-pointer justify-start gap-2 py-1">
+                        <input type="checkbox" class="checkbox checkbox-primary" id="recheckFix">
+                        <span class="label-text">Auto-repair</span>
+                    </label>
+                </div>
+                <div class="md:col-span-2">
+                    <button type="submit" class="btn btn-primary w-full" id="recheckMediaBtn">
+                        <i class="bi bi-search-heart mr-1"></i>Recheck
+                    </button>
+                </div>
+            </form>
+
+            <div id="recheckMediaResult" class="mt-4 hidden bg-base-200/60 rounded-lg p-4 text-sm"></div>
+        </div>
+    </div>
+
+    <!-- Run history -->
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-header">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 p-6 border-b border-base-200">
+                <h3 class="card-title text-xl">
+                    <i class="bi bi-clock-history mr-2"></i>Run history
+                </h3>
+                <div class="flex gap-2">
+                    <button id="clearHistoryBtn" class="btn btn-error btn-sm btn-outline">
+                        <i class="bi bi-trash mr-1"></i>Clear history
+                    </button>
+                    <button id="refreshHistoryBtn" class="btn btn-outline btn-sm">
+                        <i class="bi bi-arrow-clockwise mr-1"></i>Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div class="overflow-x-auto">
+                <table class="table table-hover">
+                    <thead class="bg-base-200">
+                    <tr>
+                        <th>Started</th>
+                        <th>Trigger</th>
+                        <th>Status</th>
+                        <th>Probed</th>
+                        <th>Broken</th>
+                        <th>Repaired</th>
+                        <th>Cleared</th>
+                        <th>Duration</th>
+                        <th>Error</th>
+                    </tr>
+                    </thead>
+                    <tbody id="runsTableBody"></tbody>
+                </table>
+                <div id="noRunsMessage" class="text-center py-12 hidden text-base-content/70">
+                    <i class="bi bi-clipboard-x text-3xl block mb-2"></i>
+                    No runs yet.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Run options modal -->
+<dialog id="runRepairModal" class="modal">
+    <div class="modal-box max-w-2xl p-0">
+        <form method="dialog">
+            <button class="btn btn-sm btn-circle btn-ghost absolute right-3 top-3" aria-label="Close">✕</button>
+        </form>
+        <div class="px-6 py-5 border-b border-base-200">
+            <h3 class="font-bold text-lg flex items-center gap-2 pr-10">
+                <i class="bi bi-play-fill text-primary"></i>Run repair
+            </h3>
+            <p class="text-sm opacity-70 mt-1">Choose how this one-off sweep should probe and act on entries.</p>
+        </div>
+        <form id="runRepairForm">
+            <div class="divide-y divide-base-200">
+                <label class="flex cursor-pointer items-start justify-between gap-4 px-6 py-4 hover:bg-base-200/60">
+                    <span class="flex gap-3">
+                        <i class="bi bi-calendar-x text-lg text-primary mt-0.5"></i>
+                        <span>
+                            <span class="block font-medium">Ignore last checked</span>
+                            <span class="block text-sm opacity-70">Probe every selected candidate, including entries checked recently.</span>
+                        </span>
+                    </span>
+                    <input type="checkbox" class="toggle toggle-primary mt-1" id="runIgnoreLastChecked">
+                </label>
+                <div class="px-6 py-4">
+                    <div class="flex gap-3 mb-3">
+                        <i class="bi bi-filter-circle text-lg text-primary mt-0.5"></i>
+                        <div>
+                            <div class="font-medium">Protocol</div>
+                            <div class="text-sm opacity-70">Choose which entries this run should check.</div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <label class="label cursor-pointer justify-start gap-3 rounded-lg border border-base-300 px-3 py-2">
+                            <input type="radio" class="radio radio-primary radio-sm" name="runProtocol" value="all" id="runProtocolAll">
+                            <span class="label-text">Torrent and NZB</span>
+                        </label>
+                        <label class="label cursor-pointer justify-start gap-3 rounded-lg border border-base-300 px-3 py-2">
+                            <input type="radio" class="radio radio-primary radio-sm" name="runProtocol" value="torrent" id="runProtocolTorrent">
+                            <span class="label-text">Torrent</span>
+                        </label>
+                        <label class="label cursor-pointer justify-start gap-3 rounded-lg border border-base-300 px-3 py-2">
+                            <input type="radio" class="radio radio-primary radio-sm" name="runProtocol" value="nzb" id="runProtocolNZB">
+                            <span class="label-text">NZB</span>
+                        </label>
+                    </div>
+                </div>
+                <label class="flex cursor-pointer items-start justify-between gap-4 px-6 py-4 hover:bg-base-200/60">
+                    <span class="flex gap-3">
+                        <i class="bi bi-link-45deg text-lg text-primary mt-0.5"></i>
+                        <span>
+                            <span class="block font-medium">Unrestrict link</span>
+                            <span class="block text-sm opacity-70">Use provider download-link generation for torrent probes instead of the provider check endpoint.</span>
+                        </span>
+                    </span>
+                    <input type="checkbox" class="toggle toggle-primary mt-1" id="runUnrestrictLink">
+                </label>
+                <label class="flex cursor-pointer items-start justify-between gap-4 px-6 py-4 hover:bg-base-200/60">
+                    <span class="flex gap-3">
+                        <i class="bi bi-bandaid text-lg text-error mt-0.5"></i>
+                        <span>
+                            <span class="block font-medium">Auto-repair</span>
+                            <span class="block text-sm opacity-70">Send broken Arr-known files through delete and search after probing.</span>
+                        </span>
+                    </span>
+                    <input type="checkbox" class="toggle toggle-primary mt-1" id="runAutoRepair">
+                </label>
+            </div>
+            <div class="modal-action px-6 py-4 mt-0 bg-base-200/40">
+                <button type="button" class="btn btn-ghost" onclick="document.getElementById('runRepairModal').close()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="runRepairSubmitBtn">
+                    <i class="bi bi-play-fill mr-1"></i>Run
+                </button>
+            </div>
+        </form>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
+
+<!-- Clear state modal -->
+<dialog id="clearStateModal" class="modal">
+    <div class="modal-box max-w-lg">
+        <form method="dialog">
+            <button class="btn btn-sm btn-circle btn-ghost absolute right-3 top-3" aria-label="Close">✕</button>
+        </form>
+        <h3 class="font-bold text-lg flex items-center gap-2 mb-4">
+            <i class="bi bi-eraser text-warning"></i>Clear State
+        </h3>
+        <form id="clearStateForm" class="space-y-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2" id="clearStateOptions">
+                <label class="label cursor-pointer justify-between gap-3 rounded-lg border border-base-300 px-3 py-2">
+                    <span class="label-text">Repairing <span class="badge badge-sm ml-1" data-clear-state-count="repairing">0</span></span>
+                    <input type="checkbox" class="checkbox checkbox-primary" name="repair_state" value="repairing">
+                </label>
+                <label class="label cursor-pointer justify-between gap-3 rounded-lg border border-base-300 px-3 py-2">
+                    <span class="label-text">Broken <span class="badge badge-sm ml-1" data-clear-state-count="broken">0</span></span>
+                    <input type="checkbox" class="checkbox checkbox-primary" name="repair_state" value="broken">
+                </label>
+                <label class="label cursor-pointer justify-between gap-3 rounded-lg border border-base-300 px-3 py-2">
+                    <span class="label-text">Healthy <span class="badge badge-sm ml-1" data-clear-state-count="healthy">0</span></span>
+                    <input type="checkbox" class="checkbox checkbox-primary" name="repair_state" value="healthy">
+                </label>
+                <label class="label cursor-pointer justify-between gap-3 rounded-lg border border-base-300 px-3 py-2">
+                    <span class="label-text">Unknown <span class="badge badge-sm ml-1" data-clear-state-count="unknown">0</span></span>
+                    <input type="checkbox" class="checkbox checkbox-primary" name="repair_state" value="unknown">
+                </label>
+                <label class="label cursor-pointer justify-between gap-3 rounded-lg border border-base-300 px-3 py-2">
+                    <span class="label-text">Stale <span class="badge badge-sm ml-1" data-clear-state-count="stale">0</span></span>
+                    <input type="checkbox" class="checkbox checkbox-primary" name="repair_state" value="stale">
+                </label>
+                <label class="label cursor-pointer justify-between gap-3 rounded-lg border border-base-300 px-3 py-2">
+                    <span class="label-text">Unsupported <span class="badge badge-sm ml-1" data-clear-state-count="unsupported">0</span></span>
+                    <input type="checkbox" class="checkbox checkbox-primary" name="repair_state" value="unsupported">
+                </label>
+            </div>
+            <div id="clearStateError" class="text-error text-sm hidden"></div>
+            <div class="modal-action">
+                <button type="button" class="btn btn-ghost" onclick="document.getElementById('clearStateModal').close()">Cancel</button>
+                <button type="submit" class="btn btn-warning" id="clearStateSubmitBtn">
+                    <i class="bi bi-eraser mr-1"></i>Clear
+                </button>
+            </div>
+        </form>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
+
+<!-- Broken entries modal -->
+<dialog id="brokenModal" class="modal">
+    <div class="modal-box max-w-6xl">
+        <form method="dialog">
+            <button class="btn btn-sm btn-circle btn-ghost absolute right-3 top-3" aria-label="Close">✕</button>
+        </form>
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4 pr-10">
+            <h3 class="font-bold text-lg flex items-center gap-2">
+                <i class="bi bi-bug text-error"></i>Broken entries
+                <span id="brokenModalCount" class="badge badge-error badge-sm">0</span>
+            </h3>
+            <button id="refreshBrokenBtn" class="btn btn-outline btn-sm">
+                <i class="bi bi-arrow-clockwise mr-1"></i>Refresh
+            </button>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="table table-hover">
+                <thead class="bg-base-200">
+                <tr>
+                    <th></th>
+                    <th>Entry</th>
+                    <th>Protocol</th>
+                    <th>Files</th>
+                    <th>Broken</th>
+                    <th>Reason</th>
+                    <th>Last checked</th>
+                    <th>Last fix</th>
+                    <th class="text-right">Actions</th>
+                </tr>
+                </thead>
+                <tbody id="brokenTableBody"></tbody>
+            </table>
+            <div id="noBrokenMessage" class="text-center py-12 hidden text-base-content/70">
+                <i class="bi bi-check2-circle text-3xl block mb-2 text-success"></i>
+                No broken entries.
+            </div>
+        </div>
+        <div id="brokenPaginationBar" class="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 mt-2 border-t border-base-200 hidden">
+            <div id="brokenPaginationInfo" class="text-xs opacity-70"></div>
+            <div id="brokenPaginationControls" class="join"></div>
+        </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        window.repairManager = new RepairManager();
+    });
+</script>
+{{ end }}

@@ -1,0 +1,1412 @@
+{{ define "stats" }}
+<style>
+    #mount-content .mount-stat-section-title {
+        color: color-mix(in oklab, var(--color-base-content) 58%, transparent);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        margin-bottom: 0.5rem;
+        text-transform: uppercase;
+    }
+
+    #mount-content .mount-stat-section-header {
+        align-items: center;
+        border-top: 1px solid color-mix(in oklab, var(--color-base-content) 10%, transparent);
+        display: flex;
+        gap: 1rem;
+        justify-content: space-between;
+        margin-top: 0.5rem;
+        padding-top: 1.5rem;
+    }
+
+    #mount-content .mount-stat-section-header .mount-stat-section-title {
+        margin-bottom: 0;
+    }
+
+    #mount-content .mount-cache-action-btn {
+        min-height: 2rem;
+    }
+
+    #mount-content .mount-cache-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        justify-content: flex-end;
+    }
+
+    #mount-content .mount-stat-grid {
+        display: grid;
+        gap: 0;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    #mount-content .mount-stat-grid > .stat {
+        border-left: 1px dashed color-mix(in oklab, var(--color-base-content) 16%, transparent);
+        min-height: 9.5rem;
+        padding: 1.5rem 2rem;
+    }
+
+    #mount-content .mount-stat-grid > .stat:nth-child(4n + 1) {
+        border-left: 0;
+    }
+
+    #mount-content .mount-stat-grid > .stat:nth-child(n + 5) {
+        border-top: 1px dashed color-mix(in oklab, var(--color-base-content) 12%, transparent);
+    }
+
+    #mount-content .mount-stat-value-compact {
+        font-size: 1.55rem;
+        line-height: 1.85rem;
+    }
+
+    #mount-content .mount-stat-wrap {
+        max-width: 18rem;
+        overflow-wrap: anywhere;
+        white-space: normal;
+        word-break: break-word;
+    }
+
+    #purge-cache-modal .purge-cache-summary {
+        border: 1px solid color-mix(in oklab, var(--color-base-content) 10%, transparent);
+    }
+
+    @media (max-width: 1023px) {
+        #mount-content .mount-stat-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        #mount-content .mount-stat-grid > .stat:nth-child(odd) {
+            border-left: 0;
+        }
+
+        #mount-content .mount-stat-grid > .stat:nth-child(n + 3) {
+            border-top: 1px dashed color-mix(in oklab, var(--color-base-content) 12%, transparent);
+        }
+
+    }
+
+    @media (max-width: 639px) {
+        #mount-content .mount-stat-grid {
+            grid-template-columns: 1fr;
+        }
+
+        #mount-content .mount-stat-section-header {
+            align-items: flex-start;
+            flex-direction: column;
+        }
+
+        #mount-content .mount-cache-actions {
+            justify-content: flex-start;
+        }
+
+        #mount-content .mount-stat-grid > .stat {
+            border-left: 0;
+            padding: 1.25rem 1rem;
+        }
+
+        #mount-content .mount-stat-grid > .stat:nth-child(n + 2) {
+            border-top: 1px dashed color-mix(in oklab, var(--color-base-content) 12%, transparent);
+        }
+    }
+</style>
+<div class="container mx-auto">
+    <div class="flex items-center justify-between mb-6">
+        <div class="flex items-center gap-3">
+            <h1 class="text-3xl font-bold text-primary">System Statistics</h1>
+        </div>
+        <button id="refresh-stats" class="btn btn-outline btn-sm">
+            <i class="bi bi-arrow-clockwise"></i>
+            Refresh
+        </button>
+    </div>
+
+    <div id="loading-stats" class="text-center py-12">
+        <div class="loading loading-spinner loading-lg text-primary"></div>
+        <p class="mt-4 text-base-content/70">Loading system statistics...</p>
+    </div>
+
+    <div id="stats-content" style="display: none;">
+        <!-- Tab Navigation -->
+        <div role="tablist" class="tabs tabs-boxed mb-6">
+            <a role="tab" class="tab tab-active" data-tab="overview">
+                <i class="bi bi-speedometer2 mr-2"></i>Overview
+            </a>
+            <a role="tab" class="tab" data-tab="streams">
+                <i class="bi bi-broadcast mr-2"></i>Streams
+                <span class="badge badge-sm ml-2" id="streams-tab-count">0</span>
+            </a>
+            <a role="tab" class="tab" data-tab="providers">
+                <i class="bi bi-collection mr-2"></i>Providers
+            </a>
+            <a role="tab" class="tab" data-tab="mount">
+                <i class="bi bi-hdd-stack mr-2"></i>Mount
+            </a>
+        </div>
+
+        <!-- Overview Tab -->
+        <div id="tab-overview" class="tab-content">
+            <div class="card bg-base-100 shadow-xl">
+                <div class="card-header p-6 pb-3">
+                    <h2 class="card-title text-xl">
+                        <i class="bi bi-cpu text-info"></i>
+                        System Overview
+                    </h2>
+                </div>
+                <div class="card-body p-6 pt-3">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                        <div class="stat">
+                            <div class="stat-figure text-primary">
+                                <i class="bi bi-clock-history text-2xl"></i>
+                            </div>
+                            <div class="stat-title">Uptime</div>
+                            <div class="stat-value text-primary" id="uptime">-</div>
+                            <div class="stat-desc" id="start-time">Started: -</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-figure text-info">
+                                <i class="bi bi-memory text-2xl"></i>
+                            </div>
+                            <div class="stat-title">Memory Used</div>
+                            <div class="stat-value text-info" id="memory-used">-</div>
+                            <div class="stat-desc" id="heap-alloc">Heap: -</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-figure text-success">
+                                <i class="bi bi-diagram-3 text-2xl"></i>
+                            </div>
+                            <div class="stat-title">Goroutines</div>
+                            <div class="stat-value text-success" id="goroutines">-</div>
+                            <div class="stat-desc" id="gc-cycles">GC: - cycles</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-figure text-warning">
+                                <i class="bi bi-cpu text-2xl"></i>
+                            </div>
+                            <div class="stat-title">CPU Cores</div>
+                            <div class="stat-value text-warning" id="num-cpu">-</div>
+                            <div class="stat-desc" id="arch">-</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-figure text-accent">
+                                <i class="bi bi-info-circle text-2xl"></i>
+                            </div>
+                            <div class="stat-title">System</div>
+                            <div class="stat-value text-accent" id="os">-</div>
+                            <div class="stat-desc" id="go-version">-</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Library Stats Section -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 gap-6 mt-6">
+                <!-- Storage Stats -->
+                <div class="card bg-base-100 shadow-xl">
+                    <div class="card-body p-4">
+                        <h3 class="card-title text-base">
+                            <i class="bi bi-database text-primary"></i>
+                            Storage
+                        </h3>
+                        <div class="grid grid-cols-2 gap-2 mt-2">
+                            <div>
+                                <div class="text-xs text-base-content/70">Database</div>
+                                <div class="font-bold text-primary" id="db-size">-</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-base-content/70">Entries</div>
+                                <div class="font-bold text-info" id="total-entries">-</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Queue Stats -->
+                <div class="card bg-base-100 shadow-xl">
+                    <div class="card-body p-4">
+                        <h3 class="card-title text-base">
+                            <i class="bi bi-hourglass-split text-warning"></i>
+                            Queue
+                        </h3>
+                        <div class="mt-2">
+                            <div class="text-xs text-base-content/70">Pending</div>
+                            <div class="font-bold text-warning text-xl" id="queue-pending">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Arr Instances -->
+                <div class="card bg-base-100 shadow-xl">
+                    <div class="card-body p-4">
+                        <h3 class="card-title text-base">
+                            <i class="bi bi-link-45deg text-success"></i>
+                            Arr Instances
+                        </h3>
+                        <div class="mt-2">
+                            <div class="text-xs text-base-content/70">Connected</div>
+                            <div class="font-bold text-success text-xl" id="arrs-count">-</div>
+                        </div>
+                        <div class="flex flex-wrap gap-1 mt-2" id="arrs-list"></div>
+                    </div>
+                </div>
+
+                <!-- Repair Stats -->
+                <div class="card bg-base-100 shadow-xl">
+                    <div class="card-body p-4">
+                        <h3 class="card-title text-base">
+                            <i class="bi bi-wrench text-secondary"></i>
+                            Repair Jobs
+                        </h3>
+                        <div class="grid grid-cols-2 gap-2 mt-2">
+                            <div>
+                                <div class="text-xs text-base-content/70">Active</div>
+                                <div class="font-bold text-info" id="repair-active">-</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-base-content/70">Pending</div>
+                                <div class="font-bold text-warning" id="repair-pending">-</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-base-content/70">Completed</div>
+                                <div class="font-bold text-success" id="repair-completed">-</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-base-content/70">Failed</div>
+                                <div class="font-bold text-error" id="repair-failed">-</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Streams Tab -->
+        <div id="tab-streams" class="tab-content hidden">
+            <div class="card bg-base-100 shadow-xl" id="streams-card">
+                <div class="card-header p-6 pb-3">
+                    <div class="card-title text-xl justify-between items-center">
+                        <h2>
+                            <i class="bi bi-broadcast text-success"></i>
+                            Active Streams
+                        </h2>
+                        <div class="badge badge-success" id="streams-count">0</div>
+                    </div>
+                </div>
+                <div class="card-body p-6 pt-3" id="streams-content">
+                    <p class="text-base-content/70">No active streams</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Providers Tab -->
+        <div id="tab-providers" class="tab-content hidden">
+            <div class="card bg-base-100 shadow-xl" id="providers-card">
+                <div class="card-header p-6 pb-3">
+                    <h2 class="card-title text-xl">
+                        <i class="bi bi-collection text-secondary"></i>
+                        Providers
+                    </h2>
+                </div>
+                <div class="card-body p-6 pt-3" id="providers-content">
+                    <p class="text-base-content/70">Loading providers...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mount Tab -->
+        <div id="tab-mount" class="tab-content hidden">
+            <div class="card bg-base-100 shadow-xl" id="mount-card">
+                <div class="card-header p-6 pb-3">
+                    <div class="card-title text-xl justify-between items-center">
+                        <h2>
+                            <i class="bi bi-hdd-stack text-primary"></i>
+                            Mount Statistics
+                        </h2>
+                        <div class="flex gap-2">
+                            <a href="{{.URLBase}}debug/logs/rclone" class="btn btn-sm btn-outline" target="_blank"
+                               id="rclone-logs-btn">
+                                <i class="bi bi-arrow-right"></i>
+                                View Logs
+                            </a>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <div class="badge" id="mount-type">Unknown</div>
+                        <div class="badge" id="mount-status">Unknown</div>
+                    </div>
+                </div>
+                <div class="card-body p-6 pt-3" id="mount-content">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="error-stats" class="alert alert-error" style="display: none;">
+        <i class="bi bi-exclamation-triangle-fill"></i>
+        <span id="error-message">Failed to load statistics</span>
+        <button id="retry-stats" class="btn btn-sm btn-outline">
+            <i class="bi bi-arrow-clockwise"></i>
+            Retry
+        </button>
+    </div>
+</div>
+
+<dialog id="purge-cache-modal" class="modal">
+    <div class="modal-box max-w-lg">
+        <form method="dialog">
+            <button class="btn btn-sm btn-circle btn-ghost absolute right-3 top-3" aria-label="Close">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </form>
+        <h3 class="font-bold text-lg flex items-center gap-2 mb-3">
+            <i class="bi bi-trash3 text-error"></i>
+            Purge DFS Cache
+        </h3>
+        <p class="text-sm text-base-content/70 mb-4">
+            This removes cached disk files that are not currently open or streaming. Active files will be skipped.
+        </p>
+        <div class="purge-cache-summary rounded-lg bg-base-200/50 p-4">
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <div class="text-xs text-base-content/60">Cached Files</div>
+                    <div class="font-bold text-info text-xl" id="purge-cache-files">0</div>
+                </div>
+                <div>
+                    <div class="text-xs text-base-content/60">Disk Used</div>
+                    <div class="font-bold text-warning text-xl" id="purge-cache-disk-used">0 B</div>
+                </div>
+            </div>
+        </div>
+        <div class="alert alert-warning mt-4">
+            <i class="bi bi-exclamation-triangle"></i>
+            <span>Cached files may need to be downloaded again after purging.</span>
+        </div>
+        <div class="modal-action">
+            <button type="button" class="btn btn-ghost" id="cancel-purge-cache">Cancel</button>
+            <button type="button" class="btn btn-error" id="confirm-purge-cache">
+                <i class="bi bi-trash3"></i>
+                Purge Cache
+            </button>
+        </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const loadingEl = document.getElementById('loading-stats');
+        const contentEl = document.getElementById('stats-content');
+        const errorEl = document.getElementById('error-stats');
+        const refreshBtn = document.getElementById('refresh-stats');
+        const retryBtn = document.getElementById('retry-stats');
+
+        // Tab switching
+        const tabs = document.querySelectorAll('[role="tab"]');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const targetTab = tab.dataset.tab;
+
+                // Update tab states
+                tabs.forEach(t => t.classList.remove('tab-active'));
+                tab.classList.add('tab-active');
+
+                // Show/hide content
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.add('hidden');
+                });
+                document.getElementById(`tab-${targetTab}`).classList.remove('hidden');
+            });
+        });
+
+        function formatNumber(num) {
+            return num.toLocaleString();
+        }
+
+        function showError(message) {
+            loadingEl.style.display = 'none';
+            contentEl.style.display = 'none';
+            errorEl.style.display = 'flex';
+            document.getElementById('error-message').textContent = message;
+        }
+
+        function showContent() {
+            loadingEl.style.display = 'none';
+            errorEl.style.display = 'none';
+            contentEl.style.display = 'block';
+        }
+
+        function showLoading() {
+            contentEl.style.display = 'none';
+            errorEl.style.display = 'none';
+            loadingEl.style.display = 'block';
+        }
+
+        function updateMountStats(mountData) {
+            const mountCard = document.getElementById('mount-card');
+            const mountType = document.getElementById('mount-type');
+            const mountStatus = document.getElementById('mount-status');
+            const mountContent = document.getElementById('mount-content');
+            const rcloneLogsBtn = document.getElementById('rclone-logs-btn');
+
+            // Determine mount type (rclone, dfs, or external)
+            let type = 'None';
+
+            if (mountData && mountData.type === "rclone" && mountData.enabled) {
+                type = 'Rclone';
+                rcloneLogsBtn.style.display = 'inline-flex';
+            } else if (mountData && mountData.type === "dfs" && mountData.enabled) {
+                type = 'DFS';
+                rcloneLogsBtn.style.display = 'none';
+            } else if (mountData && mountData.type === "external") {
+                type = 'External';
+                rcloneLogsBtn.style.display = 'inline-flex';
+            }
+
+            mountType.textContent = type;
+            mountType.className = type !== 'None' ? 'badge badge-info' : 'badge badge-ghost';
+
+            if (!mountData || type === 'None') {
+                mountStatus.textContent = 'Disabled';
+                mountStatus.className = 'badge badge-error';
+                mountContent.innerHTML = '<p class="text-base-content/70">No mount system is enabled or configured.</p>';
+                return;
+            }
+
+            // For DFS mount
+            if (type === 'DFS') {
+                updateDFSStats(mountData, mountStatus, mountContent);
+                return;
+            }
+
+            // For Rclone/External mount
+            if (!mountData.ready) {
+                mountStatus.textContent = 'Not Ready';
+                mountStatus.className = 'badge badge-warning';
+                mountContent.innerHTML = `<p class="text-base-content/70">${type} server is not ready.</p>`;
+                return;
+            }
+
+            mountStatus.textContent = 'Active';
+            mountStatus.className = 'badge badge-success';
+
+            updateRcloneStats(mountData.detail || {}, mountContent);
+        }
+
+        function updateDFSStats(data, statusEl, contentEl) {
+            if (!data.ready) {
+                statusEl.textContent = 'Not Ready';
+                statusEl.className = 'badge badge-warning';
+                contentEl.innerHTML = '<p class="text-base-content/70">DFS filesystem is not ready.</p>';
+                return;
+            }
+
+            statusEl.textContent = 'Active';
+            statusEl.className = 'badge badge-success';
+
+            const detail = data.detail || {};
+            const activeFiles = detail.active_files || 0;
+            const totalFiles = detail.total_files || 0;
+            const cacheItems = detail.cache_item_count || 0;
+            const activeCacheItems = detail.cache_active_item_count || 0;
+            const cacheTotalSize = detail.cache_total_size || 0;
+            const cacheMaxSize = detail.cache_max_size || 0;
+            const cacheType = (detail.cache_type || 'vfs').toUpperCase();
+            const cacheUtilizationValue = detail.cache_utilization != null
+                ? detail.cache_utilization
+                : (cacheMaxSize > 0 ? cacheTotalSize / cacheMaxSize : 0);
+            const cacheUtilizationPercent = (cacheUtilizationValue * 100).toFixed(1);
+            const cacheUsageNumber = Number(cacheUtilizationPercent);
+            const cacheUsageTextClass = cacheUsageNumber > 90 ? 'text-error'
+                : cacheUsageNumber > 75 ? 'text-warning'
+                    : 'text-success';
+            // New stats
+            const activeDownloads = detail.cache_active_downloads || 0;
+            const downloadSpeed = detail.cache_download_speed || 0;
+            const totalDownloaded = detail.cache_total_downloaded || 0;
+            const cacheHits = detail.cache_cache_hits || 0;
+            const cacheMisses = detail.cache_cache_misses || 0;
+            const cacheHitRate = detail.cache_cache_hit_rate != null ? detail.cache_cache_hit_rate : 0;
+            const hitRatePercent = (cacheHitRate * 100).toFixed(1);
+            const hitRateClass = cacheHitRate > 0.8 ? 'text-success'
+                : cacheHitRate > 0.5 ? 'text-warning'
+                    : cacheHits + cacheMisses === 0 ? 'text-base-content/50' : 'text-error';
+            const circuitBreakers = detail.cache_circuit_breakers || 0;
+            const cacheHealthClass = circuitBreakers > 0 ? 'text-warning' : 'text-success';
+            const cacheHealthLabel = circuitBreakers > 0 ? 'Attention' : 'OK';
+            const cacheHealthDesc = circuitBreakers > 0
+                ? `${formatNumber(circuitBreakers)} ${circuitBreakers === 1 ? 'file' : 'files'} temporarily paused`
+                : 'Cache reads normal';
+            const cacheHealthTitle = circuitBreakers > 0
+                ? 'Decypharr paused cache reads for these files after repeated provider errors. It will retry automatically.'
+                : 'Cache reads are operating normally.';
+            const cacheHealthIcon = circuitBreakers > 0 ? 'bi-shield-exclamation' : 'bi-shield-check';
+
+            let html = `
+                <div class="mount-stat-section-title">Current Activity</div>
+                <div class="mount-stat-grid">
+                    <div class="stat">
+                        <div class="stat-figure text-primary">
+                            <i class="bi bi-download text-2xl"></i>
+                        </div>
+                        <div class="stat-title">Active Downloads</div>
+                        <div class="stat-value text-primary">${formatNumber(activeDownloads)}</div>
+                        <div class="stat-desc">${activeDownloads > 0 ? '<span class="text-success">● Downloading</span>' : 'Idle'}</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-figure text-info">
+                            <i class="bi bi-speedometer2 text-2xl"></i>
+                        </div>
+                        <div class="stat-title">Download Speed</div>
+                        <div class="stat-value text-info">${window.decypharrUtils.formatBytes(downloadSpeed)}/s</div>
+                        <div class="stat-desc">Total: ${window.decypharrUtils.formatBytes(totalDownloaded)}</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-figure ${hitRateClass}">
+                            <i class="bi bi-bullseye text-2xl"></i>
+                        </div>
+                        <div class="stat-title">Cache Hit Rate</div>
+                        <div class="stat-value ${hitRateClass}">${hitRatePercent}%</div>
+                        <div class="stat-desc">${formatNumber(cacheHits)} hits / ${formatNumber(cacheMisses)} misses</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-figure text-secondary">
+                            <i class="bi bi-folder2-open text-2xl"></i>
+                        </div>
+                        <div class="stat-title">Open Files</div>
+                        <div class="stat-value text-secondary">${formatNumber(activeFiles)}</div>
+                        <div class="stat-desc">Opened since startup: ${formatNumber(totalFiles)}</div>
+                    </div>
+                </div>
+
+                <div class="mount-stat-section-header">
+                    <div class="mount-stat-section-title">Cache Storage</div>
+                    <div class="mount-cache-actions">
+                        <button type="button" class="btn btn-outline btn-sm mount-cache-action-btn" data-run-cache-cleanup>
+                            <i class="bi bi-play-circle"></i>
+                            Run Cleanup
+                        </button>
+                        <button type="button"
+                                class="btn btn-outline btn-sm mount-cache-action-btn"
+                                data-purge-cache
+                                data-cache-items="${cacheItems}"
+                                data-cache-size="${cacheTotalSize}"
+                                data-cache-max="${cacheMaxSize}">
+                            <i class="bi bi-trash3"></i>
+                            Purge Cache
+                        </button>
+                    </div>
+                </div>
+                <div class="mount-stat-grid">
+                    <div class="stat">
+                        <div class="stat-figure text-info">
+                            <i class="bi bi-archive text-2xl"></i>
+                        </div>
+                        <div class="stat-title">Cached Files</div>
+                        <div class="stat-value mount-stat-value-compact text-info">${formatNumber(cacheItems)}</div>
+                        <div class="stat-desc">Stored on disk</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-figure ${cacheUsageTextClass}">
+                            <i class="bi bi-hdd text-2xl"></i>
+                        </div>
+                        <div class="stat-title">Disk Used</div>
+                        <div class="stat-value mount-stat-value-compact ${cacheUsageTextClass}">${window.decypharrUtils.formatBytes(cacheTotalSize)}</div>
+                        <div class="stat-desc">${cacheUtilizationPercent}% of ${window.decypharrUtils.formatBytes(cacheMaxSize)}</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-figure text-accent">
+                            <i class="bi bi-memory text-2xl"></i>
+                        </div>
+                        <div class="stat-title">Loaded Cache Items</div>
+                        <div class="stat-value mount-stat-value-compact text-accent">${formatNumber(activeCacheItems)}</div>
+                        <div class="stat-desc">Resident in ${cacheType} memory</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-figure ${cacheHealthClass}">
+                            <i class="bi ${cacheHealthIcon} text-2xl"></i>
+                        </div>
+                        <div class="stat-title">Cache Health</div>
+                        <div class="stat-value mount-stat-value-compact ${cacheHealthClass}">${cacheHealthLabel}</div>
+                        <div class="stat-desc ${cacheHealthClass}" title="${window.decypharrUtils.escapeHtml(cacheHealthTitle)}">${cacheHealthDesc}</div>
+                    </div>
+            `;
+
+            html += `
+                </div>
+            `;
+
+            contentEl.innerHTML = html;
+            const cleanupButton = contentEl.querySelector('[data-run-cache-cleanup]');
+            if (cleanupButton) {
+                cleanupButton.addEventListener('click', () => runDFSCacheCleanup(cleanupButton));
+            }
+            const purgeButton = contentEl.querySelector('[data-purge-cache]');
+            if (purgeButton) {
+                purgeButton.addEventListener('click', () => runDFSCachePurge(purgeButton));
+            }
+        }
+
+        async function runDFSCacheCleanup(button) {
+            try {
+                const response = await window.decypharrUtils.fetcher('/api/mount/cache/cleanup', {
+                    method: 'POST',
+                    loadingButton: button,
+                });
+
+                if (!response.ok) {
+                    const message = await response.text();
+                    throw new Error(message || `HTTP ${response.status}`);
+                }
+
+                const result = await response.json();
+                const cache = result.cache || {};
+                const warnings = cache.cleanup_warning_count || 0;
+                const freedBytes = cache.cleanup_freed_bytes || 0;
+                const removedItems = cache.cleanup_removed_items || 0;
+                const toastType = warnings > 0 ? 'warning' : 'success';
+                const toastMessage = warnings > 0
+                    ? `Cache cleanup completed with ${warnings} warning(s).`
+                    : `Cache cleanup completed. Freed ${window.decypharrUtils.formatBytes(freedBytes)} and evicted ${formatNumber(removedItems)} file(s).`;
+
+                window.decypharrUtils.createToast(toastMessage, toastType);
+                loadStats();
+            } catch (error) {
+                window.decypharrUtils.createToast(`Cache cleanup failed: ${error.message}`, 'error');
+            }
+        }
+
+        function confirmDFSCachePurge(button) {
+            const modal = document.getElementById('purge-cache-modal');
+            const confirmButton = document.getElementById('confirm-purge-cache');
+            const cancelButton = document.getElementById('cancel-purge-cache');
+            const filesEl = document.getElementById('purge-cache-files');
+            const diskUsedEl = document.getElementById('purge-cache-disk-used');
+            if (!modal || !confirmButton || !cancelButton) {
+                return Promise.resolve(false);
+            }
+
+            const cacheItems = Number(button.dataset.cacheItems || 0);
+            const cacheSize = Number(button.dataset.cacheSize || 0);
+            const cacheMax = Number(button.dataset.cacheMax || 0);
+            if (filesEl) {
+                filesEl.textContent = formatNumber(cacheItems);
+            }
+            if (diskUsedEl) {
+                const sizeText = window.decypharrUtils.formatBytes(cacheSize);
+                diskUsedEl.textContent = cacheMax > 0
+                    ? `${sizeText} / ${window.decypharrUtils.formatBytes(cacheMax)}`
+                    : `${sizeText} / unlimited`;
+            }
+
+            return new Promise(resolve => {
+                let resolved = false;
+                const cleanup = () => {
+                    confirmButton.removeEventListener('click', onConfirm);
+                    cancelButton.removeEventListener('click', onCancel);
+                    modal.removeEventListener('close', onCancel);
+                };
+                const finish = value => {
+                    if (resolved) {
+                        return;
+                    }
+                    resolved = true;
+                    cleanup();
+                    resolve(value);
+                    if (modal.open) {
+                        modal.close();
+                    }
+                };
+                const onConfirm = () => finish(true);
+                const onCancel = () => finish(false);
+
+                confirmButton.addEventListener('click', onConfirm);
+                cancelButton.addEventListener('click', onCancel);
+                modal.addEventListener('close', onCancel);
+
+                if (typeof modal.showModal === 'function') {
+                    modal.showModal();
+                } else {
+                    modal.setAttribute('open', '');
+                }
+            });
+        }
+
+        async function runDFSCachePurge(button) {
+            const confirmed = await confirmDFSCachePurge(button);
+            if (!confirmed) {
+                return;
+            }
+
+            try {
+                const response = await window.decypharrUtils.fetcher('/api/mount/cache/purge', {
+                    method: 'POST',
+                    loadingButton: button,
+                });
+
+                if (!response.ok) {
+                    const message = await response.text();
+                    throw new Error(message || `HTTP ${response.status}`);
+                }
+
+                const result = await response.json();
+                const cache = result.cache || {};
+                const warnings = cache.purge_warning_count || 0;
+                const freedBytes = cache.purge_freed_bytes || 0;
+                const removedItems = cache.purge_removed_items || 0;
+                const skippedBusyItems = cache.purge_skipped_busy_items || 0;
+                const toastType = warnings > 0 ? 'warning' : 'success';
+                const skippedText = skippedBusyItems > 0 ? ` Skipped ${formatNumber(skippedBusyItems)} active item(s).` : '';
+                const toastMessage = warnings > 0
+                    ? `Cache purge completed with ${warnings} warning(s).${skippedText}`
+                    : `Cache purge completed. Freed ${window.decypharrUtils.formatBytes(freedBytes)} and removed ${formatNumber(removedItems)} file(s).${skippedText}`;
+
+                window.decypharrUtils.createToast(toastMessage, toastType);
+                loadStats();
+            } catch (error) {
+                window.decypharrUtils.createToast(`Cache purge failed: ${error.message}`, 'error');
+            }
+        }
+
+        function updateRcloneStats(rclone, contentEl) {
+            let html = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">';
+
+            // Version info
+            if (rclone.version) {
+                html += `
+                    <div class="stat">
+                        <div class="stat-title">Rclone Version</div>
+                        <div class="stat-value text-sm">${rclone.version.version || 'Unknown'}</div>
+                        <div class="stat-desc">${rclone.version.arch || ''} ${rclone.version.os || ''}</div>
+                    </div>
+                `;
+            }
+
+            // Core stats contain transfer information
+            if (rclone.core) {
+                const cs = rclone.core;
+                html += `
+                    <div class="stat">
+                        <div class="stat-title">Transferred</div>
+                        <div class="stat-value text-primary">${window.decypharrUtils.formatBytes(cs.bytes || 0)}</div>
+                        <div class="stat-desc">Speed: ${window.decypharrUtils.formatBytes(cs.speed || 0)}/s</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-title">Transfers</div>
+                        <div class="stat-value text-info">${cs.transfers || 0}</div>
+                        <div class="stat-desc">Errors: ${cs.errors || 0}</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-title">Checks</div>
+                        <div class="stat-value text-secondary">${cs.checks || 0}</div>
+                        <div class="stat-desc">Total: ${cs.totalChecks || 0}</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-title">Uptime</div>
+                        <div class="stat-value text-accent">${window.decypharrUtils.formatDuration(cs.elapsedTime)}</div>
+                        <div class="stat-desc">Transfer: ${window.decypharrUtils.formatDuration(cs.transferTime)}</div>
+                    </div>
+                `;
+            }
+
+            if (rclone.memory) {
+                const ms = rclone.memory;
+                html += `
+                    <div class="stat">
+                        <div class="stat-title">Rclone Memory</div>
+                        <div class="stat-value text-accent">${window.decypharrUtils.formatBytes(ms.Sys || 0)}</div>
+                        <div class="stat-desc">Heap: ${window.decypharrUtils.formatBytes(ms.TotalAlloc || 0)}</div>
+                    </div>
+                `;
+            }
+            html += '</div>';
+
+            // AddOrUpdate active transfers if available
+            if (rclone.core && rclone.core.transferring && rclone.core.transferring.length > 0) {
+                let transferring = rclone.core.transferring;
+                html += `
+                    <div class="mt-6">
+                        <h3 class="text-lg font-semibold mb-3">
+                            <i class="bi bi-arrow-down-up text-primary"></i>
+                            Active Transfers (${transferring.length})
+                        </h3>
+                        <div class="space-y-2 max-h-64 overflow-y-auto">
+                `;
+
+                transferring.forEach(transfer => {
+                    const progress = ((transfer.bytes || 0) / (transfer.size || 1)) * 100;
+                    html += `
+                        <div class="card bg-base-200 compact">
+                            <div class="card-body">
+                                <div class="flex justify-between items-start mb-2">
+                                    <h4 class="font-medium text-sm truncate flex-1 mr-2">${transfer.name || 'Unknown'}</h4>
+                                    <span class="text-xs text-base-content/70">${window.decypharrUtils.formatBytes(transfer.speed || 0)}/s</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <progress class="progress progress-primary flex-1" value="${progress}" max="100"></progress>
+                                    <span class="text-xs font-mono">${progress.toFixed(1)}%</span>
+                                </div>
+                                <div class="flex justify-between text-xs text-base-content/60 mt-1">
+                                    <span>${window.decypharrUtils.formatBytes(transfer.bytes || 0)} / ${window.decypharrUtils.formatBytes(transfer.size || 0)}</span>
+                                    <span>ETA: ${transfer.eta ? window.decypharrUtils.formatDuration(transfer.eta) : 'Unknown'}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                html += '</div></div>';
+            }
+
+            // AddOrUpdate bandwidth stats if available
+            if (rclone.bandwidth && rclone.bandwidth.rate !== "off") {
+                html += `
+                    <div class="mt-6">
+                        <h3 class="text-lg font-semibold mb-3">
+                            <i class="bi bi-speedometer2 text-info"></i>
+                            Bandwidth Limits
+                        </h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                `;
+
+                html += `
+                    <div class="stat bg-base-200 rounded-lg p-3">
+                        <div class="stat-title text-xs">Bytes Per Seconds</div>
+                        <div class="stat-value text-sm">${window.decypharrUtils.formatBytes(rclone.bandwidth.bytesPerSecond)}</div>
+                    </div>
+                    <div class="stat bg-base-200 rounded-lg p-3">
+                        <div class="stat-title text-xs">Rate</div>
+                        <div class="stat-value text-sm">${window.decypharrUtils.formatBytes(rclone.bandwidth.rate)}</div>
+                    </div>
+                `;
+
+                html += '</div></div>';
+            }
+
+            contentEl.innerHTML = html;
+        }
+
+        function updateActiveStreams(activeStreamsData) {
+            const streamsCount = document.getElementById('streams-count');
+            const streamsTabCount = document.getElementById('streams-tab-count');
+            const streamsContent = document.getElementById('streams-content');
+
+            const count = activeStreamsData?.count || 0;
+
+            // Update both badges
+            streamsCount.textContent = count;
+            streamsTabCount.textContent = count;
+            streamsCount.className = count > 0 ? 'badge badge-success' : 'badge badge-ghost';
+            streamsTabCount.className = count > 0 ? 'badge badge-sm badge-success ml-2' : 'badge badge-sm badge-ghost ml-2';
+
+            if (!activeStreamsData || !activeStreamsData.streams || count === 0) {
+                streamsContent.innerHTML = '<p class="text-base-content/70">No active streams</p>';
+                return;
+            }
+
+            let html = '<div class="space-y-2 max-h-96 overflow-y-auto">';
+
+            activeStreamsData.streams.forEach(stream => {
+                const startedAt = new Date(stream.started_at * 1000);
+                const duration = Math.floor((Date.now() - startedAt.getTime()) / 1000);
+                const sourceBadge = stream.source === 'nzb'
+                    ? '<span class="badge badge-accent badge-xs">NZB</span>'
+                    : '<span class="badge badge-secondary badge-xs">Torrent</span>';
+                const debridInfo = stream.debrid ? `<span class="text-xs text-base-content/60">${stream.debrid}</span>` : '';
+
+                // Format client info - truncate long user agents
+                let clientDisplay = '';
+                if (stream.client) {
+                    let clientText = stream.client;
+                    // Truncate long user agents, show first meaningful part
+                    if (clientText.length > 30) {
+                        // Try to extract the main app name (e.g., "VLC/3.0.18" from a long UA)
+                        const match = clientText.match(/^([^\s\/]+(?:\/[\d.]+)?)/);
+                        clientText = match ? match[1] : clientText.substring(0, 30) + '...';
+                    }
+                    clientDisplay = `<span class="badge badge-ghost badge-xs" title="${stream.client}">${clientText}</span>`;
+                }
+
+                html += `
+                    <div class="card bg-base-200 compact">
+                        <div class="card-body p-3">
+                            <div class="flex justify-between items-start">
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center gap-2 mb-1 flex-wrap">
+                                        ${sourceBadge}
+                                        ${debridInfo}
+                                        ${clientDisplay}
+                                    </div>
+                                    <h4 class="font-medium text-sm truncate" title="${stream.entry_name}">${stream.entry_name}</h4>
+                                    <p class="text-xs text-base-content/70 truncate" title="${stream.file_name}">${stream.file_name}</p>
+                                </div>
+                                <div class="text-right flex-shrink-0 ml-2">
+                                    <div class="text-sm font-mono">${window.decypharrUtils.formatBytes(stream.file_size)}</div>
+                                    <div class="text-xs text-base-content/60">${formatUptime(duration)}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            streamsContent.innerHTML = html;
+        }
+
+        function updateProviders(debrids, usenetData) {
+            const providersContent = document.getElementById('providers-content');
+
+            const hasDebrids = debrids && debrids.length > 0;
+            const hasUsenet = usenetData && usenetData.providers && usenetData.providers.length > 0;
+
+            if (!hasDebrids && !hasUsenet) {
+                providersContent.innerHTML = '<p class="text-base-content/70">No providers configured.</p>';
+                return;
+            }
+
+            let html = '<div class="space-y-4">';
+
+            // Render debrid providers
+            if (hasDebrids) {
+                debrids.forEach(debrid => {
+                    const profile = debrid.profile || {};
+                    const library = debrid.library || {};
+                    const accounts = debrid.accounts || [];
+                    const storedSpeedTest = debrid.speed_test_result;
+
+                    // Generate initial speed result HTML from stored result
+                    let debridSpeedResultHtml = '';
+                    if (storedSpeedTest && !storedSpeedTest.error) {
+                        const speedMbps = storedSpeedTest.speed_mbps ? (storedSpeedTest.speed_mbps * 8).toFixed(1) : '';
+                        const latency = storedSpeedTest.latency_ms ? `${storedSpeedTest.latency_ms}ms` : '';
+                        const testedAt = storedSpeedTest.tested_at ? new Date(storedSpeedTest.tested_at).toLocaleTimeString() : '';
+                        debridSpeedResultHtml = `
+                            <div class="flex items-center gap-2 text-success">
+                                <i class="bi bi-check-circle"></i>
+                                ${latency ? `<span><strong>${latency}</strong> latency</span>` : ''}
+                                ${speedMbps ? `<span><strong>${speedMbps} Mbps</strong></span>` : ''}
+                            </div>
+                            <div class="text-xs text-base-content/50">Tested: ${testedAt}</div>
+                        `;
+                    }
+
+                    html += `
+                        <div class="card bg-base-200" id="debrid-card-${profile.name.replace(/\s+/g, '-')}">
+                            <div class="card-body p-4">
+                                <div class="flex justify-between items-start">
+                                    <div>
+                                        <div class="flex items-center gap-2">
+                                            <h3 class="card-title text-lg">${profile.name || 'Unknown Service'}</h3>
+                                            <span class="badge badge-secondary badge-sm">Debrid</span>
+                                        </div>
+                                        <p class="text-sm text-base-content/70">${profile.username || 'No username'}</p>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="flex items-center gap-2 justify-end">
+                                            <button
+                                                class="btn btn-xs btn-ghost debrid-speed-test-btn"
+                                                data-provider="${profile.name}"
+                                                onclick="runDebridSpeedTest('${profile.name}');">
+                                                Test Speed
+                                            </button>
+                                            <div class="text-sm font-mono">${formatNumber(profile.points || 0)} points</div>
+                                        </div>
+                                        <div id="debrid-speed-result-${profile.name.replace(/\s+/g, '-')}" class="text-xs mt-1">${debridSpeedResultHtml}</div>
+                                        <div class="text-xs text-base-content/70">Type: ${profile.type || 'Unknown'}</div>
+                                        <div class="text-xs text-base-content/70">Expires: ${profile.expiration ? new Date(profile.expiration).toLocaleDateString() : 'Unknown'}</div>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
+                                    <div class="stat">
+                                        <div class="stat-title text-xs">Library Size</div>
+                                        <div class="stat-value text-sm">${formatNumber(library.total || 0)}</div>
+                                    </div>
+                                    <div class="stat">
+                                        <div class="stat-title text-xs">Bad Torrents</div>
+                                        <div class="stat-value text-sm text-error">${formatNumber(library.bad || 0)}</div>
+                                    </div>
+                                    <div class="stat">
+                                        <div class="stat-title text-xs">Active Links</div>
+                                        <div class="stat-value text-sm text-success">${formatNumber(library.active_links || 0)}</div>
+                                    </div>
+                                    <div class="stat">
+                                        <div class="stat-title text-xs">Total Accounts</div>
+                                        <div class="stat-value text-sm text-info">${accounts.length}</div>
+                                    </div>
+                                </div>
+                    `;
+
+                    // Add accounts section if there are accounts
+                    if (accounts && accounts.length > 0) {
+                        html += `
+                            <div class="mt-4">
+                                <h4 class="font-semibold mb-2 text-sm">
+                                    <i class="bi bi-person-lines-fill text-primary"></i>
+                                    Accounts
+                                </h4>
+                                <div class="grid grid-cols-2 md:grid-cols-2 gap-2">
+                        `;
+
+                        accounts.forEach((account, index) => {
+                            const statusBadge = account.disabled ?
+                                '<span class="badge badge-error badge-xs">Disabled</span>' :
+                                '<span class="badge badge-success badge-xs">Active</span>';
+                            const inUseBadge = account.in_use ?
+                                '<span class="badge badge-info badge-xs">In Use</span>' :
+                                '';
+
+                            html += `
+                                <div class="card bg-base-100 compact">
+                                    <div class="card-body p-2">
+                                        <div class="flex justify-between items-start">
+                                            <div class="flex-1">
+                                                <div class="flex items-center gap-1">
+                                                    <h5 class="font-medium text-xs">Account #${account.order + 1}</h5>
+                                                    ${statusBadge}
+                                                    ${inUseBadge}
+                                                </div>
+                                                <p class="text-xs text-base-content/70">${account.username || '-'}</p>
+                                            </div>
+                                            <div class="text-right flex-shrink-0 ml-2">
+                                                <div class="text-xs text-base-content/60">Daily Usage: ${window.decypharrUtils.formatBytes(account.traffic_used || 0)}</div>
+                                                <div class="text-xs text-base-content/60">Expires: ${account.expiration ? new Date(account.expiration).toLocaleDateString() : 'Unknown'}</div>
+                                            </div>
+
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        });
+
+                        html += '</div></div>';
+                    }
+
+                    html += `
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+
+            // Render usenet provider
+            if (hasUsenet) {
+                const pool = usenetData.pool || {};
+                const nntpProviders = usenetData.providers || [];
+
+                const maxConns = pool.max_connections || 0;
+                const active = pool.active || 0;
+                const idle = pool.idle || 0;
+                const totalCreated = pool.total_created || 0;
+
+                const activePercent = maxConns > 0 ? (active / maxConns) * 100 : 0;
+                const idlePercent = maxConns > 0 ? (idle / maxConns) * 100 : 0;
+                const utilizationPercent = maxConns > 0 ? (totalCreated / maxConns) * 100 : 0;
+
+                html += `
+                    <div class="card bg-base-200">
+                        <div class="card-body p-4">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <div class="flex items-center gap-2">
+                                        <h3 class="card-title text-lg">Usenet</h3>
+                                        <span class="badge badge-accent badge-sm">NNTP</span>
+                                    </div>
+                                    <p class="text-sm text-base-content/70">${nntpProviders.length} server(s) configured</p>
+                                </div>
+                                <div class="text-right">
+                                    <div class="text-sm text-base-content/70">${formatNumber(totalCreated)} / ${formatNumber(maxConns)} connections</div>
+                                </div>
+                            </div>
+
+                            <!-- Connection Pool Bar -->
+                            <div class="mt-4">
+                                <div class="flex justify-between items-center mb-2">
+                                    <span class="text-xs font-medium">Pool Utilization</span>
+                                    <span class="text-xs font-mono">${utilizationPercent.toFixed(1)}%</span>
+                                </div>
+                                <div class="w-full bg-base-300 rounded-full h-4 relative overflow-hidden">
+                                    <div class="absolute h-full bg-success transition-all duration-300"
+                                         style="width: ${activePercent}%"></div>
+                                    <div class="absolute h-full bg-primary/80 transition-all duration-300"
+                                         style="left: ${activePercent}%; width: ${idlePercent}%"></div>
+                                </div>
+                                <div class="flex gap-4 mt-2 text-xs flex-wrap">
+                                    <span class="flex items-center gap-1">
+                                        <span class="w-2 h-2 bg-success rounded"></span>
+                                        Active: ${active}
+                                    </span>
+                                    <span class="flex items-center gap-1">
+                                        <span class="w-2 h-2 bg-primary/80 rounded"></span>
+                                        Idle: ${idle}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <!-- NNTP Servers -->
+                            <div class="mt-4">
+                                <h4 class="font-semibold mb-2 text-sm">
+                                    <i class="bi bi-server text-primary"></i>
+                                    NNTP Servers
+                                </h4>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                `;
+
+                nntpProviders.forEach(provider => {
+                    const speedTest = provider.speed_test;
+                    let speedResultHtml = '';
+                    if (speedTest && speedTest.tested_at) {
+                        const testedAt = new Date(speedTest.tested_at).toLocaleTimeString();
+                        if (speedTest.error) {
+                            speedResultHtml = `<span class="text-error text-xs"><i class="bi bi-x-circle"></i> Error</span>`;
+                        } else {
+                            const speedStr = speedTest.speed_mbps > 0
+                                ? `${speedTest.speed_mbps.toFixed(1)} MB/s`
+                                : `${speedTest.latency_ms}ms`;
+                            speedResultHtml = `<span class="text-success text-xs"><i class="bi bi-check-circle"></i> ${speedStr}</span>`;
+                        }
+                    }
+
+                    html += `
+                        <div class="card bg-base-100 compact">
+                            <div class="card-body p-2">
+                                <div class="flex justify-between items-start">
+                                    <div>
+                                        <div class="flex items-center gap-1">
+                                            <span class="font-medium text-xs">${provider.host}</span>
+                                            <span class="badge ${provider.ssl ? 'badge-success' : 'badge-warning'} badge-xs">${provider.ssl ? 'SSL' : 'Plain'}</span>
+                                        </div>
+                                        <p class="text-xs text-base-content/70">${provider.max_connections || 0} connections</p>
+                                    </div>
+                                    <div class="flex flex-col items-end gap-1">
+                                        ${speedResultHtml}
+                                        <button
+                                            class="btn btn-xs btn-ghost speed-test-btn"
+                                            data-provider="${provider.host}"
+                                            title="Run Speed Test"
+                                            onclick="runSpeedTest('${provider.host}');">
+                                            Test Speed
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="speed-result-${provider.host.replace(/\./g, '-')}" class="text-xs mt-1"></div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                html += `
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            html += '</div>';
+            providersContent.innerHTML = html;
+        }
+
+        function formatUptime(seconds) {
+            if (!seconds) return '-';
+
+            const days = Math.floor(seconds / 86400);
+            const hours = Math.floor((seconds % 86400) / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+
+            if (days > 0) {
+                return `${days}d ${hours}h ${minutes}m`;
+            } else if (hours > 0) {
+                return `${hours}h ${minutes}m ${secs}s`;
+            } else if (minutes > 0) {
+                return `${minutes}m ${secs}s`;
+            } else {
+                return `${secs}s`;
+            }
+        }
+
+        function updateStats(stats) {
+            // System overview
+            const sys = stats.system || {};
+            document.getElementById('uptime').textContent = formatUptime(sys.uptime_seconds);
+            document.getElementById('start-time').textContent = `Started: ${sys.start_time || '-'}`;
+            document.getElementById('memory-used').textContent = sys.memory_used || '-';
+            document.getElementById('heap-alloc').textContent = `Heap: ${sys.heap_alloc_mb || '-'} · Released: ${sys.heap_released_mb || '-'}`;
+            document.getElementById('goroutines').textContent = formatNumber(sys.goroutines || 0);
+            document.getElementById('gc-cycles').textContent = `GC: ${formatNumber(sys.gc_cycles || 0)} cycles`;
+            document.getElementById('num-cpu').textContent = sys.num_cpu || '-';
+            document.getElementById('arch').textContent = sys.arch || '-';
+            document.getElementById('os').textContent = sys.os || '-';
+            document.getElementById('go-version').textContent = sys.go_version || '-';
+
+            // Storage stats
+            if (stats.storage) {
+                document.getElementById('db-size').textContent = window.decypharrUtils.formatBytes(stats.storage.db_size || 0);
+                document.getElementById('total-entries').textContent = formatNumber(stats.storage.total_entries || 0);
+            }
+
+            // Queue stats
+            if (stats.queue) {
+                document.getElementById('queue-pending').textContent = formatNumber(stats.queue.pending || 0);
+            }
+
+            // Arr instances
+            if (stats.arrs) {
+                document.getElementById('arrs-count').textContent = formatNumber(stats.arrs.count || 0);
+                const arrsList = document.getElementById('arrs-list');
+                if (stats.arrs.names && stats.arrs.names.length > 0) {
+                    arrsList.innerHTML = stats.arrs.names.map(name =>
+                        `<span class="badge badge-outline">${name}</span>`
+                    ).join('');
+                } else {
+                    arrsList.innerHTML = '<span class="text-base-content/50 text-sm">No Arr instances configured</span>';
+                }
+            }
+
+            // Repair stats
+            if (stats.repair) {
+                document.getElementById('repair-active').textContent = formatNumber(stats.repair.active_jobs || 0);
+                document.getElementById('repair-pending').textContent = formatNumber(stats.repair.pending_jobs || 0);
+                document.getElementById('repair-completed').textContent = formatNumber(stats.repair.completed_jobs || 0);
+                document.getElementById('repair-failed').textContent = formatNumber(stats.repair.failed_jobs || 0);
+            }
+
+            // Mount stats (handles rclone, dfs, or external)
+            updateMountStats(stats.mount);
+
+            // Unified providers (debrid + usenet)
+            updateProviders(stats.debrids, stats.usenet);
+
+            // Active streams
+            updateActiveStreams(stats.active_streams);
+        }
+
+        function loadStats() {
+            showLoading();
+
+            fetch(`${window.urlBase}debug/stats`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return response.json();
+                })
+                .then(stats => {
+                    updateStats(stats);
+                    showContent();
+                })
+                .catch(error => {
+                    console.error('Error loading stats:', error);
+                    showError(error.message || 'Failed to load statistics');
+                });
+        }
+
+        // Speed test function for NNTP providers
+        window.runSpeedTest = async function (providerHost) {
+            const resultDiv = document.getElementById(`speed-result-${providerHost.replace(/\./g, '-')}`);
+            const button = document.querySelector(`button[data-provider="${providerHost}"]`);
+
+            if (!resultDiv || !button) return;
+
+            // Show loading state
+            button.disabled = true;
+            button.innerHTML = '<span class="loading loading-spinner loading-xs"></span> Testing...';
+            resultDiv.innerHTML = '';
+
+            try {
+                const response = await fetch(`${window.urlBase}debug/speedtest`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({protocol: 'nntp', provider: providerHost})
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const result = await response.json();
+
+                if (result.error) {
+                    resultDiv.innerHTML = `<span class="text-error"><i class="bi bi-x-circle"></i> ${result.error}</span>`;
+                } else {
+                    const testedAt = result.tested_at ? new Date(result.tested_at).toLocaleTimeString() : '';
+                    resultDiv.innerHTML = `
+                        <div class="flex items-center gap-2">
+                            <i class="bi bi-check-circle text-success"></i>
+                            <span><strong>${result.latency_ms || 0}ms</strong> latency</span>
+                        </div>
+                        <div class="text-xs text-base-content/50 mt-1">Tested: ${testedAt}</div>
+                    `;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<span class="text-error"><i class="bi bi-x-circle"></i> ${error.message}</span>`;
+            } finally {
+                button.disabled = false;
+                button.innerHTML = 'Test Speed';
+            }
+        };
+
+        // Speed test function for Debrid providers
+        window.runDebridSpeedTest = async function (providerName) {
+            const sanitizedName = providerName.replace(/\s+/g, '-');
+            const resultDiv = document.getElementById(`debrid-speed-result-${sanitizedName}`);
+            const button = document.querySelector(`button.debrid-speed-test-btn[data-provider="${providerName}"]`);
+
+            if (!resultDiv || !button) return;
+
+            // Show loading state
+            button.disabled = true;
+            button.innerHTML = '<span class="loading loading-spinner loading-xs"></span>';
+            resultDiv.innerHTML = '<span class="text-base-content/50">Testing...</span>';
+
+            try {
+                const response = await fetch(`${window.urlBase}debug/speedtest`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({protocol: 'debrid', provider: providerName})
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const result = await response.json();
+
+                if (result.error) {
+                    resultDiv.innerHTML = `<span class="text-error"><i class="bi bi-x-circle"></i> ${result.error}</span>`;
+                } else {
+                    const testedAt = result.tested_at ? new Date(result.tested_at).toLocaleTimeString() : '';
+                    // Convert MB/s to Mbps (multiply by 8)
+                    const speedMbps = result.speed_mbps ? (result.speed_mbps * 8).toFixed(1) : '';
+                    const latencyDisplay = result.latency_ms ? `${result.latency_ms}ms` : '';
+
+                    resultDiv.innerHTML = `
+                        <div class="flex items-center gap-2 text-success">
+                            <i class="bi bi-check-circle"></i>
+                            ${latencyDisplay ? `<span><strong>${latencyDisplay}</strong> latency</span>` : ''}
+                            ${speedMbps ? `<span><strong>${speedMbps} Mbps</strong></span>` : ''}
+                        </div>
+                        <div class="text-xs text-base-content/50">Tested: ${testedAt}</div>
+                    `;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<span class="text-error"><i class="bi bi-x-circle"></i> ${error.message}</span>`;
+            } finally {
+                button.disabled = false;
+                button.innerHTML = 'Test Speed';
+            }
+        };
+
+        // Event listeners
+        refreshBtn.addEventListener('click', loadStats);
+        retryBtn.addEventListener('click', loadStats);
+
+        // Auto-refresh every 30 seconds
+        setInterval(loadStats, 30000);
+
+        // Initial load
+        loadStats();
+    });
+</script>
+{{ end }}

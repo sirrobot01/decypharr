@@ -1,0 +1,1747 @@
+{{ define "config" }}
+<div class="space-y-6">
+    {{ if .SetupError }}
+    <div role="alert" class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle text-xl"></i>
+        <div>
+            <h3 class="font-bold">Configuration Required</h3>
+            <div class="text-sm">Your configuration is incomplete ({{ .SetupError }}). Please complete the setup
+                below.
+            </div>
+        </div>
+    </div>
+    {{ end }}
+
+    <form id="configForm" class="space-y-6">
+        <div class="card bg-base-100 shadow-xl">
+            <div class="card-body">
+                <div class="border-b border-base-300 mb-8 overflow-x-auto">
+                    <nav class="flex min-w-max gap-8" aria-label="Configuration Tabs">
+                        <button type="button"
+                                class="tab-button active flex items-center gap-2 py-3 px-1 border-b-2 border-primary text-primary font-medium text-sm"
+                                data-tab="general">
+                            <i class="bi bi-gear text-lg"></i>
+                            <span class="hidden sm:inline">General</span>
+                        </button>
+                        <button type="button"
+                                class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                data-tab="downloads">
+                            <i class="bi bi-download text-lg"></i>
+                            <span class="hidden sm:inline">Downloads</span>
+                        </button>
+                        <button type="button"
+                                class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                data-tab="providers">
+                            <i class="bi bi-collection text-lg"></i>
+                            <span class="hidden sm:inline">Providers</span>
+                        </button>
+                        <button type="button"
+                                class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                data-tab="auth">
+                            <i class="bi bi-shield-lock text-lg"></i>
+                            <span class="hidden sm:inline">Auth</span>
+                        </button>
+                        <button type="button"
+                                class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                data-tab="arrs">
+                            <i class="bi bi-collection text-lg"></i>
+                            <span class="hidden sm:inline">*Arrs</span>
+                        </button>
+                        <button type="button"
+                                class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                data-tab="notifications">
+                            <i class="bi bi-bell text-lg"></i>
+                            <span class="hidden sm:inline">Notifications</span>
+                        </button>
+                        <button type="button"
+                                class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                data-tab="mounts">
+                            <i class="bi bi-hdd-stack text-lg"></i>
+                            <span class="hidden sm:inline">Mounts</span>
+                        </button>
+                        <button type="button"
+                                class="tab-button flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                data-tab="repair">
+                            <i class="bi bi-heart-pulse text-lg"></i>
+                            <span class="hidden sm:inline">Repair</span>
+                        </button>
+                    </nav>
+                </div>
+
+                <div class="sticky top-20 z-30 flex justify-end mb-6">
+                    <button type="submit" class="btn btn-success btn-lg shadow-lg">
+                        <i class="bi bi-save mr-2"></i>Save Configuration
+                    </button>
+                </div>
+
+                <div class="tab-content-container">
+
+                    <div class="tab-content" data-tab-content="general">
+                        <div class="space-y-6">
+                            <h2 class="text-2xl font-bold flex items-center mb-6">
+                                <i class="bi bi-gear mr-3 text-primary"></i>General Settings
+                            </h2>
+
+                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="label" for="log-level">
+                                        <span class="font-medium">Log Level</span>
+                                    </label>
+                                    <select class="select w-full" name="log_level" id="log-level">
+                                        <option value="info">Info</option>
+                                        <option value="debug">Debug</option>
+                                        <option value="warn">Warning</option>
+                                        <option value="error">Error</option>
+                                        <option value="trace">Trace</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="label">
+                                        <span class="font-medium">Magnet Link Handler</span>
+                                    </label>
+                                    <button type="button" class="btn btn-primary w-full"
+                                            onclick="registerMagnetLinkHandler();" id="registerMagnetLink">
+                                        <i class="bi bi-magnet mr-2"></i>Register Magnet Handler
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                                <div>
+                                    <label class="label" for="urlBase">
+                                        <span class="font-medium">URL Base</span>
+                                    </label>
+                                    <input type="text" class="input w-full" id="urlBase" name="url_base"
+                                           placeholder="/">
+                                    <span class="text-sm opacity-70">URL base for the application</span>
+                                </div>
+
+                                <div>
+                                    <label class="label" for="bindAddress">
+                                        <span class="font-medium">Bind Address</span>
+                                    </label>
+                                    <input type="text" class="input w-full" id="bindAddress" name="bind_address"
+                                           placeholder="0.0.0.0">
+                                    <span class="text-sm opacity-70">Bind address (default: all interfaces)</span>
+                                </div>
+
+                                <div>
+                                    <label class="label" for="port">
+                                        <span class="font-medium">Port</span>
+                                    </label>
+                                    <input type="number" class="input w-full" id="port" name="port" placeholder="8282">
+                                    <span class="text-sm opacity-70">Application port</span>
+                                </div>
+                                <div>
+                                    <label class="label" for="appUrl">
+                                        <span class="font-medium">Application URL</span>
+                                    </label>
+                                    <input type="text" class="input w-full" id="appUrl" name="app_url"
+                                           placeholder="http://192.168.0.1:8282">
+                                    <span class="text-sm opacity-70">Full URL to access to the application</span>
+                                </div>
+                                <div>
+                                    <label class="label" for="minFileSize">
+                                        <span class="font-medium">Minimum File Size</span>
+                                    </label>
+                                    <input type="text" class="input w-full" id="minFileSize" name="min_file_size"
+                                           placeholder="10MB">
+                                    <span class="text-sm opacity-70">Minimum file size to download</span>
+                                </div>
+
+                                <div>
+                                    <label class="label" for="maxFileSize">
+                                        <span class="font-medium">Maximum File Size</span>
+                                    </label>
+                                    <input type="text" class="input w-full" id="maxFileSize" name="max_file_size"
+                                           placeholder="50GB">
+                                    <span class="text-sm opacity-70">Maximum file size to download</span>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 lg:grid-cols-1 gap-4">
+                                <div>
+                                    <label class="label" for="allowedExtensions">
+                                        <span class="font-medium">Allowed File Extensions</span>
+                                    </label>
+                                    <textarea class="textarea w-full" id="allowedExtensions" name="allowed_file_types"
+                                              placeholder="mkv, mp4, avi, mov"></textarea>
+                                    <span class="text-sm opacity-70">Comma-separated list of allowed file
+                                        extensions</span>
+                                </div>
+                            </div>
+
+                            <div class="divider">
+                                <span class="text-lg font-semibold"><i class="bi bi-hdd-network mr-3 text-info"></i>WebDAV & External Rclone
+                                Settings</span>
+                            </div>
+
+                            <div class="space-y-6">
+                                <div class="space-y-4">
+                                    <div>
+                                        <label class="label cursor-pointer justify-start gap-3">
+                                            <input type="checkbox" class="checkbox checkbox-lg checkbox-primary"
+                                                   name="disable_webdav" id="disable_webdav">
+                                            <div>
+                                                <span class="label-text font-medium text-lg">Disable WebDAV</span>
+                                            </div>
+                                        </label>
+                                    </div>
+                                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                        <div>
+                                            <label class="label" for="folder_naming">
+                                                <span class="font-medium">Folder Naming</span>
+                                            </label>
+                                            <select class="select w-full" name="folder_naming" id="folder_naming">
+                                                <option value="original_no_ext">Original name (No Extension)</option>
+                                                <option value="original">Original name</option>
+                                                <option value="filename">File name</option>
+                                                <option value="filename_no_ext">File name (No Extension)</option>
+                                                <option value="infohash">Infohash</option>
+                                            </select>
+                                            <span class="text-sm opacity-70">How to name folders in WebDAV</span>
+                                        </div>
+                                        <div>
+                                            <label class="label" for="refresh_dirs">
+                                                <span class="font-medium">Refresh Directories</span>
+                                            </label>
+                                            <input type="text" class="input w-full" name="refresh_dirs"
+                                                   id="refresh_dirs" placeholder="/path1,/path2">
+                                            <span class="text-sm opacity-70">Comma-separated list of directories to
+                                                refresh</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="divider">
+                                <span class="text-lg font-semibold">Virtual Folders</span>
+                            </div>
+                            <div class="card bg-base-200">
+                                <div class="card-body">
+                                    <div class="space-y-6">
+                                        <h3 class="text-xl font-bold flex items-center mt-8 mb-4">
+                                            <i class="bi bi-folder-symlink mr-3 text-info"></i>Virtual Folders
+                                            <button type="button" id="addVirtualFolderBtn"
+                                                    class="btn btn-sm btn-info ml-auto">
+                                                <i class="bi bi-plus mr-2"></i>Add Virtual Folder
+                                            </button>
+                                        </h3>
+
+                                        <div class="alert alert-info">
+                                            <i class="bi bi-info-circle"></i>
+                                            <span>Virtual folders allow you to organize torrents using custom filters.
+                                                For example, create a "Movies" folder that shows only torrents
+                                                containing movies.</span>
+                                        </div>
+
+                                        <div id="virtualFoldersContainer" class="space-y-4 mt-4">
+                                            <!-- Virtual folders will be dynamically added here -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-content hidden" data-tab-content="downloads">
+                    <div class="space-y-6">
+                        <h2 class="text-2xl font-bold flex items-center mb-6">
+                            <i class="bi bi-download mr-3 text-info"></i>Download Clients
+                        </h2>
+
+                        <div class="divider">
+                            <span class="text-lg font-semibold">qBittorrent & SABnzbd</span>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <div>
+                                <label class="label" for="download_folder">
+                                    <span class="font-medium">Download Folder</span>
+                                </label>
+                                <input type="text" class="input w-full" name="download_folder"
+                                       id="download_folder" placeholder="/mnt/symlinks/">
+                                <span class="text-sm opacity-70">Folder exposed to qBittorrent, SABnzbd, and Arr applications</span>
+                            </div>
+                            <div>
+                                <label class="label" for="refresh_interval">
+                                    <span class="font-medium">Refresh Interval</span>
+                                </label>
+                                <input type="text" class="input w-full" name="refresh_interval"
+                                       id="refresh_interval" placeholder="30s">
+                                <span class="text-sm opacity-70">How often active download status is refreshed</span>
+                            </div>
+                            <div>
+                                <label class="label" for="removeStalledAfter">
+                                    <span class="font-medium">Remove Stalled After</span>
+                                </label>
+                                <input type="text" class="input w-full" id="removeStalledAfter"
+                                       name="remove_stalled_after" placeholder="1h">
+                                <span class="text-sm opacity-70">Duration before stalled active downloads are removed</span>
+                            </div>
+                            <div>
+                                <label class="label" for="nzbUserAgent">
+                                    <span class="font-medium">NZB User Agent</span>
+                                </label>
+                                <input type="text" class="input w-full" id="nzbUserAgent"
+                                       name="nzb_user_agent" placeholder="SABnzbd/3.0.0">
+                                <span class="text-sm opacity-70">User-Agent used when fetching NZB files</span>
+                            </div>
+                            <div>
+                                <label class="label cursor-pointer justify-start gap-3">
+                                    <input type="checkbox" class="checkbox checkbox-primary"
+                                           name="skip_pre_cache" id="skip_pre_cache">
+                                    <div>
+                                        <span class="font-medium">Skip Pre-Cache</span>
+                                        <div class="label-text-alt">Disable pre-caching during imports</div>
+                                    </div>
+                                </label>
+                            </div>
+                            <div>
+                                <label class="label cursor-pointer justify-start gap-3">
+                                    <input type="checkbox" class="checkbox checkbox-primary"
+                                           name="always_rm_tracker_urls" id="always_rm_tracker_urls">
+                                    <div>
+                                        <span class="font-medium">Always Remove Tracker URLs</span>
+                                        <div class="label-text-alt">Remove tracker URLs before submitting torrents to providers</div>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="divider">
+                            <span class="text-lg font-semibold">Downloader</span>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4" id="downloaderSection">
+                            <div>
+                                <label class="label" for="default_download_action">
+                                    <span class="font-medium">Default Download Action</span>
+                                </label>
+                                <select class="select w-full" name="default_download_action"
+                                        id="default_download_action">
+                                    <option value="symlink">Create Symlink</option>
+                                    <option value="strm">Create STRM Files</option>
+                                    <option value="download">Download Files</option>
+                                    <option value="none">No Action</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="label" for="max_active_downloads">
+                                    <span class="font-medium">Maximum Active Downloads</span>
+                                </label>
+                                <input type="number" class="input w-full" name="max_active_downloads"
+                                       id="max_active_downloads" min="1" placeholder="5">
+                                <span class="text-sm opacity-70">Shared active limit for torrent and NZB downloads</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-content hidden" data-tab-content="providers">
+                    <div class="space-y-6">
+                        <h2 class="text-2xl font-bold flex items-center">
+                            <i class="bi bi-collection mr-3 text-secondary"></i>Providers
+                        </h2>
+
+                        <!-- Provider Sub-tabs -->
+                        <div class="border-b border-base-300 mb-6">
+                            <nav class="flex gap-4" aria-label="Provider Type Tabs">
+                                <button type="button"
+                                        class="provider-subtab-button active py-2 px-4 border-b-2 border-secondary text-secondary font-medium text-sm"
+                                        data-provider-tab="debrid">
+                                    <i class="bi bi-cloud mr-2"></i>Debrid
+                                </button>
+                                <button type="button"
+                                        class="provider-subtab-button py-2 px-4 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                        data-provider-tab="usenet">
+                                    <i class="bi bi-newspaper mr-2"></i>Usenet
+                                </button>
+                            </nav>
+                        </div>
+
+                        <!-- Debrid Sub-tab Content -->
+                        <div class="provider-subtab-content" data-provider-tab-content="debrid">
+                            <div class="space-y-6">
+                                <div class="flex justify-between items-center">
+                                    <h3 class="text-xl font-semibold flex items-center"></h3>
+                                    <button type="button" id="addDebridBtn" class="btn btn-secondary btn-sm">
+                                        <i class="bi bi-plus mr-2"></i>Add Account
+                                    </button>
+                                </div>
+                                <div id="debridConfigs" class="space-y-4">
+                                    <!-- Debrid configs will be added here dynamically -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Usenet Sub-tab Content -->
+                        <div class="provider-subtab-content hidden" data-provider-tab-content="usenet">
+                            <div class="space-y-6">
+                                <!-- Streaming Settings -->
+                                <div class="card bg-base-200">
+                                    <div class="card-body">
+                                        <h4 class="text-lg font-semibold mb-4 flex items-center">
+                                            <i class="bi bi-lightning mr-2 text-warning"></i>Streaming Settings
+                                        </h4>
+                                        <div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
+                                            <div>
+                                                <label class="label" for="usenet.max_connections">
+                                                    <span class="font-medium">Max Connections Per File</span>
+                                                </label>
+                                                <input type="number" class="input w-full" name="usenet.max_connections"
+                                                       id="usenet.max_connections" min="1" placeholder="15">
+                                                <span class="text-sm opacity-70">Connections per streaming file (default: 15)</span>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="usenet.processing_max_connections">
+                                                    <span class="font-medium">Processing Connections Per File</span>
+                                                </label>
+                                                <input type="number" class="input w-full"
+                                                       name="usenet.processing_max_connections"
+                                                       id="usenet.processing_max_connections" min="1"
+                                                       placeholder="15">
+                                                <span class="text-sm opacity-70">Connections per file for parsing and NZB downloads</span>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="usenet.read_ahead">
+                                                    <span class="font-medium">Read Ahead</span>
+                                                </label>
+                                                <input type="text" class="input w-full" name="usenet.read_ahead"
+                                                       id="usenet.read_ahead" min="1" placeholder="16MB">
+                                                <span class="text-sm opacity-70">Amount of data to read ahead when streaming
+                                                    (default: 16MB)</span>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="usenet.processing_timeout">
+                                                    <span class="font-medium">Processing Timeout</span>
+                                                </label>
+                                                <input type="text" class="input w-full" name="usenet.processing_timeout"
+                                                       id="usenet.processing_timeout" placeholder="5m">
+                                                <span class="text-sm opacity-70">Timeout for NZB processing (default:
+                                                    5m)</span>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="usenet.availability_sample_percent">
+                                                    <span class="font-medium">Repair Availability Sample %</span>
+                                                </label>
+                                                <input type="number" class="input w-full"
+                                                       name="usenet.availability_sample_percent"
+                                                       id="usenet.availability_sample_percent" min="1" max="100"
+                                                       placeholder="10">
+                                                <span class="text-sm opacity-70">Percentage of segments to check during
+                                                    repairs (1-100, default: 10)</span>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="usenet.import_availability_sample_percent">
+                                                    <span class="font-medium">NZB Import Availability Sample %</span>
+                                                </label>
+                                                <input type="number" class="input w-full"
+                                                       name="usenet.import_availability_sample_percent"
+                                                       id="usenet.import_availability_sample_percent" min="1" max="100"
+                                                       placeholder="1">
+                                                <span class="text-sm opacity-70">Percentage of segments to check when
+                                                    adding an NZB (1-100, default: 1)</span>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="usenet.disk_buffer_path">
+                                                    <span class="font-medium">Disk Buffer Path</span>
+                                                </label>
+                                                <input type="text" class="input w-full"
+                                                       name="usenet.disk_buffer_path" id="usenet.disk_buffer_path"
+                                                       placeholder="/cache">
+                                                <span class="text-sm opacity-70">Path for disk buffering during streaming</span>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="usenet.buffer_memory">
+                                                    <span class="font-medium">Buffer Memory</span>
+                                                </label>
+                                                <input type="text" class="input w-full"
+                                                       name="usenet.buffer_memory" id="usenet.buffer_memory"
+                                                       placeholder="512MB">
+                                                <span class="text-sm opacity-70">Total RAM for usenet streaming buffers
+                                                    across all open streams (e.g., 512MB, 1GB)</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- NNTP Servers -->
+                                <div class="card bg-base-200">
+                                    <div class="card-body">
+                                        <div class="flex justify-between items-center mb-4">
+                                            <h4 class="text-lg font-semibold flex items-center">
+                                                <i class="bi bi-server mr-2 text-info"></i>NNTP Servers
+                                            </h4>
+                                            <button type="button" id="addUsenetProviderBtn" class="btn btn-info btn-sm">
+                                                <i class="bi bi-plus mr-2"></i>Add Server
+                                            </button>
+                                        </div>
+                                        <div id="usenetProviders" class="space-y-4">
+                                            <!-- Providers will be added here dynamically -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-content hidden" data-tab-content="auth">
+                    <div class="space-y-6">
+                        <h2 class="text-2xl font-bold flex items-center mb-6">
+                            <i class="bi bi-download mr-3 text-accent"></i>Authentication Settings
+                        </h2>
+
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1">
+                                <h3 class="text-lg font-semibold mb-2">Authentication Settings</h3>
+                                <p class="text-sm text-base-content/70">Configure username/password authentication and
+                                    API token for programmatic access.</p>
+                            </div>
+                        </div>
+
+                        <!-- Username/Password Section -->
+                        <div class="space-y-4">
+                            <h4 class="font-semibold text-base">Web Authentication</h4>
+                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="label">
+                                        <span class="font-medium">Username</span>
+                                    </label>
+                                    <input type="text" id="auth-username" name="auth_username" class="input w-full"
+                                           placeholder="Enter username (leave empty to disable auth)">
+                                    <span class="text-sm opacity-70">Leave empty to disable authentication</span>
+                                </div>
+                                <div>
+                                    <label class="label">
+                                        <span class="font-medium">Password</span>
+                                    </label>
+                                    <div class="password-toggle-container">
+                                        <input type="password" id="auth-password" name="auth_password"
+                                               class="input input-has-toggle" placeholder="Enter password">
+                                        <button type="button" class="password-toggle-btn">
+                                            <i class="bi bi-eye"></i>
+                                        </button>
+                                    </div>
+                                    <span class="text-sm opacity-70">Leave empty to disable authentication</span>
+                                </div>
+                                <div>
+                                    <label class="label">
+                                        <span class="font-medium">Confirm Password</span>
+                                    </label>
+                                    <div class="password-toggle-container">
+                                        <input type="password" id="auth-password-confirm" name="auth_password_confirm"
+                                               class="input input-has-toggle" placeholder="Confirm password">
+                                        <button type="button" class="password-toggle-btn">
+                                            <i class="bi bi-eye"></i>
+                                        </button>
+                                    </div>
+                                    <span class="label-text-alt" id="password-match-indicator"></span>
+                                </div>
+                                <div>
+                                    <label class="label">
+                                        <span class="font-medium">Current Token</span>
+                                    </label>
+                                    <div class="join w-full">
+                                        <input type="text" id="api-token-display"
+                                               class="input join-item flex-1 font-mono" placeholder="No token generated"
+                                               readonly>
+                                        <button type="button" id="copy-token-btn" class="btn btn-outline join-item"
+                                                onclick="copyAPIToken();">
+                                            <i class="bi bi-copy"></i>
+                                        </button>
+                                        <button type="button" id="refresh-token-btn"
+                                                class="btn btn-outline btn-secondary join-item"
+                                                onclick="refreshAPIToken();">
+                                            <i class="bi bi-arrow-clockwise"></i>
+                                        </button>
+                                    </div>
+                                    <span class="text-sm opacity-70">Click refresh to generate or update your API
+                                        token</span>
+                                </div>
+                            </div>
+                            <div class="flex justify-end items-center mt-5">
+                                <button type="button" id="update-auth-btn" class="btn btn-primary"
+                                        onclick="updateAuthSettings();">
+                                    <i class="bi bi-shield-check mr-2"></i>Update Authentication
+                                </button>
+                            </div>
+                        </div>
+                        <div class="space-y-4">
+                            <p class="text-sm text-base-content/70">Use this token for API authentication instead of
+                                session cookies. Perfect for automation and scripts.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-content hidden" data-tab-content="arrs">
+                    <div class="space-y-6">
+                        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <h2 class="text-2xl font-bold flex items-center">
+                                    <i class="bi bi-collection mr-3 text-warning"></i>Arr Applications
+                                </h2>
+                                <p class="text-sm opacity-70 mt-1">Configure each connected Arr service and its import behavior.</p>
+                            </div>
+                            <button type="button" id="addArrBtn" class="btn btn-warning sm:shrink-0">
+                                <i class="bi bi-plus mr-2"></i>Add Arr Service
+                            </button>
+                        </div>
+
+                        <div id="arrConfigs" class="grid grid-cols-2 gap-4">
+                        </div>
+
+                        <div class="rounded-box border border-base-300 bg-base-200/30 p-4 space-y-4">
+                            <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                                <div>
+                                    <h3 class="text-lg font-semibold flex items-center">
+                                        <i class="bi bi-funnel mr-2 text-warning"></i>Queue Cleanup Actions
+                                    </h3>
+                                    <p class="text-sm opacity-70 mt-1 max-w-4xl">
+                                        These actions apply to configured Arr services. Unmatched warnings stay in the queue,
+                                        and changes apply on the next cleanup cycle.
+                                    </p>
+                                </div>
+                                <span class="badge badge-outline badge-warning lg:shrink-0">Global policy</span>
+                            </div>
+
+                            <div class="grid grid-cols-1 xl:grid-cols-5 gap-4">
+                                <div class="xl:col-span-3 rounded-box border border-base-300 bg-base-100 overflow-hidden">
+                                    <div class="px-3 py-2 border-b border-base-300">
+                                        <h4 class="font-medium text-sm">Known issues</h4>
+                                        <p class="text-xs opacity-60 mt-1">Choose the action for each built-in queue warning.</p>
+                                    </div>
+                                    <div id="queueCleanupCatalog" class="divide-y divide-base-200"></div>
+                                </div>
+
+                                <div class="xl:col-span-2 rounded-box border border-base-300 bg-base-100 p-3 space-y-3">
+                                    <div class="flex items-center justify-between gap-3">
+                                        <div>
+                                            <h4 class="font-medium text-sm">Custom rules</h4>
+                                            <p class="text-xs opacity-60 mt-1">Match status-message text after known issues.</p>
+                                        </div>
+                                        <button type="button" id="addQueueCleanupRuleBtn" class="btn btn-sm btn-ghost shrink-0">
+                                            <i class="bi bi-plus mr-1"></i>Add
+                                        </button>
+                                    </div>
+                                    <div id="queueCleanupCustom" class="space-y-2"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-content hidden" data-tab-content="notifications">
+                    <div class="space-y-6">
+                        <h2 class="text-2xl font-bold flex items-center mb-6">
+                            <i class="bi bi-bell mr-3 text-warning"></i>Notification Settings
+                        </h2>
+
+                        <div class="card bg-base-200">
+                            <div class="card-body">
+                                <div>
+                                    <label class="label cursor-pointer justify-start gap-3">
+                                        <input type="checkbox" class="checkbox checkbox-lg checkbox-primary"
+                                               name="notifications.enabled" id="notifications.enabled">
+                                        <div>
+                                            <span class="label-text font-medium text-lg">Enable Notifications</span>
+                                            <div class="label-text-alt">Send notifications for configured events</div>
+                                        </div>
+                                    </label>
+                                </div>
+
+                                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+                                    <div>
+                                        <label class="label" for="notifications.webhook_url">
+                                            <span class="font-medium">Discord Webhook URL</span>
+                                        </label>
+                                        <textarea class="textarea w-full" id="notifications.webhook_url"
+                                                  name="notifications.webhook_url"
+                                                  placeholder="https://discord.com/api/webhooks/..."></textarea>
+                                        <span class="text-sm opacity-70">Discord webhook URL for sending
+                                            notifications</span>
+                                    </div>
+
+                                    <div>
+                                        <label class="label" for="notifications.callback_url">
+                                            <span class="font-medium">Callback URL</span>
+                                        </label>
+                                        <input type="text" class="input w-full" id="notifications.callback_url"
+                                               name="notifications.callback_url"
+                                               placeholder="http://example.com/callback">
+                                        <span class="text-sm opacity-70">HTTP endpoint for status callbacks (JSON
+                                            POST)</span>
+                                    </div>
+                                </div>
+
+                                <div class="divider">Event Types</div>
+
+                                <div>
+                                    <p class="text-sm opacity-70 mb-4">Select which events should trigger notifications.
+                                        If none are selected, all events are enabled.</p>
+                                    <div class="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                                        <div>
+                                            <label class="label cursor-pointer justify-start gap-2">
+                                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
+                                                       name="notifications.events[]" value="download_complete">
+                                                <div>
+                                                    <span class="font-medium text-sm">Download Complete</span>
+                                                    <div class="label-text-alt">When a download finishes successfully
+                                                    </div>
+                                                </div>
+                                            </label>
+                                        </div>
+
+                                        <div>
+                                            <label class="label cursor-pointer justify-start gap-2">
+                                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
+                                                       name="notifications.events[]" value="download_failed">
+                                                <div>
+                                                    <span class="font-medium text-sm">Download Failed</span>
+                                                    <div class="label-text-alt">When a download fails</div>
+                                                </div>
+                                            </label>
+                                        </div>
+
+                                        <div>
+                                            <label class="label cursor-pointer justify-start gap-2">
+                                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
+                                                       name="notifications.events[]" value="repair_pending">
+                                                <div>
+                                                    <span class="font-medium text-sm">Repair Pending</span>
+                                                    <div class="label-text-alt">When repair finds issues awaiting action
+                                                    </div>
+                                                </div>
+                                            </label>
+                                        </div>
+
+                                        <div>
+                                            <label class="label cursor-pointer justify-start gap-2">
+                                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
+                                                       name="notifications.events[]" value="repair_complete">
+                                                <div>
+                                                    <span class="font-medium text-sm">Repair Complete</span>
+                                                    <div class="label-text-alt">When repair finishes successfully</div>
+                                                </div>
+                                            </label>
+                                        </div>
+
+                                        <div>
+                                            <label class="label cursor-pointer justify-start gap-2">
+                                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
+                                                       name="notifications.events[]" value="repair_failed">
+                                                <div>
+                                                    <span class="font-medium text-sm">Repair Failed</span>
+                                                    <div class="label-text-alt">When repair encounters an error</div>
+                                                </div>
+                                            </label>
+                                        </div>
+
+                                        <div>
+                                            <label class="label cursor-pointer justify-start gap-2">
+                                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
+                                                       name="notifications.events[]" value="repair_cancelled">
+                                                <div>
+                                                    <span class="font-medium text-sm">Repair Cancelled</span>
+                                                    <div class="label-text-alt">When repair job is cancelled</div>
+                                                </div>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-content hidden" data-tab-content="mounts">
+                    <div class="space-y-6">
+                        <h2 class="text-2xl font-bold flex items-center mb-6">
+                            <i class="bi bi-hdd-stack mr-3 text-info"></i>Mount Settings
+                        </h2>
+
+                        <div>
+                            <label class="label">
+                                <span class="font-medium">Mount Type</span>
+                            </label>
+                            <div class="">
+                                <label
+                                        class="label cursor-pointer justify-start gap-3 p-3 border border-base-300 rounded-lg hover:bg-base-200 transition-colors">
+                                    <input type="radio" class="radio radio-primary" name="mount.type" value="dfs"
+                                           id="mount.type.dfs" checked>
+                                    <div>
+                                        <span class="font-medium">DFS (Decypharr Filesystem)</span>
+                                        <div class="label-text-alt">Built-in filesystem implementation</div>
+                                    </div>
+                                </label>
+                                <label
+                                        class="label cursor-pointer justify-start gap-3 p-3 border border-base-300 rounded-lg hover:bg-base-200 transition-colors">
+                                    <input type="radio" class="radio radio-primary" name="mount.type" value="rclone"
+                                           id="mount.type.rclone">
+                                    <div>
+                                        <span class="font-medium">Rclone</span>
+                                        <div class="label-text-alt">Managed rclone mount</div>
+                                    </div>
+                                </label>
+                                <label
+                                        class="label cursor-pointer justify-start gap-3 p-3 border border-base-300 rounded-lg hover:bg-base-200 transition-colors">
+                                    <input type="radio" class="radio radio-primary" name="mount.type"
+                                           value="external_rclone" id="mount.type.external_rclone">
+                                    <div>
+                                        <span class="font-medium">External Rclone</span>
+                                        <div class="label-text-alt">Connect to existing rclone instance</div>
+                                    </div>
+                                </label>
+                                <label
+                                        class="label cursor-pointer justify-start gap-3 p-3 border border-base-300 rounded-lg hover:bg-base-200 transition-colors">
+                                    <input type="radio" class="radio radio-primary" name="mount.type" value="none"
+                                           id="mount.type.none">
+                                    <div>
+                                        <span class="font-medium">No Mount</span>
+                                        <div class="label-text-alt">Disable mounting functionality</div>
+                                    </div>
+                                </label>
+                            </div>
+                            <span class="text-sm opacity-70">Select the mount type to use for debrid items</span>
+                        </div>
+                        <div>
+                            <label class="label" for="mount.mount_path">
+                                <span class="font-medium">Mount Path</span>
+                            </label>
+                            <input type="text" class="input w-full" name="mount.mount_path" id="mount.mount_path"
+                                   placeholder="/mnt/dfs">
+                            <span class="text-sm opacity-70">Path where the selected mount will be mounted (e.g., /mnt/dfs)</span>
+                        </div>
+
+                        <!-- Sub-tabs for mount types -->
+                        <div class="border-b border-base-300 mb-6">
+                            <nav class="flex gap-4" aria-label="Mount Type Tabs">
+                                <button type="button"
+                                        class="mount-subtab-button active py-2 px-4 border-b-2 border-primary text-primary font-medium text-sm"
+                                        data-mount-tab="dfs">
+                                    <i class="bi bi-file-earmark-code mr-2"></i>DFS
+                                </button>
+                                <button type="button"
+                                        class="mount-subtab-button py-2 px-4 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                        data-mount-tab="rclone">
+                                    <i class="bi bi-cloud mr-2"></i>Rclone
+                                </button>
+                                <button type="button"
+                                        class="mount-subtab-button py-2 px-4 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                        data-mount-tab="external_rclone">
+                                    <i class="bi bi-cloud mr-2"></i>External Rclone
+                                </button>
+                            </nav>
+                        </div>
+
+                        <!-- DFS Mount Settings -->
+                        <div class="mount-subtab-content" data-mount-tab-content="dfs">
+                            <div class="space-y-6">
+                                <div class="flex justify-between items-center">
+                                    <h3 class="text-xl font-semibold flex items-center">
+                                        <i class="bi bi-file-earmark-code mr-2 text-info"></i>DFS Mount Configuration
+                                    </h3>
+                                </div>
+
+                                <div class="card bg-base-200">
+                                    <div class="card-body">
+                                        <h4 class="text-lg font-semibold mb-4 flex items-center">
+                                            <i class="bi bi-folder mr-2"></i>Mount Configuration
+                                        </h4>
+                                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                                            <div>
+                                                <label class="label" for="mount.dfs.cache_dir">
+                                                    <span class="font-medium">Cache Directory</span>
+                                                </label>
+                                                <input type="text" class="input w-full" name="mount.dfs.cache_dir"
+                                                       id="mount.dfs.cache_dir" placeholder="/tmp/dfs-cache">
+                                                <span class="text-sm opacity-70">Directory for DFS cache files</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.dfs.disk_cache_size">
+                                                    <span class="font-medium">Disk Cache Size</span>
+                                                </label>
+                                                <input type="text" class="input w-full" name="mount.dfs.disk_cache_size"
+                                                       id="mount.dfs.disk_cache_size" placeholder="5GB">
+                                                <span class="text-sm opacity-70">Maximum disk cache size (e.g., 5GB,
+                                                    10GB)</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.dfs.buffer_memory">
+                                                    <span class="font-medium">Buffer Memory</span>
+                                                </label>
+                                                <input type="text" class="input w-full" name="mount.dfs.buffer_memory"
+                                                       id="mount.dfs.buffer_memory" placeholder="512MB">
+                                                <span class="text-sm opacity-70">Total RAM for DFS streaming buffers
+                                                    across all open files (e.g., 512MB, 1GB)</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.dfs.cache_expiry">
+                                                    <span class="font-medium">Cache Expiry</span>
+                                                </label>
+                                                <input type="text" class="input w-full" name="mount.dfs.cache_expiry"
+                                                       id="mount.dfs.cache_expiry" placeholder="24h">
+                                                <span class="text-sm opacity-70">How long to keep cache entries (e.g.,
+                                                    24h, 1d)</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.dfs.cache_cleanup_interval">
+                                                    <span class="font-medium">Cache Cleanup Interval</span>
+                                                </label>
+                                                <input type="text" class="input w-full"
+                                                       name="mount.dfs.cache_cleanup_interval"
+                                                       id="mount.dfs.cache_cleanup_interval" placeholder="5m">
+                                                <span class="text-sm opacity-70">How often to clean cache</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.dfs.chunk_size">
+                                                    <span class="font-medium">Chunk Size</span>
+                                                </label>
+                                                <input type="text" class="input w-full" name="mount.dfs.chunk_size"
+                                                       id="mount.dfs.chunk_size" placeholder="8MB">
+                                                <span class="text-sm opacity-70">Size of data chunks (e.g., 4MB,
+                                                    8MB)</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.dfs.read_ahead_size">
+                                                    <span class="font-medium">Read Ahead Size</span>
+                                                </label>
+                                                <input type="text" class="input w-full" name="mount.dfs.read_ahead_size"
+                                                       id="mount.dfs.read_ahead_size" placeholder="128MB">
+                                                <span class="text-sm opacity-70">Read ahead buffer size</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.dfs.daemon_timeout">
+                                                    <span class="font-medium">Daemon Timeout</span>
+                                                </label>
+                                                <input type="text" class="input w-full" name="mount.dfs.daemon_timeout"
+                                                       id="mount.dfs.daemon_timeout" placeholder="10s">
+                                                <span class="text-sm opacity-70">Daemon idle timeout</span>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="mount.dfs.uid">
+                                                    <span class="font-medium">User ID (UID)</span>
+                                                </label>
+                                                <input type="number" class="input w-full" name="mount.dfs.uid"
+                                                       id="mount.dfs.uid" placeholder="1000" min="0">
+                                                <span class="text-sm opacity-70">User ID for mounted files</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.dfs.gid">
+                                                    <span class="font-medium">Group ID (GID)</span>
+                                                </label>
+                                                <input type="number" class="input w-full" name="mount.dfs.gid"
+                                                       id="mount.dfs.gid" placeholder="1000" min="0">
+                                                <span class="text-sm opacity-70">Group ID for mounted files</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.dfs.umask">
+                                                    <span class="font-medium">UMASK</span>
+                                                </label>
+                                                <input type="text" class="input w-full" name="mount.dfs.umask"
+                                                       id="mount.dfs.umask" placeholder="0022">
+                                                <span class="text-sm opacity-70">File permissions mask</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Rclone Mount Settings -->
+                        <div class="mount-subtab-content hidden" data-mount-tab-content="rclone">
+                            <div class="space-y-6">
+                                <div class="flex justify-between items-center">
+                                    <h3 class="text-xl font-semibold flex items-center">
+                                        <i class="bi bi-cloud mr-2 text-info"></i>Rclone Mount Configuration
+                                    </h3>
+                                </div>
+
+                                <div class="card bg-base-200">
+                                    <div class="card-body">
+                                        <h4 class="text-lg font-semibold mb-4 flex items-center">
+                                            <i class="bi bi-folder mr-2"></i>Mount Configuration
+                                        </h4>
+                                        <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+
+                                            <div>
+                                                <label class="label" for="mount.rclone.port">
+                                                    <span class="font-medium">Rclone RC Port</span>
+                                                </label>
+                                                <input type="text" class="input w-full" name="mount.rclone.port"
+                                                       id="mount.rclone.port" placeholder="5572">
+                                                <span class="text-sm opacity-70">Port for Rclone Remote Control (RC)
+                                                    interface</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.rclone.log_level">
+                                                    <span class="font-medium">Log Level</span>
+                                                </label>
+                                                <select class="select w-full" name="mount.rclone.log_level"
+                                                        id="mount.rclone.log_level">
+                                                    <option value="INFO">INFO</option>
+                                                    <option value="DEBUG">DEBUG</option>
+                                                    <option value="NOTICE">NOTICE</option>
+                                                    <option value="ERROR">ERROR</option>
+                                                </select>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.rclone.uid">
+                                                    <span class="font-medium">User ID (PUID)</span>
+                                                </label>
+                                                <input type="number" class="input w-full" name="mount.rclone.uid"
+                                                       id="mount.rclone.uid" placeholder="1000" min="0">
+                                                <span class="text-sm opacity-70">User ID for mounted files (0 = current
+                                                    user)</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.rclone.gid">
+                                                    <span class="font-medium">Group ID (PGID)</span>
+                                                </label>
+                                                <input type="number" class="input w-full" name="mount.rclone.gid"
+                                                       id="mount.rclone.gid" placeholder="1000" min="0">
+                                                <span class="text-sm opacity-70">Group ID for mounted files (0 = current
+                                                    group)</span>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="mount.rclone.umask">
+                                                    <span class="font-medium">UMASK</span>
+                                                </label>
+                                                <input type="text" class="input w-full" name="mount.rclone.umask"
+                                                       id="mount.rclone.umask" placeholder="0022">
+                                                <span class="text-sm opacity-70">Umask</span>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="mount.rclone.buffer_size">
+                                                    <span class="font-medium">Buffer Size</span>
+                                                </label>
+                                                <input type="text" class="input w-full" name="mount.rclone.buffer_size"
+                                                       id="mount.rclone.buffer_size" placeholder="10M">
+                                                <span class="text-sm opacity-70">Buffer Size(This caches to memory, be
+                                                    wary!!)</span>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="mount.rclone.bw_limit">
+                                                    <span class="font-medium">Bandwidth Limit</span>
+                                                </label>
+                                                <input type="text" class="input w-full" name="mount.rclone.bw_limit"
+                                                       id="mount.rclone.bw_limit" placeholder="100M">
+                                                <span class="text-sm opacity-70">Bandwidth limit (e.g., 100M, 1G, leave
+                                                    empty for unlimited)</span>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="mount.rclone.attr_timeout">
+                                                    <span class="font-medium">Attribute Caching Timeout</span>
+                                                </label>
+                                                <input type="text" class="input w-full" name="mount.rclone.attr_timeout"
+                                                       id="mount.rclone.attr_timeout" placeholder="1s">
+                                                <span class="text-sm opacity-70">How long the kernel caches the
+                                                    attributes (size, modification time, etc.)</span>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="mount.rclone.transfers">
+                                                    <span class="font-medium">Transfers</span>
+                                                </label>
+                                                <input type="number" class="input w-full" name="mount.rclone.transfers"
+                                                       id="mount.rclone.transfers" placeholder="8" min="1">
+                                                <span class="text-sm opacity-70">Number of file transfers to run in
+                                                    parallel</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="card bg-base-200">
+                                    <div class="card-body">
+                                        <h4 class="text-lg font-semibold mb-4 flex items-center">
+                                            <i class="bi bi-speedometer2 mr-2"></i>VFS Cache Settings
+                                        </h4>
+                                        <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+                                            <div>
+                                                <label class="label" for="mount.rclone.cache_dir">
+                                                    <span class="font-medium">Cache Directory</span>
+                                                </label>
+                                                <input type="text" class="input w-full" name="mount.rclone.cache_dir"
+                                                       id="mount.rclone.cache_dir" placeholder="/tmp/rclone">
+                                                <span class="text-sm opacity-70">Directory for rclone cache files (leave
+                                                    empty for system default)</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.rclone.vfs_cache_mode">
+                                                    <span class="font-medium">VFS Cache Mode</span>
+                                                </label>
+                                                <select class="select w-full" name="mount.rclone.vfs_cache_mode"
+                                                        id="mount.rclone.vfs_cache_mode">
+                                                    <option value="off">Off - No caching</option>
+                                                    <option value="minimal">Minimal - Cache file structure only</option>
+                                                    <option value="writes">Writes - Cache writes for better performance
+                                                    </option>
+                                                    <option value="full">Full - Cache reads and writes</option>
+                                                </select>
+                                                <span class="text-sm opacity-70">VFS caching mode for performance
+                                                    optimization</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.rclone.vfs_cache_max_size">
+                                                    <span class="font-medium">VFS Cache Max Size</span>
+                                                </label>
+                                                <input type="text" class="input w-full"
+                                                       name="mount.rclone.vfs_cache_max_size"
+                                                       id="mount.rclone.vfs_cache_max_size" placeholder="1G">
+                                                <span class="text-sm opacity-70">Maximum cache size (e.g., 1G, 500M,
+                                                    leave empty for unlimited)</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.rclone.vfs_cache_max_age">
+                                                    <span class="font-medium">VFS Cache Max Age</span>
+                                                </label>
+                                                <input type="text" class="input w-full"
+                                                       name="mount.rclone.vfs_cache_max_age"
+                                                       id="mount.rclone.vfs_cache_max_age" placeholder="1h">
+                                                <span class="text-sm opacity-70">Maximum age of cache entries (e.g., 1h,
+                                                    30m)</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.rclone.vfs_read_chunk_size">
+                                                    <span class="font-medium">Read Chunk Size</span>
+                                                </label>
+                                                <input type="text" class="input w-full"
+                                                       name="mount.rclone.vfs_read_chunk_size"
+                                                       id="mount.rclone.vfs_read_chunk_size" placeholder="128M">
+                                                <span class="text-sm opacity-70">Size of data chunks to read (e.g.,
+                                                    128M, 64M)</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.rclone.vfs_read_chunk_size_limit">
+                                                    <span class="font-medium">Read Chunk Size Limit</span>
+                                                </label>
+                                                <input type="text" class="input w-full"
+                                                       name="mount.rclone.vfs_read_chunk_size_limit"
+                                                       id="mount.rclone.vfs_read_chunk_size_limit" placeholder="128M">
+                                                <span class="text-sm opacity-70">Limit Read Chunk Size</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.rclone.vfs_read_ahead">
+                                                    <span class="font-medium">VFS Read Ahead</span>
+                                                </label>
+                                                <input type="text" class="input w-full"
+                                                       name="mount.rclone.vfs_read_ahead"
+                                                       id="mount.rclone.vfs_read_ahead"
+                                                       placeholder="128k">
+                                                <span class="text-sm opacity-70">Read ahead buffer size (e.g., 128k,
+                                                    256k)</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.rclone.dir_cache_time">
+                                                    <span class="font-medium">Directory Cache Time</span>
+                                                </label>
+                                                <input type="text" class="input w-full"
+                                                       name="mount.rclone.dir_cache_time"
+                                                       id="mount.rclone.dir_cache_time"
+                                                       placeholder="5m">
+                                                <span class="text-sm opacity-70">How long to cache directory listings
+                                                    (e.g., 5m, 10m)</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.rclone.vfs_cache_poll_interval">
+                                                    <span class="font-medium">VFS Cache Poll Interval</span>
+                                                </label>
+                                                <input type="text" class="input w-full"
+                                                       name="mount.rclone.vfs_cache_poll_interval"
+                                                       id="mount.rclone.vfs_cache_poll_interval" placeholder="1h">
+                                                <span class="text-sm opacity-70">How often VFS cache dir gets
+                                                    cleaned</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.rclone.vfs_cache_min_free_space">
+                                                    <span class="font-medium">VFS Cache Min Free Space</span>
+                                                </label>
+                                                <input type="text" class="input w-full"
+                                                       name="mount.rclone.vfs_cache_min_free_space"
+                                                       id="mount.rclone.vfs_cache_min_free_space" placeholder="1G">
+                                                <span class="text-sm opacity-70">Target minimum free space on the disk
+                                                    containing the cache</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.rclone.vfs_disk_space_total">
+                                                    <span class="font-medium">VFS Disk Space Total</span>
+                                                </label>
+                                                <input type="text" class="input w-full"
+                                                       name="mount.rclone.vfs_disk_space_total"
+                                                       id="mount.rclone.vfs_disk_space_total" placeholder="1G">
+                                                <span class="text-sm opacity-70">Specify the total space of disk</span>
+                                            </div>
+
+                                            <div>
+                                                <label class="label" for="mount.rclone.vfs_read_chunk_streams">
+                                                    <span class="font-medium">VFS Read Chunk Streams</span>
+                                                </label>
+                                                <input type="number" class="input w-full"
+                                                       name="mount.rclone.vfs_read_chunk_streams"
+                                                       id="mount.rclone.vfs_read_chunk_streams" placeholder="4" min="0">
+                                                <span class="text-sm opacity-70">The number of parallel streams to read
+                                                    at once</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="card bg-base-200">
+                                    <div class="card-body">
+                                        <h4 class="text-lg font-semibold mb-4 flex items-center">
+                                            <i class="bi bi-gear mr-2"></i>Advanced Settings
+                                        </h4>
+                                        <div class="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                                            <div>
+                                                <label class="label cursor-pointer justify-start gap-3">
+                                                    <input type="checkbox" class="checkbox checkbox-primary"
+                                                           name="mount.rclone.no_modtime" id="mount.rclone.no_modtime">
+                                                    <div>
+                                                        <span class="font-medium">No Modification Time</span>
+                                                        <div class="label-text-alt">Don't read/write modification times
+                                                        </div>
+                                                    </div>
+                                                </label>
+                                            </div>
+
+                                            <div>
+                                                <label class="label cursor-pointer justify-start gap-3">
+                                                    <input type="checkbox" class="checkbox checkbox-primary"
+                                                           name="mount.rclone.no_checksum"
+                                                           id="mount.rclone.no_checksum">
+                                                    <div>
+                                                        <span class="font-medium">No Checksum</span>
+                                                        <div class="label-text-alt">Don't checksum files on upload</div>
+                                                    </div>
+                                                </label>
+                                            </div>
+
+                                            <div>
+                                                <label class="label cursor-pointer justify-start gap-3"
+                                                       for="mount.rclone.async_read">
+                                                    <input type="checkbox" class="checkbox checkbox-primary"
+                                                           name="mount.rclone.async_read" id="mount.rclone.async_read">
+                                                    <div>
+                                                        <span class="font-medium">Async Read</span>
+                                                        <div class="label-text-alt">Use asynchronous reads</div>
+                                                    </div>
+                                                </label>
+                                            </div>
+
+                                            <div>
+                                                <label class="label cursor-pointer justify-start gap-3"
+                                                       for="mount.rclone.vfs_fast_fingerprint">
+                                                    <input type="checkbox" class="checkbox checkbox-primary"
+                                                           name="mount.rclone.vfs_fast_fingerprint"
+                                                           id="mount.rclone.vfs_fast_fingerprint">
+                                                    <div>
+                                                        <span class="font-medium">VFS Fast Fingerprint</span>
+                                                        <div class="label-text-alt">Use fast (less accurate)
+                                                            fingerprints for change detection
+                                                        </div>
+                                                    </div>
+                                                </label>
+                                            </div>
+
+                                            <div>
+                                                <label class="label cursor-pointer justify-start gap-3"
+                                                       for="mount.rclone.use_mmap">
+                                                    <input type="checkbox" class="checkbox checkbox-primary"
+                                                           name="mount.rclone.use_mmap" id="mount.rclone.use_mmap">
+                                                    <div>
+                                                        <span class="font-medium">Use Mmap</span>
+                                                        <div class="label-text-alt">Use fast (less accurate)
+                                                            fingerprints for change detection
+                                                        </div>
+                                                    </div>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- External Mount Settings -->
+                        <div class="mount-subtab-content" data-mount-tab-content="external_rclone">
+                            <div class="space-y-6">
+                                <div class="flex justify-between items-center">
+                                    <h3 class="text-xl font-semibold flex items-center">
+                                        <i class="bi bi-file-earmark-code mr-2 text-info"></i>External Rclone
+                                        Configuration
+                                    </h3>
+                                </div>
+
+                                <div class="card bg-base-200">
+                                    <div class="card-body">
+                                        <h4 class="text-lg font-semibold mb-4 flex items-center">
+                                            <i class="bi bi-folder mr-2"></i>Rclone RC Server Settings
+                                        </h4>
+                                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                                            <div>
+                                                <label class="label" for="mount.external_rclone.rc_url">
+                                                    <span class="font-medium">Rclone RC URL</span>
+                                                </label>
+                                                <input type="url" class="input w-full"
+                                                       name="mount.external_rclone.rc_url"
+                                                       id="mount.external_rclone.rc_url"
+                                                       placeholder="http://localhost:9990">
+                                                <span class="text-sm opacity-70">RC URL (speeds up imports)</span>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="mount.external_rclone.rc_username">
+                                                    <span class="font-medium">Rclone RC User</span>
+                                                </label>
+                                                <input type="text" class="input w-full"
+                                                       name="mount.external_rclone.rc_username"
+                                                       id="mount.external_rclone.rc_username" placeholder="admin">
+                                                <span class="text-sm opacity-70">RC username</span>
+                                            </div>
+                                            <div>
+                                                <label class="label" for="mount.external_rclone.rc_password">
+                                                    <span class="font-medium">Rclone RC Password</span>
+                                                </label>
+                                                <input type="password" class="input w-full"
+                                                       name="mount.external_rclone.rc_password"
+                                                       id="mount.external_rclone.rc_password">
+                                                <span class="text-sm opacity-70">RC password</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-content hidden" data-tab-content="repair">
+                    <div class="space-y-6">
+                        <div>
+                            <label class="label cursor-pointer justify-start gap-3">
+                                <input type="checkbox" class="checkbox checkbox-lg checkbox-primary"
+                                       id="repair.enabled" name="repair.enabled">
+                                <div>
+                                    <span class="label-text font-medium text-lg">Enable Repair</span>
+                                    <div class="label-text-alt">When off, the scheduled sweep is unregistered. Per-entry
+                                        rechecks from the Browse
+                                        page still work.
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <div>
+                                <label class="label" for="repair.source">
+                                    <span class="font-medium">Source</span>
+                                </label>
+                                <select class="select w-full" name="repair.source" id="repair.source">
+                                    <option value="arr">Arr (Sonarr / Radarr)</option>
+                                    <option value="managed">Managed entries</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label class="label" for="repair.arrs">
+                                    <span class="font-medium">Arrs to include
+                                        <span class="opacity-60 font-normal">(empty = all eligible)</span>
+                                    </span>
+                                </label>
+                                <select class="select w-full" name="repair.arrs" id="repair.arrs" multiple
+                                        size="3"></select>
+                            </div>
+
+                            <div>
+                                <label class="label" for="repair.schedule">
+                                    <span class="font-medium">Schedule</span>
+                                </label>
+                                <input type="text" class="input w-full" name="repair.schedule" id="repair.schedule"
+                                       placeholder="e.g. 6h, 04:00, 0 4 * * *">
+                                <span class="label-text-alt opacity-70">Cron expression or interval. Required when enabled.</span>
+                            </div>
+
+                            <div>
+                                <label class="label" for="repair.recheck_interval">
+                                    <span class="font-medium">Recheck interval</span>
+                                </label>
+                                <input type="text" class="input w-full" name="repair.recheck_interval"
+                                       id="repair.recheck_interval"
+                                       placeholder="168h">
+                                <span class="label-text-alt opacity-70">Skip entries probed more recently than this.</span>
+                            </div>
+
+                            <div>
+                                <label class="label" for="repair.workers">
+                                    <span class="font-medium">Workers</span>
+                                </label>
+                                <input type="number" min="1" class="input w-full" name="repair.workers"
+                                       id="repair.workers" value="50">
+                            </div>
+
+                            <div>
+                                <label class="label" for="repair.nntp_connection_percent">
+                                    <span class="font-medium">NNTP repair connections (%)</span>
+                                </label>
+                                <input type="number" min="1" max="100" class="input w-full"
+                                       name="repair.nntp_connection_percent" id="repair.nntp_connection_percent"
+                                       value="20">
+                                <span class="label-text-alt opacity-70">Maximum percentage of all NNTP connections a repair run may borrow.</span>
+                            </div>
+
+                            <div>
+                                <label class="label" for="repair.strategy">
+                                    <span class="font-medium">Strategy</span>
+                                </label>
+                                <select class="select w-full" name="repair.strategy" id="repair.strategy">
+                                    <option value="per_entry">Per entry</option>
+                                    <option value="per_file">Per file</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <label class="label cursor-pointer justify-start gap-3">
+                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
+                                       id="repair.auto_repair" name="repair.auto_repair">
+                                <span class="label-text font-medium">Auto-repair when broken</span>
+                            </label>
+                            <label class="label cursor-pointer justify-start gap-3">
+                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
+                                       id="repair.skip_nzb_repair" name="repair.skip_nzb_repair">
+                                <span class="label-text font-medium">Skip NZB repair</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </form>
+</div>
+
+<div id="loadingOverlay" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden">
+    <div class="flex items-center justify-center h-full">
+        <div class="card bg-base-100 shadow-2xl">
+            <div class="card-body text-center">
+                <span class="loading loading-spinner loading-lg text-primary"></span>
+                <h3 class="text-lg font-semibold mt-4">Applying Configuration</h3>
+                <p class="text-base-content/70">Please wait while we save your settings...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Tab Navigation Handler
+    document.addEventListener('DOMContentLoaded', function () {
+        window.configManager = new ConfigManager();
+
+        const tabButtons = document.querySelectorAll('.tab-button');
+        const tabContents = document.querySelectorAll('.tab-content');
+
+        // Tab switching function
+        function switchTab(targetTab) {
+
+            // Remove active class from all tabs
+            tabButtons.forEach(btn => {
+                btn.classList.remove('active');
+            });
+
+            // AddOrUpdate active class to clicked tab
+            const activeButton = document.querySelector(`[data-tab="${targetTab}"]`);
+            if (activeButton) {
+                activeButton.classList.add('active');
+            }
+
+            // Hide all tab contents
+            tabContents.forEach(content => {
+                content.classList.add('hidden');
+            });
+
+            // Show selected tab content
+            const activeContent = document.querySelector(`[data-tab-content="${targetTab}"]`);
+            if (activeContent) {
+                activeContent.classList.remove('hidden');
+            }
+
+            // Update URL hash for bookmarking
+            window.location.hash = `tab-${targetTab}`;
+        }
+
+        // AddOrUpdate click handlers to tab buttons
+        tabButtons.forEach(button => {
+            button.addEventListener('click', (e) => {
+                e.preventDefault();
+                const tabId = button.getAttribute('data-tab');
+                switchTab(tabId);
+            });
+        });
+
+        // Handle initial tab based on URL hash
+        const hash = window.location.hash;
+        if (hash.startsWith('#tab-')) {
+            const tabId = hash.replace('#tab-', '');
+            switchTab(tabId);
+        } else {
+            switchTab('general');
+        }
+
+        // Handle browser back/forward
+        window.addEventListener('hashchange', () => {
+            const hash = window.location.hash;
+            if (hash.startsWith('#tab-')) {
+                const tabId = hash.replace('#tab-', '');
+                switchTab(tabId);
+            }
+        });
+    });
+
+    // Password confirmation validation
+    document.addEventListener('DOMContentLoaded', function () {
+        const password = document.getElementById('auth-password');
+        const confirmPassword = document.getElementById('auth-password-confirm');
+        const indicator = document.getElementById('password-match-indicator');
+
+        function validatePasswords() {
+            if (!password.value && !confirmPassword.value) {
+                indicator.textContent = '';
+                indicator.className = 'label-text-alt';
+                return;
+            }
+
+            if (password.value === confirmPassword.value) {
+                indicator.textContent = '✓ Passwords match';
+                indicator.className = 'label-text-alt text-success';
+            } else {
+                indicator.textContent = '✗ Passwords do not match';
+                indicator.className = 'label-text-alt text-error';
+            }
+        }
+
+        password?.addEventListener('input', validatePasswords);
+        confirmPassword?.addEventListener('input', validatePasswords);
+    });
+
+    // Mount sub-tab navigation handler
+    document.addEventListener('DOMContentLoaded', function () {
+        const mountSubTabButtons = document.querySelectorAll('.mount-subtab-button');
+        const mountSubTabContents = document.querySelectorAll('.mount-subtab-content');
+        const mountTypeRadios = document.querySelectorAll('input[name="mount.type"]');
+
+        // Mount sub-tab switching function
+        function switchMountSubTab(targetTab) {
+            // Remove active class from all mount sub-tabs
+            mountSubTabButtons.forEach(btn => {
+                btn.classList.remove('active', 'border-primary', 'text-primary');
+                btn.classList.add('border-transparent', 'text-base-content/70');
+            });
+
+            // AddOrUpdate active class to clicked mount sub-tab
+            const activeButton = document.querySelector(`.mount-subtab-button[data-mount-tab="${targetTab}"]`);
+            if (activeButton) {
+                activeButton.classList.add('active', 'border-primary', 'text-primary');
+                activeButton.classList.remove('border-transparent', 'text-base-content/70');
+            }
+
+            // Hide all mount sub-tab contents
+            mountSubTabContents.forEach(content => {
+                content.classList.add('hidden');
+            });
+
+            // Show selected mount sub-tab content
+            const activeContent = document.querySelector(`.mount-subtab-content[data-mount-tab-content="${targetTab}"]`);
+            if (activeContent) {
+                activeContent.classList.remove('hidden');
+            }
+        }
+
+        // AddOrUpdate click handlers to mount sub-tab buttons
+        mountSubTabButtons.forEach(button => {
+            button.addEventListener('click', (e) => {
+                e.preventDefault();
+                const tabId = button.getAttribute('data-mount-tab');
+                switchMountSubTab(tabId);
+
+                // Also update the radio button to match
+                const correspondingRadio = document.querySelector(`input[name="mount.type"][value="${tabId}"]`);
+                if (correspondingRadio) {
+                    correspondingRadio.checked = true;
+                }
+            });
+        });
+
+        // Add change handlers to radio buttons to switch tabs
+        mountTypeRadios.forEach(radio => {
+            radio.addEventListener('change', function () {
+                if (this.checked) {
+                    switchMountSubTab(this.value);
+                }
+            });
+        });
+
+        // Initialize with DFS tab active by default
+        switchMountSubTab('dfs');
+    });
+
+    // Provider sub-tab navigation handler
+    document.addEventListener('DOMContentLoaded', function () {
+        const providerSubTabButtons = document.querySelectorAll('.provider-subtab-button');
+        const providerSubTabContents = document.querySelectorAll('.provider-subtab-content');
+
+        // Provider sub-tab switching function
+        function switchProviderSubTab(targetTab) {
+            // Remove active class from all provider sub-tabs
+            providerSubTabButtons.forEach(btn => {
+                btn.classList.remove('active', 'border-secondary', 'text-secondary');
+                btn.classList.add('border-transparent', 'text-base-content/70');
+            });
+
+            // Add active class to clicked provider sub-tab
+            const activeButton = document.querySelector(`.provider-subtab-button[data-provider-tab="${targetTab}"]`);
+            if (activeButton) {
+                activeButton.classList.add('active', 'border-secondary', 'text-secondary');
+                activeButton.classList.remove('border-transparent', 'text-base-content/70');
+            }
+
+            // Hide all provider sub-tab contents
+            providerSubTabContents.forEach(content => {
+                content.classList.add('hidden');
+            });
+
+            // Show selected provider sub-tab content
+            const activeContent = document.querySelector(`.provider-subtab-content[data-provider-tab-content="${targetTab}"]`);
+            if (activeContent) {
+                activeContent.classList.remove('hidden');
+            }
+        }
+
+        // Add click handlers to provider sub-tab buttons
+        providerSubTabButtons.forEach(button => {
+            button.addEventListener('click', (e) => {
+                e.preventDefault();
+                const tabId = button.getAttribute('data-provider-tab');
+                switchProviderSubTab(tabId);
+            });
+        });
+
+        // Initialize with debrid tab active by default
+        switchProviderSubTab('debrid');
+    });
+
+    // API Token Management Functions
+    async function refreshAPIToken() {
+        const refreshBtn = document.getElementById('refresh-token-btn');
+        const tokenDisplay = document.getElementById('api-token-display');
+
+        // Show loading state
+        window.decypharrUtils.setButtonLoading(refreshBtn, true, 'Refresh Token');
+
+        try {
+            const response = await window.decypharrUtils.fetcher('/api/refresh-token', {
+                method: 'POST'
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to refresh token');
+            }
+
+            const data = await response.json();
+            tokenDisplay.value = data.token;
+            window.decypharrUtils.createToast(data.message || 'Token refreshed successfully', 'success');
+
+        } catch (error) {
+            console.error('Error refreshing token:', error);
+            window.decypharrUtils.createToast('Failed to refresh token: ' + error.message, 'error');
+        } finally {
+            window.decypharrUtils.setButtonLoading(refreshBtn, false);
+        }
+    }
+
+    async function copyAPIToken() {
+        const tokenDisplay = document.getElementById('api-token-display');
+        const token = tokenDisplay.value;
+
+        if (!token || token === 'No token generated') {
+            window.decypharrUtils.createToast('No token to copy. Please refresh the token first.', 'warning');
+            return;
+        }
+
+        try {
+            await window.decypharrUtils.copyToClipboard(token);
+        } catch (error) {
+            console.error('Failed to copy token:', error);
+            window.decypharrUtils.createToast('Failed to copy token to clipboard', 'error');
+        }
+    }
+
+    async function updateAuthSettings() {
+        const username = document.getElementById('auth-username').value;
+        const password = document.getElementById('auth-password').value;
+        const confirmPassword = document.getElementById('auth-password-confirm').value;
+        const updateBtn = document.getElementById('update-auth-btn');
+
+        if (password !== confirmPassword) {
+            window.decypharrUtils.createToast('Passwords do not match', 'error');
+            return false;
+        }
+
+        // Show loading state
+        window.decypharrUtils.setButtonLoading(updateBtn, true, 'Update Authentication');
+
+        try {
+            const response = await window.decypharrUtils.fetcher('/api/update-auth', {
+                method: 'POST',
+                body: JSON.stringify({
+                    username: username,
+                    password: password,
+                    confirm_password: confirmPassword
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || 'Failed to update authentication settings');
+            }
+
+            const data = await response.json();
+            window.decypharrUtils.createToast(data.message, 'success');
+
+            // Clear password fields for security
+            document.getElementById('auth-password').value = '';
+            document.getElementById('auth-password-confirm').value = '';
+
+            return true;
+
+        } catch (error) {
+            console.error('Error updating auth settings:', error);
+            window.decypharrUtils.createToast('Failed to update authentication: ' + error.message, 'error');
+            return false;
+        } finally {
+            window.decypharrUtils.setButtonLoading(updateBtn, false);
+        }
+    }
+</script>
+{{ end }}

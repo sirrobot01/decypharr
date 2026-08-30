@@ -1,0 +1,371 @@
+{{ define "setup" }}
+<div class="flex min-h-screen items-center justify-center bg-base-200 p-4">
+    <div class="card w-full max-w-4xl bg-base-100 shadow-xl">
+        <div class="card-body">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="card-title">Setup Wizard</h2>
+            </div>
+
+            <!-- Progress indicator -->
+            <div class="mb-8">
+                <ul class="steps w-full">
+                    <li class="step" data-step="1" id="step-indicator-1">Authentication</li>
+                    <li class="step" data-step="2" id="step-indicator-2">Debrid Account</li>
+                    <li class="step" data-step="3" id="step-indicator-3">Usenet Provider</li>
+                    <li class="step" data-step="4" id="step-indicator-4">Download Folder</li>
+                    <li class="step" data-step="5" id="step-indicator-5">Mount System</li>
+                    <li class="step" data-step="6" id="step-indicator-6">Overview</li>
+                </ul>
+            </div>
+
+            <!-- Loading state -->
+            <div id="loading-state" class="flex justify-center items-center py-12">
+                <span class="loading loading-spinner loading-lg"></span>
+            </div>
+
+            <!-- Error state -->
+            <div id="error-state" class="alert alert-error hidden mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none"
+                     viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <span id="error-message">An error occurred</span>
+            </div>
+
+            <!-- Step 1: Authentication -->
+            <div id="step-1" class="setup-step hidden">
+                <h3 class="text-xl font-semibold mb-4">Step 1: Authentication Setup (Optional)</h3>
+                <p class="text-sm text-gray-500 mb-4">Set up a username and password to protect your instance, or skip
+                    to continue without authentication.</p>
+
+                <form id="auth-form" class="space-y-4">
+                    <div>
+                        <label class="label" for="auth-username">
+                            <span>Username</span>
+                        </label>
+                        <input type="text" class="input input-bordered w-full" id="auth-username" name="username"
+                               placeholder="Enter username">
+                    </div>
+                    <div>
+                        <label class="label" for="auth-password">
+                            <span>Password</span>
+                        </label>
+                        <input type="password" class="input input-bordered w-full" id="auth-password" name="password"
+                               placeholder="Enter password">
+                    </div>
+                    <div>
+                        <label class="label" for="auth-confirm-password">
+                            <span>Confirm Password</span>
+                        </label>
+                        <input type="password" class="input input-bordered w-full" id="auth-confirm-password"
+                               name="confirm_password" placeholder="Re-enter password">
+                    </div>
+                </form>
+
+                <div class="flex justify-between mt-6">
+                    <button type="button" class="btn btn-ghost" id="skip-auth-btn">Skip Authentication</button>
+                    <button type="button" class="btn btn-primary" id="auth-next-btn">Next</button>
+                </div>
+            </div>
+
+            <!-- Step 2: Provider Account -->
+            <div id="step-2" class="setup-step hidden">
+                <h3 class="text-xl font-semibold mb-2">Step 2: Add Debrid Account (Optional)</h3>
+                <p class="text-sm text-gray-500">Configure a debrid service to download and stream cached content.</p>
+                <p class="text-xs text-warning mb-4">You must configure at least one Debrid or Usenet provider before
+                    finishing the setup.</p>
+
+                <form id="debrid-form" class="space-y-4">
+                    <div>
+                        <label class="label" for="debrid-provider">
+                            <span>Debrid Provider</span>
+                        </label>
+                        <select class="select select-bordered w-full" id="debrid-provider" name="provider" required>
+                            <option value="">Select a provider</option>
+                            <option value="realdebrid">RealDebrid</option>
+                            <option value="alldebrid">AllDebrid</option>
+                            <option value="torbox">TorBox</option>
+                            <option value="debridlink">DebridLink</option>
+                            <option value="premiumize">Premiumize</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="label" for="debrid-api-key">
+                            <span>API Key</span>
+                        </label>
+                        <input type="text" class="input input-bordered w-full" id="debrid-api-key" name="api_key"
+                               placeholder="Enter your API key" required>
+                        <label class="label">
+                            <span class="label-text-alt">Get your API key from your debrid provider's website</span>
+                        </label>
+                    </div>
+                </form>
+
+                <div class="flex justify-between mt-6">
+                    <button type="button" class="btn btn-ghost" id="debrid-back-btn">Back</button>
+                    <div class="flex gap-2">
+                        <button type="button" class="btn btn-ghost" id="skip-debrid-btn">Skip Debrid</button>
+                        <button type="button" class="btn btn-primary" id="debrid-next-btn">Next</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: Usenet (Optional) -->
+            <div id="step-3" class="setup-step hidden">
+                <h3 class="text-xl font-semibold mb-2">Step 3: Usenet Configuration (Optional)</h3>
+                <p class="text-sm text-gray-500">Add a usenet provider to enable NZB streaming and downloading.</p>
+                <p class="text-xs text-warning mb-4">Either this usenet provider or the previous debrid step must be
+                    configured.</p>
+
+                <form id="usenet-form" class="space-y-4">
+                    <div id="usenet-config" class="space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="label" for="usenet-host">
+                                    <span>Server Host</span>
+                                </label>
+                                <input type="text" class="input input-bordered w-full" id="usenet-host" name="host"
+                                       placeholder="news.example.com">
+                            </div>
+                            <div>
+                                <label class="label" for="usenet-port">
+                                    <span>Port</span>
+                                </label>
+                                <input type="number" class="input input-bordered w-full" id="usenet-port" name="port"
+                                       placeholder="563">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="label" for="usenet-username">
+                                    <span>Username</span>
+                                </label>
+                                <input type="text" class="input input-bordered w-full" id="usenet-username"
+                                       name="username" placeholder="Your usenet username">
+                            </div>
+                            <div>
+                                <label class="label" for="usenet-password">
+                                    <span>Password</span>
+                                </label>
+                                <input type="password" class="input input-bordered w-full" id="usenet-password"
+                                       name="password" placeholder="Your usenet password">
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="label" for="usenet-max-connections">
+                                    <span>Max Connections</span>
+                                </label>
+                                <input type="number" class="input input-bordered w-full" id="usenet-max-connections"
+                                       name="max_connections" placeholder="30" min="1" max="100">
+                                <label class="label">
+                                    <span class="label-text-alt">Total connections to provider</span>
+                                </label>
+                            </div>
+                            <div>
+                                <label class="label" for="usenet-max-connections-per-reader">
+                                    <span>Connections Per Stream</span>
+                                </label>
+                                <input type="number" class="input input-bordered w-full"
+                                       id="usenet-max-connections-per-reader" name="reader_connections" placeholder="15"
+                                       min="1">
+                                <label class="label">
+                                    <span class="label-text-alt">Higher = faster streaming</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="flex gap-4">
+                            <label class="flex items-center gap-2 cursor-pointer" for="usenet-ssl">
+                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm" id="usenet-ssl"
+                                       name="ssl">
+                                <span class="text-sm">Use SSL</span>
+                            </label>
+                        </div>
+                    </div>
+                </form>
+
+                <div class="flex justify-between mt-6">
+                    <button type="button" class="btn btn-ghost" id="usenet-back-btn">Back</button>
+                    <div class="flex gap-2">
+                        <button type="button" class="btn btn-ghost" id="skip-usenet-btn">Skip Usenet</button>
+                        <button type="button" class="btn btn-primary" id="usenet-next-btn">Next</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4: Download Folder -->
+            <div id="step-4" class="setup-step hidden">
+                <h3 class="text-xl font-semibold mb-4">Step 4: Download Folder</h3>
+                <p class="text-sm text-gray-500 mb-4">Specify where downloaded files should be stored on your
+                    system.</p>
+
+                <form id="download-form" class="space-y-4">
+                    <div>
+                        <label class="label" for="download-folder">
+                            <span>Download Folder Path</span>
+                        </label>
+                        <input type="text" class="input input-bordered w-full" id="download-folder"
+                               name="download_folder" placeholder="/path/to/downloads" required>
+                        <label class="label">
+                            <span class="label-text-alt">Full path to the folder where files will be downloaded</span>
+                        </label>
+                    </div>
+                </form>
+
+                <div class="flex justify-between mt-6">
+                    <button type="button" class="btn btn-ghost" id="download-back-btn">Back</button>
+                    <button type="button" class="btn btn-primary" id="download-next-btn">Next</button>
+                </div>
+            </div>
+
+            <!-- Step 5: Mount System -->
+            <div id="step-5" class="setup-step hidden">
+                <h3 class="text-xl font-semibold mb-4">Step 5: Mount System Configuration</h3>
+                <p class="text-sm text-gray-500 mb-4">Choose and configure your preferred mount system for accessing
+                    files.</p>
+
+                <form id="mount-form" class="space-y-4">
+                    <div>
+                        <label class="label">
+                            <span>Mount Type</span>
+                        </label>
+                        <div class="flex gap-4">
+                            <label class="label cursor-pointer gap-2">
+                                <input type="radio" name="mount_type" value="dfs" class="radio" id="mount-type-dfs"
+                                       checked>
+                                <span class="label-text">DFS (Decypharr File System)</span>
+                            </label>
+                            <label class="label cursor-pointer gap-2">
+                                <input type="radio" name="mount_type" value="rclone" class="radio"
+                                       id="mount-type-rclone">
+                                <span class="label-text">Rclone</span>
+                            </label>
+                            <label class="label cursor-pointer gap-2">
+                                <input type="radio" name="mount_type" value="external_rclone" class="radio"
+                                       id="mount-type-external">
+                                <span class="label-text">External Mount</span>
+                            </label>
+                            <label class="label cursor-pointer gap-2">
+                                <input type="radio" name="mount_type" value="none" class="radio" id="mount-type-none">
+                                <span class="label-text">No Mount</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="label" for="mount-path">
+                            <span>Mount Path</span>
+                        </label>
+                        <input type="text" class="input input-bordered w-full" id="mount-path" name="mount_path"
+                               placeholder="/mnt/decypharr" required>
+                        <label class="label">
+                            <span class="label-text-alt">Path where the filesystem will be mounted</span>
+                        </label>
+                    </div>
+
+                    <div id="cache-dir-container">
+                        <label class="label" for="cache-dir">
+                            <span>Cache Directory</span>
+                        </label>
+                        <input type="text" class="input input-bordered w-full" id="cache-dir" name="cache_dir"
+                               placeholder="/tmp/decypharr-cache" required>
+                        <label class="label">
+                            <span class="label-text-alt">Directory for caching file chunks</span>
+                        </label>
+                    </div>
+
+                    <!-- Rclone-specific options (hidden by default) -->
+                    <div id="rclone-options" class="hidden">
+                        <div class="divider">Rclone Options</div>
+                        <div>
+                            <label class="label" for="rclone-buffer-size">
+                                <span>Buffer Size (Optional)</span>
+                            </label>
+                            <input type="text" class="input input-bordered w-full" id="rclone-buffer-size"
+                                   name="rclone_buffer_size" placeholder="e.g., 128M">
+                        </div>
+                    </div>
+                </form>
+
+                <div class="flex justify-between mt-6">
+                    <button type="button" class="btn btn-ghost" id="mount-back-btn">Back</button>
+                    <button type="button" class="btn btn-primary" id="mount-next-btn">Next</button>
+                </div>
+            </div>
+
+            <!-- Step 6: Overview -->
+            <div id="step-6" class="setup-step hidden">
+                <h3 class="text-xl font-semibold mb-4">Step 6: Configuration Overview</h3>
+                <p class="text-sm text-gray-500 mb-4">Review your configuration before completing the setup.</p>
+
+                <div class="space-y-4">
+                    <!-- Authentication -->
+                    <div class="card bg-base-200">
+                        <div class="card-body p-4">
+                            <h4 class="font-semibold">Authentication</h4>
+                            <p id="overview-auth" class="text-sm text-gray-600"></p>
+                        </div>
+                    </div>
+
+                    <!-- Provider Account -->
+                    <div class="card bg-base-200">
+                        <div class="card-body p-4">
+                            <h4 class="font-semibold">Debrid Account</h4>
+                            <div id="overview-debrid" class="text-sm text-gray-600"></div>
+                        </div>
+                    </div>
+
+                    <!-- Usenet Configuration -->
+                    <div class="card bg-base-200">
+                        <div class="card-body p-4">
+                            <h4 class="font-semibold">Usenet Configuration</h4>
+                            <div id="overview-usenet" class="text-sm text-gray-600"></div>
+                        </div>
+                    </div>
+
+                    <!-- Download Folder -->
+                    <div class="card bg-base-200">
+                        <div class="card-body p-4">
+                            <h4 class="font-semibold">Download Folder</h4>
+                            <p id="overview-download" class="text-sm text-gray-600"></p>
+                        </div>
+                    </div>
+
+                    <!-- Mount System -->
+                    <div class="card bg-base-200">
+                        <div class="card-body p-4">
+                            <h4 class="font-semibold">Mount System</h4>
+                            <div id="overview-mount" class="text-sm text-gray-600"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="alert alert-info mt-6">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                         class="stroke-current shrink-0 w-6 h-6">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <span>The application will restart after you click finish to apply these changes.</span>
+                </div>
+
+                <div class="flex justify-between mt-6">
+                    <button type="button" class="btn btn-ghost" id="overview-back-btn">Back</button>
+                    <button type="button" class="btn btn-primary" id="finish-btn">
+                        <span id="finish-btn-text">Finish Setup</span>
+                        <span id="finish-btn-loading" class="loading loading-spinner loading-sm hidden"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        window.setupWizard = new SetupWizard();
+    });
+</script>
+{{ end }}
