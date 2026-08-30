@@ -157,7 +157,10 @@ func ErrorCodeToLinkError(code string) *Error {
 	case "401", "unauthorized":
 		return NewPermanentError(ErrUnauthorized, code)
 	case "404":
-		return NewPermanentError(Err404, code)
+		// CDN 404 during validation means the URL is not yet active or has expired,
+		// not that the file is permanently gone. Refetch so a fresh CDN URL is
+		// generated — the prior URL may have been fetched before the file was ready.
+		return NewRefetchableError(Err404, code)
 	case "429":
 		return NewRetryableError(Err429, code)
 	// Some providers (TorBox) return a bare 400 for a presigned link that has
