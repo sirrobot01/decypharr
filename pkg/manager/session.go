@@ -428,9 +428,9 @@ func (t *httpTransport) recover(ctx context.Context, err error, attempt int) err
 	case lerr.IsPermanent():
 		return err
 	case lerr.ShouldBackoff():
-		wait := lerr.RetryAfter
+		wait := lerr.RetryAfter()
 		if wait <= 0 {
-			wait = sessionBackoff(attempt)
+			wait = time.Duration(sessionBackoff(attempt))
 		}
 		return sleepCtx(ctx, min(wait, sessionMaxThrottleWait))
 	case lerr.ShouldRefetch(), lerr.ShouldDisableAccount():

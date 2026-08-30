@@ -1,0 +1,22 @@
+name: decypharr
+
+services:
+  decypharr:
+    container_name: decypharr
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - 8282:8282
+    volumes:
+      - /mnt/:/mnt:rshared
+      - ./data/config.json:/app/config.json
+      - ./data/auth.json:/app/auth.json
+      - ./data/logs:/app/logs
+      - ./data/db:/app/db
+      - ./data/cache:/app/cache
+    restart: unless-stopped
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined

@@ -3,6 +3,10 @@ package link
 import (
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"time"
 )
 
 // ErrorCategory defines the type of link error and its retry behavior
@@ -184,4 +188,86 @@ func GetLinkError(err error) *Error {
 		return linkErr
 	}
 	return nil
+}
+
+// IsRetryable returns true if the error allows for retries (inverse of IsPermanent)
+func (e *Error) IsRetryable() bool {
+	return !e.IsPermanent() && e.Category != CategoryAccountIssue
+}
+
+// ShouldBackoff returns true if the error requires backoff before retry
+func (e *Error) ShouldBackoff() bool {
+	return e.ShouldRetry()
+}
+
+// RetryAfter returns the recommended wait time before retrying (0 = no specific wait)
+func (e *Error) RetryAfter() time.Duration {
+	// Check for Retry-After in error code or HTTP status
+	switch e.Code {
+	case "429":
+		return 60 * time.Second // Default backoff for rate limit
+	case "503":
+		return 30 * time.Second // Default backoff for service unavailable
+	default:
+		return 0
+	}
+}
+
+// ClassifyTransportError classifies transport-level errors into link error categories
+func ClassifyTransportError(err error) *Error {
+	if err == nil {
+		return nil
+	}
+
+	// Check for timeout errors
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return NewRetryableError(err, "timeout")
+	}
+
+	// Check for context cancellation
+	if errors.Is(err, errors.New("context canceled")) || errors.Is(err, errors.New("context deadline exceeded")) {
+		return NewPermanentError(err, "context_canceled")
+	}
+
+	// Check for EOF on read/write
+	if errors.Is(err, io.EOF) {
+		return NewRetryableError(err, "eof")
+	}
+
+	// Default to refetchable for unknown transport errors
+	return NewRefetchableError(err, "transport_error")
+}
+
+// ClassifyStreamStatus classifies HTTP status codes into link error categories
+func ClassifyStreamStatus(status int, header http.Header) *Error {
+	switch status {
+	case http.StatusOK, http.StatusPartialContent:
+		return nil // Success
+	case http.StatusUnauthorized:
+		return NewPermanentError(fmt.Errorf("HTTP %d unauthorized", status), "401")
+	case http.StatusForbidden:
+		return NewPermanentError(fmt.Errorf("HTTP %d forbidden", status), "403")
+	case http.StatusNotFound:
+		return NewPermanentError(Err404, "404")
+	case http.StatusTooManyRequests:
+		return NewRefetchableError(Err429, "429")
+	case http.StatusInternalServerError:
+		return NewRefetchableError(fmt.Errorf("HTTP 500 server error"), "500")
+	case http.StatusBadGateway:
+		return NewRefetchableError(fmt.Errorf("HTTP 502 bad gateway"), "502")
+	case http.StatusServiceUnavailable:
+		return NewRefetchableError(Err503, "503")
+	case http.StatusGatewayTimeout:
+		return NewRefetchableError(fmt.Errorf("HTTP 504 gateway timeout"), "504")
+	default:
+		if status >= 500 {
+			return NewRefetchableError(fmt.Errorf("HTTP %d server error", status), fmt.Sprintf("%d", status))
+		}
+		if status >= 400 {
+			// 4xx auth-shaped statuses and 404 usually mean the presigned link expired or rotated
+			return NewRefetchableError(fmt.Errorf("HTTP %d client error", status), fmt.Sprintf("%d", status))
+		}
+		return NewRetryableError(fmt.Errorf("HTTP %d", status), fmt.Sprintf("%d", status))
+	}
 }

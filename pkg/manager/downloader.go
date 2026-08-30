@@ -550,7 +550,7 @@ func (d *Downloader) resolveLinkWithRetry(ctx context.Context, entry *storage.En
 		}
 		lastErr = err
 		// Permanent errors won't improve with retries — surface immediately.
-		if linkErr := link.GetLinkError(err); linkErr != nil && !linkErr.IsRetryable() {
+		if linkErr := link.GetLinkError(err); linkErr != nil && linkErr.IsPermanent() {
 			return types.DownloadLink{}, err
 		}
 		if attempt < maxAttempts {
