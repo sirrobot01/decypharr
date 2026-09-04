@@ -231,22 +231,27 @@ func TestHandoffPrioritizesStream(t *testing.T) {
 }
 
 func TestLowerPriorityCannotBargePastStreamWaiter(t *testing.T) {
-	pp := newTestPool(2)
-	c := newAcquireTestClient(pp)
+	for _, lower := range []Workload{WorkloadDownload, WorkloadBackground} {
+		t.Run(lower.String(), func(t *testing.T) {
+			pp := newTestPool(1)
+			c := newAcquireTestClient(pp)
+			stream := newSlotWaiter(WorkloadStream, []*ProviderPool{pp})
+			c.register(stream)
 
-	stream := newSlotWaiter(WorkloadStream, []*ProviderPool{pp})
-	c.register(stream)
-	if c.tryAcquireSlot(pp, WorkloadDownload) {
-		t.Fatal("download acquired while a stream was waiting")
+			if c.tryAcquireSlot(pp, lower) {
+				t.Fatalf("%s acquired while a stream was waiting", lower)
+			}
+			select {
+			case got := <-stream.handoff:
+				if got != pp {
+					t.Fatal("stream received the wrong provider pool")
+				}
+			default:
+				t.Fatal("available slot was not handed to the waiting stream")
+			}
+			c.releaseSlot(pp)
+		})
 	}
-	if c.tryAcquireSlot(pp, WorkloadBackground) {
-		t.Fatal("background work acquired while a stream was waiting")
-	}
-	if !c.tryAcquireSlot(pp, WorkloadStream) {
-		t.Fatal("stream could not acquire a free slot")
-	}
-	c.deregister(stream)
-	c.releaseSlot(pp)
 }
 
 // TestDeregisterDrainsPendingHandoff: a waiter that exits after a releaser

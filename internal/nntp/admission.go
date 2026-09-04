@@ -133,24 +133,19 @@ func (c *Client) deregister(w *slotWaiter) {
 // ahead of latency-sensitive work. Same-class callers remain approximately
 // FIFO through direct handoff, while their uncontended path stays lock-free.
 func (pp *ProviderPool) higherPriorityWaiting(workload Workload) bool {
-	if workload == WorkloadStream {
-		return false
-	}
 	higherPriorityMask := uint32(1<<workload) - 1
 	return pp.waitingMask.Load()&higherPriorityMask != 0
 }
 
-// tryAcquireSlot takes a provider semaphore slot without blocking. A second
-// priority check closes the registration race: if a higher-priority waiter
-// appeared while the send succeeded, the new holder immediately hands the
-// slot to that waiter and reports failure to its caller.
+// tryAcquireSlot takes a provider semaphore slot without blocking. After a
+// lower-priority caller succeeds, it checks whether a higher-priority waiter
+// already registered. If so, it immediately hands over the slot and reports
+// failure. This post-acquisition check defines a clean ordering boundary and
+// keeps the latency-sensitive stream path to the original semaphore send.
 func (c *Client) tryAcquireSlot(pp *ProviderPool, workload Workload) bool {
-	if pp.higherPriorityWaiting(workload) {
-		return false
-	}
 	select {
 	case pp.slots <- struct{}{}:
-		if pp.higherPriorityWaiting(workload) {
+		if workload != WorkloadStream && pp.higherPriorityWaiting(workload) {
 			c.releaseSlot(pp)
 			return false
 		}
