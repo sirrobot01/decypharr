@@ -297,6 +297,24 @@ func TestAdmissionMetricsRecordOutcomesAndHandoffs(t *testing.T) {
 	}
 }
 
+func TestQueueSnapshotReportsOldestLiveWait(t *testing.T) {
+	pp := newTestPool(1)
+	c := newAcquireTestClient(pp)
+	w := c.newQueuedWaiter(WorkloadStreamPrefetch, []*ProviderPool{pp})
+	c.register(w)
+	time.Sleep(time.Millisecond)
+
+	waiting, oldestWaitNS := c.queueSnapshot()
+	if waiting[WorkloadStreamPrefetch] != 1 {
+		t.Fatalf("waiting = %d, want 1", waiting[WorkloadStreamPrefetch])
+	}
+	if oldestWaitNS[WorkloadStreamPrefetch] == 0 {
+		t.Fatal("oldest live wait was not reported")
+	}
+	c.deregister(w)
+	c.finishWait(w, admissionCanceled)
+}
+
 // newSilentPipeConnection builds a Connection whose peer stays open but
 // never reads or answers: a ping's write blocks until its deadline and
 // surfaces as a net timeout — the flush trigger.

@@ -1407,10 +1407,10 @@ func (c *Client) Stats() map[string]any {
 		providers = append(providers, providerInfo)
 	}
 
-	waiting := c.waitingByWorkload()
+	waiting, oldestWaitNS := c.queueSnapshot()
 	admissionStats := make(map[string]any, workloadCount)
 	for workload := WorkloadStreamDemand; workload < workloadCount; workload++ {
-		admissionStats[workload.String()] = c.admission[workload].snapshot().stats(waiting[workload])
+		admissionStats[workload.String()] = c.admission[workload].snapshot().stats(waiting[workload], oldestWaitNS[workload])
 	}
 	poolStats := map[string]any{
 		"max_connections": totalMax,

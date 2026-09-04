@@ -142,7 +142,7 @@ func (m *admissionMetrics) snapshot() admissionSnapshot {
 	}
 }
 
-func (s admissionSnapshot) stats(waiting int) map[string]any {
+func (s admissionSnapshot) stats(waiting int, oldestWaitNS uint64) map[string]any {
 	meanWaitMS := 0.0
 	completed := s.admitted + s.canceled + s.failed
 	if completed != 0 {
@@ -157,6 +157,7 @@ func (s admissionSnapshot) stats(waiting int) map[string]any {
 		"handoffs_total": s.handoffs,
 		"wait_mean_ms":   meanWaitMS,
 		"wait_max_ms":    float64(s.waitMaxNS) / 1e6,
+		"oldest_wait_ms": float64(oldestWaitNS) / 1e6,
 	}
 }
 
@@ -279,14 +280,23 @@ func (c *Client) handoffSlot(pp *ProviderPool) bool {
 	return false
 }
 
-func (c *Client) waitingByWorkload() [workloadCount]int {
+func (c *Client) queueSnapshot() ([workloadCount]int, [workloadCount]uint64) {
 	c.waitMu.Lock()
 	defer c.waitMu.Unlock()
+	now := nanotimeNow()
 	var waiting [workloadCount]int
+	var oldestWaitNS [workloadCount]uint64
 	for workload := WorkloadStreamDemand; workload < workloadCount; workload++ {
 		waiting[workload] = c.waiters[workload].len
+		for w := c.waiters[workload].head; w != nil; w = w.next {
+			if w.started <= 0 {
+				continue
+			}
+			age := uint64(max(now-w.started, 0))
+			oldestWaitNS[workload] = max(oldestWaitNS[workload], age)
+		}
 	}
-	return waiting
+	return waiting, oldestWaitNS
 }
 
 func (c *Client) providerWaiting(pp *ProviderPool) map[string]int {
