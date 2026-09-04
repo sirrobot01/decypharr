@@ -33,15 +33,16 @@ type PrefetchableReaderAt interface {
 
 // FS implements fs.FS for RAR volumes backed by NNTP Segments
 type FS struct {
-	ctx           context.Context
-	volumes       *xsync.Map[string, *types.Volume]
-	client        *nntp.Client // Connection client for all readers
-	maxConcurrent int          // Scheduler width for standalone readers
-	prefetchSize  int64        // Prefetch size in bytes
-	diskPath      string
-	retention     reader.Retention
-	scheduler     *reader.FetchScheduler
-	logger        zerolog.Logger
+	ctx               context.Context
+	volumes           *xsync.Map[string, *types.Volume]
+	client            *nntp.Client // Connection client for all readers
+	maxConcurrent     int          // Scheduler width for standalone readers
+	prefetchSize      int64        // Prefetch size in bytes
+	bodyPipelineDepth int
+	diskPath          string
+	retention         reader.Retention
+	scheduler         *reader.FetchScheduler
+	logger            zerolog.Logger
 }
 
 // Option configures the filesystem
@@ -68,14 +69,15 @@ func NewFS(ctx context.Context, client *nntp.Client, maxConcurrent int, prefetch
 		retention = reader.RetentionRewind
 	}
 	f := &FS{
-		ctx:           ctx,
-		volumes:       xsync.NewMap[string, *types.Volume](),
-		client:        client,
-		maxConcurrent: maxConcurrent,
-		prefetchSize:  prefetchSize,
-		diskPath:      usenetConfig.DiskPath,
-		retention:     retention,
-		logger:        logger,
+		ctx:               ctx,
+		volumes:           xsync.NewMap[string, *types.Volume](),
+		client:            client,
+		maxConcurrent:     maxConcurrent,
+		prefetchSize:      prefetchSize,
+		bodyPipelineDepth: usenetConfig.BodyPipelineDepth,
+		diskPath:          usenetConfig.DiskPath,
+		retention:         retention,
+		logger:            logger,
 	}
 
 	// Apply options
@@ -116,16 +118,17 @@ func (f *FS) Open(name string) (fs.File, error) {
 	}
 
 	return &File{
-		info:          info,
-		ctx:           f.ctx,
-		manager:       f.client,
-		maxConcurrent: f.maxConcurrent,
-		prefetchSize:  f.prefetchSize,
-		diskPath:      f.diskPath,
-		retention:     f.retention,
-		scheduler:     f.scheduler,
-		logger:        f.logger,
-		volume:        vol,
+		info:              info,
+		ctx:               f.ctx,
+		manager:           f.client,
+		maxConcurrent:     f.maxConcurrent,
+		prefetchSize:      f.prefetchSize,
+		bodyPipelineDepth: f.bodyPipelineDepth,
+		diskPath:          f.diskPath,
+		retention:         f.retention,
+		scheduler:         f.scheduler,
+		logger:            f.logger,
+		volume:            vol,
 	}, nil
 }
 
@@ -227,12 +230,14 @@ func (f *FS) createNewReaderForVolume(vol *types.Volume) (PrefetchableReaderAt, 
 	readerConfig := reader.DefaultConfig()
 	readerConfig.MaxConnections = f.maxConcurrent
 	readerConfig.PrefetchAhead = reader.PrefetchAheadSegments(f.prefetchSize, segments)
+	readerConfig.BodyPipelineDepth = f.bodyPipelineDepth
 	readerConfig.DiskPath = f.diskPath
 	readerConfig.Retention = f.retention
 	readerConfig.Scheduler = f.scheduler
 	readerOptions := []reader.Option{
 		reader.WithMaxConnections(readerConfig.MaxConnections),
 		reader.WithPrefetchAhead(readerConfig.PrefetchAhead),
+		reader.WithBodyPipelineDepth(readerConfig.BodyPipelineDepth),
 		reader.WithDiskPath(readerConfig.DiskPath),
 		reader.WithRetention(readerConfig.Retention),
 		reader.WithFetchScheduler(readerConfig.Scheduler),

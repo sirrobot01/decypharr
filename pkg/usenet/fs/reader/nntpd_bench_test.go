@@ -150,6 +150,49 @@ func BenchmarkColdStream(b *testing.B) {
 	}
 }
 
+// BenchmarkConfiguredBodyPipelineDepth exercises the user-facing reader
+// option through a cold sequential stream. A full-file read gives the initial
+// read-ahead window enough work to use every configured pipeline depth.
+func BenchmarkConfiguredBodyPipelineDepth(b *testing.B) {
+	const prefetchAhead = benchSegs - 1
+	for _, depth := range []int{1, 2, 4} {
+		b.Run(fmt.Sprintf("depth%d", depth), func(b *testing.B) {
+			_, client, segs := newBenchStack(b, nntpd.Config{RTT: 30 * time.Millisecond})
+			fileSize := benchSegSize * benchSegs
+			buf := make([]byte, 128*1024)
+
+			b.ReportAllocs()
+			b.SetBytes(fileSize)
+			for b.Loop() {
+				b.StopTimer()
+				sr, err := NewStreamingReader(b.Context(), client, segs,
+					WithDiskPath(b.TempDir()),
+					WithMaxConnections(8),
+					WithPrefetchAhead(prefetchAhead),
+					WithBodyPipelineDepth(depth),
+					WithMemoryBuffer(true),
+				)
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.StartTimer()
+
+				for off := int64(0); off < fileSize; off += int64(len(buf)) {
+					if _, err := sr.ReadAt(buf[:min(int64(len(buf)), fileSize-off)], off); err != nil {
+						b.Fatal(err)
+					}
+				}
+
+				b.StopTimer()
+				if err := sr.Close(); err != nil {
+					b.Fatal(err)
+				}
+				b.StartTimer()
+			}
+		})
+	}
+}
+
 // BenchmarkOpenToFirstByte measures reader construction plus the first 64KB
 // read — the time-to-first-byte a mount open pays.
 func BenchmarkOpenToFirstByte(b *testing.B) {

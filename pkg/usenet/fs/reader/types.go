@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	appconfig "github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
@@ -116,6 +117,10 @@ type Config struct {
 	// PrefetchAhead is the number of segments to prefetch ahead of reads (default: 8).
 	PrefetchAhead int
 
+	// BodyPipelineDepth is the number of speculative BODY commands sent on one
+	// connection. One disables pipelining (default: 2, maximum: 4).
+	BodyPipelineDepth int
+
 	// DownloadTimeout is the timeout for a single segment download (default: 60s).
 	DownloadTimeout time.Duration
 
@@ -129,12 +134,13 @@ type Config struct {
 // DefaultConfig returns a ReaderConfig with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		MaxConnections:  8,
-		PrefetchAhead:   8,
-		DownloadTimeout: 60 * time.Second,
-		MaxRetries:      3,
-		RetryDelay:      time.Second,
-		Retention:       RetentionWindow,
+		MaxConnections:    8,
+		PrefetchAhead:     8,
+		BodyPipelineDepth: appconfig.DefaultBodyPipelineDepth,
+		DownloadTimeout:   60 * time.Second,
+		MaxRetries:        3,
+		RetryDelay:        time.Second,
+		Retention:         RetentionWindow,
 	}
 }
 
@@ -210,6 +216,14 @@ func WithMaxConnections(n int) Option {
 func WithPrefetchAhead(n int) Option {
 	return func(c *Config) {
 		c.PrefetchAhead = n
+	}
+}
+
+// WithBodyPipelineDepth sets the speculative BODY pipeline depth. Values are
+// normalized to the supported range; one disables pipelining.
+func WithBodyPipelineDepth(depth int) Option {
+	return func(c *Config) {
+		c.BodyPipelineDepth = appconfig.NormalizeBodyPipelineDepth(depth)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	appconfig "github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/nntp"
 )
 
@@ -50,10 +51,6 @@ type prefetchClaim struct {
 	promise *fetchPromise
 }
 
-// A two-article pipeline nearly halves RTT overhead while bounding the time a
-// speculative fetch keeps one connection away from newly queued demand.
-const streamBodyPipelineDepth = 2
-
 // NewSegmentFetcher creates a new segment fetcher.
 func NewSegmentFetcher(
 	ctx context.Context,
@@ -64,6 +61,7 @@ func NewSegmentFetcher(
 	logger zerolog.Logger,
 ) *SegmentFetcher {
 	ctx, cancel := context.WithCancel(ctx)
+	config.BodyPipelineDepth = appconfig.NormalizeBodyPipelineDepth(config.BodyPipelineDepth)
 
 	maxConns := config.MaxConnections
 	if maxConns < 1 {
@@ -390,20 +388,22 @@ func (sf *SegmentFetcher) queueSpeculativeRange(startSeg, endSeg int, priority f
 	for segIdx := startSeg; segIdx < startSeg+singleCount; segIdx++ {
 		sf.queueSpeculative(segIdx, priority)
 	}
-	for start := startSeg + singleCount; start <= endSeg; start += streamBodyPipelineDepth {
-		sf.queueSpeculativeBatch(start, min(start+streamBodyPipelineDepth-1, endSeg), priority)
+	depth := sf.config.BodyPipelineDepth
+	for start := startSeg + singleCount; start <= endSeg; start += depth {
+		sf.queueSpeculativeBatch(start, min(start+depth-1, endSeg), priority)
 	}
 }
 
 func (sf *SegmentFetcher) streamBodyPipelineSingleCount(segmentCount int, priority fetchPriority) int {
-	if segmentCount <= 1 || sf.scheduler.workers <= 1 {
+	depth := sf.config.BodyPipelineDepth
+	if segmentCount <= 1 || sf.scheduler.workers <= 1 || depth <= 1 {
 		return max(segmentCount, 0)
 	}
 	availableWorkers := sf.scheduler.workers
 	if priority == priorityPrefetch {
 		availableWorkers-- // one scheduler worker is reserved for demand
 	}
-	if segmentCount >= availableWorkers*streamBodyPipelineDepth {
+	if segmentCount >= availableWorkers*depth {
 		return 0 // every worker can start with a pipeline
 	}
 	if segmentCount > availableWorkers+1 {
@@ -458,7 +458,7 @@ func (sf *SegmentFetcher) prefetchOne(segIdx int) {
 }
 
 func (sf *SegmentFetcher) queueSpeculativeBatch(startSeg, endSeg int, priority fetchPriority) {
-	var batchStorage [streamBodyPipelineDepth]int
+	var batchStorage [appconfig.MaxBodyPipelineDepth]int
 	batchLen := 0
 	for segIdx := startSeg; segIdx <= endSeg; segIdx++ {
 		state := sf.cache.GetState(segIdx)

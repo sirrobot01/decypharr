@@ -64,3 +64,41 @@ func TestApplyUsenetEnvVarsDiskPath(t *testing.T) {
 		t.Fatalf("environment disk path = %q, want /cache/usenet", c.Usenet.DiskPath)
 	}
 }
+
+func TestNormalizeBodyPipelineDepth(t *testing.T) {
+	tests := []struct {
+		name  string
+		depth int
+		want  int
+	}{
+		{name: "unset uses default", depth: 0, want: DefaultBodyPipelineDepth},
+		{name: "negative clamps to minimum", depth: -1, want: MinBodyPipelineDepth},
+		{name: "one disables pipelining", depth: 1, want: 1},
+		{name: "default remains unchanged", depth: 2, want: 2},
+		{name: "maximum remains unchanged", depth: 4, want: 4},
+		{name: "large value clamps to maximum", depth: 99, want: MaxBodyPipelineDepth},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NormalizeBodyPipelineDepth(tt.depth); got != tt.want {
+				t.Fatalf("NormalizeBodyPipelineDepth(%d) = %d, want %d", tt.depth, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUsenetBodyPipelineDepthDefaultAndEnvironment(t *testing.T) {
+	var defaults Config
+	defaults.updateUsenetConfig()
+	if got := defaults.Usenet.BodyPipelineDepth; got != DefaultBodyPipelineDepth {
+		t.Fatalf("default BODY pipeline depth = %d, want %d", got, DefaultBodyPipelineDepth)
+	}
+
+	t.Setenv("DECYPHARR_USENET__BODY_PIPELINE_DEPTH", "4")
+	var fromEnv Config
+	fromEnv.applyUsenetEnvVars()
+	if got := fromEnv.Usenet.BodyPipelineDepth; got != 4 {
+		t.Fatalf("environment BODY pipeline depth = %d, want 4", got)
+	}
+}

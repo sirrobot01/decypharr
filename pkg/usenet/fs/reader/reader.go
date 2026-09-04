@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/rs/zerolog"
+	appconfig "github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/crypto"
 	"github.com/sirrobot01/decypharr/internal/nntp"
 )
@@ -222,6 +223,7 @@ func NewStreamingReader(
 	for _, opt := range opts {
 		opt(&config)
 	}
+	config.BodyPipelineDepth = appconfig.NormalizeBodyPipelineDepth(config.BodyPipelineDepth)
 
 	ctx, cancel := context.WithCancel(ctx)
 	logger := zerolog.Nop() // Use logger from config if available
@@ -733,6 +735,7 @@ func (rp *Pool) GetReader(
 			ctx, rp.client, segments, encryption,
 			WithMaxConnections(rp.config.MaxConnections),
 			WithPrefetchAhead(rp.config.PrefetchAhead),
+			WithBodyPipelineDepth(rp.config.BodyPipelineDepth),
 			WithDiskPath(rp.config.DiskPath),
 			WithRetention(rp.config.Retention),
 			WithFetchScheduler(rp.config.Scheduler),
@@ -742,6 +745,7 @@ func (rp *Pool) GetReader(
 			ctx, rp.client, segments,
 			WithMaxConnections(rp.config.MaxConnections),
 			WithPrefetchAhead(rp.config.PrefetchAhead),
+			WithBodyPipelineDepth(rp.config.BodyPipelineDepth),
 			WithDiskPath(rp.config.DiskPath),
 			WithRetention(rp.config.Retention),
 			WithFetchScheduler(rp.config.Scheduler),
