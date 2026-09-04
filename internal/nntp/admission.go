@@ -254,7 +254,11 @@ func (c *Client) tryAcquireSlot(pp *ProviderPool, workload Workload) bool {
 // releaseSlot frees one held slot, preferring a direct handoff to the oldest
 // compatible waiter in the highest-priority non-empty workload class.
 func (c *Client) releaseSlot(pp *ProviderPool) {
-	if c.handoffSlot(pp) {
+	// The overwhelmingly common case has no queued work. register publishes
+	// the per-provider mask before unlocking waitMu, and every new waiter does
+	// a final slot scan after registration, so a raced zero observation cannot
+	// strand it.
+	if pp.waitingMask.Load() != 0 && c.handoffSlot(pp) {
 		return
 	}
 	<-pp.slots
