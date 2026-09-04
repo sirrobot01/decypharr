@@ -59,8 +59,8 @@ func BenchmarkStreamBodyE2E(b *testing.B) {
 			ctx := context.Background()
 			w := &countingWriter{}
 			b.SetBytes(benchSegmentSize)
-			b.ResetTimer()
-			for range b.N {
+			var iterations int64
+			for b.Loop() {
 				err := client.ExecuteWithFailover(ctx, WorkloadStream, func(conn *Connection) error {
 					_, err := conn.StreamBody("<bench@nntpd>", w)
 					return err
@@ -68,10 +68,10 @@ func BenchmarkStreamBodyE2E(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
+				iterations++
 			}
-			b.StopTimer()
-			if w.n != int64(b.N)*benchSegmentSize {
-				b.Fatalf("streamed %d bytes, want %d", w.n, int64(b.N)*benchSegmentSize)
+			if w.n != iterations*benchSegmentSize {
+				b.Fatalf("streamed %d bytes, want %d", w.n, iterations*benchSegmentSize)
 			}
 		})
 	}

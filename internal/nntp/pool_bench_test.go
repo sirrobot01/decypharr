@@ -4,9 +4,8 @@ import (
 	"bufio"
 	"context"
 	"net"
-	"sort"
+	"slices"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -64,7 +63,7 @@ func reportWaitQuantiles(b *testing.B, waits []time.Duration) {
 	if len(waits) == 0 {
 		return
 	}
-	sort.Slice(waits, func(i, j int) bool { return waits[i] < waits[j] })
+	slices.Sort(waits)
 	q := func(p float64) float64 {
 		idx := int(p * float64(len(waits)-1))
 		return float64(waits[idx]) / float64(time.Millisecond)
@@ -82,14 +81,80 @@ func BenchmarkPoolCheckoutUncontended(b *testing.B) {
 	c := newBenchClient([]config.UsenetProvider{provider}, []*ProviderPool{pp})
 	ctx := context.Background()
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		conn, prov, err := c.getAnyAvailableConnection(ctx, WorkloadStream, providerExclusions{})
 		if err != nil {
 			b.Fatal(err)
 		}
 		c.put(conn, prov)
 	}
+}
+
+// BenchmarkPriorityAdmission measures queue latency while background work
+// keeps every provider slot busy. A stream should wait for only the next
+// article boundary; another background caller waits behind its FIFO peers.
+func BenchmarkPriorityAdmission(b *testing.B) {
+	for _, workload := range []Workload{WorkloadStream, WorkloadBackground} {
+		b.Run(workload.String(), func(b *testing.B) {
+			const (
+				slots       = 8
+				workers     = 32
+				articleTime = 2 * time.Millisecond
+			)
+			pp, provider := newBenchPool(b, "bench-priority", slots)
+			client := newBenchClient([]config.UsenetProvider{provider}, []*ProviderPool{pp})
+			ctx, cancel := context.WithCancel(context.Background())
+			var wg sync.WaitGroup
+			for range workers {
+				wg.Go(func() {
+					for ctx.Err() == nil {
+						conn, acquiredProvider, err := client.getAnyAvailableConnection(ctx, WorkloadBackground, providerExclusions{})
+						if err != nil {
+							return
+						}
+						time.Sleep(articleTime)
+						client.put(conn, acquiredProvider)
+					}
+				})
+			}
+			waitForBenchSaturation(b, client, pp, workers-slots)
+
+			var totalWait, maxWait time.Duration
+			var iterations int64
+			for b.Loop() {
+				start := time.Now()
+				conn, acquiredProvider, err := client.getAnyAvailableConnection(context.Background(), workload, providerExclusions{})
+				if err != nil {
+					b.Fatal(err)
+				}
+				wait := time.Since(start)
+				totalWait += wait
+				maxWait = max(maxWait, wait)
+				iterations++
+				client.put(conn, acquiredProvider)
+			}
+			cancel()
+			wg.Wait()
+			b.ReportMetric(float64(totalWait)/float64(iterations)/float64(time.Millisecond), "mean-wait-ms")
+			b.ReportMetric(float64(maxWait)/float64(time.Millisecond), "max-wait-ms")
+		})
+	}
+}
+
+func waitForBenchSaturation(b *testing.B, client *Client, pp *ProviderPool, queuedTarget int) {
+	b.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	queued := 0
+	for time.Now().Before(deadline) {
+		client.waitMu.Lock()
+		queued = client.waiters[WorkloadBackground].len
+		client.waitMu.Unlock()
+		if len(pp.slots) == pp.max && queued >= queuedTarget {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	b.Fatalf("background workload did not saturate: active=%d queued=%d, want at least %d", len(pp.slots), queued, queuedTarget)
 }
 
 // benchContended runs `workers` goroutines that each loop: acquire a
@@ -103,16 +168,13 @@ func benchContended(b *testing.B, slots, workers int, hold time.Duration) {
 	ctx := context.Background()
 
 	waitsPerWorker := make([][]time.Duration, workers)
-	var next atomic.Int64
 	var wg sync.WaitGroup
+	jobs := make(chan struct{}, workers*2)
 
-	b.ResetTimer()
 	start := time.Now()
 	for w := range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for next.Add(1) <= int64(b.N) {
+		wg.Go(func() {
+			for range jobs {
 				t0 := time.Now()
 				conn, prov, err := c.getAnyAvailableConnection(ctx, WorkloadStream, providerExclusions{})
 				if err != nil {
@@ -123,18 +185,23 @@ func benchContended(b *testing.B, slots, workers int, hold time.Duration) {
 				time.Sleep(hold)
 				c.put(conn, prov)
 			}
-		}()
+		})
 	}
+	var iterations int64
+	for b.Loop() {
+		jobs <- struct{}{}
+		iterations++
+	}
+	close(jobs)
 	wg.Wait()
 	elapsed := time.Since(start)
-	b.StopTimer()
 
 	var waits []time.Duration
 	for _, ws := range waitsPerWorker {
 		waits = append(waits, ws...)
 	}
 	reportWaitQuantiles(b, waits)
-	ideal := float64(hold) / float64(slots) * float64(b.N)
+	ideal := float64(hold) / float64(slots) * float64(iterations)
 	b.ReportMetric(ideal/float64(elapsed)*100, "slot-utilization-%")
 }
 
@@ -212,8 +279,7 @@ func BenchmarkAcquireDeadPrimary(b *testing.B) {
 	)
 	ctx := context.Background()
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		conn, prov, err := c.getAnyAvailableConnection(ctx, WorkloadStream, providerExclusions{})
 		if err != nil {
 			b.Fatal(err)
