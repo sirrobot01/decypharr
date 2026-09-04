@@ -211,12 +211,13 @@ connection pool.
 ### Does Decypharr use NNTP pipelining?
 
 Yes. Repair and availability checks send up to 16 independent `STAT` commands
-per pipeline. Speculative stream read-ahead uses a shallow pipeline of two
-ordered `BODY` commands, removing one round trip without creating a long
+per pipeline. Once enough speculative stream read-ahead is queued to keep its
+workers occupied, the remaining bodies use shallow two-command pipelines. This
+removes round trips without reducing connection parallelism or creating a long
 preemption window. Urgent playback demand always requests one body at a time;
-read-ahead also falls back to depth one on a single-worker setup. Full downloads
-remain article-bounded, so newly queued playback takes the next released
-connection instead of sitting behind a deep body pipeline.
+read-ahead also stays single-body on a single-worker setup. Full downloads remain
+article-bounded, so newly queued playback takes the next released connection
+instead of sitting behind a deep body pipeline.
 
 ## Arr Integration
 

@@ -368,12 +368,12 @@ func (sf *SegmentFetcher) clearPrefetchQueued(segIdx int) {
 
 // QueuePrefetch submits speculative work without creating a per-file worker.
 func (sf *SegmentFetcher) QueuePrefetch(segIdx int) {
-	sf.queueSpeculativeBatch(segIdx, segIdx, priorityPrefetch)
+	sf.queueSpeculative(segIdx, priorityPrefetch)
 }
 
 func (sf *SegmentFetcher) QueueProbe(segIdx int) {
 	if sf.scheduler.workers > 1 {
-		sf.queueSpeculativeBatch(segIdx, segIdx, priorityProbe)
+		sf.queueSpeculative(segIdx, priorityProbe)
 	}
 }
 
@@ -385,20 +385,76 @@ func (sf *SegmentFetcher) QueueProbeRange(startSeg, endSeg int) {
 }
 
 func (sf *SegmentFetcher) queueSpeculativeRange(startSeg, endSeg int, priority fetchPriority) {
-	depth := sf.streamBodyPipelineDepth()
-	for start := startSeg; start <= endSeg; start += depth {
-		sf.queueSpeculativeBatch(start, min(start+depth-1, endSeg), priority)
+	segmentCount := endSeg - startSeg + 1
+	singleCount := sf.streamBodyPipelineSingleCount(segmentCount, priority)
+	for segIdx := startSeg; segIdx < startSeg+singleCount; segIdx++ {
+		sf.queueSpeculative(segIdx, priority)
+	}
+	for start := startSeg + singleCount; start <= endSeg; start += streamBodyPipelineDepth {
+		sf.queueSpeculativeBatch(start, min(start+streamBodyPipelineDepth-1, endSeg), priority)
 	}
 }
 
-func (sf *SegmentFetcher) streamBodyPipelineDepth() int {
-	// With one worker, a speculative batch is the only active BODY request.
-	// Keep that request to one article so newly queued demand can run at the
-	// next article boundary instead of waiting for an entire batch.
-	if sf.scheduler.workers <= 1 {
-		return 1
+func (sf *SegmentFetcher) streamBodyPipelineSingleCount(segmentCount int, priority fetchPriority) int {
+	if segmentCount <= 1 || sf.scheduler.workers <= 1 {
+		return max(segmentCount, 0)
 	}
-	return streamBodyPipelineDepth
+	availableWorkers := sf.scheduler.workers
+	if priority == priorityPrefetch {
+		availableWorkers-- // one scheduler worker is reserved for demand
+	}
+	if segmentCount >= availableWorkers*streamBodyPipelineDepth {
+		return 0 // every worker can start with a pipeline
+	}
+	if segmentCount > availableWorkers+1 {
+		// Fill every usable worker with a single article first, then pipeline
+		// the tail without sacrificing initial connection parallelism.
+		return availableWorkers
+	}
+	return segmentCount
+}
+
+func (sf *SegmentFetcher) queueSpeculative(segIdx int, priority fetchPriority) {
+	state := sf.cache.GetState(segIdx)
+	if state == StateOnDisk || state == StateFetching || !sf.markPrefetchQueued(segIdx) {
+		return
+	}
+	gen := sf.prefetchGen.Load()
+	if !sf.submit(sf.ctx, priority, func() {
+		if gen != sf.prefetchGen.Load() {
+			return
+		}
+		defer func() {
+			if gen == sf.prefetchGen.Load() {
+				sf.clearPrefetchQueued(segIdx)
+			}
+		}()
+		sf.prefetchOne(segIdx)
+	}, func() {
+		if gen == sf.prefetchGen.Load() {
+			sf.clearPrefetchQueued(segIdx)
+		}
+	}) {
+		sf.clearPrefetchQueued(segIdx)
+		sf.stats.PrefetchMisses.Add(1)
+	}
+}
+
+func (sf *SegmentFetcher) prefetchOne(segIdx int) {
+	if sf.cache.GetState(segIdx) == StateOnDisk {
+		sf.stats.PrefetchHits.Add(1)
+		return
+	}
+	timeout := sf.config.DownloadTimeout
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+	fetchCtx, cancel := context.WithTimeout(sf.ctx, timeout)
+	err := sf.fetchWithRetryDirect(fetchCtx, segIdx, nntp.WorkloadStreamPrefetch)
+	cancel()
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		sf.logger.Debug().Err(err).Int("segment", segIdx).Msg("prefetch failed")
+	}
 }
 
 func (sf *SegmentFetcher) queueSpeculativeBatch(startSeg, endSeg int, priority fetchPriority) {
@@ -490,8 +546,9 @@ func (sf *SegmentFetcher) fetchPrefetchBatch(ctx context.Context, segIndices []i
 		claims       []prefetchClaim
 		writers      []segmentWriter
 		messageIDs   []string
-		destinations [][]byte
+		destinations []nntp.BodyDestination
 		decoded      [][]byte
+		written      []int64
 		bodyErrors   []error
 		initialized  bool
 	)
@@ -514,7 +571,11 @@ func (sf *SegmentFetcher) fetchPrefetchBatch(ctx context.Context, segIndices []i
 				}
 				writers = append(writers, writer)
 				messageIDs = append(messageIDs, segment.MessageID)
-				destinations = append(destinations, writer.DecodeBuffer())
+				destination := nntp.BodyDestination{Buffer: writer.DecodeBuffer()}
+				if destination.Buffer == nil {
+					destination.Writer = writer
+				}
+				destinations = append(destinations, destination)
 			}
 		}
 		if len(claims) == 0 {
@@ -528,13 +589,17 @@ func (sf *SegmentFetcher) fetchPrefetchBatch(ctx context.Context, segIndices []i
 			defer close(cancelFinished)
 			_ = conn.Close()
 		})
-		results, decodeErr := conn.DecodeBodiesInto(messageIDs, destinations)
+		results, decodeErr := conn.PipelineBodies(messageIDs, destinations)
 		if decoded == nil {
 			decoded = make([][]byte, len(claims))
+			written = make([]int64, len(claims))
 		}
 		for i, result := range results {
 			if len(result.Body) > 0 {
 				decoded[i] = result.Body
+				bodyErrors[i] = nil
+			} else if result.Bytes > 0 {
+				written[i] = result.Bytes
 				bodyErrors[i] = nil
 			} else if result.Error != nil {
 				bodyErrors[i] = result.Error
@@ -561,7 +626,9 @@ func (sf *SegmentFetcher) fetchPrefetchBatch(ctx context.Context, segIndices []i
 		writer := writers[i]
 		var writeErr error
 		n := int64(0)
-		if i < len(decoded) && len(decoded[i]) > 0 {
+		if i < len(written) && written[i] > 0 {
+			n = written[i]
+		} else if i < len(decoded) && len(decoded[i]) > 0 {
 			n, writeErr = writer.Adopt(decoded[i])
 		} else {
 			if i < len(bodyErrors) {

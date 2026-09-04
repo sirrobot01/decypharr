@@ -76,6 +76,7 @@ func TestPrefetchRangePipelinesAndPublishesEverySegment(t *testing.T) {
 	fetcher.QueuePrefetchRange(0, streamBodyPipelineDepth-1)
 	waitForSegmentState(t, cache, 0, StateOnDisk)
 	waitForSegmentState(t, cache, 1, StateOnDisk)
+	waitForCondition(t, func() bool { return stats.Downloads.Load() == streamBodyPipelineDepth })
 
 	if got := srv.Bodies.Load(); got != streamBodyPipelineDepth {
 		t.Fatalf("BODY responses = %d, want %d", got, streamBodyPipelineDepth)
@@ -91,6 +92,7 @@ func TestPrefetchRangePublishesSuccessAfterMissingArticle(t *testing.T) {
 	fetcher.QueuePrefetchRange(0, streamBodyPipelineDepth-1)
 	waitForSegmentState(t, cache, 0, StateFailed)
 	waitForSegmentState(t, cache, 1, StateOnDisk)
+	waitForCondition(t, func() bool { return stats.Downloads.Load()+stats.DownloadErrors.Load() == streamBodyPipelineDepth })
 
 	if err := cache.GetError(0); !nntp.IsArticleNotFoundError(err) {
 		t.Fatalf("missing segment error = %v, want article-not-found", err)
@@ -103,17 +105,29 @@ func TestPrefetchRangePublishesSuccessAfterMissingArticle(t *testing.T) {
 	}
 }
 
-func TestStreamBodyPipelineDepthPreservesSingleWorkerBoundary(t *testing.T) {
-	oneWorker := newTestFetcher(t, 1)
-	oneWorker.scheduler.workers = 1
-	if got := oneWorker.streamBodyPipelineDepth(); got != 1 {
-		t.Fatalf("single-worker depth = %d, want 1", got)
+func TestStreamBodyPipelinePlanPreservesParallelism(t *testing.T) {
+	tests := []struct {
+		name         string
+		workers      int
+		segmentCount int
+		priority     fetchPriority
+		wantSingles  int
+	}{
+		{"single worker", 1, 16, priorityPrefetch, 16},
+		{"short range preserves parallelism", 8, 8, priorityPrefetch, 8},
+		{"pipeline tail after filling workers", 8, 10, priorityPrefetch, 7},
+		{"full multi-worker pipeline", 8, 14, priorityPrefetch, 0},
+		{"two workers pipeline", 2, 2, priorityPrefetch, 0},
+		{"probe may use reserved worker", 8, 9, priorityProbe, 9},
+		{"probe pipeline tail", 8, 12, priorityProbe, 8},
 	}
-
-	twoWorkers := newTestFetcher(t, 1)
-	twoWorkers.scheduler.workers = 2
-	if got := twoWorkers.streamBodyPipelineDepth(); got != streamBodyPipelineDepth {
-		t.Fatalf("multi-worker depth = %d, want %d", got, streamBodyPipelineDepth)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sf := &SegmentFetcher{scheduler: &FetchScheduler{workers: tt.workers}}
+			if got := sf.streamBodyPipelineSingleCount(tt.segmentCount, tt.priority); got != tt.wantSingles {
+				t.Fatalf("single articles = %d, want %d", got, tt.wantSingles)
+			}
+		})
 	}
 }
 
@@ -175,6 +189,18 @@ func waitForSegmentState(t *testing.T, cache *SegmentCache, segIdx int, want Seg
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("segment %d state = %s, want %s (error: %v)", segIdx, cache.GetState(segIdx), want, cache.GetError(segIdx))
+}
+
+func waitForCondition(t *testing.T, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("condition was not satisfied before timeout")
 }
 
 func TestEnsureSegmentsPropagatesPermanentFailure(t *testing.T) {

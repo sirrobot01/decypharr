@@ -127,9 +127,10 @@ use `"0"` to disable spillover.
 ```
 
 Prefetch buffer for smoother playback. Higher = smoother but more memory.
-Read-ahead bodies use a two-command NNTP pipeline when multiple streaming
-workers are available. Direct playback demand stays at one body per request so
-it can take priority at the next article boundary.
+Read-ahead bodies use a two-command NNTP pipeline after enough work is queued to
+keep the available prefetch workers occupied; shorter ranges retain full
+connection parallelism. Direct playback demand stays at one body per request
+so it can take priority at the next article boundary.
 
 ### Connection Idle Timeout
 

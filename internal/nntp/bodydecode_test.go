@@ -73,13 +73,13 @@ func TestDecodeBodyIntoUsesCallerStorage(t *testing.T) {
 	}
 }
 
-func TestDecodeBodiesIntoPipelinesCommands(t *testing.T) {
+func TestPipelineBodiesPipelinesCommands(t *testing.T) {
 	c, server := newBodyTestConn(t)
 	messageIDs := []string{"<first@b>", "<second@b>"}
 	payloads := [][]byte{testPayload(32 * 1024), testPayload(16 * 1024)}
-	destinations := [][]byte{
-		make([]byte, 0, DecodedBodyCapacity(int64(len(payloads[0])))),
-		make([]byte, 0, DecodedBodyCapacity(int64(len(payloads[1])))),
+	destinations := []BodyDestination{
+		{Buffer: make([]byte, 0, DecodedBodyCapacity(int64(len(payloads[0]))))},
+		{Buffer: make([]byte, 0, DecodedBodyCapacity(int64(len(payloads[1]))))},
 	}
 	serverErr := make(chan error, 1)
 	go func() {
@@ -104,7 +104,7 @@ func TestDecodeBodiesIntoPipelinesCommands(t *testing.T) {
 		serverErr <- nil
 	}()
 
-	results, err := c.DecodeBodiesInto(messageIDs, destinations)
+	results, err := c.PipelineBodies(messageIDs, destinations)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,13 +118,13 @@ func TestDecodeBodiesIntoPipelinesCommands(t *testing.T) {
 		if !bytes.Equal(results[i].Body, payloads[i]) {
 			t.Fatalf("article %d payload corrupted", i)
 		}
-		if &results[i].Body[0] != &destinations[i][:1][0] {
+		if &results[i].Body[0] != &destinations[i].Buffer[:1][0] {
 			t.Fatalf("article %d replaced caller storage", i)
 		}
 	}
 }
 
-func TestDecodeBodiesIntoDrainsNegativeResponses(t *testing.T) {
+func TestPipelineBodiesDrainsNegativeResponses(t *testing.T) {
 	c, server := newBodyTestConn(t)
 	payload := testPayload(8 * 1024)
 	serverErr := make(chan error, 1)
@@ -148,9 +148,9 @@ func TestDecodeBodiesIntoDrainsNegativeResponses(t *testing.T) {
 		serverErr <- err
 	}()
 
-	results, err := c.DecodeBodiesInto(
+	results, err := c.PipelineBodies(
 		[]string{"<missing@b>", "<present@b>"},
-		make([][]byte, 2),
+		make([]BodyDestination, 2),
 	)
 	if !IsArticleNotFoundError(err) {
 		t.Fatalf("error = %v, want article-not-found", err)
@@ -166,6 +166,67 @@ func TestDecodeBodiesIntoDrainsNegativeResponses(t *testing.T) {
 	}
 	if _, _, err := c.Stat("<after@b>"); err != nil {
 		t.Fatalf("connection was not reusable after drained pipeline: %v", err)
+	}
+	if err := <-serverErr; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPipelineBodiesStreamsFromPooledStorage(t *testing.T) {
+	c, server := newBodyTestConn(t)
+	payload := testPayload(32 * 1024)
+	serveResponses(t, server, "222 0 <stream@b> body\r\n"+encodeBody(payload)+".\r\n")
+
+	var dst bytes.Buffer
+	results, err := c.PipelineBodies(
+		[]string{"<stream@b>"},
+		[]BodyDestination{{Writer: &dst}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(dst.Bytes(), payload) {
+		t.Fatal("streamed payload corrupted")
+	}
+	if results[0].Body != nil {
+		t.Fatal("streamed result retained pooled body storage")
+	}
+	if results[0].Bytes != int64(len(payload)) {
+		t.Fatalf("streamed bytes = %d, want %d", results[0].Bytes, len(payload))
+	}
+}
+
+func TestPipelineBodiesDrainsDecodeErrors(t *testing.T) {
+	c, server := newBodyTestConn(t)
+	payload := testPayload(8 * 1024)
+	serverErr := make(chan error, 1)
+	go func() {
+		reader := bufio.NewReader(server)
+		for range 2 {
+			if _, err := reader.ReadString('\n'); err != nil {
+				serverErr <- err
+				return
+			}
+		}
+		_, err := fmt.Fprintf(server,
+			"222 0 <corrupt@b> body\r\nnot yenc data\r\n.\r\n222 0 <present@b> body\r\n%s.\r\n",
+			encodeBody(payload),
+		)
+		serverErr <- err
+	}()
+
+	results, err := c.PipelineBodies(
+		[]string{"<corrupt@b>", "<present@b>"},
+		make([]BodyDestination, 2),
+	)
+	if !IsArticleNotFoundError(err) {
+		t.Fatalf("error = %v, want article-not-found", err)
+	}
+	if !IsArticleNotFoundError(results[0].Error) {
+		t.Fatalf("first result error = %v, want article-not-found", results[0].Error)
+	}
+	if results[1].Error != nil || !bytes.Equal(results[1].Body, payload) {
+		t.Fatalf("second result = (%d bytes, %v), want successful payload", len(results[1].Body), results[1].Error)
 	}
 	if err := <-serverErr; err != nil {
 		t.Fatal(err)

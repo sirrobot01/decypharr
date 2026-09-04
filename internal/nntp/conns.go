@@ -592,18 +592,26 @@ func (c *Connection) GetDecodedBody(messageID string) ([]byte, error) {
 	return decoded, err
 }
 
+// BodyDestination selects how one pipelined article is delivered. Writer
+// takes precedence and receives decoded data from reusable connection-owned
+// storage. Otherwise Body is returned using Buffer as caller-owned storage.
+type BodyDestination struct {
+	Buffer []byte
+	Writer io.Writer
+}
+
 // DecodedBodyResult is the outcome of one article in a BODY pipeline.
 type DecodedBodyResult struct {
 	Body  []byte
+	Bytes int64
 	Error error
 }
 
-// DecodeBodiesInto pipelines multiple BODY commands and decodes their ordered
-// responses into the corresponding caller-owned buffers. Per-article results
-// preserve partial success. The returned error describes the batch-level
-// failure used for retry and provider failover. The connection must not be
-// used concurrently.
-func (c *Connection) DecodeBodiesInto(messageIDs []string, destinations [][]byte) ([]DecodedBodyResult, error) {
+// PipelineBodies sends multiple BODY commands with one flush and decodes their
+// ordered responses. Per-article results preserve partial success. The returned
+// error describes the batch-level failure used for retry and provider failover.
+// The connection must not be used concurrently.
+func (c *Connection) PipelineBodies(messageIDs []string, destinations []BodyDestination) ([]DecodedBodyResult, error) {
 	if len(messageIDs) != len(destinations) {
 		return nil, fmt.Errorf("BODY pipeline has %d message IDs and %d destinations", len(messageIDs), len(destinations))
 	}
@@ -631,16 +639,32 @@ func (c *Connection) DecodeBodiesInto(messageIDs []string, destinations [][]byte
 
 	var firstArticleErr error
 	for i := range messageIDs {
-		res, err := c.readBodyBuffered(destinations[i], false)
+		destination := destinations[i]
+		pooled := destination.Writer != nil
+		res, err := c.readBodyBuffered(destination.Buffer, pooled)
 		if err == nil {
-			results[i].Body = res.Data
-			continue
+			if destination.Writer == nil {
+				results[i].Body = res.Data
+				results[i].Bytes = int64(len(res.Data))
+				continue
+			}
+			n, writeErr := destination.Writer.Write(res.Data)
+			if writeErr == nil && n != len(res.Data) {
+				writeErr = io.ErrShortWrite
+			}
+			putBodyBuf(res.Data)
+			results[i].Bytes = int64(n)
+			if writeErr == nil {
+				continue
+			}
+			err = writeErr
 		}
 		results[i].Error = err
-		if res.StatusCode != 0 && res.StatusCode != 222 {
-			// A single-line negative response is a clean protocol boundary.
-			// Consume the rest of the ordered pipeline before returning it so
-			// ExecuteWithFailover may safely reuse or retry the connection.
+		if res.StatusCode != 0 {
+			// Status-line negatives, fully consumed yEnc decode failures, and
+			// destination write failures all leave a clean protocol boundary.
+			// Drain the rest of the ordered pipeline before returning so the
+			// connection remains reusable.
 			if firstArticleErr == nil {
 				firstArticleErr = fmt.Errorf("BODY pipeline article %d/%d: %w", i+1, len(messageIDs), err)
 			}

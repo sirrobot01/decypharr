@@ -181,10 +181,12 @@ connections or reduce background throughput.
 
 An in-progress article is allowed to finish. Priority takes effect at the next
 article boundary, avoiding discarded data and unnecessary reconnects. Stream
-read-ahead pipelines two ordered `BODY` commands when at least two workers are
-available; urgent playback remains one article per request, and single-worker
-setups also use a depth of one. Repair checks pipeline up to 16 `STAT` commands
-per connection and return the connection after each window.
+read-ahead pipelines two ordered `BODY` commands once enough work is queued to
+keep the available prefetch workers occupied; shorter ranges stay single-body
+to preserve connection parallelism. Urgent playback remains one article per
+request, and single-worker setups also use a depth of one. Repair checks
+pipeline up to 16 `STAT` commands per connection and return the connection
+after each window.
 
 Providers marked `backup` stay in a fallback tier. They are normally used only
 after primary providers fail or do not carry an article. Setting

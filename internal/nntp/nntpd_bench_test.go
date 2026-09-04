@@ -213,9 +213,9 @@ func BenchmarkBodyPipelineDepthE2E(b *testing.B) {
 					messageIDs[i] = fmt.Sprintf("<pipeline-%d@nntpd>", i)
 					srv.AddArticle(messageIDs[i], body)
 				}
-				destinations := make([][]byte, bodiesPerOperation)
+				destinations := make([]BodyDestination, bodiesPerOperation)
 				for i := range destinations {
-					destinations[i] = make([]byte, 0, DecodedBodyCapacity(benchSegmentSize))
+					destinations[i].Buffer = make([]byte, 0, DecodedBodyCapacity(benchSegmentSize))
 				}
 				conn, provider, err := client.getConnectionFromProvider(context.Background(), WorkloadStreamPrefetch, client.providers[0])
 				if err != nil {
@@ -228,7 +228,7 @@ func BenchmarkBodyPipelineDepthE2E(b *testing.B) {
 				for b.Loop() {
 					for start := 0; start < len(messageIDs); start += depth {
 						end := min(start+depth, len(messageIDs))
-						if _, err := conn.DecodeBodiesInto(messageIDs[start:end], destinations[start:end]); err != nil {
+						if _, err := conn.PipelineBodies(messageIDs[start:end], destinations[start:end]); err != nil {
 							b.Fatal(err)
 						}
 					}
