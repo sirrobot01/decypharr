@@ -62,7 +62,8 @@ Decypharr can use multiple providers with priority and failover:
         "backbone": "Omicron",
         "ssl": true,
         "max_connections": 10,
-        "priority": 2
+        "priority": 2,
+        "backup": true
       }
     ]
   }
@@ -72,6 +73,23 @@ Decypharr can use multiple providers with priority and failover:
 Lower `priority` = higher preference.
 
 `backbone` is optional. Set it when two providers share the same article spool so Decypharr can skip same-backbone providers after `423/430 article not found` responses.
+
+Set `backup` for a fallback or block-account provider. By default, a backup is
+used only when the primary tier fails or does not have an article; a merely busy
+primary does not spend block-account traffic. To trade block usage for lower
+playback startup latency, opt urgent reads into delayed spillover:
+
+```json
+{
+  "usenet": {
+    "stream_backup_wait": "250ms"
+  }
+}
+```
+
+Only urgent playback demand spills over after this wait. Read-ahead, downloads,
+and maintenance continue waiting for the primary tier. Leave the value unset or
+use `"0"` to disable spillover.
 
 ## Performance Tuning
 
@@ -109,6 +127,9 @@ Lower `priority` = higher preference.
 ```
 
 Prefetch buffer for smoother playback. Higher = smoother but more memory.
+Read-ahead bodies use a two-command NNTP pipeline when multiple streaming
+workers are available. Direct playback demand stays at one body per request so
+it can take priority at the next article boundary.
 
 ### Connection Idle Timeout
 

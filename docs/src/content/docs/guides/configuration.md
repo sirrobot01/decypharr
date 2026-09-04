@@ -147,6 +147,7 @@ Array of Debrid services:
     "max_connections": 15,
     "processing_max_connections": 15,
     "read_ahead": "16MB",
+    "stream_backup_wait": "0",
     "processing_timeout": "10m",
     "availability_sample_percent": 10,
     "import_availability_sample_percent": 1,
@@ -163,6 +164,7 @@ Array of Debrid services:
 | `max_connections`             | int    | Global streaming fetch-worker limit | `15`                      |
 | `processing_max_connections`  | int    | Max connections per file for parsing and NZB downloads | Same as `max_connections` |
 | `read_ahead`                  | string | Prefetch buffer size            | `16MB`                       |
+| `stream_backup_wait`          | string | Wait before urgent playback may use a busy-tier backup provider; `0` disables spillover | `0` |
 | `processing_timeout`          | string | Max time for NZB processing     | `10m`                        |
 | `availability_sample_percent` | int    | % of segments to check during repairs (1-100) | `10`             |
 | `import_availability_sample_percent` | int | % of segments to check when adding an NZB (1-100) | `1`         |
@@ -170,16 +172,26 @@ Array of Debrid services:
 
 ### NNTP workload priority
 
-Connection scheduling is automatic and work-conserving. Playback and its
-bounded read-ahead are admitted before full downloads and import parsing;
-scheduled repair, availability scans, and speed tests run last. Lower-priority
-work may use every connection while no higher-priority request is waiting, so
-the policy does not reserve idle connections or reduce background throughput.
+Connection scheduling is automatic and work-conserving. The four admission
+classes, from highest to lowest, are urgent playback demand, bounded stream
+read-ahead, full downloads/import parsing, and background repair, availability,
+or speed-test work. Lower-priority work may use every connection while no
+higher-priority request is waiting, so the policy does not reserve idle
+connections or reduce background throughput.
 
 An in-progress article is allowed to finish. Priority takes effect at the next
-article boundary, avoiding discarded data and unnecessary reconnects. Repair
-checks pipeline up to 16 `STAT` commands per connection and return the
-connection after each window, giving playback a frequent scheduling boundary.
+article boundary, avoiding discarded data and unnecessary reconnects. Stream
+read-ahead pipelines two ordered `BODY` commands when at least two workers are
+available; urgent playback remains one article per request, and single-worker
+setups also use a depth of one. Repair checks pipeline up to 16 `STAT` commands
+per connection and return the connection after each window.
+
+Providers marked `backup` stay in a fallback tier. They are normally used only
+after primary providers fail or do not carry an article. Setting
+`stream_backup_wait` to a duration such as `250ms` additionally allows only an
+urgent playback read to use a backup after waiting that long for a primary
+slot. Leave it unset or set it to `0` to prevent busy primaries from consuming
+block-account traffic.
 
 This workload priority is separate from a provider's `priority` field. Provider
 priority controls which server is preferred; workload priority controls which
@@ -197,6 +209,7 @@ kind of local operation receives the next available connection.
 | `ssl`             | bool   | Use SSL/TLS                        | `false`             |
 | `max_connections` | int    | Max connections to this server     | `20`                |
 | `priority`        | int    | Provider priority (lower = higher) | Index + 1           |
+| `backup`          | bool   | Put provider in the fallback/block-account tier | `false`       |
 
 ## Mounting
 
@@ -526,6 +539,7 @@ DEBRIDS__0__API_KEY=your_key
 
 # Usenet
 USENET__MAX_CONNECTIONS=20
+USENET__STREAM_BACKUP_WAIT=250ms
 USENET__PROVIDERS__0__HOST=news.provider.com
 USENET__PROVIDERS__0__PORT=563
 USENET__PROVIDERS__0__BACKBONE=Omicron

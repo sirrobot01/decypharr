@@ -19,11 +19,11 @@ type UsenetProvider struct {
 	// Backup marks this provider as a fallback tier. Backups are only
 	// consulted when every non-backup ("primary") provider is excluded
 	// — e.g. all primaries returned article-not-found or had connection
-	// errors. They are NOT used just because a primary's pool is busy;
-	// the request waits for a primary slot instead. This matches the
-	// "unlimited primary + block backup for completion" model that most
-	// other Usenet clients implement, and prevents block providers from
-	// being billed for articles the unlimited could have served.
+	// errors. They are not used just because a primary's pool is busy unless
+	// stream_backup_wait explicitly enables urgent playback spillover. This
+	// matches the "unlimited primary + block backup for completion" model
+	// that most other Usenet clients implement, and prevents block providers
+	// from being billed for articles the unlimited could have served.
 	Backup bool `json:"backup,omitempty"`
 }
 
