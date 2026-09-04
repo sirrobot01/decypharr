@@ -199,6 +199,22 @@ And per-provider:
 }
 ```
 
+### Do downloads or repairs compete with playback?
+
+Playback is automatically prioritized. A currently transferring NNTP article
+is allowed to finish, then its connection is handed to a waiting stream before
+another download, import, or repair operation. When no stream is waiting,
+lower-priority work can use the full connection pool.
+
+### Does Decypharr use NNTP pipelining?
+
+Yes, for repair and availability checks: independent `STAT` commands are sent
+in shallow pipelines, which removes most per-command round-trip delay. Article
+`BODY` retrieval remains parallel across provider connections and yields after
+each article. Deep `BODY` pipelines would prevent a newly started stream from
+overtaking already-issued download responses and would enlarge the failure and
+retry window.
+
 ## Arr Integration
 
 ### Path mapping not working?

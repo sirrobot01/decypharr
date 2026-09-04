@@ -160,13 +160,30 @@ Array of Debrid services:
 | Field                         | Type   | Description                     | Default                      |
 |-------------------------------|--------|---------------------------------|------------------------------|
 | `providers`                   | array  | NNTP server configurations      | `[]`                         |
-| `max_connections`             | int    | Max connections per streaming file | `15`                      |
+| `max_connections`             | int    | Global streaming fetch-worker limit | `15`                      |
 | `processing_max_connections`  | int    | Max connections per file for parsing and NZB downloads | Same as `max_connections` |
 | `read_ahead`                  | string | Prefetch buffer size            | `16MB`                       |
 | `processing_timeout`          | string | Max time for NZB processing     | `10m`                        |
 | `availability_sample_percent` | int    | % of segments to check during repairs (1-100) | `10`             |
 | `import_availability_sample_percent` | int | % of segments to check when adding an NZB (1-100) | `1`         |
 | `disk_path`                   | string | Disk-backed rewind location; empty buffers in memory | `""` (memory) |
+
+### NNTP workload priority
+
+Connection scheduling is automatic and work-conserving. Playback and its
+bounded read-ahead are admitted before full downloads and import parsing;
+scheduled repair, availability scans, and speed tests run last. Lower-priority
+work may use every connection while no higher-priority request is waiting, so
+the policy does not reserve idle connections or reduce background throughput.
+
+An in-progress article is allowed to finish. Priority takes effect at the next
+article boundary, avoiding discarded data and unnecessary reconnects. Repair
+checks pipeline up to 16 `STAT` commands per connection and return the
+connection after each window, giving playback a frequent scheduling boundary.
+
+This workload priority is separate from a provider's `priority` field. Provider
+priority controls which server is preferred; workload priority controls which
+kind of local operation receives the next available connection.
 
 ### Provider Fields
 
