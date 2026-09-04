@@ -61,7 +61,7 @@ func BenchmarkStreamBodyE2E(b *testing.B) {
 			b.SetBytes(benchSegmentSize)
 			b.ResetTimer()
 			for range b.N {
-				err := client.ExecuteWithFailover(ctx, func(conn *Connection) error {
+				err := client.ExecuteWithFailover(ctx, WorkloadStream, func(conn *Connection) error {
 					_, err := conn.StreamBody("<bench@nntpd>", w)
 					return err
 				})

@@ -30,6 +30,8 @@ type ProviderPool struct {
 	conns       []*connectionEntry // Stack: Push/Pop from end
 	mu          sync.Mutex         // Protects conns slice only
 	slots       chan struct{}      // Semaphore: capacity = max connections
+	waiting     [workloadCount]int // Protected by Client.waitMu
+	waitingMask atomic.Uint32
 	max         int
 	config      config.UsenetProvider
 	activeConns sync.Map // *Connection → struct{}; tracks checked-out connections for force-close on shutdown
@@ -101,12 +103,11 @@ type Client struct {
 
 	retries int // Number of retries per provider for transient errors
 
-	// waitMu guards waiters, the FIFO queue of parked acquirers. releaseSlot
-	// hands a freed slot directly to the oldest compatible waiter under this
-	// lock (see handoffSlot); waiters register before parking and deregister
-	// on every other exit path.
+	// waitMu guards the priority queues of parked acquirers. releaseSlot hands
+	// a freed slot directly to the oldest compatible waiter in the highest
+	// priority class under this lock.
 	waitMu  sync.Mutex
-	waiters []*slotWaiter
+	waiters [workloadCount]waiterQueue
 
 	closed atomic.Bool
 	// Speed test results storage
@@ -383,88 +384,6 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	return cm, nil
 }
 
-// slotWaiter is one parked acquirer waiting for a slot on any of its
-// eligible pools. A releaser hands a freed slot directly to the oldest
-// compatible waiter (FIFO) instead of returning it to the pool's slot
-// channel: with a free-for-all channel, the goroutine that just released a
-// slot (already running, cache-hot) re-acquired it via the non-blocking
-// scan before a parked waiter even woke, starving parked acquirers for
-// over a second at p99 under saturation (see BenchmarkPoolContended).
-type slotWaiter struct {
-	pools []*ProviderPool
-	// handoff carries the pool whose held slot was transferred to this
-	// waiter. Buffered, and sends happen under Client.waitMu — so once a
-	// waiter observes it is absent from the queue, the token is already in
-	// the channel and a non-blocking receive cannot miss it.
-	handoff chan *ProviderPool
-}
-
-func newSlotWaiter(pools []*ProviderPool) *slotWaiter {
-	return &slotWaiter{pools: pools, handoff: make(chan *ProviderPool, 1)}
-}
-
-// register queues w for slot handoffs. Callers must register before their
-// availability scan so a release between scan and park cannot be missed.
-func (c *Client) register(w *slotWaiter) {
-	c.waitMu.Lock()
-	c.waiters = append(c.waiters, w)
-	c.waitMu.Unlock()
-}
-
-// deregister removes w from the waiter queue. If a releaser already popped
-// w, a handoff token is guaranteed present (sends happen under waitMu), so
-// it is drained and the slot re-released rather than leaked. Must NOT be
-// called after w consumed a handoff itself — the token is gone and the
-// drain would block.
-func (c *Client) deregister(w *slotWaiter) {
-	c.waitMu.Lock()
-	found := false
-	for i, q := range c.waiters {
-		if q == w {
-			c.waiters = append(c.waiters[:i], c.waiters[i+1:]...)
-			found = true
-			break
-		}
-	}
-	c.waitMu.Unlock()
-	if !found {
-		c.releaseSlot(<-w.handoff)
-	}
-}
-
-// releaseSlot frees one held slot on pp, preferring a direct handoff to the
-// oldest parked waiter that can use it. Every slot release must go through
-// here: a raw `<-pp.slots` would bypass parked waiters and leave them to
-// their fallback tick.
-func (c *Client) releaseSlot(pp *ProviderPool) {
-	if c.handoffSlot(pp) {
-		return
-	}
-	<-pp.slots
-}
-
-// handoffSlot transfers a held slot on pp to the oldest parked waiter
-// eligible for it. Returns false when no such waiter exists, or when the
-// pool cannot currently serve one (nothing idle and dials cooling down) —
-// handing a doomed slot around would just ping-pong it between waiters.
-func (c *Client) handoffSlot(pp *ProviderPool) bool {
-	if !pp.hasIdle() && pp.inDialCooldown() {
-		return false
-	}
-	c.waitMu.Lock()
-	defer c.waitMu.Unlock()
-	for i, w := range c.waiters {
-		for _, wp := range w.pools {
-			if wp == pp {
-				c.waiters = append(c.waiters[:i], c.waiters[i+1:]...)
-				w.handoff <- pp
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // put returns a connection to the pool and releases the slot.
 func (c *Client) put(conn *Connection, provider config.UsenetProvider) {
 	if conn == nil {
@@ -572,7 +491,10 @@ func (c *Client) isIdleExpired(lastUsed time.Time, now time.Time) bool {
 // Uses exclusion-based connection acquisition: gets ANY available connection,
 // and on retryable errors, retries with exponential backoff before excluding the provider.
 // Uses avast/retry-go for retry handling.
-func (c *Client) ExecuteWithFailover(ctx context.Context, fn func(conn *Connection) error) error {
+func (c *Client) ExecuteWithFailover(ctx context.Context, workload Workload, fn func(conn *Connection) error) error {
+	if !workload.valid() {
+		return fmt.Errorf("invalid NNTP workload: %s", workload)
+	}
 	var lastErr error
 	var exclusions providerExclusions
 
@@ -581,7 +503,7 @@ func (c *Client) ExecuteWithFailover(ctx context.Context, fn func(conn *Connecti
 			return ctx.Err()
 		}
 
-		conn, connProvider, err := c.getAnyAvailableConnection(ctx, exclusions)
+		conn, connProvider, err := c.getAnyAvailableConnection(ctx, workload, exclusions)
 		if err != nil {
 			lastErr = err
 			continue
@@ -614,8 +536,7 @@ func (c *Client) ExecuteWithFailover(ctx context.Context, fn func(conn *Connecti
 					return nil
 				}
 
-				var nntpErr *Error
-				if errors.As(execErr, &nntpErr) {
+				if nntpErr, ok := errors.AsType[*Error](execErr); ok {
 					switch nntpErr.Type {
 					case ErrorTypeConnection, ErrorTypeTimeout, ErrorTypeServerBusy:
 						// Retriable error - release the potentially dead connection.
@@ -633,9 +554,9 @@ func (c *Client) ExecuteWithFailover(ctx context.Context, fn func(conn *Connecti
 						// the same one.
 						retryExclusions := providerExclusions{}
 						retryExclusions.excludeHost(failedProvider.Host)
-						newConn, newProvider, connErr := c.getAnyAvailableConnection(ctx, retryExclusions)
+						newConn, newProvider, connErr := c.getAnyAvailableConnection(ctx, workload, retryExclusions)
 						if connErr != nil {
-							newConn, newProvider, connErr = c.getAnyAvailableConnection(ctx, providerExclusions{})
+							newConn, newProvider, connErr = c.getAnyAvailableConnection(ctx, workload, providerExclusions{})
 						}
 						if connErr != nil {
 							return retry.Unrecoverable(connErr)
@@ -682,8 +603,7 @@ func (c *Client) ExecuteWithFailover(ctx context.Context, fn func(conn *Connecti
 		lastErr = err
 
 		// Check if we should exclude this provider
-		var nntpErr *Error
-		if errors.As(err, &nntpErr) {
+		if nntpErr, ok := errors.AsType[*Error](err); ok {
 			switch nntpErr.Type {
 			case ErrorTypeArticleNotFound, ErrorTypeYencDecode:
 				// A CRC/decode failure is article-specific just like a 430:
@@ -739,36 +659,39 @@ func (c *Client) returnOrReleaseConn(conn *Connection, provider config.UsenetPro
 // are ignored (allowDial=true): targeted callers — the repair BatchStat
 // sweep — need this provider's answer specifically, and a prompt connection
 // error is more accurate for them than a silent reroute.
-func (c *Client) getConnectionFromProvider(ctx context.Context, provider config.UsenetProvider) (*Connection, config.UsenetProvider, error) {
+func (c *Client) getConnectionFromProvider(ctx context.Context, workload Workload, provider config.UsenetProvider) (*Connection, config.UsenetProvider, error) {
+	if !workload.valid() {
+		return nil, provider, fmt.Errorf("invalid NNTP workload: %s", workload)
+	}
 	pp, ok := c.pools[provider.ID()]
 	if !ok {
 		return nil, provider, fmt.Errorf("provider pool not found: %s", provider.Host)
 	}
 
 	// Fast path: free slot, no queueing.
-	select {
-	case pp.slots <- struct{}{}:
+	if c.tryAcquireSlot(pp, workload) {
 		conn, err := c.getOrCreateFromPool(ctx, pp, provider, true)
 		if err != nil {
 			c.releaseSlot(pp)
 			return nil, provider, err
 		}
 		return conn, provider, nil
-	default:
 	}
 
-	w := newSlotWaiter([]*ProviderPool{pp})
+	w := newSlotWaiter(workload, []*ProviderPool{pp})
 	c.register(w)
-	select {
-	case pp.slots <- struct{}{}:
+	if c.tryAcquireSlot(pp, workload) {
 		// Won a raced slot directly; deregister drains any concurrent
 		// handoff so the second slot is re-released, not leaked.
 		c.deregister(w)
-	case got := <-w.handoff:
-		pp = got
-	case <-ctx.Done():
-		c.deregister(w)
-		return nil, provider, ctx.Err()
+	} else {
+		select {
+		case got := <-w.handoff:
+			pp = got
+		case <-ctx.Done():
+			c.deregister(w)
+			return nil, provider, ctx.Err()
+		}
 	}
 
 	conn, err := c.getOrCreateFromPool(ctx, pp, provider, true)
@@ -795,7 +718,7 @@ func (c *Client) safeExecute(conn *Connection, fn func(conn *Connection) error) 
 
 // getAnyAvailableConnection gets a connection from ANY provider that isn't excluded.
 // Phase 1: Non-blocking scan of all eligible providers (fast path)
-// Phase 2: If all busy, race goroutines to get first available slot
+// Phase 2: If all busy, join the workload-aware admission queue
 //
 // Tiering: providers with Backup=true are NOT considered until every
 // non-backup ("primary") provider is excluded. A primary's pool being
@@ -807,7 +730,10 @@ func (c *Client) safeExecute(conn *Connection, fn func(conn *Connection) error) 
 //
 // Within a tier, providers are still consumed opportunistically across
 // hosts — so two unlimited primaries split load the way they do today.
-func (c *Client) getAnyAvailableConnection(ctx context.Context, exclusions providerExclusions) (*Connection, config.UsenetProvider, error) {
+func (c *Client) getAnyAvailableConnection(ctx context.Context, workload Workload, exclusions providerExclusions) (*Connection, config.UsenetProvider, error) {
+	if !workload.valid() {
+		return nil, config.UsenetProvider{}, fmt.Errorf("invalid NNTP workload: %s", workload)
+	}
 	// Determine whether any primary is eligible first. Avoid building provider
 	// slices on the common path: when a pool has a free slot, the first scan
 	// returns immediately. A slice is only needed for the uncommon all-busy
@@ -849,8 +775,7 @@ func (c *Client) getAnyAvailableConnection(ctx context.Context, exclusions provi
 			continue // provider cooling down after dial failures; route around it
 		}
 
-		select {
-		case pp.slots <- struct{}{}:
+		if c.tryAcquireSlot(pp, workload) {
 			// Got a slot - try to get or create connection
 			conn, err := c.getOrCreateFromPool(ctx, pp, provider, ignoreCooldowns)
 			if err != nil {
@@ -858,9 +783,6 @@ func (c *Client) getAnyAvailableConnection(ctx context.Context, exclusions provi
 				continue          // Try next provider
 			}
 			return conn, provider, nil
-		default:
-			// Pool at capacity, try next provider
-			continue
 		}
 	}
 
@@ -877,16 +799,15 @@ func (c *Client) getAnyAvailableConnection(ctx context.Context, exclusions provi
 			eligible = append(eligible, c.orderedPools[i])
 		}
 	}
-	return c.waitForConnection(ctx, eligible)
+	return c.waitForConnection(ctx, workload, eligible)
 }
 
 // waitForConnection blocks until a slot is available on any eligible
-// provider. The waiter registers in the shared FIFO before each scan so a
-// release between scan and park cannot be missed, and releases hand their
-// slot directly to the oldest compatible waiter (see releaseSlot), making
-// acquisition under saturation approximately FIFO instead of barge-in.
-func (c *Client) waitForConnection(ctx context.Context, eligible []*ProviderPool) (*Connection, config.UsenetProvider, error) {
-	w := newSlotWaiter(eligible)
+// provider. The waiter registers in its priority queue before each scan so a
+// release between scan and park cannot be missed. Handoffs are strict across
+// workload classes and approximately FIFO within each class.
+func (c *Client) waitForConnection(ctx context.Context, workload Workload, eligible []*ProviderPool) (*Connection, config.UsenetProvider, error) {
+	w := newSlotWaiter(workload, eligible)
 
 	// The fallback tick guards against a slot release that bypasses
 	// releaseSlot turning into an indefinite park, and doubles as the
@@ -915,8 +836,7 @@ func (c *Client) waitForConnection(ctx context.Context, eligible []*ProviderPool
 			if !ignoreCooldowns && !pp.isWarm() {
 				continue
 			}
-			select {
-			case pp.slots <- struct{}{}:
+			if c.tryAcquireSlot(pp, workload) {
 				conn, err := c.getOrCreateFromPool(ctx, pp, pp.config, ignoreCooldowns)
 				if err != nil {
 					c.releaseSlot(pp)
@@ -932,7 +852,7 @@ func (c *Client) waitForConnection(ctx context.Context, eligible []*ProviderPool
 				}
 				c.deregister(w)
 				return conn, pp.config, nil
-			default:
+			} else {
 				busy++
 			}
 		}
@@ -1425,6 +1345,7 @@ func (c *Client) Stats() map[string]any {
 			"active":          active,
 			"idle":            idle,
 			"ssl":             p.SSL,
+			"waiting":         c.providerWaiting(pp),
 		}
 
 		// Add speed test result if available
@@ -1441,11 +1362,17 @@ func (c *Client) Stats() map[string]any {
 		providers = append(providers, providerInfo)
 	}
 
+	waiting := c.waitingByWorkload()
 	poolStats := map[string]any{
 		"max_connections": totalMax,
 		"total_created":   totalActive + totalIdle,
 		"active":          totalActive,
 		"idle":            totalIdle,
+		"waiting": map[string]int{
+			WorkloadStream.String():     waiting[WorkloadStream],
+			WorkloadDownload.String():   waiting[WorkloadDownload],
+			WorkloadBackground.String(): waiting[WorkloadBackground],
+		},
 	}
 
 	stats["pool"] = poolStats
@@ -1454,14 +1381,14 @@ func (c *Client) Stats() map[string]any {
 	return stats
 }
 
-func (c *Client) Stat(ctx context.Context, messageID string) (int, string, error) {
+func (c *Client) Stat(ctx context.Context, workload Workload, messageID string) (int, string, error) {
 	if c.closed.Load() {
 		return 0, "", errors.New("nntp client is closed")
 	}
 
 	var num int
 	var id string
-	err := c.ExecuteWithFailover(ctx, func(conn *Connection) error {
+	err := c.ExecuteWithFailover(ctx, workload, func(conn *Connection) error {
 		n, echoed, statErr := conn.Stat(messageID)
 		if statErr != nil {
 			return statErr
@@ -1649,8 +1576,7 @@ func (c *Client) BatchStat(ctx context.Context, messageIDs []string) (*BatchStat
 		}
 		// Article-not-found doesn't count as an error for the caller's
 		// availability decision; only true connection/protocol failures do.
-		var nntpErr *Error
-		if errors.As(r.Error, &nntpErr) && nntpErr.Type == ErrorTypeArticleNotFound {
+		if nntpErr, ok := errors.AsType[*Error](r.Error); ok && nntpErr.Type == ErrorTypeArticleNotFound {
 			continue
 		}
 		result.ErrorCount++
@@ -1723,8 +1649,7 @@ func (c *Client) batchStatAcrossProviders(ctx context.Context, messageIDs []stri
 				continue
 			}
 
-			var nntpErr *Error
-			if res.Error != nil && errors.As(res.Error, &nntpErr) && nntpErr.Type == ErrorTypeArticleNotFound {
+			if nntpErr, ok := errors.AsType[*Error](res.Error); res.Error != nil && ok && nntpErr.Type == ErrorTypeArticleNotFound {
 				states[idx].sawNotFound = true
 				excludeForArticleNotFound(&states[idx].exclusions, provider)
 			} else {
@@ -1763,7 +1688,7 @@ func (c *Client) batchStatAcrossProviders(ctx context.Context, messageIDs []stri
 }
 
 func (c *Client) batchStatOnProvider(ctx context.Context, provider config.UsenetProvider, messageIDs []string) ([]StatResult, error) {
-	conn, providerCfg, err := c.getConnectionFromProvider(ctx, provider)
+	conn, providerCfg, err := c.getConnectionFromProvider(ctx, WorkloadBackground, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -1787,8 +1712,7 @@ func (c *Client) batchStatOnProvider(ctx context.Context, provider config.Usenet
 		results[i].Available = false
 		results[i].Error = statErr
 
-		var nntpErr *Error
-		if errors.As(statErr, &nntpErr) && nntpErr.Type != ErrorTypeConnection && nntpErr.Type != ErrorTypeTimeout {
+		if nntpErr, ok := errors.AsType[*Error](statErr); ok && nntpErr.Type != ErrorTypeConnection && nntpErr.Type != ErrorTypeTimeout {
 			continue
 		}
 
@@ -1892,7 +1816,7 @@ func (c *Client) SpeedTest(ctx context.Context, providerID string, messageID str
 	// connection cap — a direct dial could exceed max_connections by one,
 	// which strict providers answer with 502 for the whole account. A
 	// healthy connection goes back to the pool warm when the test is done.
-	conn, providerCfg, err := c.getConnectionFromProvider(ctx, *targetProvider)
+	conn, providerCfg, err := c.getConnectionFromProvider(ctx, WorkloadBackground, *targetProvider)
 	if err != nil {
 		result.Error = fmt.Sprintf("connection failed: %v", err)
 		c.speedTestResults.Store(providerID, result)

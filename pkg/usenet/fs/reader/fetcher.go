@@ -267,7 +267,7 @@ func (sf *SegmentFetcher) doFetchAttempt(ctx context.Context, segIdx, restarts i
 	defer cancel()
 
 	// ExecuteWithFailover already retries across configured providers.
-	err := sf.client.ExecuteWithFailover(downloadCtx, func(conn *nntp.Connection) error {
+	err := sf.client.ExecuteWithFailover(downloadCtx, nntp.WorkloadStream, func(conn *nntp.Connection) error {
 		stopCancel := context.AfterFunc(downloadCtx, func() {
 			_ = conn.Close()
 		})

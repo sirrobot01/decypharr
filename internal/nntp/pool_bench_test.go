@@ -84,7 +84,7 @@ func BenchmarkPoolCheckoutUncontended(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		conn, prov, err := c.getAnyAvailableConnection(ctx, providerExclusions{})
+		conn, prov, err := c.getAnyAvailableConnection(ctx, WorkloadStream, providerExclusions{})
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -114,7 +114,7 @@ func benchContended(b *testing.B, slots, workers int, hold time.Duration) {
 			defer wg.Done()
 			for next.Add(1) <= int64(b.N) {
 				t0 := time.Now()
-				conn, prov, err := c.getAnyAvailableConnection(ctx, providerExclusions{})
+				conn, prov, err := c.getAnyAvailableConnection(ctx, WorkloadStream, providerExclusions{})
 				if err != nil {
 					b.Error(err)
 					return
@@ -214,7 +214,7 @@ func BenchmarkAcquireDeadPrimary(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		conn, prov, err := c.getAnyAvailableConnection(ctx, providerExclusions{})
+		conn, prov, err := c.getAnyAvailableConnection(ctx, WorkloadStream, providerExclusions{})
 		if err != nil {
 			b.Fatal(err)
 		}

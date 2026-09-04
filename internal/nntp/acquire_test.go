@@ -41,7 +41,7 @@ func TestWaitForConnectionUnblocksOnRelease(t *testing.T) {
 	}
 	resCh := make(chan result, 1)
 	go func() {
-		got, _, err := c.getAnyAvailableConnection(context.Background(), providerExclusions{})
+		got, _, err := c.getAnyAvailableConnection(context.Background(), WorkloadStream, providerExclusions{})
 		resCh <- result{got, err}
 	}()
 
@@ -81,7 +81,7 @@ func TestWaitForConnectionCtxCancelUnblocks(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, err := c.getAnyAvailableConnection(ctx, providerExclusions{})
+		_, _, err := c.getAnyAvailableConnection(ctx, WorkloadStream, providerExclusions{})
 		errCh <- err
 	}()
 

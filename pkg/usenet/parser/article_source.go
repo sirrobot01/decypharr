@@ -59,7 +59,7 @@ func (b nntpArticleBackend) Fetch(ctx context.Context, messageID string) ([]byte
 		body     []byte
 		metadata *nntp.YencMetadata
 	)
-	err := b.manager.ExecuteWithFailover(ctx, func(conn *nntp.Connection) error {
+	err := b.manager.ExecuteWithFailover(ctx, nntp.WorkloadDownload, func(conn *nntp.Connection) error {
 		decoded, observed, fetchErr := conn.GetDecodedBodyWithMetadata(messageID)
 		if fetchErr == nil {
 			body = decoded
@@ -71,7 +71,7 @@ func (b nntpArticleBackend) Fetch(ctx context.Context, messageID string) ([]byte
 }
 
 func (b nntpArticleBackend) Stat(ctx context.Context, messageID string) error {
-	_, _, err := b.manager.Stat(ctx, messageID)
+	_, _, err := b.manager.Stat(ctx, nntp.WorkloadDownload, messageID)
 	return err
 }
 
