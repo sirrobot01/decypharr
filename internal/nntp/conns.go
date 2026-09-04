@@ -797,6 +797,9 @@ func (c *Connection) StatBatch(messageIDs []string) ([]StatResult, error) {
 	if len(messageIDs) == 0 {
 		return results, nil
 	}
+	for i, messageID := range messageIDs {
+		results[i].MessageID = messageID
+	}
 
 	writeTimeout := c.writeTimeout
 	if writeTimeout <= 0 {
@@ -804,7 +807,6 @@ func (c *Connection) StatBatch(messageIDs []string) ([]StatResult, error) {
 	}
 	_ = c.conn.SetWriteDeadline(utils.Now().Add(writeTimeout))
 	for i, messageID := range messageIDs {
-		results[i].MessageID = messageID
 		if err := c.writeCommandArg("STAT", FormatMessageID(messageID)); err != nil {
 			_ = c.conn.SetWriteDeadline(time.Time{})
 			pipelineErr := NewConnectionError(fmt.Errorf("write STAT pipeline at %d/%d: %w", i+1, len(messageIDs), err))

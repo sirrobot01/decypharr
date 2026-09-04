@@ -2,13 +2,14 @@ package nntp
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
 	"net/textproto"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -330,8 +331,8 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	}
 
 	// Sort providers by priority (lower number = higher priority)
-	sort.Slice(providers, func(i, j int) bool {
-		return providers[i].Priority < providers[j].Priority
+	slices.SortFunc(providers, func(a, b config.UsenetProvider) int {
+		return cmp.Compare(a.Priority, b.Priority)
 	})
 
 	// Pre-normalize backbones once. excludes() runs on every connection
@@ -1211,9 +1212,7 @@ func (c *Client) keepAliveBatch(pp *ProviderPool, toPing []*connectionEntry, now
 	}
 	tallies := make([]tally, workers)
 	for i := range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for entry := range pingCh {
 				err := c.keepAlive(pp, entry, now, &st)
 				if err == nil {
@@ -1226,7 +1225,7 @@ func (c *Client) keepAliveBatch(pp *ProviderPool, toPing []*connectionEntry, now
 					tallies[i].err = err
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -1704,9 +1703,17 @@ func (c *Client) batchStatOnProvider(ctx context.Context, provider config.Usenet
 			return results, err
 		}
 
-		stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
+		cancelFinished := make(chan struct{})
+		stopCancel := context.AfterFunc(ctx, func() {
+			defer close(cancelFinished)
+			_ = conn.Close()
+		})
 		window, statErr := conn.StatBatch(messageIDs[start:end])
-		stopCancel()
+		if !stopCancel() {
+			// The callback has started. Wait until it has closed the connection
+			// before returnOrReleaseConn can inspect and potentially pool it.
+			<-cancelFinished
+		}
 		results = append(results, window...)
 		if statErr != nil {
 			c.release(conn)

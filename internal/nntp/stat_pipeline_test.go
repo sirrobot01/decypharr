@@ -180,6 +180,34 @@ func TestStatBatchMarksUnreadSuffixAfterDisconnect(t *testing.T) {
 	}
 }
 
+func TestStatBatchPreservesMessageIDsAfterWriteFailure(t *testing.T) {
+	clientSide, serverSide := net.Pipe()
+	_ = serverSide.Close()
+	t.Cleanup(func() { _ = clientSide.Close() })
+	conn := &Connection{
+		conn:   clientSide,
+		writer: bufio.NewWriterSize(clientSide, 8),
+	}
+	messageIDs := []string{
+		"first-long-message-id@example",
+		"second@example",
+		"third@example",
+	}
+
+	results, err := conn.StatBatch(messageIDs)
+	if err == nil {
+		t.Fatal("expected pipeline write failure")
+	}
+	for i, result := range results {
+		if result.MessageID != messageIDs[i] {
+			t.Fatalf("result %d message ID = %q, want %q", i, result.MessageID, messageIDs[i])
+		}
+		if nntpErr, ok := errors.AsType[*Error](result.Error); !ok || nntpErr.Type != ErrorTypeConnection {
+			t.Fatalf("result %d error = %v, want connection error", i, result.Error)
+		}
+	}
+}
+
 func serveStatPipeline(server net.Conn, commands int, responses []string) <-chan error {
 	done := make(chan error, 1)
 	go func() {

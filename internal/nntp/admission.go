@@ -2,6 +2,7 @@ package nntp
 
 import (
 	"fmt"
+	"slices"
 )
 
 // Workload describes why a caller needs an NNTP connection. Lower values
@@ -176,14 +177,7 @@ func (c *Client) handoffSlot(pp *ProviderPool) bool {
 	defer c.waitMu.Unlock()
 	for workload := WorkloadStream; workload < workloadCount; workload++ {
 		for w := c.waiters[workload].head; w != nil; w = w.next {
-			compatible := false
-			for _, candidate := range w.pools {
-				if candidate == pp {
-					compatible = true
-					break
-				}
-			}
-			if !compatible {
+			if !slices.Contains(w.pools, pp) {
 				continue
 			}
 			c.removeWaiterLocked(w)
