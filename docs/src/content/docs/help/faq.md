@@ -212,12 +212,13 @@ connection pool.
 
 Yes. Repair and availability checks send up to 16 independent `STAT` commands
 per pipeline. Once enough speculative stream read-ahead is queued to keep its
-workers occupied, the remaining bodies use shallow two-command pipelines. This
-removes round trips without reducing connection parallelism or creating a long
-preemption window. Urgent playback demand always requests one body at a time;
-read-ahead also stays single-body on a single-worker setup. Full downloads remain
-article-bounded, so newly queued playback takes the next released connection
-instead of sitting behind a deep body pipeline.
+workers occupied, the remaining bodies use shallow pipelines. The configurable
+`body_pipeline_depth` range is 1-4: 1 disables BODY pipelining, 2 is the balanced
+default, and 4 favors throughput on high-latency links. Urgent playback demand
+always requests one body at a time; read-ahead also stays single-body on a
+single-worker setup. Full downloads remain article-bounded, so newly queued
+playback takes the next released connection instead of sitting behind a deep
+body pipeline.
 
 ## Arr Integration
 

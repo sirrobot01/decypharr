@@ -121,16 +121,19 @@ use `"0"` to disable spillover.
 ```json
 {
   "usenet": {
-    "read_ahead": "16MB"
+    "read_ahead": "16MB",
+    "body_pipeline_depth": 2
   }
 }
 ```
 
 Prefetch buffer for smoother playback. Higher = smoother but more memory.
-Read-ahead bodies use a two-command NNTP pipeline after enough work is queued to
-keep the available prefetch workers occupied; shorter ranges retain full
-connection parallelism. Direct playback demand stays at one body per request
-so it can take priority at the next article boundary.
+Read-ahead bodies use an NNTP pipeline after enough work is queued to keep the
+available prefetch workers occupied; shorter ranges retain full connection
+parallelism. `body_pipeline_depth` accepts 1-4: 1 disables pipelining, 2 is the
+balanced default, and 4 favors throughput on high-latency links. Direct playback
+demand stays at one body per request so it can take priority at the next article
+boundary.
 
 ### Connection Idle Timeout
 
@@ -262,6 +265,7 @@ Full Usenet config with optimal settings:
     "max_connections": 15,
     "processing_max_connections": 15,
     "read_ahead": "32MB",
+    "body_pipeline_depth": 2,
     "processing_timeout": "15m",
     "availability_sample_percent": 5,
     "disk_path": "/cache/usenet"

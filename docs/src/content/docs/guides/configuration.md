@@ -147,6 +147,7 @@ Array of Debrid services:
     "max_connections": 15,
     "processing_max_connections": 15,
     "read_ahead": "16MB",
+    "body_pipeline_depth": 2,
     "stream_backup_wait": "0",
     "processing_timeout": "10m",
     "availability_sample_percent": 10,
@@ -164,6 +165,7 @@ Array of Debrid services:
 | `max_connections`             | int    | Global streaming fetch-worker limit | `15`                      |
 | `processing_max_connections`  | int    | Max connections per file for parsing and NZB downloads | Same as `max_connections` |
 | `read_ahead`                  | string | Prefetch buffer size            | `16MB`                       |
+| `body_pipeline_depth`         | int    | Ordered read-ahead `BODY` commands per connection (`1` disables pipelining, range 1-4) | `2` |
 | `stream_backup_wait`          | string | Wait before urgent playback may use a busy-tier backup provider; `0` disables spillover | `0` |
 | `processing_timeout`          | string | Max time for NZB processing     | `10m`                        |
 | `availability_sample_percent` | int    | % of segments to check during repairs (1-100) | `10`             |
@@ -181,12 +183,14 @@ connections or reduce background throughput.
 
 An in-progress article is allowed to finish. Priority takes effect at the next
 article boundary, avoiding discarded data and unnecessary reconnects. Stream
-read-ahead pipelines two ordered `BODY` commands once enough work is queued to
-keep the available prefetch workers occupied; shorter ranges stay single-body
-to preserve connection parallelism. Urgent playback remains one article per
-request, and single-worker setups also use a depth of one. Repair checks
-pipeline up to 16 `STAT` commands per connection and return the connection
-after each window.
+read-ahead pipelines up to `body_pipeline_depth` ordered `BODY` commands once
+enough work is queued to keep the available prefetch workers occupied; shorter
+ranges stay single-body to preserve connection parallelism. The default depth
+of 2 balances RTT savings with a short preemption window. Set it to 1 to disable
+BODY pipelining, or up to 4 for higher throughput on high-latency links. Urgent
+playback remains one article per request, and single-worker setups also behave
+as depth one. Repair checks pipeline up to 16 `STAT` commands per connection and
+return the connection after each window.
 
 Providers marked `backup` stay in a fallback tier. They are normally used only
 after primary providers fail or do not carry an article. Setting
@@ -541,6 +545,7 @@ DEBRIDS__0__API_KEY=your_key
 
 # Usenet
 USENET__MAX_CONNECTIONS=20
+USENET__BODY_PIPELINE_DEPTH=2
 USENET__STREAM_BACKUP_WAIT=250ms
 USENET__PROVIDERS__0__HOST=news.provider.com
 USENET__PROVIDERS__0__PORT=563
