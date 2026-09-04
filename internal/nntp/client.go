@@ -109,6 +109,9 @@ type Client struct {
 	// priority class under this lock.
 	waitMu  sync.Mutex
 	waiters [workloadCount]waiterQueue
+	// admission holds lock-free cumulative telemetry for contended connection
+	// acquisitions. The uncontended path never touches these counters.
+	admission [workloadCount]admissionMetrics
 
 	closed atomic.Bool
 	// Speed test results storage
@@ -679,7 +682,7 @@ func (c *Client) getConnectionFromProvider(ctx context.Context, workload Workloa
 		return conn, provider, nil
 	}
 
-	w := newSlotWaiter(workload, []*ProviderPool{pp})
+	w := c.newQueuedWaiter(workload, []*ProviderPool{pp})
 	c.register(w)
 	if c.tryAcquireSlot(pp, workload) {
 		// Won a raced slot directly; deregister drains any concurrent
@@ -691,6 +694,7 @@ func (c *Client) getConnectionFromProvider(ctx context.Context, workload Workloa
 			pp = got
 		case <-ctx.Done():
 			c.deregister(w)
+			c.finishWait(w, admissionCanceled)
 			return nil, provider, ctx.Err()
 		}
 	}
@@ -698,8 +702,14 @@ func (c *Client) getConnectionFromProvider(ctx context.Context, workload Workloa
 	conn, err := c.getOrCreateFromPool(ctx, pp, provider, true)
 	if err != nil {
 		c.releaseSlot(pp)
+		outcome := admissionFailed
+		if ctx.Err() != nil {
+			outcome = admissionCanceled
+		}
+		c.finishWait(w, outcome)
 		return nil, provider, err
 	}
+	c.finishWait(w, admissionSucceeded)
 	return conn, provider, nil
 }
 
@@ -808,7 +818,7 @@ func (c *Client) getAnyAvailableConnection(ctx context.Context, workload Workloa
 // release between scan and park cannot be missed. Handoffs are strict across
 // workload classes and approximately FIFO within each class.
 func (c *Client) waitForConnection(ctx context.Context, workload Workload, eligible []*ProviderPool) (*Connection, config.UsenetProvider, error) {
-	w := newSlotWaiter(workload, eligible)
+	w := c.newQueuedWaiter(workload, eligible)
 
 	// The fallback tick guards against a slot release that bypasses
 	// releaseSlot turning into an indefinite park, and doubles as the
@@ -820,6 +830,7 @@ func (c *Client) waitForConnection(ctx context.Context, workload Workload, eligi
 	var lastErr error
 	for {
 		if c.closed.Load() {
+			c.finishWait(w, admissionFailed)
 			return nil, config.UsenetProvider{}, errors.New("nntp client is closed")
 		}
 		c.register(w)
@@ -852,6 +863,7 @@ func (c *Client) waitForConnection(ctx context.Context, workload Workload, eligi
 					continue
 				}
 				c.deregister(w)
+				c.finishWait(w, admissionSucceeded)
 				return conn, pp.config, nil
 			} else {
 				busy++
@@ -861,6 +873,7 @@ func (c *Client) waitForConnection(ctx context.Context, workload Workload, eligi
 		// surface the error instead of spinning on dial failures.
 		if busy == 0 && failed > 0 {
 			c.deregister(w)
+			c.finishWait(w, admissionFailed)
 			return nil, config.UsenetProvider{}, lastErr
 		}
 
@@ -877,11 +890,13 @@ func (c *Client) waitForConnection(ctx context.Context, workload Workload, eligi
 				}
 				continue
 			}
+			c.finishWait(w, admissionSucceeded)
 			return conn, pp.config, nil
 		case <-timer.C:
 			c.deregister(w)
 		case <-ctx.Done():
 			c.deregister(w)
+			c.finishWait(w, admissionCanceled)
 			return nil, config.UsenetProvider{}, ctx.Err()
 		}
 	}
@@ -1362,6 +1377,10 @@ func (c *Client) Stats() map[string]any {
 	}
 
 	waiting := c.waitingByWorkload()
+	admissionStats := make(map[string]any, workloadCount)
+	for workload := WorkloadStreamDemand; workload < workloadCount; workload++ {
+		admissionStats[workload.String()] = c.admission[workload].snapshot().stats(waiting[workload])
+	}
 	poolStats := map[string]any{
 		"max_connections": totalMax,
 		"total_created":   totalActive + totalIdle,
@@ -1373,6 +1392,7 @@ func (c *Client) Stats() map[string]any {
 			WorkloadDownload.String():       waiting[WorkloadDownload],
 			WorkloadBackground.String():     waiting[WorkloadBackground],
 		},
+		"admission": admissionStats,
 	}
 
 	stats["pool"] = poolStats

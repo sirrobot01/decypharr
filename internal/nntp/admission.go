@@ -3,6 +3,7 @@ package nntp
 import (
 	"fmt"
 	"slices"
+	"sync/atomic"
 )
 
 // Workload describes why a caller needs an NNTP connection. Lower values
@@ -51,9 +52,38 @@ type slotWaiter struct {
 	workload Workload
 	pools    []*ProviderPool
 	handoff  chan *ProviderPool
+	started  int64
 	prev     *slotWaiter
 	next     *slotWaiter
 	queued   bool
+}
+
+type admissionOutcome uint8
+
+const (
+	admissionSucceeded admissionOutcome = iota
+	admissionCanceled
+	admissionFailed
+)
+
+type admissionMetrics struct {
+	queued      atomic.Uint64
+	admitted    atomic.Uint64
+	canceled    atomic.Uint64
+	failed      atomic.Uint64
+	handoffs    atomic.Uint64
+	waitTotalNS atomic.Uint64
+	waitMaxNS   atomic.Uint64
+}
+
+type admissionSnapshot struct {
+	queued      uint64
+	admitted    uint64
+	canceled    uint64
+	failed      uint64
+	handoffs    uint64
+	waitTotalNS uint64
+	waitMaxNS   uint64
 }
 
 type waiterQueue struct {
@@ -67,6 +97,66 @@ func newSlotWaiter(workload Workload, pools []*ProviderPool) *slotWaiter {
 		workload: workload,
 		pools:    pools,
 		handoff:  make(chan *ProviderPool, 1),
+	}
+}
+
+func (c *Client) newQueuedWaiter(workload Workload, pools []*ProviderPool) *slotWaiter {
+	w := newSlotWaiter(workload, pools)
+	w.started = nanotimeNow()
+	c.admission[workload].queued.Add(1)
+	return w
+}
+
+func (c *Client) finishWait(w *slotWaiter, outcome admissionOutcome) {
+	if w.started == 0 {
+		return
+	}
+	metrics := &c.admission[w.workload]
+	switch outcome {
+	case admissionSucceeded:
+		metrics.admitted.Add(1)
+	case admissionCanceled:
+		metrics.canceled.Add(1)
+	case admissionFailed:
+		metrics.failed.Add(1)
+	}
+	waitNS := uint64(max(nanotimeNow()-w.started, 0))
+	metrics.waitTotalNS.Add(waitNS)
+	for previous := metrics.waitMaxNS.Load(); waitNS > previous; previous = metrics.waitMaxNS.Load() {
+		if metrics.waitMaxNS.CompareAndSwap(previous, waitNS) {
+			break
+		}
+	}
+	w.started = 0
+}
+
+func (m *admissionMetrics) snapshot() admissionSnapshot {
+	return admissionSnapshot{
+		queued:      m.queued.Load(),
+		admitted:    m.admitted.Load(),
+		canceled:    m.canceled.Load(),
+		failed:      m.failed.Load(),
+		handoffs:    m.handoffs.Load(),
+		waitTotalNS: m.waitTotalNS.Load(),
+		waitMaxNS:   m.waitMaxNS.Load(),
+	}
+}
+
+func (s admissionSnapshot) stats(waiting int) map[string]any {
+	meanWaitMS := 0.0
+	completed := s.admitted + s.canceled + s.failed
+	if completed != 0 {
+		meanWaitMS = float64(s.waitTotalNS) / float64(completed) / 1e6
+	}
+	return map[string]any{
+		"waiting":        waiting,
+		"queued_total":   s.queued,
+		"admitted_total": s.admitted,
+		"canceled_total": s.canceled,
+		"failed_total":   s.failed,
+		"handoffs_total": s.handoffs,
+		"wait_mean_ms":   meanWaitMS,
+		"wait_max_ms":    float64(s.waitMaxNS) / 1e6,
 	}
 }
 
@@ -181,6 +271,7 @@ func (c *Client) handoffSlot(pp *ProviderPool) bool {
 				continue
 			}
 			c.removeWaiterLocked(w)
+			c.admission[w.workload].handoffs.Add(1)
 			w.handoff <- pp
 			return true
 		}

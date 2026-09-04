@@ -262,6 +262,41 @@ func TestDeregisterDrainsPendingHandoff(t *testing.T) {
 	}
 }
 
+func TestAdmissionMetricsRecordOutcomesAndHandoffs(t *testing.T) {
+	pp := newTestPool(1)
+	c := newAcquireTestClient(pp)
+	pp.slots <- struct{}{}
+
+	admitted := c.newQueuedWaiter(WorkloadStreamDemand, []*ProviderPool{pp})
+	c.register(admitted)
+	if !c.handoffSlot(pp) {
+		t.Fatal("expected handoff")
+	}
+	if got := <-admitted.handoff; got != pp {
+		t.Fatal("handoff used the wrong provider pool")
+	}
+	c.finishWait(admitted, admissionSucceeded)
+	c.releaseSlot(pp)
+
+	canceled := c.newQueuedWaiter(WorkloadStreamDemand, []*ProviderPool{pp})
+	c.register(canceled)
+	c.deregister(canceled)
+	c.finishWait(canceled, admissionCanceled)
+
+	failed := c.newQueuedWaiter(WorkloadStreamDemand, []*ProviderPool{pp})
+	c.register(failed)
+	c.deregister(failed)
+	c.finishWait(failed, admissionFailed)
+
+	got := c.admission[WorkloadStreamDemand].snapshot()
+	if got.queued != 3 || got.admitted != 1 || got.canceled != 1 || got.failed != 1 || got.handoffs != 1 {
+		t.Fatalf("unexpected admission metrics: %+v", got)
+	}
+	if got.waitMaxNS > got.waitTotalNS {
+		t.Fatalf("max wait %d exceeds total wait %d", got.waitMaxNS, got.waitTotalNS)
+	}
+}
+
 // newSilentPipeConnection builds a Connection whose peer stays open but
 // never reads or answers: a ping's write blocks until its deadline and
 // surfaces as a net timeout — the flush trigger.
