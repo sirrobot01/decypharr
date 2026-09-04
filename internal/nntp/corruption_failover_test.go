@@ -53,7 +53,7 @@ func TestExecuteWithFailoverTriesAnotherBackboneAfterYencCorruption(t *testing.T
 	t.Cleanup(func() { _ = client.Close() })
 
 	var decoded []byte
-	err = client.ExecuteWithFailover(context.Background(), WorkloadStream, func(conn *Connection) error {
+	err = client.ExecuteWithFailover(context.Background(), WorkloadStreamDemand, func(conn *Connection) error {
 		var fetchErr error
 		decoded, fetchErr = conn.GetDecodedBody(messageID)
 		return fetchErr

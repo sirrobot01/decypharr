@@ -1368,9 +1368,10 @@ func (c *Client) Stats() map[string]any {
 		"active":          totalActive,
 		"idle":            totalIdle,
 		"waiting": map[string]int{
-			WorkloadStream.String():     waiting[WorkloadStream],
-			WorkloadDownload.String():   waiting[WorkloadDownload],
-			WorkloadBackground.String(): waiting[WorkloadBackground],
+			WorkloadStreamDemand.String():   waiting[WorkloadStreamDemand],
+			WorkloadStreamPrefetch.String(): waiting[WorkloadStreamPrefetch],
+			WorkloadDownload.String():       waiting[WorkloadDownload],
+			WorkloadBackground.String():     waiting[WorkloadBackground],
 		},
 	}
 

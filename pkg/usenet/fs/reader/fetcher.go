@@ -90,7 +90,7 @@ func NewSegmentFetcher(
 // is shared across readers, so opening more files cannot multiply workers.
 func (sf *SegmentFetcher) Fetch(ctx context.Context, segIdx int) error {
 	return sf.scheduleAndWait(ctx, priorityDemand, func() error {
-		return sf.fetchWithRetryDirect(sf.ctx, segIdx)
+		return sf.fetchWithRetryDirect(sf.ctx, segIdx, nntp.WorkloadStreamDemand)
 	})
 }
 
@@ -158,7 +158,7 @@ func (sf *SegmentFetcher) submit(ctx context.Context, priority fetchPriority, ru
 }
 
 // fetchDirect performs one deduplicated fetch inside a scheduler worker.
-func (sf *SegmentFetcher) fetchDirect(ctx context.Context, segIdx int) error {
+func (sf *SegmentFetcher) fetchDirect(ctx context.Context, segIdx int, workload nntp.Workload) error {
 	// Fast path: already cached, or wait until an extent eviction completes.
 	for {
 		state := sf.cache.GetState(segIdx)
@@ -198,7 +198,7 @@ func (sf *SegmentFetcher) fetchDirect(ctx context.Context, segIdx int) error {
 	sf.inFlightMu.Unlock()
 
 	// Actually fetch
-	err := sf.doFetch(ctx, segIdx)
+	err := sf.doFetch(ctx, segIdx, workload)
 	promise.err = err
 	close(promise.done)
 
@@ -211,8 +211,8 @@ func (sf *SegmentFetcher) fetchDirect(ctx context.Context, segIdx int) error {
 }
 
 // doFetch performs the actual NNTP download.
-func (sf *SegmentFetcher) doFetch(ctx context.Context, segIdx int) error {
-	return sf.doFetchAttempt(ctx, segIdx, 0)
+func (sf *SegmentFetcher) doFetch(ctx context.Context, segIdx int, workload nntp.Workload) error {
+	return sf.doFetchAttempt(ctx, segIdx, workload, 0)
 }
 
 // doFetchRestarts bounds how many times a single doFetch may restart because
@@ -221,7 +221,7 @@ func (sf *SegmentFetcher) doFetch(ctx context.Context, segIdx int) error {
 // real work, so this only stops a pathological loop.
 const doFetchRestarts = 4
 
-func (sf *SegmentFetcher) doFetchAttempt(ctx context.Context, segIdx, restarts int) error {
+func (sf *SegmentFetcher) doFetchAttempt(ctx context.Context, segIdx int, workload nntp.Workload, restarts int) error {
 	seg := sf.cache.GetSegment(segIdx)
 	if seg == nil {
 		return ErrSegmentNotFound
@@ -246,14 +246,14 @@ func (sf *SegmentFetcher) doFetchAttempt(ctx context.Context, segIdx, restarts i
 			// that is no longer coming — retry the fetch ourselves.
 			err := sf.cache.WaitForSegment(ctx, segIdx)
 			if errors.Is(err, ErrSegmentEvicted) {
-				return sf.doFetchAttempt(ctx, segIdx, restarts+1)
+				return sf.doFetchAttempt(ctx, segIdx, workload, restarts+1)
 			}
 			return err
 		case StateEvicting:
 			if err := sf.cache.WaitForEvictionRelease(ctx, segIdx); err != nil {
 				return err
 			}
-			return sf.doFetchAttempt(ctx, segIdx, restarts+1)
+			return sf.doFetchAttempt(ctx, segIdx, workload, restarts+1)
 		}
 	}
 
@@ -267,7 +267,7 @@ func (sf *SegmentFetcher) doFetchAttempt(ctx context.Context, segIdx, restarts i
 	defer cancel()
 
 	// ExecuteWithFailover already retries across configured providers.
-	err := sf.client.ExecuteWithFailover(downloadCtx, nntp.WorkloadStream, func(conn *nntp.Connection) error {
+	err := sf.client.ExecuteWithFailover(downloadCtx, workload, func(conn *nntp.Connection) error {
 		stopCancel := context.AfterFunc(downloadCtx, func() {
 			_ = conn.Close()
 		})
@@ -418,7 +418,7 @@ func (sf *SegmentFetcher) prefetchOne(segIdx int) {
 	}
 
 	fetchCtx, cancel := context.WithTimeout(sf.ctx, sf.config.DownloadTimeout)
-	err := sf.fetchWithRetryDirect(fetchCtx, segIdx)
+	err := sf.fetchWithRetryDirect(fetchCtx, segIdx, nntp.WorkloadStreamPrefetch)
 	cancel()
 
 	if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
@@ -447,7 +447,7 @@ func (sf *SegmentFetcher) PrepareSegments(ctx context.Context, startSeg, endSeg 
 	waits := make([]<-chan error, len(missing))
 	for j, segIdx := range missing {
 		waits[j] = sf.schedule(ctx, priorityDemand, func() error {
-			return sf.fetchWithRetryDirect(sf.ctx, segIdx)
+			return sf.fetchWithRetryDirect(sf.ctx, segIdx, nntp.WorkloadStreamDemand)
 		})
 	}
 	return func() error {
@@ -481,7 +481,7 @@ func (sf *SegmentFetcher) pendingPrefetch() int {
 	return pending
 }
 
-func (sf *SegmentFetcher) fetchWithRetryDirect(ctx context.Context, segIdx int) error {
+func (sf *SegmentFetcher) fetchWithRetryDirect(ctx context.Context, segIdx int, workload nntp.Workload) error {
 	maxAttempts := sf.config.MaxRetries
 	if maxAttempts < 1 {
 		maxAttempts = 3
@@ -503,7 +503,7 @@ func (sf *SegmentFetcher) fetchWithRetryDirect(ctx context.Context, segIdx int) 
 			}
 		}
 
-		err := sf.fetchDirect(ctx, segIdx)
+		err := sf.fetchDirect(ctx, segIdx, workload)
 		if err == nil {
 			return nil
 		}

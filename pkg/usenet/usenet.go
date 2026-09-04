@@ -1084,7 +1084,7 @@ func (u *Usenet) Touch(ctx context.Context, nzoID, filename string) error {
 	// get first segment
 	firstSeg := file.Segments[0]
 	// Run STAT command to check if article exists
-	_, _, err = u.nntp.Stat(ctx, nntp.WorkloadStream, firstSeg.MessageID)
+	_, _, err = u.nntp.Stat(ctx, nntp.WorkloadStreamDemand, firstSeg.MessageID)
 	if err != nil {
 		return fmt.Errorf("segment not available: %w", err)
 	}

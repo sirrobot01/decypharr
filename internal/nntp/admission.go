@@ -10,9 +10,12 @@ import (
 type Workload uint8
 
 const (
-	// WorkloadStream is latency-sensitive playback traffic, including the
-	// bounded read-ahead needed to keep an active stream fed.
-	WorkloadStream Workload = iota
+	// WorkloadStreamDemand is latency-sensitive playback traffic required to
+	// satisfy a reader that is currently blocked.
+	WorkloadStreamDemand Workload = iota
+	// WorkloadStreamPrefetch is bounded speculative read-ahead for an active
+	// stream. It stays ahead of bulk work without delaying current demand.
+	WorkloadStreamPrefetch
 	// WorkloadDownload is throughput-oriented foreground work: complete NZB
 	// downloads, imports, and archive parsing.
 	WorkloadDownload
@@ -29,8 +32,10 @@ func (w Workload) valid() bool {
 
 func (w Workload) String() string {
 	switch w {
-	case WorkloadStream:
-		return "stream"
+	case WorkloadStreamDemand:
+		return "stream_demand"
+	case WorkloadStreamPrefetch:
+		return "stream_prefetch"
 	case WorkloadDownload:
 		return "download"
 	case WorkloadBackground:
@@ -145,7 +150,7 @@ func (pp *ProviderPool) higherPriorityWaiting(workload Workload) bool {
 func (c *Client) tryAcquireSlot(pp *ProviderPool, workload Workload) bool {
 	select {
 	case pp.slots <- struct{}{}:
-		if workload != WorkloadStream && pp.higherPriorityWaiting(workload) {
+		if workload != WorkloadStreamDemand && pp.higherPriorityWaiting(workload) {
 			c.releaseSlot(pp)
 			return false
 		}
@@ -170,7 +175,7 @@ func (c *Client) handoffSlot(pp *ProviderPool) bool {
 	}
 	c.waitMu.Lock()
 	defer c.waitMu.Unlock()
-	for workload := WorkloadStream; workload < workloadCount; workload++ {
+	for workload := WorkloadStreamDemand; workload < workloadCount; workload++ {
 		for w := c.waiters[workload].head; w != nil; w = w.next {
 			if !slices.Contains(w.pools, pp) {
 				continue
@@ -187,7 +192,7 @@ func (c *Client) waitingByWorkload() [workloadCount]int {
 	c.waitMu.Lock()
 	defer c.waitMu.Unlock()
 	var waiting [workloadCount]int
-	for workload := WorkloadStream; workload < workloadCount; workload++ {
+	for workload := WorkloadStreamDemand; workload < workloadCount; workload++ {
 		waiting[workload] = c.waiters[workload].len
 	}
 	return waiting
@@ -197,8 +202,9 @@ func (c *Client) providerWaiting(pp *ProviderPool) map[string]int {
 	c.waitMu.Lock()
 	defer c.waitMu.Unlock()
 	return map[string]int{
-		WorkloadStream.String():     pp.waiting[WorkloadStream],
-		WorkloadDownload.String():   pp.waiting[WorkloadDownload],
-		WorkloadBackground.String(): pp.waiting[WorkloadBackground],
+		WorkloadStreamDemand.String():   pp.waiting[WorkloadStreamDemand],
+		WorkloadStreamPrefetch.String(): pp.waiting[WorkloadStreamPrefetch],
+		WorkloadDownload.String():       pp.waiting[WorkloadDownload],
+		WorkloadBackground.String():     pp.waiting[WorkloadBackground],
 	}
 }

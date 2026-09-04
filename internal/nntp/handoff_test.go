@@ -54,7 +54,7 @@ func TestDialCooldownReroutesAroundDeadProvider(t *testing.T) {
 		pingInterval:   time.Hour,
 	}
 
-	got, prov, err := c.getAnyAvailableConnection(context.Background(), WorkloadStream, providerExclusions{})
+	got, prov, err := c.getAnyAvailableConnection(context.Background(), WorkloadStreamDemand, providerExclusions{})
 	if err != nil {
 		t.Fatalf("first acquisition failed: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestDialCooldownReroutesAroundDeadProvider(t *testing.T) {
 
 	// Subsequent acquisitions must not dial the dead provider again.
 	for range 5 {
-		got, prov, err = c.getAnyAvailableConnection(context.Background(), WorkloadStream, providerExclusions{})
+		got, prov, err = c.getAnyAvailableConnection(context.Background(), WorkloadStreamDemand, providerExclusions{})
 		if err != nil {
 			t.Fatalf("acquisition during cooldown failed: %v", err)
 		}
@@ -105,7 +105,7 @@ func TestDialCooldownKeepsSingleProviderFailFast(t *testing.T) {
 
 	for i := range 3 {
 		start := time.Now()
-		_, _, err := c.getAnyAvailableConnection(context.Background(), WorkloadStream, providerExclusions{})
+		_, _, err := c.getAnyAvailableConnection(context.Background(), WorkloadStreamDemand, providerExclusions{})
 		if err == nil {
 			t.Fatalf("attempt %d: expected dial error", i)
 		}
@@ -131,7 +131,7 @@ func TestHandoffFIFO(t *testing.T) {
 	acquire := func() chan *Connection {
 		ch := make(chan *Connection, 1)
 		go func() {
-			got, prov, err := c.getAnyAvailableConnection(context.Background(), WorkloadStream, providerExclusions{})
+			got, prov, err := c.getAnyAvailableConnection(context.Background(), WorkloadStreamDemand, providerExclusions{})
 			if err != nil {
 				t.Error(err)
 				close(ch)
@@ -168,74 +168,57 @@ func TestHandoffFIFO(t *testing.T) {
 	}
 }
 
-func TestHandoffPrioritizesStream(t *testing.T) {
+func TestHandoffOrdersEveryWorkloadClass(t *testing.T) {
 	pp := newTestPool(1)
 	c := newAcquireTestClient(pp)
 	pp.slots <- struct{}{}
 
-	background := newSlotWaiter(WorkloadBackground, []*ProviderPool{pp})
-	download := newSlotWaiter(WorkloadDownload, []*ProviderPool{pp})
-	stream := newSlotWaiter(WorkloadStream, []*ProviderPool{pp})
-	c.register(background)
-	c.register(download)
-	c.register(stream)
-
-	if !c.handoffSlot(pp) {
-		t.Fatal("expected a handoff")
+	ordered := []*slotWaiter{
+		newSlotWaiter(WorkloadStreamDemand, []*ProviderPool{pp}),
+		newSlotWaiter(WorkloadStreamPrefetch, []*ProviderPool{pp}),
+		newSlotWaiter(WorkloadDownload, []*ProviderPool{pp}),
+		newSlotWaiter(WorkloadBackground, []*ProviderPool{pp}),
 	}
-	select {
-	case got := <-stream.handoff:
-		if got != pp {
-			t.Fatal("stream received the wrong provider pool")
+	// Register in reverse priority order to prove arrival time cannot override
+	// the workload ordering.
+	for i := len(ordered) - 1; i >= 0; i-- {
+		c.register(ordered[i])
+	}
+	for i, want := range ordered {
+		if i == 0 {
+			if !c.handoffSlot(pp) {
+				t.Fatal("expected initial handoff")
+			}
+		} else {
+			c.releaseSlot(pp)
 		}
-	default:
-		t.Fatal("stream did not receive the first available slot")
-	}
-	select {
-	case <-download.handoff:
-		t.Fatal("download ran before stream")
-	case <-background.handoff:
-		t.Fatal("background work ran before stream")
-	default:
-	}
-
-	// Returning the stream slot admits download before background work.
-	c.releaseSlot(pp)
-	select {
-	case got := <-download.handoff:
-		if got != pp {
-			t.Fatal("download received the wrong provider pool")
+		select {
+		case got := <-want.handoff:
+			if got != pp {
+				t.Fatalf("%s received the wrong provider pool", want.workload)
+			}
+		default:
+			t.Fatalf("%s did not receive handoff %d", want.workload, i+1)
 		}
-	default:
-		t.Fatal("download did not receive the second slot")
-	}
-	c.releaseSlot(pp)
-	select {
-	case got := <-background.handoff:
-		if got != pp {
-			t.Fatal("background work received the wrong provider pool")
-		}
-	default:
-		t.Fatal("background work did not receive the final slot")
 	}
 	c.releaseSlot(pp)
 
 	if held := len(pp.slots); held != 0 {
 		t.Fatalf("slot leaked after handoffs: %d held", held)
 	}
-	for workload := WorkloadStream; workload < workloadCount; workload++ {
+	for workload := WorkloadStreamDemand; workload < workloadCount; workload++ {
 		if waiting := pp.waiting[workload]; waiting != 0 {
 			t.Fatalf("%s waiting count = %d, want 0", workload, waiting)
 		}
 	}
 }
 
-func TestLowerPriorityCannotBargePastStreamWaiter(t *testing.T) {
-	for _, lower := range []Workload{WorkloadDownload, WorkloadBackground} {
+func TestLowerPriorityCannotBargePastStreamDemand(t *testing.T) {
+	for _, lower := range []Workload{WorkloadStreamPrefetch, WorkloadDownload, WorkloadBackground} {
 		t.Run(lower.String(), func(t *testing.T) {
 			pp := newTestPool(1)
 			c := newAcquireTestClient(pp)
-			stream := newSlotWaiter(WorkloadStream, []*ProviderPool{pp})
+			stream := newSlotWaiter(WorkloadStreamDemand, []*ProviderPool{pp})
 			c.register(stream)
 
 			if c.tryAcquireSlot(pp, lower) {
@@ -261,7 +244,7 @@ func TestDeregisterDrainsPendingHandoff(t *testing.T) {
 	c := newAcquireTestClient(pp)
 	pp.slots <- struct{}{} // slot held; hasIdle=false but no cooldown → handoff allowed
 
-	w := newSlotWaiter(WorkloadStream, []*ProviderPool{pp})
+	w := newSlotWaiter(WorkloadStreamDemand, []*ProviderPool{pp})
 	c.register(w)
 	if !c.handoffSlot(pp) {
 		t.Fatal("expected handoff to the registered waiter")
@@ -274,8 +257,8 @@ func TestDeregisterDrainsPendingHandoff(t *testing.T) {
 	}
 	c.waitMu.Lock()
 	defer c.waitMu.Unlock()
-	if c.waiters[WorkloadStream].len != 0 {
-		t.Fatalf("stream waiter queue not empty: %d", c.waiters[WorkloadStream].len)
+	if c.waiters[WorkloadStreamDemand].len != 0 {
+		t.Fatalf("stream waiter queue not empty: %d", c.waiters[WorkloadStreamDemand].len)
 	}
 }
 

@@ -82,7 +82,7 @@ func BenchmarkPoolCheckoutUncontended(b *testing.B) {
 	ctx := context.Background()
 
 	for b.Loop() {
-		conn, prov, err := c.getAnyAvailableConnection(ctx, WorkloadStream, providerExclusions{})
+		conn, prov, err := c.getAnyAvailableConnection(ctx, WorkloadStreamDemand, providerExclusions{})
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -94,7 +94,7 @@ func BenchmarkPoolCheckoutUncontended(b *testing.B) {
 // keeps every provider slot busy. A stream should wait for only the next
 // article boundary; another background caller waits behind its FIFO peers.
 func BenchmarkPriorityAdmission(b *testing.B) {
-	for _, workload := range []Workload{WorkloadStream, WorkloadBackground} {
+	for _, workload := range []Workload{WorkloadStreamDemand, WorkloadStreamPrefetch, WorkloadDownload, WorkloadBackground} {
 		b.Run(workload.String(), func(b *testing.B) {
 			const (
 				slots       = 8
@@ -176,7 +176,7 @@ func benchContended(b *testing.B, slots, workers int, hold time.Duration) {
 		wg.Go(func() {
 			for range jobs {
 				t0 := time.Now()
-				conn, prov, err := c.getAnyAvailableConnection(ctx, WorkloadStream, providerExclusions{})
+				conn, prov, err := c.getAnyAvailableConnection(ctx, WorkloadStreamDemand, providerExclusions{})
 				if err != nil {
 					b.Error(err)
 					return
@@ -280,7 +280,7 @@ func BenchmarkAcquireDeadPrimary(b *testing.B) {
 	ctx := context.Background()
 
 	for b.Loop() {
-		conn, prov, err := c.getAnyAvailableConnection(ctx, WorkloadStream, providerExclusions{})
+		conn, prov, err := c.getAnyAvailableConnection(ctx, WorkloadStreamDemand, providerExclusions{})
 		if err != nil {
 			b.Fatal(err)
 		}
