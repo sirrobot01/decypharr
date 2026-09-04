@@ -112,6 +112,11 @@ type Client struct {
 	// admission holds lock-free cumulative telemetry for contended connection
 	// acquisitions. The uncontended path never touches these counters.
 	admission [workloadCount]admissionMetrics
+	// streamBackupWait is an opt-in latency budget for urgent playback. After
+	// this long queued on the primary tier, demand may spill to a configured
+	// backup provider. Zero preserves completion-only backup semantics.
+	streamBackupWait       time.Duration
+	streamBackupSpillovers atomic.Uint64
 
 	closed atomic.Bool
 	// Speed test results storage
@@ -379,6 +384,14 @@ func NewClient(cfg *config.Config) (*Client, error) {
 			if cm.keepalivePing > cm.pingInterval {
 				cm.keepalivePing = cm.pingInterval
 			}
+		}
+	}
+	if value := cfg.Usenet.StreamBackupWait; value != "" && value != "0" {
+		if d, err := utils.ParseDuration(value); err != nil || d <= 0 {
+			cm.logger.Warn().Str("stream_backup_wait", value).
+				Msg("invalid stream_backup_wait, backup spillover disabled")
+		} else {
+			cm.streamBackupWait = d
 		}
 	}
 	cm.repairPool = cm.newRepairPool(cfg.Repair.NNTPConnectionPercent)
@@ -734,7 +747,8 @@ func (c *Client) safeExecute(conn *Connection, fn func(conn *Connection) error) 
 // Tiering: providers with Backup=true are NOT considered until every
 // non-backup ("primary") provider is excluded. A primary's pool being
 // merely busy is not enough — the caller waits for a primary slot to free
-// up rather than dipping into a backup. This matches the
+// up rather than dipping into a backup, unless urgent stream spillover was
+// explicitly configured. The default matches the
 // unlimited-primary + block-backup-for-completion model and prevents
 // block providers from being billed for articles the primary could have
 // served given a moment's patience.
@@ -745,17 +759,20 @@ func (c *Client) getAnyAvailableConnection(ctx context.Context, workload Workloa
 	if !workload.valid() {
 		return nil, config.UsenetProvider{}, fmt.Errorf("invalid NNTP workload: %s", workload)
 	}
-	// Determine whether any primary is eligible first. Avoid building provider
-	// slices on the common path: when a pool has a free slot, the first scan
-	// returns immediately. A slice is only needed for the uncommon all-busy
-	// fallback that races across providers.
-	useBackups := true
-	for _, p := range c.providers {
-		if !p.Backup && !exclusions.excludes(p) {
-			useBackups = false
-			break
+	useBackups := !c.hasEligibleProviderInTier(exclusions, false)
+	return c.getAnyAvailableConnectionInTier(ctx, workload, exclusions, useBackups)
+}
+
+func (c *Client) hasEligibleProviderInTier(exclusions providerExclusions, backup bool) bool {
+	for _, provider := range c.providers {
+		if provider.Backup == backup && !exclusions.excludes(provider) {
+			return true
 		}
 	}
+	return false
+}
+
+func (c *Client) getAnyAvailableConnectionInTier(ctx context.Context, workload Workload, exclusions providerExclusions, useBackups bool) (*Connection, config.UsenetProvider, error) {
 
 	// Cooldowns are advisory reroutes, never a denial of service: skip a
 	// cooling-down provider only when some other eligible provider is warm
@@ -810,8 +827,22 @@ func (c *Client) getAnyAvailableConnection(ctx context.Context, workload Workloa
 			eligible = append(eligible, c.orderedPools[i])
 		}
 	}
+
+	if !useBackups && workload == WorkloadStreamDemand && c.streamBackupWait > 0 && c.hasEligibleProviderInTier(exclusions, true) {
+		waitCtx, cancel := context.WithTimeoutCause(ctx, c.streamBackupWait, errStreamBackupWaitElapsed)
+		conn, provider, err := c.waitForConnection(waitCtx, workload, eligible)
+		spillToBackup := errors.Is(context.Cause(waitCtx), errStreamBackupWaitElapsed) && ctx.Err() == nil
+		cancel()
+		if spillToBackup {
+			c.streamBackupSpillovers.Add(1)
+			return c.getAnyAvailableConnectionInTier(ctx, workload, exclusions, true)
+		}
+		return conn, provider, err
+	}
 	return c.waitForConnection(ctx, workload, eligible)
 }
+
+var errStreamBackupWaitElapsed = errors.New("stream primary-tier wait elapsed")
 
 // waitForConnection blocks until a slot is available on any eligible
 // provider. The waiter registers in its priority queue before each scan so a
@@ -1392,7 +1423,8 @@ func (c *Client) Stats() map[string]any {
 			WorkloadDownload.String():       waiting[WorkloadDownload],
 			WorkloadBackground.String():     waiting[WorkloadBackground],
 		},
-		"admission": admissionStats,
+		"admission":                      admissionStats,
+		"stream_backup_spillovers_total": c.streamBackupSpillovers.Load(),
 	}
 
 	stats["pool"] = poolStats

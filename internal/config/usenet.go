@@ -44,6 +44,10 @@ type Usenet struct {
 	ProcessingMaxConnections int `json:"processing_max_connections,omitempty"` // Maximum concurrent connections per file for parsing and NZB downloads (default: max_connections)
 	// Read-ahead configuration
 	ReadAhead string `json:"read_ahead,omitempty"` // Bytes to prefetch ahead of streaming reads e.g. "16MB", "32MB" (default: 16MB)
+	// StreamBackupWait optionally permits an urgent playback read to spill to
+	// the backup-provider tier after waiting this long for a primary slot.
+	// Empty or "0" keeps backups completion-only and avoids block-account use.
+	StreamBackupWait string `json:"stream_backup_wait,omitempty"`
 	// SocketReadBuffer / SocketWriteBuffer set the per-connection TCP
 	// SO_RCVBUF / SO_SNDBUF (e.g. "4MB"). At high RTT a single connection's
 	// throughput is capped at roughly buffer ÷ RTT, so the receive buffer must
@@ -91,7 +95,7 @@ func (u Usenet) UsesDiskBuffer() bool {
 }
 
 func (u Usenet) IsZero() bool {
-	return len(u.Providers) == 0 && u.MaxConnections == 0 && u.ProcessingMaxConnections == 0 && u.ReadAhead == "" && u.ProcessingTimeout == "" && !u.UsesDiskBuffer()
+	return len(u.Providers) == 0 && u.MaxConnections == 0 && u.ProcessingMaxConnections == 0 && u.ReadAhead == "" && u.StreamBackupWait == "" && u.ProcessingTimeout == "" && !u.UsesDiskBuffer()
 }
 
 func (c *Config) updateUsenetConfig() {
@@ -208,6 +212,9 @@ func (c *Config) applyUsenetEnvVars() {
 
 	if readAhead := getEnv("USENET__READ_AHEAD"); readAhead != "" {
 		c.Usenet.ReadAhead = readAhead
+	}
+	if streamBackupWait := getEnv("USENET__STREAM_BACKUP_WAIT"); streamBackupWait != "" {
+		c.Usenet.StreamBackupWait = streamBackupWait
 	}
 
 	if v := getEnv("USENET__SOCKET_READ_BUFFER"); v != "" {
