@@ -90,64 +90,87 @@ func BenchmarkPoolCheckoutUncontended(b *testing.B) {
 	}
 }
 
-// BenchmarkPriorityAdmission measures queue latency while background work
-// keeps every provider slot busy. A stream should wait for only the next
-// article boundary; another background caller waits behind its FIFO peers.
+// BenchmarkPriorityAdmission measures every adjacent priority boundary. The
+// higher-class request should wait for one article boundary; the same-class
+// control waits behind the saturated workload's FIFO peers.
 func BenchmarkPriorityAdmission(b *testing.B) {
-	for _, workload := range []Workload{WorkloadStreamDemand, WorkloadStreamPrefetch, WorkloadDownload, WorkloadBackground} {
-		b.Run(workload.String(), func(b *testing.B) {
-			const (
-				slots       = 8
-				workers     = 32
-				articleTime = 2 * time.Millisecond
-			)
-			pp, provider := newBenchPool(b, "bench-priority", slots)
-			client := newBenchClient([]config.UsenetProvider{provider}, []*ProviderPool{pp})
-			ctx, cancel := context.WithCancel(context.Background())
-			var wg sync.WaitGroup
-			for range workers {
-				wg.Go(func() {
-					for ctx.Err() == nil {
-						conn, acquiredProvider, err := client.getAnyAvailableConnection(ctx, WorkloadBackground, providerExclusions{})
-						if err != nil {
-							return
-						}
-						time.Sleep(articleTime)
-						client.put(conn, acquiredProvider)
-					}
+	scenarios := []struct {
+		name   string
+		higher Workload
+		load   Workload
+	}{
+		{"demand_over_prefetch", WorkloadStreamDemand, WorkloadStreamPrefetch},
+		{"prefetch_over_download", WorkloadStreamPrefetch, WorkloadDownload},
+		{"download_over_background", WorkloadDownload, WorkloadBackground},
+	}
+	for _, scenario := range scenarios {
+		b.Run(scenario.name, func(b *testing.B) {
+			for _, contender := range []struct {
+				name     string
+				workload Workload
+			}{
+				{"priority", scenario.higher},
+				{"same_class", scenario.load},
+			} {
+				b.Run(contender.name, func(b *testing.B) {
+					benchmarkPriorityAdmission(b, scenario.load, contender.workload)
 				})
 			}
-			waitForBenchSaturation(b, client, pp, workers-slots)
-
-			var totalWait, maxWait time.Duration
-			var iterations int64
-			for b.Loop() {
-				start := time.Now()
-				conn, acquiredProvider, err := client.getAnyAvailableConnection(context.Background(), workload, providerExclusions{})
-				if err != nil {
-					b.Fatal(err)
-				}
-				wait := time.Since(start)
-				totalWait += wait
-				maxWait = max(maxWait, wait)
-				iterations++
-				client.put(conn, acquiredProvider)
-			}
-			cancel()
-			wg.Wait()
-			b.ReportMetric(float64(totalWait)/float64(iterations)/float64(time.Millisecond), "mean-wait-ms")
-			b.ReportMetric(float64(maxWait)/float64(time.Millisecond), "max-wait-ms")
 		})
 	}
 }
 
-func waitForBenchSaturation(b *testing.B, client *Client, pp *ProviderPool, queuedTarget int) {
+func benchmarkPriorityAdmission(b *testing.B, load, contender Workload) {
+	const (
+		slots       = 8
+		workers     = 32
+		articleTime = 2 * time.Millisecond
+	)
+	pp, provider := newBenchPool(b, "bench-priority", slots)
+	client := newBenchClient([]config.UsenetProvider{provider}, []*ProviderPool{pp})
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() {
+			for ctx.Err() == nil {
+				conn, acquiredProvider, err := client.getAnyAvailableConnection(ctx, load, providerExclusions{})
+				if err != nil {
+					return
+				}
+				time.Sleep(articleTime)
+				client.put(conn, acquiredProvider)
+			}
+		})
+	}
+	waitForBenchSaturation(b, client, pp, load, workers-slots)
+
+	var totalWait, maxWait time.Duration
+	var iterations int64
+	for b.Loop() {
+		start := time.Now()
+		conn, acquiredProvider, err := client.getAnyAvailableConnection(context.Background(), contender, providerExclusions{})
+		if err != nil {
+			b.Fatal(err)
+		}
+		wait := time.Since(start)
+		totalWait += wait
+		maxWait = max(maxWait, wait)
+		iterations++
+		client.put(conn, acquiredProvider)
+	}
+	cancel()
+	wg.Wait()
+	b.ReportMetric(float64(totalWait)/float64(iterations)/float64(time.Millisecond), "mean-wait-ms")
+	b.ReportMetric(float64(maxWait)/float64(time.Millisecond), "max-wait-ms")
+}
+
+func waitForBenchSaturation(b *testing.B, client *Client, pp *ProviderPool, workload Workload, queuedTarget int) {
 	b.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	queued := 0
 	for time.Now().Before(deadline) {
 		client.waitMu.Lock()
-		queued = client.waiters[WorkloadBackground].len
+		queued = client.waiters[workload].len
 		client.waitMu.Unlock()
 		if len(pp.slots) == pp.max && queued >= queuedTarget {
 			return
