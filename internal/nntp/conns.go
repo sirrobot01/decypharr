@@ -362,7 +362,13 @@ func (c *Connection) sendCommandArg(command, arg string) error {
 	}
 	_ = c.conn.SetWriteDeadline(utils.Now().Add(writeTimeout))
 	defer func() { _ = c.conn.SetWriteDeadline(time.Time{}) }()
+	if err := c.writeCommandArg(command, arg); err != nil {
+		return err
+	}
+	return c.writer.Flush()
+}
 
+func (c *Connection) writeCommandArg(command, arg string) error {
 	if _, err := c.writer.WriteString(command); err != nil {
 		return err
 	}
@@ -377,7 +383,7 @@ func (c *Connection) sendCommandArg(command, arg string) error {
 	if _, err := c.writer.WriteString("\r\n"); err != nil {
 		return err
 	}
-	return c.writer.Flush()
+	return nil
 }
 
 // readResponse reads a response from the NNTP server
@@ -762,7 +768,10 @@ func (c *Connection) Stat(messageID string) (articleNumber int, echoedID string,
 	if err != nil {
 		return 0, "", NewConnectionError(fmt.Errorf("failed to read STAT response: %w", err))
 	}
+	return parseStatResponse(resp)
+}
 
+func parseStatResponse(resp Response) (articleNumber int, echoedID string, err error) {
 	if resp.Code != 223 {
 		return 0, "", classifyNNTPError(resp.Code, resp.Message)
 	}
@@ -778,6 +787,61 @@ func (c *Connection) Stat(messageID string) (articleNumber int, echoedID string,
 	echoedID = fields[1]
 
 	return articleNumber, echoedID, nil
+}
+
+// StatBatch pipelines independent STAT commands in one write and consumes the
+// ordered single-line responses. A transport failure makes the connection
+// unusable and marks the unread suffix with the same error.
+func (c *Connection) StatBatch(messageIDs []string) ([]StatResult, error) {
+	results := make([]StatResult, len(messageIDs))
+	if len(messageIDs) == 0 {
+		return results, nil
+	}
+
+	writeTimeout := c.writeTimeout
+	if writeTimeout <= 0 {
+		writeTimeout = timeouts.HandshakeTimeout
+	}
+	_ = c.conn.SetWriteDeadline(utils.Now().Add(writeTimeout))
+	for i, messageID := range messageIDs {
+		results[i].MessageID = messageID
+		if err := c.writeCommandArg("STAT", FormatMessageID(messageID)); err != nil {
+			_ = c.conn.SetWriteDeadline(time.Time{})
+			pipelineErr := NewConnectionError(fmt.Errorf("write STAT pipeline at %d/%d: %w", i+1, len(messageIDs), err))
+			markStatSuffixError(results, 0, pipelineErr)
+			return results, pipelineErr
+		}
+	}
+	if err := c.writer.Flush(); err != nil {
+		_ = c.conn.SetWriteDeadline(time.Time{})
+		pipelineErr := NewConnectionError(fmt.Errorf("flush STAT pipeline: %w", err))
+		markStatSuffixError(results, 0, pipelineErr)
+		return results, pipelineErr
+	}
+	_ = c.conn.SetWriteDeadline(time.Time{})
+
+	for i := range results {
+		resp, err := c.readResponseWithDeadline(timeouts.StreamBodyTimeout)
+		if err != nil {
+			pipelineErr := NewConnectionError(fmt.Errorf("read STAT pipeline at %d/%d: %w", i+1, len(results), err))
+			markStatSuffixError(results, i, pipelineErr)
+			return results, pipelineErr
+		}
+		_, _, statErr := parseStatResponse(resp)
+		if statErr == nil {
+			results[i].Available = true
+			continue
+		}
+		results[i].Error = statErr
+	}
+	return results, nil
+}
+
+func markStatSuffixError(results []StatResult, start int, err error) {
+	for i := start; i < len(results); i++ {
+		results[i].Available = false
+		results[i].Error = err
+	}
 }
 
 // SelectGroup selects a newsgroup and returns group information

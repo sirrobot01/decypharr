@@ -19,8 +19,8 @@ import (
 
 // Config controls simulated network behavior.
 type Config struct {
-	// RTT is the artificial delay applied before every response, simulating
-	// one network round trip per command.
+	// RTT is the artificial delay applied before the first response to each
+	// command burst. Commands delivered in one pipeline share the delay.
 	RTT time.Duration
 	// Bandwidth caps body streaming per connection in bytes/second.
 	// 0 means unlimited.
@@ -113,6 +113,7 @@ func (s *Server) handleConn(conn net.Conn) {
 	if s.respond(writer, "200 nntpd ready") != nil {
 		return
 	}
+	inPipeline := false
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -126,30 +127,33 @@ func (s *Server) handleConn(conn net.Conn) {
 		if len(fields) > 1 {
 			arg = fields[len(fields)-1]
 		}
+		if !inPipeline {
+			s.sleepRTT()
+		}
+		inPipeline = reader.Buffered() > 0
 
 		switch strings.ToUpper(fields[0]) {
 		case "AUTHINFO":
 			if len(fields) > 1 && strings.EqualFold(fields[1], "USER") {
-				err = s.respond(writer, "381 password required")
+				err = writeResponse(writer, "381 password required")
 			} else {
-				err = s.respond(writer, "281 authentication accepted")
+				err = writeResponse(writer, "281 authentication accepted")
 			}
 		case "DATE":
-			err = s.respond(writer, "111 20260101000000")
+			err = writeResponse(writer, "111 20260101000000")
 		case "STAT":
 			if s.lookup(arg) != nil {
-				err = s.respond(writer, "223 0 "+arg)
+				err = writeResponse(writer, "223 0 "+arg)
 			} else {
-				err = s.respond(writer, "430 no such article")
+				err = writeResponse(writer, "430 no such article")
 			}
 		case "BODY":
 			body := s.lookup(arg)
 			if body == nil {
-				err = s.respond(writer, "430 no such article")
+				err = writeResponse(writer, "430 no such article")
 				break
 			}
 			s.Bodies.Add(1)
-			s.sleepRTT()
 			if _, err = writer.WriteString("222 0 " + arg + " body\r\n"); err != nil {
 				return
 			}
@@ -161,10 +165,10 @@ func (s *Server) handleConn(conn net.Conn) {
 			}
 			err = writer.Flush()
 		case "QUIT":
-			_ = s.respond(writer, "205 bye")
+			_ = writeResponse(writer, "205 bye")
 			return
 		default:
-			err = s.respond(writer, "500 unknown command")
+			err = writeResponse(writer, "500 unknown command")
 		}
 		if err != nil {
 			return
@@ -180,6 +184,10 @@ func (s *Server) lookup(messageID string) []byte {
 
 func (s *Server) respond(w *bufio.Writer, line string) error {
 	s.sleepRTT()
+	return writeResponse(w, line)
+}
+
+func writeResponse(w *bufio.Writer, line string) error {
 	if _, err := w.WriteString(line + "\r\n"); err != nil {
 		return err
 	}

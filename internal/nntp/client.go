@@ -1687,47 +1687,33 @@ func (c *Client) batchStatAcrossProviders(ctx context.Context, messageIDs []stri
 	return results, nil
 }
 
+const statPipelineDepth = 16
+
 func (c *Client) batchStatOnProvider(ctx context.Context, provider config.UsenetProvider, messageIDs []string) ([]StatResult, error) {
-	conn, providerCfg, err := c.getConnectionFromProvider(ctx, WorkloadBackground, provider)
-	if err != nil {
-		return nil, err
-	}
+	// A background worker returns its connection after every shallow pipeline.
+	// This bounds the delay seen by a stream that arrives while all provider
+	// slots are busy without reintroducing one RTT per STAT.
+	results := make([]StatResult, 0, len(messageIDs))
+	for start := 0; start < len(messageIDs); start += statPipelineDepth {
+		if err := ctx.Err(); err != nil {
+			return results, err
+		}
+		end := min(start+statPipelineDepth, len(messageIDs))
+		conn, providerCfg, err := c.getConnectionFromProvider(ctx, WorkloadBackground, provider)
+		if err != nil {
+			return results, err
+		}
 
-	results := make([]StatResult, len(messageIDs))
-	for i, msgID := range messageIDs {
-		results[i].MessageID = msgID
-		if ctx.Err() != nil {
-			results[i].Available = false
-			results[i].Error = ctx.Err()
+		stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
+		window, statErr := conn.StatBatch(messageIDs[start:end])
+		stopCancel()
+		results = append(results, window...)
+		if statErr != nil {
 			c.release(conn)
-			return results, ctx.Err()
+			return results, statErr
 		}
-
-		_, _, statErr := conn.Stat(msgID)
-		if statErr == nil {
-			results[i].Available = true
-			continue
-		}
-
-		results[i].Available = false
-		results[i].Error = statErr
-
-		if nntpErr, ok := errors.AsType[*Error](statErr); ok && nntpErr.Type != ErrorTypeConnection && nntpErr.Type != ErrorTypeTimeout {
-			continue
-		}
-
-		connErr := NewConnectionError(fmt.Errorf("failed to STAT %s at %d/%d: %w", msgID, i+1, len(messageIDs), statErr))
-		results[i].Error = connErr
-		for j := i + 1; j < len(messageIDs); j++ {
-			results[j].MessageID = messageIDs[j]
-			results[j].Available = false
-			results[j].Error = connErr
-		}
-		c.release(conn)
-		return results, connErr
+		c.returnOrReleaseConn(conn, providerCfg)
 	}
-
-	c.returnOrReleaseConn(conn, providerCfg)
 	return results, nil
 }
 
