@@ -196,3 +196,44 @@ func BenchmarkStreamBodyPriorityUnderDownloadPressure(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkBodyPipelineDepthE2E evaluates the RTT savings and scheduling
+// boundary cost of candidate BODY pipeline depths. Every operation retrieves
+// four complete 750 KiB articles.
+func BenchmarkBodyPipelineDepthE2E(b *testing.B) {
+	const bodiesPerOperation = 4
+	payload := nntpd.Pattern(0, benchSegmentSize)
+	body := nntpd.Encode(payload, "pipeline.bin", 1, benchSegmentSize, 0)
+	for _, rtt := range []time.Duration{10 * time.Millisecond, 30 * time.Millisecond} {
+		for _, depth := range []int{1, 2, 4} {
+			b.Run(fmt.Sprintf("rtt%dms/depth%d", rtt/time.Millisecond, depth), func(b *testing.B) {
+				srv, client := newBenchServerClient(b, nntpd.Config{RTT: rtt}, 1)
+				messageIDs := make([]string, bodiesPerOperation)
+				for i := range bodiesPerOperation {
+					messageIDs[i] = fmt.Sprintf("<pipeline-%d@nntpd>", i)
+					srv.AddArticle(messageIDs[i], body)
+				}
+				destinations := make([][]byte, bodiesPerOperation)
+				for i := range destinations {
+					destinations[i] = make([]byte, 0, DecodedBodyCapacity(benchSegmentSize))
+				}
+				conn, provider, err := client.getConnectionFromProvider(context.Background(), WorkloadStreamPrefetch, client.providers[0])
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.Cleanup(func() { client.returnOrReleaseConn(conn, provider) })
+				b.SetBytes(bodiesPerOperation * benchSegmentSize)
+				b.ReportMetric(bodiesPerOperation, "bodies/op")
+
+				for b.Loop() {
+					for start := 0; start < len(messageIDs); start += depth {
+						end := min(start+depth, len(messageIDs))
+						if _, err := conn.DecodeBodiesInto(messageIDs[start:end], destinations[start:end]); err != nil {
+							b.Fatal(err)
+						}
+					}
+				}
+			})
+		}
+	}
+}

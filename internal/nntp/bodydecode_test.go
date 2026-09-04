@@ -73,6 +73,105 @@ func TestDecodeBodyIntoUsesCallerStorage(t *testing.T) {
 	}
 }
 
+func TestDecodeBodiesIntoPipelinesCommands(t *testing.T) {
+	c, server := newBodyTestConn(t)
+	messageIDs := []string{"<first@b>", "<second@b>"}
+	payloads := [][]byte{testPayload(32 * 1024), testPayload(16 * 1024)}
+	destinations := [][]byte{
+		make([]byte, 0, DecodedBodyCapacity(int64(len(payloads[0])))),
+		make([]byte, 0, DecodedBodyCapacity(int64(len(payloads[1])))),
+	}
+	serverErr := make(chan error, 1)
+	go func() {
+		reader := bufio.NewReader(server)
+		for i := range messageIDs {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				serverErr <- err
+				return
+			}
+			if !strings.HasPrefix(line, "BODY "+messageIDs[i]) {
+				serverErr <- fmt.Errorf("command %d = %q", i, line)
+				return
+			}
+		}
+		for i := range messageIDs {
+			if _, err := fmt.Fprintf(server, "222 0 %s body\r\n%s.\r\n", messageIDs[i], encodeBody(payloads[i])); err != nil {
+				serverErr <- err
+				return
+			}
+		}
+		serverErr <- nil
+	}()
+
+	results, err := c.DecodeBodiesInto(messageIDs, destinations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-serverErr; err != nil {
+		t.Fatal(err)
+	}
+	for i := range payloads {
+		if results[i].Error != nil {
+			t.Fatalf("article %d error: %v", i, results[i].Error)
+		}
+		if !bytes.Equal(results[i].Body, payloads[i]) {
+			t.Fatalf("article %d payload corrupted", i)
+		}
+		if &results[i].Body[0] != &destinations[i][:1][0] {
+			t.Fatalf("article %d replaced caller storage", i)
+		}
+	}
+}
+
+func TestDecodeBodiesIntoDrainsNegativeResponses(t *testing.T) {
+	c, server := newBodyTestConn(t)
+	payload := testPayload(8 * 1024)
+	serverErr := make(chan error, 1)
+	go func() {
+		reader := bufio.NewReader(server)
+		for range 2 {
+			if _, err := reader.ReadString('\n'); err != nil {
+				serverErr <- err
+				return
+			}
+		}
+		if _, err := fmt.Fprintf(server, "430 no such article\r\n222 0 <present@b> body\r\n%s.\r\n", encodeBody(payload)); err != nil {
+			serverErr <- err
+			return
+		}
+		if _, err := reader.ReadString('\n'); err != nil {
+			serverErr <- err
+			return
+		}
+		_, err := fmt.Fprint(server, "223 0 <after@b>\r\n")
+		serverErr <- err
+	}()
+
+	results, err := c.DecodeBodiesInto(
+		[]string{"<missing@b>", "<present@b>"},
+		make([][]byte, 2),
+	)
+	if !IsArticleNotFoundError(err) {
+		t.Fatalf("error = %v, want article-not-found", err)
+	}
+	if !IsArticleNotFoundError(results[0].Error) {
+		t.Fatalf("first result error = %v, want article-not-found", results[0].Error)
+	}
+	if results[1].Error != nil {
+		t.Fatalf("second result error: %v", results[1].Error)
+	}
+	if !bytes.Equal(results[1].Body, payload) {
+		t.Fatal("available response after missing article was not decoded")
+	}
+	if _, _, err := c.Stat("<after@b>"); err != nil {
+		t.Fatalf("connection was not reusable after drained pipeline: %v", err)
+	}
+	if err := <-serverErr; err != nil {
+		t.Fatal(err)
+	}
+}
+
 // serveResponses answers each incoming command line with the next canned
 // response, then keeps the pipe open.
 func serveResponses(t *testing.T, server net.Conn, responses ...string) {

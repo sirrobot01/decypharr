@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/nntp"
+	"github.com/sirrobot01/decypharr/internal/testutil/nntpd"
 )
 
 // newTestFetcher builds a cache+fetcher pair with no NNTP client. Its private
@@ -65,6 +68,113 @@ func TestCancelPendingPrefetchDrainsQueue(t *testing.T) {
 	if got := sf.pendingPrefetch(); got != 1 {
 		t.Errorf("expected segment re-queueable after cancel, queue len = %d", got)
 	}
+}
+
+func TestPrefetchRangePipelinesAndPublishesEverySegment(t *testing.T) {
+	srv, cache, fetcher, stats := newPipelineTestFetcher(t, func(int) bool { return true })
+
+	fetcher.QueuePrefetchRange(0, streamBodyPipelineDepth-1)
+	waitForSegmentState(t, cache, 0, StateOnDisk)
+	waitForSegmentState(t, cache, 1, StateOnDisk)
+
+	if got := srv.Bodies.Load(); got != streamBodyPipelineDepth {
+		t.Fatalf("BODY responses = %d, want %d", got, streamBodyPipelineDepth)
+	}
+	if got := stats.Downloads.Load(); got != streamBodyPipelineDepth {
+		t.Fatalf("completed downloads = %d, want %d", got, streamBodyPipelineDepth)
+	}
+}
+
+func TestPrefetchRangePublishesSuccessAfterMissingArticle(t *testing.T) {
+	_, cache, fetcher, stats := newPipelineTestFetcher(t, func(i int) bool { return i == 1 })
+
+	fetcher.QueuePrefetchRange(0, streamBodyPipelineDepth-1)
+	waitForSegmentState(t, cache, 0, StateFailed)
+	waitForSegmentState(t, cache, 1, StateOnDisk)
+
+	if err := cache.GetError(0); !nntp.IsArticleNotFoundError(err) {
+		t.Fatalf("missing segment error = %v, want article-not-found", err)
+	}
+	if got := stats.Downloads.Load(); got != 1 {
+		t.Fatalf("completed downloads = %d, want 1", got)
+	}
+	if got := stats.DownloadErrors.Load(); got != 1 {
+		t.Fatalf("download errors = %d, want 1", got)
+	}
+}
+
+func TestStreamBodyPipelineDepthPreservesSingleWorkerBoundary(t *testing.T) {
+	oneWorker := newTestFetcher(t, 1)
+	oneWorker.scheduler.workers = 1
+	if got := oneWorker.streamBodyPipelineDepth(); got != 1 {
+		t.Fatalf("single-worker depth = %d, want 1", got)
+	}
+
+	twoWorkers := newTestFetcher(t, 1)
+	twoWorkers.scheduler.workers = 2
+	if got := twoWorkers.streamBodyPipelineDepth(); got != streamBodyPipelineDepth {
+		t.Fatalf("multi-worker depth = %d, want %d", got, streamBodyPipelineDepth)
+	}
+}
+
+func newPipelineTestFetcher(t *testing.T, present func(int) bool) (*nntpd.Server, *SegmentCache, *SegmentFetcher, *ReaderStats) {
+	t.Helper()
+	srv, err := nntpd.New(nntpd.Config{RTT: 10 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+
+	const segmentSize = 64 * 1024
+	segments := make([]SegmentMeta, streamBodyPipelineDepth)
+	for i := range segments {
+		messageID := fmt.Sprintf("<pipeline-%d@nntpd>", i)
+		offset := int64(i * segmentSize)
+		if present(i) {
+			srv.AddArticle(messageID, nntpd.Encode(nntpd.Pattern(offset, segmentSize), "pipeline.bin", i+1, streamBodyPipelineDepth*segmentSize, offset))
+		}
+		segments[i] = SegmentMeta{
+			MessageID:   messageID,
+			Number:      i + 1,
+			Bytes:       segmentSize,
+			StartOffset: offset,
+			EndOffset:   offset + segmentSize - 1,
+		}
+	}
+	host, port := srv.Addr()
+	client, err := nntp.NewClient(&config.Config{Usenet: config.Usenet{Providers: []config.UsenetProvider{{
+		Host: host, Port: port, MaxConnections: 2,
+	}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	cfg := DefaultConfig()
+	cfg.DiskPath = t.TempDir()
+	cfg.MaxConnections = 2
+	cfg.DownloadTimeout = 5 * time.Second
+	stats := &ReaderStats{}
+	cache, err := NewSegmentCache(t.Context(), segments, cfg, stats, zerolog.Nop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cache.Close() })
+	fetcher := NewSegmentFetcher(t.Context(), client, cache, cfg, stats, zerolog.Nop())
+	t.Cleanup(fetcher.Close)
+	return srv, cache, fetcher, stats
+}
+
+func waitForSegmentState(t *testing.T, cache *SegmentCache, segIdx int, want SegmentState) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if state := cache.GetState(segIdx); state == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("segment %d state = %s, want %s (error: %v)", segIdx, cache.GetState(segIdx), want, cache.GetError(segIdx))
 }
 
 func TestEnsureSegmentsPropagatesPermanentFailure(t *testing.T) {

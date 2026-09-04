@@ -479,7 +479,10 @@ func (c *Connection) requestBodyBuffered(messageID string, dst []byte, pooled bo
 	if err := c.sendCommandArg("BODY", messageID); err != nil {
 		return nntpyenc.BodyResult{}, NewConnectionError(fmt.Errorf("failed to send BODY command: %w", err))
 	}
+	return c.readBodyBuffered(dst, pooled)
+}
 
+func (c *Connection) readBodyBuffered(dst []byte, pooled bool) (nntpyenc.BodyResult, error) {
 	if !pooled {
 		c.bodyTarget = dst[:0]
 		c.bodyTargetSet = true
@@ -587,6 +590,69 @@ func (c *Connection) GetBody(messageID string) ([]byte, error) {
 func (c *Connection) GetDecodedBody(messageID string) ([]byte, error) {
 	decoded, _, err := c.GetDecodedBodyWithMetadata(messageID)
 	return decoded, err
+}
+
+// DecodedBodyResult is the outcome of one article in a BODY pipeline.
+type DecodedBodyResult struct {
+	Body  []byte
+	Error error
+}
+
+// DecodeBodiesInto pipelines multiple BODY commands and decodes their ordered
+// responses into the corresponding caller-owned buffers. Per-article results
+// preserve partial success. The returned error describes the batch-level
+// failure used for retry and provider failover. The connection must not be
+// used concurrently.
+func (c *Connection) DecodeBodiesInto(messageIDs []string, destinations [][]byte) ([]DecodedBodyResult, error) {
+	if len(messageIDs) != len(destinations) {
+		return nil, fmt.Errorf("BODY pipeline has %d message IDs and %d destinations", len(messageIDs), len(destinations))
+	}
+	results := make([]DecodedBodyResult, len(messageIDs))
+	if len(messageIDs) == 0 {
+		return results, nil
+	}
+
+	writeTimeout := c.writeTimeout
+	if writeTimeout <= 0 {
+		writeTimeout = timeouts.HandshakeTimeout
+	}
+	_ = c.conn.SetWriteDeadline(utils.Now().Add(writeTimeout))
+	for i, messageID := range messageIDs {
+		if err := c.writeCommandArg("BODY", FormatMessageID(messageID)); err != nil {
+			_ = c.conn.SetWriteDeadline(time.Time{})
+			return results, NewConnectionError(fmt.Errorf("write BODY pipeline at %d/%d: %w", i+1, len(messageIDs), err))
+		}
+	}
+	if err := c.writer.Flush(); err != nil {
+		_ = c.conn.SetWriteDeadline(time.Time{})
+		return results, NewConnectionError(fmt.Errorf("flush BODY pipeline: %w", err))
+	}
+	_ = c.conn.SetWriteDeadline(time.Time{})
+
+	var firstArticleErr error
+	for i := range messageIDs {
+		res, err := c.readBodyBuffered(destinations[i], false)
+		if err == nil {
+			results[i].Body = res.Data
+			continue
+		}
+		results[i].Error = err
+		if res.StatusCode != 0 && res.StatusCode != 222 {
+			// A single-line negative response is a clean protocol boundary.
+			// Consume the rest of the ordered pipeline before returning it so
+			// ExecuteWithFailover may safely reuse or retry the connection.
+			if firstArticleErr == nil {
+				firstArticleErr = fmt.Errorf("BODY pipeline article %d/%d: %w", i+1, len(messageIDs), err)
+			}
+			continue
+		}
+		batchErr := fmt.Errorf("BODY pipeline article %d/%d: %w", i+1, len(messageIDs), err)
+		for j := i + 1; j < len(results); j++ {
+			results[j].Error = batchErr
+		}
+		return results, batchErr
+	}
+	return results, firstArticleErr
 }
 
 // GetDecodedBodyWithMetadata retrieves and decodes the article body while also
