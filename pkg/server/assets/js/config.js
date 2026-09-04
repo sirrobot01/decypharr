@@ -1516,6 +1516,8 @@ class ConfigManager {
                 || parseInt(document.querySelector('[name="usenet.max_connections"]')?.value)
                 || 15,
             read_ahead: document.querySelector('[name="usenet.read_ahead"]').value || "16MB",
+            body_pipeline_depth: Math.min(4, Math.max(1,
+                parseInt(document.querySelector('[name="usenet.body_pipeline_depth"]')?.value, 10) || 2)),
             processing_timeout: document.querySelector('[name="usenet.processing_timeout"]')?.value || "5m",
             conn_idle_timeout: document.querySelector('[name="usenet.conn_idle_timeout"]')?.value || "",
             availability_sample_percent: parseInt(document.querySelector('[name="usenet.availability_sample_percent"]')?.value) || 10,
@@ -2366,6 +2368,7 @@ class ConfigManager {
             'max_connections': usenet.max_connections,
             'processing_max_connections': usenet.processing_max_connections,
             'read_ahead': usenet.read_ahead,
+            'body_pipeline_depth': usenet.body_pipeline_depth ?? 2,
             'processing_timeout': usenet.processing_timeout,
             'conn_idle_timeout': usenet.conn_idle_timeout,
             'availability_sample_percent': usenet.availability_sample_percent,

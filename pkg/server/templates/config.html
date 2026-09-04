@@ -678,6 +678,21 @@
                                                     buffering in memory</span>
                                             </div>
                                             <div>
+                                                <label class="label" for="usenet.body_pipeline_depth">
+                                                    <span class="font-medium">BODY Pipeline Depth</span>
+                                                </label>
+                                                <select class="select w-full" name="usenet.body_pipeline_depth"
+                                                        id="usenet.body_pipeline_depth">
+                                                    <option value="1">1 (disabled)</option>
+                                                    <option value="2" selected>2 (recommended)</option>
+                                                    <option value="3">3</option>
+                                                    <option value="4">4 (maximum throughput)</option>
+                                                </select>
+                                                <span class="text-sm opacity-70">Read-ahead BODY commands per
+                                                    connection. Higher values improve high-latency throughput but take
+                                                    longer to yield a connection to a new urgent read.</span>
+                                            </div>
+                                            <div>
                                                 <label class="label" for="usenet.processing_timeout">
                                                     <span class="font-medium">Processing Timeout</span>
                                                 </label>
