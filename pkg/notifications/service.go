@@ -18,18 +18,15 @@ type Service struct {
 // New creates a new notification service based on the provided configuration
 func New(cfg *config.Notifications, logger zerolog.Logger) *Service {
 	s := &Service{
-		config:    cfg,
-		notifiers: make([]Notifier, 0),
-		logger:    logger.With().Str("component", "notifications").Logger(),
+		config: cfg,
+		logger: logger.With().Str("component", "notifications").Logger(),
 	}
 
-	// Initialize notifiers based on config
 	s.initNotifiers()
 
 	return s
 }
 
-// initNotifiers sets up all configured notifiers
 func (s *Service) initNotifiers() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -40,12 +37,10 @@ func (s *Service) initNotifiers() {
 		return
 	}
 
-	// Add Discord notifier if webhook URL is configured
 	if s.config.WebhookURL != "" {
 		s.notifiers = append(s.notifiers, NewDiscord(s.config.WebhookURL))
 	}
 
-	// Add Callback notifier if callback URL is configured
 	if s.config.CallbackURL != "" {
 		s.notifiers = append(s.notifiers, NewCallback(s.config.CallbackURL))
 	}
@@ -62,20 +57,20 @@ func (s *Service) Notify(event Event) {
 	s.mu.RUnlock()
 
 	for _, notifier := range notifiers {
-		go func(n Notifier) {
-			if err := n.Send(event); err != nil {
+		go func() {
+			if err := notifier.Send(event); err != nil {
 				s.logger.Error().
 					Err(err).
-					Str("notifier", n.Name()).
+					Str("notifier", notifier.Name()).
 					Str("event", string(event.Type)).
 					Msg("Failed to send notification")
 			} else {
 				s.logger.Trace().
-					Str("notifier", n.Name()).
+					Str("notifier", notifier.Name()).
 					Str("event", string(event.Type)).
 					Msg("Notification sent successfully")
 			}
-		}(notifier)
+		}()
 	}
 }
 

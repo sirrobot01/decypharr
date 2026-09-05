@@ -32,7 +32,7 @@ var (
 	metadataOnly = 0
 )
 
-// NZBParser provides a simplified, robust NZB parser
+// NZBParser identifies and processes files in NZB manifests.
 type NZBParser struct {
 	logger        zerolog.Logger
 	source        ArticleSource
@@ -86,7 +86,7 @@ func (f *FileGroup) getMetadata() *fileAnalysisResult {
 
 	metadata := &fileAnalysisResult{}
 	// Estimate actual segment size from reported bytes (account for ~3% yEnc overhead)
-	reportedBytes := int64(f.Files[0].Segments[0].Bytes)
+	reportedBytes := f.Files[0].Segments[0].Bytes
 	if reportedBytes <= 0 {
 		reportedBytes = 750000 // Default 750KB segment
 	}
@@ -100,7 +100,7 @@ func (f *FileGroup) getMetadata() *fileAnalysisResult {
 	return f.metadata
 }
 
-// NewParser creates a new simplified NZB parser with a connection manager
+// NewParser creates an NZB parser with a connection manager.
 func NewParser(manager *nntp.Client, maxConcurrent int, logger zerolog.Logger) *NZBParser {
 	return NewParserWithSource(
 		NewArticleBroker(manager, maxConcurrent, defaultArticleBodyCacheBytes),
@@ -993,11 +993,6 @@ func (p *NZBParser) processMediaFile(group *FileGroup, password string) *storage
 	}
 	file.Size = currentOffset
 	return file
-}
-
-func (p *NZBParser) detectFileTypeByContent(ctx context.Context, file manifest.File) (storage.NZBFileType, string, error) {
-	result, err := p.inspectFileByContent(ctx, file)
-	return result.fileType, result.actualFilename, err
 }
 
 func (p *NZBParser) inspectFileByContent(ctx context.Context, file manifest.File) (contentResult, error) {

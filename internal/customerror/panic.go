@@ -22,7 +22,6 @@ func NewPanicError(e any) error {
 }
 
 func IsPanicError(err error) bool {
-	var panicError *PanicError
-	ok := errors.As(err, &panicError)
+	_, ok := errors.AsType[*PanicError](err)
 	return ok
 }

@@ -77,34 +77,28 @@ func NewError(err error, statusCode int, code string, silent bool, headersWritte
 
 func NewSilentError(err error) *Error {
 	return &Error{
-		err:            err,
-		silent:         true,
-		statusCode:     http.StatusInternalServerError,
-		HeadersWritten: false,
+		err:        err,
+		silent:     true,
+		statusCode: http.StatusInternalServerError,
 	}
 }
 
 func NewPermanentError(err error) *Error {
-	e := &Error{
-		err:            err,
-		silent:         false,
-		statusCode:     http.StatusInternalServerError,
-		HeadersWritten: false,
+	return &Error{
+		err:        err,
+		statusCode: http.StatusInternalServerError,
+		permanent:  true,
 	}
-	return e.Permanent()
 }
 
 func FromError(err error) *Error {
-	var customErr *Error
-	if errors.As(err, &customErr) {
+	if customErr, ok := errors.AsType[*Error](err); ok {
 		return customErr
 	}
 
 	return &Error{
-		err:            err,
-		silent:         false,
-		statusCode:     http.StatusInternalServerError,
-		HeadersWritten: false,
+		err:        err,
+		statusCode: http.StatusInternalServerError,
 	}
 }
 
@@ -114,8 +108,7 @@ func IsSilentError(err error) bool {
 		errors.Is(err, io.ErrClosedPipe) {
 		return true
 	}
-	var netErr *net.OpError
-	if errors.As(err, &netErr) {
+	if netErr, ok := errors.AsType[*net.OpError](err); ok {
 		if errors.Is(netErr.Err, syscall.EPIPE) || errors.Is(netErr.Err, syscall.ECONNRESET) {
 			return true
 		}
@@ -128,9 +121,7 @@ func IsSilentError(err error) bool {
 		return true
 	}
 
-	// Check for custom error type
-	var customErr *Error
-	if errors.As(err, &customErr) {
+	if customErr, ok := errors.AsType[*Error](err); ok {
 		return customErr.silent
 	}
 

@@ -508,8 +508,6 @@ func (r *BindingRepository) persistDeltaLocked(delta bindingDelta) error {
 	return nil
 }
 
-// dropSupersededRowsLocked removes the delta and legacy rows a fresh snapshot
-// replaces. Failures are not fatal: the loader ignores stale rows.
 // dropSupersededRowsLocked removes the pages, deltas, and legacy rows a fresh
 // generation replaces. Failures are not fatal: the loader ignores stale rows.
 func (r *BindingRepository) dropSupersededRowsLocked(state *bindingRepositoryState, arrName string, bindings []Binding) {

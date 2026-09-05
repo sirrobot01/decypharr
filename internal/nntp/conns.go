@@ -3,7 +3,6 @@ package nntp
 import (
 	"bufio"
 	"bytes"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -284,38 +283,6 @@ func (c *Connection) authenticate() error {
 	if resp.Code != 281 {
 		return classifyNNTPError(resp.Code, fmt.Sprintf("[%s] authentication failed: %s", c.address, resp.Message))
 	}
-	return nil
-}
-
-// startTLS initiates TLS encryption with proper error handling
-func (c *Connection) startTLS() error {
-	if err := c.sendCommand("STARTTLS"); err != nil {
-		return NewConnectionError(fmt.Errorf("failed to send STARTTLS: %w", err))
-	}
-
-	resp, err := c.readResponse()
-	if err != nil {
-		return NewConnectionError(fmt.Errorf("failed to read STARTTLS response: %w", err))
-	}
-
-	if resp.Code != 382 {
-		return classifyNNTPError(resp.Code, fmt.Sprintf("STARTTLS not supported: %s", resp.Message))
-	}
-
-	// Upgrade connection to TLS
-	tlsConn := tls.Client(c.conn, &tls.Config{
-		ServerName:         c.address,
-		InsecureSkipVerify: true, // Match createConnection behavior
-		MinVersion:         tls.VersionTLS12,
-	})
-
-	// Same sizing rationale as createConnection.
-	c.conn = tlsConn
-	c.reader = bufio.NewReaderSize(tlsConn, 128*1024)
-	c.writer = bufio.NewWriterSize(tlsConn, 4*1024)
-	c.text = textproto.NewReader(c.reader)
-
-	c.logger.Debug().Msg("TLS encryption enabled")
 	return nil
 }
 

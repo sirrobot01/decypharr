@@ -161,11 +161,6 @@ func (tb *Torbox) doGetWithClient(client *request.Client, endpoint string, query
 	return resp, nil
 }
 
-// doPostForm performs a POST request with form data
-func (tb *Torbox) doPostForm(endpoint string, formData map[string]string, result any) (*http.Response, error) {
-	return tb.doPostFormWithClient(tb.client, endpoint, formData, result)
-}
-
 func (tb *Torbox) doPostFormWithClient(client *request.Client, endpoint string, formData map[string]string, result any) (*http.Response, error) {
 	form := url.Values{}
 	for k, v := range formData {
@@ -296,23 +291,14 @@ func (tb *Torbox) getTorboxStatus(status string, finished bool) types.TorrentSta
 	if finished {
 		return types.TorrentStatusDownloaded
 	}
-	downloading := []string{"paused", "downloading",
-		"checkingResumeData", "metaDL", "pausedUP", "queuedUP", "checkingUP",
-		"forcedUP", "allocating", "downloading", "metaDL", "pausedDL",
-		"queuedDL", "checkingDL", "forcedDL", "checkingResumeData", "moving",
-		"incomplete",
-	}
-
-	downloaded := []string{
-		"completed", "cached", "uploading", "downloaded",
-	}
-
 	status = regexp.MustCompile(`\s*\(.*?\)\s*`).ReplaceAllString(status, "")
 
-	switch {
-	case utils.Contains(downloading, status):
+	switch status {
+	case "paused", "downloading", "checkingResumeData", "metaDL", "pausedUP",
+		"queuedUP", "checkingUP", "forcedUP", "allocating", "pausedDL",
+		"queuedDL", "checkingDL", "forcedDL", "moving", "incomplete":
 		return types.TorrentStatusDownloading
-	case utils.Contains(downloaded, status):
+	case "completed", "cached", "uploading", "downloaded":
 		return types.TorrentStatusDownloaded
 	default:
 		return types.TorrentStatusError

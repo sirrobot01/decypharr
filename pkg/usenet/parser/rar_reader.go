@@ -508,46 +508,35 @@ func (p *RARParser) readRAR5HeaderFromStream(stream *rarReader) (*rar5HeaderData
 		}
 	}
 
-	// Now parse the header content from memory (no more Read calls!)
 	reader := bytes.NewReader(headerContent)
-	bytesConsumed := 0
 
-	// Read header type (vint)
 	headerType, err := readVInt(reader)
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	_ = int(reader.Size()) - reader.Len()
 
-	// Read header flags (vint)
 	headerFlags, err := readVInt(reader)
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	bytesConsumed = int(reader.Size()) - reader.Len()
 
-	// Read extra area size if present
 	if headerFlags&RAR5HeaderFlagExtraArea != 0 {
 		_, err = readVInt(reader)
 		if err != nil {
 			return nil, 0, 0, err
 		}
-		bytesConsumed = int(reader.Size()) - reader.Len()
 	}
 
-	// Read data area size if present
 	var dataAreaSize int64
 	if headerFlags&RAR5HeaderFlagDataArea != 0 {
 		dataSize, err := readVInt(reader)
 		if err != nil {
 			return nil, 0, 0, err
 		}
-		bytesConsumed = int(reader.Size()) - reader.Len()
 		dataAreaSize = int64(dataSize)
 	}
 
-	// Remaining bytes are the header data
-	remainingHeaderSize := int(headerSize) - bytesConsumed
+	remainingHeaderSize := reader.Len()
 	var headerData []byte
 	if remainingHeaderSize > 0 {
 		headerData = make([]byte, remainingHeaderSize)

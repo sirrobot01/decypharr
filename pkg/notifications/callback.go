@@ -49,14 +49,12 @@ func (c *CallbackNotifier) Send(event Event) error {
 		return nil
 	}
 
-	// Build the callback payload
 	payload := CallbackPayload{
 		Status:  event.Status,
 		Event:   string(event.Type),
 		Message: event.Message,
 	}
 
-	// Add entry details if available
 	if event.Entry != nil {
 		payload.Hash = event.Entry.InfoHash
 		payload.Name = event.Entry.Name
@@ -65,7 +63,6 @@ func (c *CallbackNotifier) Send(event Event) error {
 		payload.ContentPath = event.Entry.ContentPath
 	}
 
-	// Add error message if present
 	if event.Error != nil {
 		payload.Error = event.Error.Error()
 	}
@@ -87,8 +84,6 @@ func (c *CallbackNotifier) Send(event Event) error {
 	}
 	defer resp.Body.Close()
 
-	// We don't fail on non-2xx responses for callbacks - just log the issue
-	// The caller will handle logging
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("callback returned non-2xx status: %s", resp.Status)
 	}

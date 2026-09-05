@@ -15,7 +15,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/storage"
-	"github.com/sirrobot01/decypharr/pkg/usenet/types"
 )
 
 // ZIP format constants
@@ -170,18 +169,6 @@ func (p *ZIPParser) Process(ctx context.Context, group *FileGroup, password stri
 	return buildExtractedArchiveFiles(group, password, storage.NZBFileTypeZip, baseSegments, volumeInfos, extracted)
 }
 
-// ParseArchive parses ZIP archive from volumes
-func (p *ZIPParser) parseArchive(ctx context.Context, volumes []*types.Volume) (*ZIPArchiveInfo, error) {
-	if len(volumes) == 0 {
-		return nil, fmt.Errorf("no volumes provided")
-	}
-	readerAt, archiveSize, err := newArticleReaderAt(ctx, p.source, volumes)
-	if err != nil {
-		return nil, err
-	}
-	return p.parseArchiveReader(readerAt, archiveSize, len(volumes) > 1)
-}
-
 func (p *ZIPParser) parseArchiveReader(readerAt io.ReaderAt, archiveSize int64, multiPart bool) (*ZIPArchiveInfo, error) {
 	if archiveSize < 22 {
 		return nil, fmt.Errorf("ZIP archive is too small: %d bytes", archiveSize)
@@ -276,23 +263,6 @@ func (p *ZIPParser) findEndOfCentralDirectory(data []byte) (*endOfCentralDirReco
 	}
 
 	return nil, 0, fmt.Errorf("end of Central Directory signature not found")
-}
-
-// parseCentralDirectory parses the central directory entries. eocdPos is the
-// position of the EOCD record within data: the directory ends exactly there
-// (or at the ZIP64 EOCD record for ZIP64 archives), so anchoring on it stays
-// correct when the archive has a trailing comment — the previous end-of-buffer
-// arithmetic was shifted by the comment length and failed on the first entry.
-func (p *ZIPParser) parseCentralDirectory(data []byte, eocd *endOfCentralDirRecord, eocdPos int) ([]*ZIPFileEntry, error) {
-	totalEntries, centralDirSize, dirEnd, err := zipCentralDirectoryMetadata(data, eocd, eocdPos)
-	if err != nil {
-		return nil, err
-	}
-	dirStart := dirEnd - centralDirSize
-	if dirStart < 0 || dirEnd > int64(len(data)) {
-		return nil, fmt.Errorf("central directory range [%d, %d) is outside the supplied %d bytes", dirStart, dirEnd, len(data))
-	}
-	return p.parseCentralDirectoryEntries(data[dirStart:dirEnd], totalEntries)
 }
 
 func zipCentralDirectoryMetadata(data []byte, eocd *endOfCentralDirRecord, eocdPos int) (int64, int64, int64, error) {
