@@ -598,6 +598,14 @@ func (sf *SegmentFetcher) fetchPrefetchBatch(ctx context.Context, segIndices []i
 			if len(result.Body) > 0 {
 				decoded[i] = result.Body
 				bodyErrors[i] = nil
+				if result.Error == nil && destinations[i].Writer == nil {
+					if n, adoptErr := writers[i].Adopt(result.Body); adoptErr == nil && n > 0 {
+						// Failover must not overwrite storage already accepted by this writer.
+						written[i] = n
+						destinations[i].Skip = true
+						decoded[i] = nil
+					}
+				}
 			} else if result.Bytes > 0 {
 				written[i] = result.Bytes
 				bodyErrors[i] = nil

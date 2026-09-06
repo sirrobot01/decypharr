@@ -565,6 +565,8 @@ func (c *Connection) GetDecodedBody(messageID string) ([]byte, error) {
 type BodyDestination struct {
 	Buffer []byte
 	Writer io.Writer
+	// Skip omits an accepted article while preserving its result index.
+	Skip bool
 }
 
 // DecodedBodyResult is the outcome of one article in a BODY pipeline.
@@ -586,6 +588,16 @@ func (c *Connection) PipelineBodies(messageIDs []string, destinations []BodyDest
 	if len(messageIDs) == 0 {
 		return results, nil
 	}
+	hasPending := false
+	for i := range destinations {
+		if !destinations[i].Skip {
+			hasPending = true
+			break
+		}
+	}
+	if !hasPending {
+		return results, nil
+	}
 
 	writeTimeout := c.writeTimeout
 	if writeTimeout <= 0 {
@@ -593,6 +605,9 @@ func (c *Connection) PipelineBodies(messageIDs []string, destinations []BodyDest
 	}
 	_ = c.conn.SetWriteDeadline(utils.Now().Add(writeTimeout))
 	for i, messageID := range messageIDs {
+		if destinations[i].Skip {
+			continue
+		}
 		if err := c.writeCommandArg("BODY", FormatMessageID(messageID)); err != nil {
 			_ = c.conn.SetWriteDeadline(time.Time{})
 			return results, NewConnectionError(fmt.Errorf("write BODY pipeline at %d/%d: %w", i+1, len(messageIDs), err))
@@ -607,6 +622,9 @@ func (c *Connection) PipelineBodies(messageIDs []string, destinations []BodyDest
 	var firstArticleErr error
 	for i := range messageIDs {
 		destination := destinations[i]
+		if destination.Skip {
+			continue
+		}
 		pooled := destination.Writer != nil
 		res, err := c.readBodyBuffered(destination.Buffer, pooled)
 		if err == nil {
@@ -639,7 +657,9 @@ func (c *Connection) PipelineBodies(messageIDs []string, destinations []BodyDest
 		}
 		batchErr := fmt.Errorf("BODY pipeline article %d/%d: %w", i+1, len(messageIDs), err)
 		for j := i + 1; j < len(results); j++ {
-			results[j].Error = batchErr
+			if !destinations[j].Skip {
+				results[j].Error = batchErr
+			}
 		}
 		return results, batchErr
 	}

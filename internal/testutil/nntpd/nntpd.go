@@ -36,8 +36,26 @@ type Server struct {
 	conns    map[net.Conn]struct{}
 	wg       sync.WaitGroup
 	closed   atomic.Bool
-	// Bodies counts BODY responses served, for bodies/op bench metrics.
+	// Bodies counts existing-article BODY attempts before writing the response.
 	Bodies atomic.Int64
+	// CompletedBodies and CompletedBodyBytes advance after the response flush
+	// succeeds. Body bytes include yEnc framing, excluding the status/terminator.
+	CompletedBodies    atomic.Int64
+	CompletedBodyBytes atomic.Int64
+	// SocketBytes counts bytes accepted by net.Conn.Write, including protocol
+	// framing and partial writes. It does not imply the client consumed them.
+	SocketBytes atomic.Int64
+}
+
+type socketWriter struct {
+	conn  net.Conn
+	bytes *atomic.Int64
+}
+
+func (w socketWriter) Write(p []byte) (int, error) {
+	n, err := w.conn.Write(p)
+	w.bytes.Add(int64(n))
+	return n, err
 }
 
 func New(cfg Config) (*Server, error) {
@@ -108,7 +126,7 @@ func (s *Server) handleConn(conn net.Conn) {
 	}()
 
 	reader := bufio.NewReaderSize(conn, 4096)
-	writer := bufio.NewWriterSize(conn, 256*1024)
+	writer := bufio.NewWriterSize(socketWriter{conn, &s.SocketBytes}, 256*1024)
 
 	if s.respond(writer, "200 nntpd ready") != nil {
 		return
@@ -164,6 +182,10 @@ func (s *Server) handleConn(conn net.Conn) {
 				return
 			}
 			err = writer.Flush()
+			if err == nil {
+				s.CompletedBodies.Add(1)
+				s.CompletedBodyBytes.Add(int64(len(body)))
+			}
 		case "QUIT":
 			_ = writeResponse(writer, "205 bye")
 			return
