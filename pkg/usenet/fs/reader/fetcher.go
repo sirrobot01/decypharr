@@ -287,9 +287,9 @@ func (sf *SegmentFetcher) doFetchAttempt(ctx context.Context, segIdx int, worklo
 
 		var n int64
 		var err error
-		if decodeBuffer := writer.DecodeBuffer(); decodeBuffer != nil {
+		if sf.cache.memoryMode {
 			var decoded []byte
-			decoded, err = conn.DecodeBodyInto(messageID, decodeBuffer)
+			decoded, err = conn.DecodeBodyWithBuffer(messageID, writer)
 			if err == nil {
 				n, err = writer.Adopt(decoded)
 			}
@@ -571,8 +571,10 @@ func (sf *SegmentFetcher) fetchPrefetchBatch(ctx context.Context, segIndices []i
 				}
 				writers = append(writers, writer)
 				messageIDs = append(messageIDs, segment.MessageID)
-				destination := nntp.BodyDestination{Buffer: writer.DecodeBuffer()}
-				if destination.Buffer == nil {
+				var destination nntp.BodyDestination
+				if sf.cache.memoryMode {
+					destination.BufferSource = writer
+				} else {
 					destination.Writer = writer
 				}
 				destinations = append(destinations, destination)

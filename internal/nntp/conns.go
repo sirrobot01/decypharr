@@ -223,6 +223,9 @@ type Connection struct {
 	bodyDec       *nntpyenc.BodyDecoder
 	bodyTarget    []byte
 	bodyTargetSet bool
+	// bodySource supplies caller-owned storage on demand for one response.
+	// The owning read installs and clears it; Close must not touch it.
+	bodySource BodyBuffer
 
 	// Body-decode idle tracking. lastProgressNS is refreshed by bodyReader
 	// while source reads make progress; idleNS is armed by
@@ -438,24 +441,29 @@ func (c *Connection) GetArticle(messageID string) (*Article, error) {
 // be mid-response and unusable; callers rely on the pool layer to discard
 // errored connections.
 func (c *Connection) requestBody(messageID string) (nntpyenc.BodyResult, error) {
-	return c.requestBodyBuffered(messageID, nil, true)
+	return c.requestBodyBuffered(messageID, nil, nil, true)
 }
 
-func (c *Connection) requestBodyBuffered(messageID string, dst []byte, pooled bool) (nntpyenc.BodyResult, error) {
+func (c *Connection) requestBodyBuffered(messageID string, dst []byte, source BodyBuffer, pooled bool) (nntpyenc.BodyResult, error) {
 	messageID = FormatMessageID(messageID)
 	if err := c.sendCommandArg("BODY", messageID); err != nil {
 		return nntpyenc.BodyResult{}, NewConnectionError(fmt.Errorf("failed to send BODY command: %w", err))
 	}
-	return c.readBodyBuffered(dst, pooled)
+	return c.readBodyBuffered(dst, source, pooled)
 }
 
-func (c *Connection) readBodyBuffered(dst []byte, pooled bool) (nntpyenc.BodyResult, error) {
+func (c *Connection) readBodyBuffered(dst []byte, source BodyBuffer, pooled bool) (nntpyenc.BodyResult, error) {
 	if !pooled {
-		c.bodyTarget = dst[:0]
-		c.bodyTargetSet = true
+		if source != nil {
+			c.bodySource = source
+		} else {
+			c.bodyTarget = dst[:0]
+			c.bodyTargetSet = true
+		}
 		defer func() {
 			c.bodyTarget = nil
 			c.bodyTargetSet = false
+			c.bodySource = nil
 		}()
 	}
 	res, err := c.nextBodyWithIdleDeadline(timeouts.StreamBodyTimeout)
@@ -488,6 +496,16 @@ func (c *Connection) nextBodyBuffer() []byte {
 	if c.bodyTargetSet {
 		c.bodyTargetSet = false
 		return c.bodyTarget[:0]
+	}
+	if source := c.bodySource; source != nil {
+		// Clear before invoking so a panic cannot leave the source installed.
+		c.bodySource = nil
+		if buf := source.DecodeBuffer(); buf != nil {
+			return buf[:0]
+		}
+		// The read still owes caller-owned storage: connection-pooled
+		// scratch must never escape as a retained decoded result.
+		return []byte{}
 	}
 	return getBodyBuf()
 }
@@ -567,6 +585,19 @@ type BodyDestination struct {
 	Writer io.Writer
 	// Skip omits an accepted article while preserving its result index.
 	Skip bool
+	// BufferSource supplies Buffer on demand. It takes precedence over
+	// Buffer and is ignored when Writer is set.
+	BufferSource BodyBuffer
+}
+
+// BodyBuffer supplies caller-owned decoded storage on demand. The decoder
+// asks for it only when it first needs output for a recognized yEnc body,
+// so a pending status, a negative status or a header alone never allocates
+// it. DecodeBuffer must return the same backing array for repeated calls
+// within one logical destination, so that a provider retry cannot change
+// the caller's storage identity.
+type BodyBuffer interface {
+	DecodeBuffer() []byte
 }
 
 // DecodedBodyResult is the outcome of one article in a BODY pipeline.
@@ -626,7 +657,7 @@ func (c *Connection) PipelineBodies(messageIDs []string, destinations []BodyDest
 			continue
 		}
 		pooled := destination.Writer != nil
-		res, err := c.readBodyBuffered(destination.Buffer, pooled)
+		res, err := c.readBodyBuffered(destination.Buffer, destination.BufferSource, pooled)
 		if err == nil {
 			if destination.Writer == nil {
 				results[i].Body = res.Data
@@ -674,7 +705,7 @@ func (c *Connection) GetDecodedBodyWithMetadata(messageID string) ([]byte, *Yenc
 	// scratch buffer out of bodyBufPool permanently. Let rapidyenc allocate
 	// storage sized for this article, just as DecodeBodyInto does when called
 	// with an empty destination.
-	res, err := c.requestBodyBuffered(messageID, nil, false)
+	res, err := c.requestBodyBuffered(messageID, nil, nil, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -698,7 +729,19 @@ func (c *Connection) StreamBody(messageID string, w io.Writer) (int64, error) {
 // DecodeBodyInto verifies one yEnc article into storage supplied by the
 // caller. The returned slice belongs to the caller and may be retained.
 func (c *Connection) DecodeBodyInto(messageID string, dst []byte) ([]byte, error) {
-	res, err := c.requestBodyBuffered(messageID, dst, false)
+	res, err := c.requestBodyBuffered(messageID, dst, nil, false)
+	if err != nil {
+		return nil, err
+	}
+	return res.Data, nil
+}
+
+// DecodeBodyWithBuffer verifies one yEnc article into storage the source
+// supplies on demand. The decoder asks for that storage only once it has a
+// recognized yEnc body, so a pending or negative status allocates nothing.
+// The returned slice belongs to the caller and may be retained.
+func (c *Connection) DecodeBodyWithBuffer(messageID string, source BodyBuffer) ([]byte, error) {
+	res, err := c.requestBodyBuffered(messageID, nil, source, false)
 	if err != nil {
 		return nil, err
 	}
