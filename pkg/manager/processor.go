@@ -344,7 +344,10 @@ func (m *Manager) processAction(entry *storage.Entry) {
 
 	// Now add entry to the main storage
 	if err := m.AddOrUpdate(entry, func(t *storage.Entry) {
-		m.RefreshEntries(true)
+		m.InvalidateEntryCache()
+		if err := m.RefreshMount(); err != nil {
+			m.logger.Error().Err(err).Msg("Mount refresh failed")
+		}
 	}); err != nil {
 		m.logger.Error().Err(err).Str("name", entry.Name).Msg("Failed to persist completed download")
 		entry.MarkAsError(err)

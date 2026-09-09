@@ -51,7 +51,7 @@ func addEntry(t *testing.T, mgr *manager.Manager, name string, files map[string]
 	if err := mgr.Storage().AddOrUpdate(entry); err != nil {
 		t.Fatal(err)
 	}
-	mgr.RefreshEntries(false)
+	mgr.InvalidateEntryCache()
 }
 
 func readdir(t *testing.T, fsys *filesystem, name string) []fs.FileInfo {

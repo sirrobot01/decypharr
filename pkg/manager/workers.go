@@ -134,7 +134,10 @@ func (m *Manager) StartWorker(ctx context.Context) error {
 				if err := m.refreshTorrents(ctx, debridName, debridClient); err != nil {
 					m.logger.Error().Err(err).Str("debrid", debridName).Msg("Torrent refresh failed")
 				}
-				m.RefreshEntries(true)
+				m.InvalidateEntryCache()
+				if err := m.RefreshMount(); err != nil {
+					m.logger.Error().Err(err).Msg("Mount refresh failed")
+				}
 			}), gocron.WithContext(ctx), gocron.WithName(jobName)); err != nil {
 				m.logger.Error().Err(err).Str("debrid", debridName).Msg("Failed to create torrent refresh job")
 			} else {

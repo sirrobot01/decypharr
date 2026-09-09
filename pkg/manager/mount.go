@@ -32,16 +32,9 @@ type MountManager interface {
 	Refresh(dirs []string) error
 }
 
-func (m *Manager) RefreshEntries(refreshMount bool) {
-	// Refresh entries
-	m.entry.Refresh()
-
-	// Refresh mount if needed
-	if refreshMount {
-		go func() {
-			_ = m.RefreshMount()
-		}()
-	}
+// InvalidateEntryCache clears cached entries. Reads rebuild them on demand.
+func (m *Manager) InvalidateEntryCache() {
+	m.entry.InvalidateAll()
 }
 
 func (m *Manager) RefreshMount() error {

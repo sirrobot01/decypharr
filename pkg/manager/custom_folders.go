@@ -116,7 +116,7 @@ func (m *Manager) ApplyVirtualFolders(definitions []config.VirtualFolder) error 
 	m.virtualFoldersMu.Unlock()
 
 	if m.entry != nil {
-		m.entry.Refresh()
+		m.entry.InvalidateAll()
 	}
 	if m.mountManager != nil {
 		go func() {

@@ -192,7 +192,10 @@ func (f *Fixer) FixTorrent(ctx context.Context, entry *storage.Entry, skipCurren
 	entry.Bad = true
 	entry.UpdatedAt = time.Now()
 	_ = f.manager.AddOrUpdate(entry, func(t *storage.Entry) {
-		f.manager.RefreshEntries(true)
+		f.manager.InvalidateEntryCache()
+		if err := f.manager.RefreshMount(); err != nil {
+			f.manager.logger.Error().Err(err).Msg("Mount refresh failed")
+		}
 	})
 
 	result := &FixResult{

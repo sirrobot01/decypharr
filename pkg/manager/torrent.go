@@ -24,7 +24,7 @@ func (m *Manager) syncTorrents(ctx context.Context) {
 			if err := m.refreshTorrents(ctx, name, client); err != nil {
 				m.logger.Error().Err(err).Str("debrid", name).Msg("Initial torrent sync failed")
 			}
-			m.RefreshEntries(false)
+			m.InvalidateEntryCache()
 		})
 		return true
 	})

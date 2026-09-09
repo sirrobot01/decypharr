@@ -83,9 +83,8 @@ func (e *EntryCache) _refreshEntry(name string) EntryCacheItem {
 	return item
 }
 
-// Refresh triggers a cache refresh with debouncing.
-// If called multiple times rapidly, only one refresh will occur.
-func (e *EntryCache) Refresh() {
+// InvalidateAll clears cached entries. Reads rebuild them on demand.
+func (e *EntryCache) InvalidateAll() {
 	e.generation.Add(1)
 	// Clear every group and torrent entry. This is deliberately independent of
 	// the current config so renamed/removed virtual folders cannot survive in the
