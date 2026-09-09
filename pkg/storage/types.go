@@ -174,6 +174,9 @@ func (e *EntryItem) GetSize() int64 {
 
 func (e *EntryItem) GetFirstFile() (*File, error) {
 	for _, f := range e.Files {
+		if f == nil || f.Deleted {
+			continue
+		}
 		return f, nil
 	}
 	return nil, fmt.Errorf("no active files found")
