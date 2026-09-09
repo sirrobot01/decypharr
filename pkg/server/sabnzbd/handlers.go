@@ -153,7 +153,11 @@ func (s *SABnzbd) handleListQueue(w http.ResponseWriter, r *http.Request) {
 		nzoIDs = strings.Split(nzoIDsVal, ",")
 	}
 
-	entries := s.manager.Queue().ListFilter(category, config.ProtocolNZB, storage.EntryStateDownloading, nzoIDs, "added_on", false)
+	entries, err := s.manager.Queue().ListFilter(category, config.ProtocolNZB, storage.EntryStateDownloading, nzoIDs, "added_on", false)
+	if err != nil {
+		s.writeError(w, "Failed to read the download queue", http.StatusInternalServerError)
+		return
+	}
 
 	queue := Queue{
 		Version: Version,
@@ -250,7 +254,11 @@ func (s *SABnzbd) handleHistoryList(w http.ResponseWriter, r *http.Request) {
 			nzoIDs = append(nzoIDs, id)
 		}
 	}
-	history := s.getHistory(r.Context(), limit, nzoIDs)
+	history, err := s.getHistory(r.Context(), limit, nzoIDs)
+	if err != nil {
+		s.writeError(w, "Failed to read download history", http.StatusInternalServerError)
+		return
+	}
 
 	response := HistoryResponse{
 		History: history,
@@ -518,10 +526,16 @@ func (s *SABnzbd) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 // Helper methods
 
-func (s *SABnzbd) getHistory(ctx context.Context, limit int, nzoIDs []string) History {
+func (s *SABnzbd) getHistory(ctx context.Context, limit int, nzoIDs []string) (History, error) {
 	cat := getCategory(ctx)
-	completed := s.manager.Queue().ListFilter(cat, config.ProtocolNZB, storage.EntryStatePausedUP, nzoIDs, "added_on", false)
-	failed := s.manager.Queue().ListFilter(cat, config.ProtocolNZB, storage.EntryStateError, nzoIDs, "added_on", false)
+	completed, err := s.manager.Queue().ListFilter(cat, config.ProtocolNZB, storage.EntryStatePausedUP, nzoIDs, "added_on", false)
+	if err != nil {
+		return History{}, err
+	}
+	failed, err := s.manager.Queue().ListFilter(cat, config.ProtocolNZB, storage.EntryStateError, nzoIDs, "added_on", false)
+	if err != nil {
+		return History{}, err
+	}
 	slots := make([]HistorySlot, 0, len(completed)+len(failed))
 	history := History{
 		Version: Version,
@@ -555,7 +569,7 @@ func (s *SABnzbd) getHistory(ctx context.Context, limit int, nzoIDs []string) Hi
 		slots = append(slots, slot)
 	}
 	history.Slots = slots
-	return history
+	return history, nil
 }
 
 func (s *SABnzbd) writeError(w http.ResponseWriter, message string, status int) {

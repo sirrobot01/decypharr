@@ -15,7 +15,11 @@ import (
 )
 
 func (m *Manager) restoreActiveDownloadJobs() {
-	entries := m.queue.ListFilter("", config.ProtocolAll, storage.EntryStateDownloading, nil, "", false)
+	entries, err := m.queue.ListFilter("", config.ProtocolAll, storage.EntryStateDownloading, nil, "", false)
+	if err != nil {
+		m.logger.Error().Err(err).Msg("Failed to restore the download queue")
+		return
+	}
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].AddedOn.Before(entries[j].AddedOn)
 	})

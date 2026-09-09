@@ -73,7 +73,11 @@ func (q *QBit) handleTorrentsInfo(w http.ResponseWriter, r *http.Request) {
 	hashes := getHashes(ctx)
 
 	// Convert hashes to filter function
-	torrents := q.manager.Queue().ListFilter(category, config.ProtocolTorrent, storage.TorrentState(state), hashes, "added_on", false)
+	torrents, err := q.manager.Queue().ListFilter(category, config.ProtocolTorrent, storage.TorrentState(state), hashes, "added_on", false)
+	if err != nil {
+		http.Error(w, "Failed to read the download queue", http.StatusInternalServerError)
+		return
+	}
 	qbitTorrents := make([]Torrent, len(torrents))
 	for i, t := range torrents {
 		qbitTorrents[i] = convertToQBitTorrentTorrent(t)
@@ -344,7 +348,11 @@ func (q *QBit) handleAddTorrentTags(w http.ResponseWriter, r *http.Request) {
 	for i, tag := range tags {
 		tags[i] = strings.TrimSpace(tag)
 	}
-	torrents := q.manager.Queue().ListFilter("", config.ProtocolTorrent, "", hashes, "", false)
+	torrents, err := q.manager.Queue().ListFilter("", config.ProtocolTorrent, "", hashes, "", false)
+	if err != nil {
+		http.Error(w, "Failed to read the download queue", http.StatusInternalServerError)
+		return
+	}
 	for _, t := range torrents {
 		q.setTorrentTags(t, tags)
 	}
@@ -363,7 +371,11 @@ func (q *QBit) handleRemoveTorrentTags(w http.ResponseWriter, r *http.Request) {
 	for i, tag := range tags {
 		tags[i] = strings.TrimSpace(tag)
 	}
-	torrents := q.manager.Queue().ListFilter("", config.ProtocolTorrent, "", hashes, "", false)
+	torrents, err := q.manager.Queue().ListFilter("", config.ProtocolTorrent, "", hashes, "", false)
+	if err != nil {
+		http.Error(w, "Failed to read the download queue", http.StatusInternalServerError)
+		return
+	}
 	for _, torrent := range torrents {
 		q.removeTorrentTags(torrent, tags)
 

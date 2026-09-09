@@ -3,6 +3,7 @@ package storage
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"maps"
 	"sort"
@@ -327,10 +328,13 @@ func (s *Storage) ForEachEntryHealth(fn func(*EntryHealth) error) error {
 }
 
 func (s *Storage) DeleteEntryHealth(entryName string) error {
-	if entryName == "" || !s.repairState.Exists(entryName) {
+	if entryName == "" {
 		return nil
 	}
-	return s.repairState.Delete(entryName)
+	if err := s.repairState.Delete(entryName); err != nil && !errors.Is(err, appendstore.ErrKeyNotFound) {
+		return fmt.Errorf("delete health for %q: %w", entryName, err)
+	}
+	return nil
 }
 
 // ClearEntryHealthByStatuses deletes persisted repair health records whose
@@ -373,12 +377,15 @@ func (s *Storage) ClearEntryHealthByStatuses(statuses []HealthStatus) (int, erro
 // MarkEntryDirty flags an entry's health as out-of-date so the next sweep will
 // re-probe it. Called from the storage layer whenever the underlying file set
 // of an entry mutates.
-func (s *Storage) MarkEntryDirty(entryName string, protocol config.Protocol, reason string) {
+func (s *Storage) MarkEntryDirty(entryName string, protocol config.Protocol, reason string) error {
 	if entryName == "" {
-		return
+		return nil
 	}
 	state, err := s.GetEntryHealth(entryName)
-	if err != nil || state == nil {
+	if err != nil && !errors.Is(err, appendstore.ErrKeyNotFound) {
+		return fmt.Errorf("read health for %q: %w", entryName, err)
+	}
+	if state == nil {
 		state = &EntryHealth{EntryName: entryName, Status: HealthUnknown}
 	}
 	if protocol != "" {
@@ -387,7 +394,10 @@ func (s *Storage) MarkEntryDirty(entryName string, protocol config.Protocol, rea
 	state.Dirty = true
 	state.DirtyReason = reason
 	state.NextCheckDueAt = time.Time{}
-	_ = s.SaveEntryHealth(state)
+	if err := s.SaveEntryHealth(state); err != nil {
+		return fmt.Errorf("mark %q dirty: %w", entryName, err)
+	}
+	return nil
 }
 
 // healthCountsTTL bounds how often CountEntryHealthByStatus scans the entire

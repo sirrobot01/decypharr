@@ -312,7 +312,12 @@ func (s *Server) handleGetTorrents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// GetReader all torrents
-	allTorrents := s.manager.Queue().ListFilter("", config.ProtocolAll, "", nil, "added_on", false)
+	allTorrents, err := s.manager.Queue().ListFilter("", config.ProtocolAll, "", nil, "added_on", false)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("Failed to read the download queue")
+		s.sendJSONError(w, "Failed to read the download queue", http.StatusInternalServerError)
+		return
+	}
 	for _, t := range allTorrents {
 		t.Sanitize()
 	}

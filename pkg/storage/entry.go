@@ -3,6 +3,7 @@ package storage
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,10 +16,9 @@ import (
 func (s *Storage) AddOrUpdate(entry *Entry) error {
 	entry.UpdatedAt = time.Now()
 
-	s.assignFileIDs(entry)
-
-	// Handle name index
-	s.updateEntryItem(entry)
+	if err := s.assignFileIDs(entry); err != nil {
+		return err
+	}
 
 	// Serialize
 	pb := EntryToProto(entry)
@@ -27,7 +27,10 @@ func (s *Storage) AddOrUpdate(entry *Entry) error {
 		return fmt.Errorf("failed to marshal entry: %w", err)
 	}
 
-	return s.entries.Put(entry.InfoHash, data, entryPutOptions(entry))
+	if err := s.entries.Put(entry.InfoHash, data, entryPutOptions(entry)); err != nil {
+		return fmt.Errorf("save entry %q: %w", entry.InfoHash, err)
+	}
+	return s.updateEntryItem(entry)
 }
 
 // BatchAddOrUpdate adds or updates multiple entries
@@ -44,7 +47,7 @@ func (s *Storage) BatchAddOrUpdate(entries []*Entry) error {
 // often rebuild entries from provider responses, so IDs already persisted for
 // this infohash are carried over by filename; only genuinely new files get a
 // fresh ID.
-func (s *Storage) assignFileIDs(entry *Entry) {
+func (s *Storage) assignFileIDs(entry *Entry) error {
 	missing := false
 	for _, f := range entry.Files {
 		if f.ID == "" {
@@ -53,9 +56,13 @@ func (s *Storage) assignFileIDs(entry *Entry) {
 		}
 	}
 	if !missing {
-		return
+		return nil
 	}
-	if existing, err := s.Get(entry.InfoHash); err == nil {
+	existing, err := s.Get(entry.InfoHash)
+	if err != nil && !errors.Is(err, appendstore.ErrKeyNotFound) {
+		return fmt.Errorf("read entry %q to preserve file IDs: %w", entry.InfoHash, err)
+	}
+	if existing != nil {
 		for name, f := range entry.Files {
 			if f.ID == "" {
 				if old, ok := existing.Files[name]; ok {
@@ -69,6 +76,7 @@ func (s *Storage) assignFileIDs(entry *Entry) {
 			f.ID = NewFileID()
 		}
 	}
+	return nil
 }
 
 // NewFileID returns a random stable file identifier.
@@ -232,221 +240,22 @@ func (s *Storage) MigrateMetadata() (int, error) {
 	return migrated, nil
 }
 
-// Delete removes an entry
+// Delete removes an entry.
 func (s *Storage) Delete(infohash string) error {
-	// get entry for cleanup
 	entry, err := s.Get(infohash)
-	if err == nil && entry != nil {
-		s.removeFromEntryItem(entry)
+	if err != nil {
+		return fmt.Errorf("read entry %q before deletion: %w", infohash, err)
 	}
-	return s.entries.Delete(infohash)
+	if err := s.removeFromEntryItem(entry); err != nil {
+		return err
+	}
+	if err := s.entries.Delete(infohash); err != nil {
+		return fmt.Errorf("delete entry %q: %w", infohash, err)
+	}
+	return nil
 }
 
 // Count returns the number of entries
 func (s *Storage) Count() (int, error) {
 	return s.entries.Len(), nil
-}
-
-// updateEntryItem updates the name index
-func (s *Storage) updateEntryItem(entry *Entry) {
-	name := entry.GetFolder()
-	if name == "" {
-		return
-	}
-
-	var item *EntryItem
-	if data, err := s.entryItems.Get(name); err == nil {
-		var pb EntryItemProto
-		if proto.Unmarshal(data, &pb) == nil {
-			item = ProtoToEntryItem(&pb)
-		}
-	}
-	oldFingerprint := EntryItemRepairFingerprint(item)
-
-	if item == nil {
-		item = &EntryItem{Name: name, Files: make(map[string]*File)}
-	}
-
-	for fileName, file := range entry.Files {
-		if existing, ok := item.Files[fileName]; ok {
-			if file.AddedOn.After(existing.AddedOn) || (file.AddedOn.Equal(existing.AddedOn) && file.Size != existing.Size) {
-				item.Files[fileName] = file
-			}
-		} else {
-			item.Files[fileName] = file
-		}
-	}
-
-	item.Size = item.GetSize()
-	newFingerprint := EntryItemRepairFingerprint(item)
-	pb := EntryItemToProto(item)
-	if data, err := proto.Marshal(pb); err == nil {
-		_ = s.entryItems.Put(name, data, nil)
-	}
-	if oldFingerprint != newFingerprint {
-		s.MarkEntryDirty(name, entry.Protocol, "entry_item_changed")
-	}
-}
-
-// removeFromEntryItem removes an entry from the name index
-func (s *Storage) removeFromEntryItem(entry *Entry) {
-	name := entry.GetFolder()
-	if name == "" {
-		return
-	}
-
-	data, err := s.entryItems.Get(name)
-	if err != nil {
-		return
-	}
-
-	var pb EntryItemProto
-	if proto.Unmarshal(data, &pb) != nil {
-		return
-	}
-	item := ProtoToEntryItem(&pb)
-
-	for fileName := range entry.Files {
-		if f, exists := item.Files[fileName]; exists && f.InfoHash == entry.InfoHash {
-			delete(item.Files, fileName)
-		}
-	}
-
-	if len(item.Files) == 0 {
-		_ = s.entryItems.Delete(name)
-		_ = s.DeleteEntryHealth(name)
-		return
-	}
-
-	item.Size = item.GetSize()
-	updatedPb := EntryItemToProto(item)
-	if updatedData, err := proto.Marshal(updatedPb); err == nil {
-		_ = s.entryItems.Put(name, updatedData, nil)
-	}
-	s.MarkEntryDirty(name, entry.Protocol, "entry_item_changed")
-}
-
-// Queue operations
-
-// AddQueue adds an entry to the queue
-func (s *Storage) AddQueue(entry *Entry) error {
-	entry.CreatedAt = time.Now()
-	return s.UpdateQueue(entry)
-}
-
-// UpdateQueue updates a queued entry
-func (s *Storage) UpdateQueue(entry *Entry) error {
-	entry.UpdatedAt = time.Now()
-
-	pb := EntryToProto(entry)
-	data, err := proto.Marshal(pb)
-	if err != nil {
-		return err
-	}
-
-	return s.queue.Put(strings.ToLower(entry.InfoHash), data, entryPutOptions(entry))
-}
-
-// GetQueued retrieves a queued entry
-func (s *Storage) GetQueued(infohash string) (*Entry, error) {
-	data, err := s.queue.Get(strings.ToLower(infohash))
-	if err != nil {
-		return nil, err
-	}
-
-	var pb EntryProto
-	if err := proto.Unmarshal(data, &pb); err != nil {
-		return nil, err
-	}
-	return ProtoToEntry(&pb), nil
-}
-
-// DeleteQueued removes a queued entry
-func (s *Storage) DeleteQueued(infohash string, cleanup func(*Entry) error) error {
-	key := strings.ToLower(infohash)
-	if cleanup != nil {
-		if entry, err := s.GetQueued(key); err == nil {
-			_ = cleanup(entry)
-		}
-	}
-	return s.queue.Delete(key)
-}
-
-// FilterQueued returns entries matching a filter
-func (s *Storage) FilterQueued(filter func(*Entry) bool) ([]*Entry, error) {
-	var entries []*Entry
-	_ = s.queue.ForEach(func(key string, value []byte) error {
-		var pb EntryProto
-		if proto.Unmarshal(value, &pb) == nil {
-			entry := ProtoToEntry(&pb)
-			if filter == nil || filter(entry) {
-				entries = append(entries, entry)
-			}
-		}
-		return nil
-	})
-	return entries, nil
-}
-
-// CountQueuedByState counts queued entries in a state. The stats collector
-// polls this every 5 seconds, so it decodes the stored records in place rather
-// than materializing every entry the way FilterQueued does.
-func (s *Storage) CountQueuedByState(state TorrentState) int {
-	count := 0
-	_ = s.queue.ForEach(func(key string, value []byte) error {
-		var pb EntryProto
-		if proto.Unmarshal(value, &pb) == nil && pb.GetState() == string(state) {
-			count++
-		}
-		return nil
-	})
-	return count
-}
-
-// DeleteWhereQueued deletes matching queued entries
-func (s *Storage) DeleteWhereQueued(predicate func(*Entry) bool, cleanup func(*Entry) error) error {
-	var keysToDelete []string
-	_ = s.queue.ForEach(func(key string, value []byte) error {
-		var pb EntryProto
-		if proto.Unmarshal(value, &pb) == nil {
-			entry := ProtoToEntry(&pb)
-			if predicate == nil || predicate(entry) {
-				if cleanup != nil {
-					_ = cleanup(entry)
-				}
-				keysToDelete = append(keysToDelete, key)
-			}
-		}
-		return nil
-	})
-
-	for _, key := range keysToDelete {
-		_ = s.queue.Delete(key)
-	}
-	return nil
-}
-
-// UpdateWhereQueued updates matching queued entries
-func (s *Storage) UpdateWhereQueued(filter func(*Entry) bool, updateFunc func(*Entry) bool) error {
-	type update struct {
-		key   string
-		entry *Entry
-	}
-	var updates []update
-
-	_ = s.queue.ForEach(func(key string, value []byte) error {
-		var pb EntryProto
-		if proto.Unmarshal(value, &pb) == nil {
-			entry := ProtoToEntry(&pb)
-			if (filter == nil || filter(entry)) && updateFunc != nil && updateFunc(entry) {
-				updates = append(updates, update{key, entry})
-			}
-		}
-		return nil
-	})
-
-	for _, u := range updates {
-		_ = s.UpdateQueue(u.entry)
-	}
-	return nil
 }

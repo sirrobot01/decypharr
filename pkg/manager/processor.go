@@ -157,7 +157,11 @@ func isTooManyActiveDownloads(err error) bool {
 }
 
 func (m *Manager) processQueuedEntries() {
-	queueEntries := m.queue.ListFilter("", config.ProtocolAll, storage.EntryStateDownloading, nil, "", true)
+	queueEntries, err := m.queue.ListFilter("", config.ProtocolAll, storage.EntryStateDownloading, nil, "", true)
+	if err != nil {
+		m.logger.Error().Err(err).Msg("Failed to read the download queue")
+		return
+	}
 	if len(queueEntries) == 0 {
 		return
 	}
