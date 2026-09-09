@@ -274,7 +274,7 @@ func (s *Service) fetchLink(ctx context.Context, entry *storage.Entry, filename 
 	}
 
 	// This uses account-level caching internally
-	downloadLink, err := client.GetDownloadLink(placement.ID, debridFile)
+	downloadLink, err := client.GetDownloadLink(ctx, placement.ID, debridFile)
 	if err != nil {
 		return downloadLink, err
 	}

@@ -412,7 +412,7 @@ func (dl *DebridLink) DeleteTorrent(torrentId string) error {
 	return nil
 }
 
-func (dl *DebridLink) fetchDownloadLink(account *account.Account, id string, file *types.File) (types.DownloadLink, error) {
+func (dl *DebridLink) fetchDownloadLink(ctx context.Context, account *account.Account, id string, file *types.File) (types.DownloadLink, error) {
 	now := time.Now()
 	link := types.DownloadLink{
 		Debrid:       dl.config.Name,
@@ -426,8 +426,8 @@ func (dl *DebridLink) fetchDownloadLink(account *account.Account, id string, fil
 	return link, nil
 }
 
-func (dl *DebridLink) GetDownloadLink(id string, file *types.File) (types.DownloadLink, error) {
-	return dl.accountsManager.GetDownloadLink(id, file, dl.fetchDownloadLink)
+func (dl *DebridLink) GetDownloadLink(ctx context.Context, id string, file *types.File) (types.DownloadLink, error) {
+	return dl.accountsManager.GetDownloadLink(ctx, id, file, dl.fetchDownloadLink)
 }
 
 func (dl *DebridLink) GetDownloadUncached() bool {

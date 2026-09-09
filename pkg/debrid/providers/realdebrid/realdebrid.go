@@ -205,13 +205,13 @@ func (r *RealDebrid) doGetWithClient(client *request.Client, fullURL string, que
 }
 
 // doPostFormWithClient performs a POST with form data using a specific client
-func (r *RealDebrid) doPostFormWithClient(client *request.Client, fullURL string, formData map[string]string, result any, errorResult any) (*http.Response, error) {
+func (r *RealDebrid) doPostFormWithClient(ctx context.Context, client *request.Client, fullURL string, formData map[string]string, result any, errorResult any) (*http.Response, error) {
 	form := url.Values{}
 	for k, v := range formData {
 		form.Set(k, v)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, fullURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -314,7 +314,7 @@ func (r *RealDebrid) handleRarArchive(t *types.Torrent, data torrentInfo, select
 
 	r.logger.Info().Msgf("RAR file detected, unpacking: %s", t.Name)
 	linkFile := &types.File{TorrentId: t.Id, Link: data.Links[0]}
-	downloadLinkObj, err := r.GetDownloadLink(t.Id, linkFile)
+	downloadLinkObj, err := r.GetDownloadLink(context.Background(), t.Id, linkFile)
 
 	if err != nil {
 		r.logger.Debug().Err(err).Msgf("Error getting download link for RAR file: %s. Falling back to single file representation.", t.Name)
@@ -684,7 +684,7 @@ func (r *RealDebrid) GetFileDownloadLinks(t *types.Torrent) (map[string]types.Do
 	for _, f := range _files {
 		go func(file types.File) {
 			defer wg.Done()
-			link, err := r.GetDownloadLink(t.Id, &file)
+			link, err := r.GetDownloadLink(context.Background(), t.Id, &file)
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
@@ -728,7 +728,7 @@ func (r *RealDebrid) CheckFile(ctx context.Context, infohash, link string) error
 		form.Set(k, v)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, r.Host+"/unrestrict/check", strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.Host+"/unrestrict/check", strings.NewReader(form.Encode()))
 	if err != nil {
 		return err
 	}
@@ -747,7 +747,7 @@ func (r *RealDebrid) CheckFile(ctx context.Context, infohash, link string) error
 	return nil
 }
 
-func (r *RealDebrid) fetchDownloadLink(account *account.Account, id string, file *types.File) (types.DownloadLink, error) {
+func (r *RealDebrid) fetchDownloadLink(ctx context.Context, account *account.Account, id string, file *types.File) (types.DownloadLink, error) {
 	emptyLink := types.DownloadLink{}
 	link := file.Link
 	if strings.HasPrefix(file.Link, "https://real-debrid.com/d/") && len(file.Link) > 39 {
@@ -758,7 +758,7 @@ func (r *RealDebrid) fetchDownloadLink(account *account.Account, id string, file
 	var errResp ErrorResponse
 	var data UnrestrictResponse
 
-	resp, err := r.doPostFormWithClient(account.Client(), fmt.Sprintf("%s/unrestrict/link/", r.Host), formData, &data, &errResp)
+	resp, err := r.doPostFormWithClient(ctx, account.Client(), fmt.Sprintf("%s/unrestrict/link/", r.Host), formData, &data, &errResp)
 	if err != nil {
 		return emptyLink, err
 	}
@@ -789,8 +789,8 @@ func (r *RealDebrid) fetchDownloadLink(account *account.Account, id string, file
 	return dl, nil
 }
 
-func (r *RealDebrid) GetDownloadLink(id string, file *types.File) (types.DownloadLink, error) {
-	return r.accountsManager.GetDownloadLink(id, file, r.fetchDownloadLink)
+func (r *RealDebrid) GetDownloadLink(ctx context.Context, id string, file *types.File) (types.DownloadLink, error) {
+	return r.accountsManager.GetDownloadLink(ctx, id, file, r.fetchDownloadLink)
 }
 
 func (r *RealDebrid) getTorrents(offset int, limit int) (int, []*types.Torrent, error) {

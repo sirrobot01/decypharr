@@ -401,7 +401,7 @@ func (pm *Premiumize) filesForTransfer(tr premiumizeTransfer) (map[string]types.
 	files := make(map[string]types.File)
 	links := make([]string, 0)
 	if fileID := tr.FileID.String(); fileID != "" {
-		item, err := pm.itemDetails(fileID)
+		item, err := pm.itemDetails(context.Background(), fileID)
 		if err != nil {
 			return nil, nil, false, err
 		}
@@ -418,9 +418,9 @@ func (pm *Premiumize) filesForTransfer(tr premiumizeTransfer) (map[string]types.
 	return files, links, false, nil
 }
 
-func (pm *Premiumize) itemDetails(id string) (*itemDetailsResponse, error) {
+func (pm *Premiumize) itemDetails(ctx context.Context, id string) (*itemDetailsResponse, error) {
 	var data itemDetailsResponse
-	req, err := http.NewRequest(http.MethodGet, pm.endpoint("/api/item/details?id="+url.QueryEscape(id)), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pm.endpoint("/api/item/details?id="+url.QueryEscape(id)), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -489,16 +489,16 @@ func (pm *Premiumize) addFile(files map[string]types.File, links *[]string, tran
 	*links = append(*links, link)
 }
 
-func (pm *Premiumize) GetDownloadLink(id string, file *types.File) (types.DownloadLink, error) {
-	return pm.accountsManager.GetDownloadLink(id, file, pm.fetchDownloadLink)
+func (pm *Premiumize) GetDownloadLink(ctx context.Context, id string, file *types.File) (types.DownloadLink, error) {
+	return pm.accountsManager.GetDownloadLink(ctx, id, file, pm.fetchDownloadLink)
 }
 
-func (pm *Premiumize) fetchDownloadLink(acc *account.Account, id string, file *types.File) (types.DownloadLink, error) {
+func (pm *Premiumize) fetchDownloadLink(ctx context.Context, acc *account.Account, id string, file *types.File) (types.DownloadLink, error) {
 	link := file.Link
 	size := file.Size
 	filename := file.Name
 	if link == "" && file.Id != "" {
-		item, err := pm.itemDetails(file.Id)
+		item, err := pm.itemDetails(ctx, file.Id)
 		if err != nil {
 			return types.DownloadLink{}, err
 		}
@@ -551,7 +551,7 @@ func (pm *Premiumize) CheckFile(ctx context.Context, infohash, fileID string) er
 	if fileID == "" {
 		return customerror.HosterUnavailableError
 	}
-	if _, err := pm.itemDetails(fileID); err != nil {
+	if _, err := pm.itemDetails(ctx, fileID); err != nil {
 		return err
 	}
 	return nil

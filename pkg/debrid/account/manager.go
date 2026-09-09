@@ -1,6 +1,8 @@
 package account
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -17,7 +19,7 @@ import (
 	"go.uber.org/ratelimit"
 )
 
-type LinkFetcher func(account *Account, id string, file *types.File) (types.DownloadLink, error)
+type LinkFetcher func(ctx context.Context, account *Account, id string, file *types.File) (types.DownloadLink, error)
 type LinkDeleter func(account *Account, dl types.DownloadLink) error
 type LinksFetcher func(account *Account) ([]types.DownloadLink, error)
 type SyncFunc func(account *Account) error
@@ -194,28 +196,33 @@ func (m *Manager) GetAccount(token string) (*Account, error) {
 	return acc, nil
 }
 
-func (m *Manager) GetDownloadLink(id string, file *types.File, fetcher LinkFetcher) (types.DownloadLink, error) {
+func (m *Manager) GetDownloadLink(ctx context.Context, id string, file *types.File, fetcher LinkFetcher) (types.DownloadLink, error) {
+	if err := ctx.Err(); err != nil {
+		return types.DownloadLink{}, err
+	}
 	current := m.Current()
 	if current == nil {
 		return types.DownloadLink{}, fmt.Errorf("no active account for debrid %s", m.debrid)
 	}
-	dl, err := current.GetDownloadLink(id, file, fetcher)
-	if err != nil {
-		activeAccounts := m.Active()
-		for _, acc := range activeAccounts {
-			if acc.Token == current.Token {
-				continue
-			}
-			dl, err = acc.GetDownloadLink(id, file, fetcher)
-			if err != nil {
-				continue
-			} else {
-				// Successfully got link from another account. Just return it, no need to switch current account
-				return dl, nil
-			}
-		}
+	dl, err := current.GetDownloadLink(ctx, id, file, fetcher)
+	if err == nil {
+		return dl, nil
 	}
-	return dl, nil
+	errs := []error{err}
+	for _, acc := range m.Active() {
+		if err := ctx.Err(); err != nil {
+			return types.DownloadLink{}, err
+		}
+		if acc.Token == current.Token {
+			continue
+		}
+		dl, err = acc.GetDownloadLink(ctx, id, file, fetcher)
+		if err == nil {
+			return dl, nil
+		}
+		errs = append(errs, err)
+	}
+	return types.DownloadLink{}, fmt.Errorf("get download link for %s: %w", m.debrid, errors.Join(errs...))
 }
 
 func (m *Manager) StoreDownloadLink(downloadLink types.DownloadLink) {

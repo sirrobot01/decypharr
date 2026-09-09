@@ -124,10 +124,10 @@ func (tb *Torbox) submissionClient() *request.Client {
 
 // doGet performs a GET request and unmarshals the response
 func (tb *Torbox) doGet(endpoint string, queryParams map[string]string, result any) (*http.Response, error) {
-	return tb.doGetWithClient(tb.client, endpoint, queryParams, result)
+	return tb.doGetWithClient(context.Background(), tb.client, endpoint, queryParams, result)
 }
 
-func (tb *Torbox) doGetWithClient(client *request.Client, endpoint string, queryParams map[string]string, result any) (*http.Response, error) {
+func (tb *Torbox) doGetWithClient(ctx context.Context, client *request.Client, endpoint string, queryParams map[string]string, result any) (*http.Response, error) {
 	u, err := url.Parse(tb.Host + endpoint)
 	if err != nil {
 		return nil, err
@@ -141,7 +141,7 @@ func (tb *Torbox) doGetWithClient(client *request.Client, endpoint string, query
 		u.RawQuery = q.Encode()
 	}
 
-	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -376,12 +376,12 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 	return t, nil
 }
 
-func (tb *Torbox) loadDownloadPresent() error {
+func (tb *Torbox) loadDownloadPresent(ctx context.Context) error {
 	offset := 0
 	total := 0
 	for {
 		var res TorrentsListResponse
-		resp, err := tb.doGet("/api/torrents/mylist", map[string]string{"offset": fmt.Sprintf("%d", offset)}, &res)
+		resp, err := tb.doGetWithClient(ctx, tb.client, "/api/torrents/mylist", map[string]string{"offset": fmt.Sprintf("%d", offset)}, &res)
 		if err != nil {
 			return err
 		}
@@ -408,7 +408,7 @@ func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
 func (tb *Torbox) updateTorrentWithClient(client *request.Client, t *types.Torrent) error {
 	var res InfoResponse
 
-	resp, err := tb.doGetWithClient(client, "/api/torrents/mylist", map[string]string{"id": t.Id}, &res)
+	resp, err := tb.doGetWithClient(context.Background(), client, "/api/torrents/mylist", map[string]string{"id": t.Id}, &res)
 	if err != nil {
 		return err
 	}
@@ -520,11 +520,11 @@ func (tb *Torbox) DeleteTorrent(torrentId string) error {
 	return nil
 }
 
-func (tb *Torbox) GetDownloadLink(id string, file *types.File) (types.DownloadLink, error) {
-	return tb.accountsManager.GetDownloadLink(id, file, tb.fetchDownloadLink)
+func (tb *Torbox) GetDownloadLink(ctx context.Context, id string, file *types.File) (types.DownloadLink, error) {
+	return tb.accountsManager.GetDownloadLink(ctx, id, file, tb.fetchDownloadLink)
 }
 
-func (tb *Torbox) fetchDownloadLink(account *account.Account, id string, file *types.File) (types.DownloadLink, error) {
+func (tb *Torbox) fetchDownloadLink(ctx context.Context, account *account.Account, id string, file *types.File) (types.DownloadLink, error) {
 	query := url.Values{}
 	query.Set("token", account.Token)
 	query.Set("torrent_id", id)
@@ -650,9 +650,16 @@ func (tb *Torbox) RefreshDownloadLinks() error {
 }
 
 func (tb *Torbox) CheckFile(ctx context.Context, infohash, link string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	tb.downloadPresentMu.Lock()
+	if err := ctx.Err(); err != nil {
+		tb.downloadPresentMu.Unlock()
+		return err
+	}
 	if !tb.downloadPresentLoaded {
-		if err := tb.loadDownloadPresent(); err != nil {
+		if err := tb.loadDownloadPresent(ctx); err != nil {
 			tb.downloadPresentMu.Unlock()
 			return err
 		}
@@ -668,6 +675,9 @@ func (tb *Torbox) CheckFile(ctx context.Context, infohash, link string) error {
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if present, ok := tb.downloadPresentCache.Load(torrentID); ok {
 		if !present.(bool) {
 			return customerror.HosterUnavailableError

@@ -12,7 +12,7 @@ import (
 type Client interface {
 	SubmitMagnet(tr *types.Torrent) (*types.Torrent, error)
 	CheckStatus(tr *types.Torrent) (*types.Torrent, error)
-	GetDownloadLink(torrentID string, file *types.File) (types.DownloadLink, error)
+	GetDownloadLink(ctx context.Context, torrentID string, file *types.File) (types.DownloadLink, error)
 	DeleteTorrent(torrentId string) error
 	// IsAvailable returns one result for each checked, nonempty input hash.
 	// Result keys retain the input spelling. Missing keys were not checked.
