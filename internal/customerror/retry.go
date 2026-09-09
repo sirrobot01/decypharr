@@ -56,15 +56,11 @@ func IsRetriableError(err error) bool {
 		return false
 	}
 
-	if csError, ok := errors.AsType[*Error](err); ok {
-		return csError.IsRetryable()
-	}
-
-	// Custom Error flags take precedence over other retry classifications.
-	type selfRetryable interface {
+	// Typed retry rules take precedence over message text.
+	if r, ok := errors.AsType[interface {
+		error
 		IsRetryable() bool
-	}
-	if r, ok := err.(selfRetryable); ok {
+	}](err); ok {
 		return r.IsRetryable()
 	}
 
@@ -124,6 +120,19 @@ func IsRetriableError(err error) bool {
 func IsPermanentError(err error) bool {
 	if err == nil {
 		return false
+	}
+
+	if p, ok := errors.AsType[interface {
+		error
+		IsPermanent() bool
+	}](err); ok {
+		return p.IsPermanent()
+	}
+	if r, ok := errors.AsType[interface {
+		error
+		IsRetryable() bool
+	}](err); ok {
+		return !r.IsRetryable()
 	}
 
 	errStr := strings.ToLower(err.Error())

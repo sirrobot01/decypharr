@@ -10,11 +10,12 @@ type PanicError struct {
 }
 
 func (e *PanicError) Error() string {
-	return "panic: " + e.e.(string)
+	return fmt.Sprintf("panic: %v", e.e)
 }
 
 func (e *PanicError) Unwrap() error {
-	return fmt.Errorf("panic: %v", e.e)
+	err, _ := e.e.(error)
+	return err
 }
 
 func NewPanicError(e any) error {
