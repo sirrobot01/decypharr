@@ -83,3 +83,15 @@ func TestTransferInfoHashPrefersRealHash(t *testing.T) {
 		t.Errorf("transferInfoHash() = %q, want %q", got, infoHash)
 	}
 }
+
+func TestAvailabilityRejectsIncompleteResponses(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `{"status":"success","response":[true]}`)
+	}))
+	defer server.Close()
+	pm := &Premiumize{Host: server.URL, client: request.New(request.WithMaxRetries(0))}
+	result, err := pm.IsAvailable([]string{"first", "second"})
+	if err == nil || len(result) != 0 {
+		t.Fatalf("incomplete response = %v, %v", result, err)
+	}
+}

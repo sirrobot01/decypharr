@@ -33,3 +33,8 @@ var InvalidDownloadLinkError = &Error{
 	Message: "Download link is invalid",
 	Code:    "invalid_download_link",
 }
+
+var ErrAvailabilityUnsupported = &Error{
+	Message: "Availability checks are not supported",
+	Code:    "availability_unsupported",
+}

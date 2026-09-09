@@ -278,37 +278,36 @@ func (pm *Premiumize) DeleteTorrent(torrentID string) error {
 	return err
 }
 
-func (pm *Premiumize) IsAvailable(infohashes []string) map[string]bool {
+func (pm *Premiumize) IsAvailable(infohashes []string) (map[string]bool, error) {
 	result := make(map[string]bool, len(infohashes))
 	const batchSize = 100
 	for i := 0; i < len(infohashes); i += batchSize {
 		end := min(i+batchSize, len(infohashes))
 		values := url.Values{}
-		hashByItem := make(map[string]string, end-i)
+		validHashes := make([]string, 0, end-i)
 		for _, hash := range infohashes[i:end] {
 			if hash == "" {
 				continue
 			}
 			item := utils.ConstructMagnet(hash, "").Link
 			values.Add("items[]", item)
-			hashByItem[item] = hash
+			validHashes = append(validHashes, hash)
 		}
 		if len(values) == 0 {
 			continue
 		}
 		var data cacheCheckResponse
 		if _, err := pm.doForm(context.Background(), http.MethodPost, "/api/cache/check", values, &data); err != nil {
-			pm.logger.Error().Err(err).Msg("Error checking Premiumize availability")
-			continue
+			return result, fmt.Errorf("check availability: %w", err)
 		}
-		items := values["items[]"]
+		if len(data.Response) != len(validHashes) {
+			return result, fmt.Errorf("check availability: got %d results for %d hashes", len(data.Response), len(validHashes))
+		}
 		for idx, available := range data.Response {
-			if idx < len(items) && available {
-				result[hashByItem[items[idx]]] = true
-			}
+			result[validHashes[idx]] = available
 		}
 	}
-	return result
+	return result, nil
 }
 
 func (pm *Premiumize) GetTorrents() ([]*types.Torrent, error) {

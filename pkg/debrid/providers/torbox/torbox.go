@@ -220,7 +220,7 @@ func (tb *Torbox) doPostJSON(endpoint string, payload any, result any) (*http.Re
 	return resp, nil
 }
 
-func (tb *Torbox) IsAvailable(hashes []string) map[string]bool {
+func (tb *Torbox) IsAvailable(hashes []string) (map[string]bool, error) {
 	result := make(map[string]bool)
 
 	for i := 0; i < len(hashes); i += 100 {
@@ -241,20 +241,26 @@ func (tb *Torbox) IsAvailable(hashes []string) map[string]bool {
 		var res AvailableResponse
 
 		resp, err := tb.doGet("/api/torrents/checkcached", map[string]string{"hash": hashStr}, &res)
-		if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			continue
+		if err != nil {
+			return result, fmt.Errorf("check availability: %w", err)
 		}
-		if res.Data == nil {
-			return result
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return result, fmt.Errorf("check availability: HTTP %d", resp.StatusCode)
 		}
-
-		for h, c := range *res.Data {
-			if c.Size > 0 {
-				result[strings.ToUpper(h)] = true
+		if !res.Success {
+			return result, fmt.Errorf("check availability: %v", res.Error)
+		}
+		cached := make(map[string]bool)
+		if res.Data != nil {
+			for h, item := range *res.Data {
+				cached[strings.ToLower(h)] = item.Size > 0
 			}
 		}
+		for _, h := range validHashes {
+			result[h] = cached[strings.ToLower(h)]
+		}
 	}
-	return result
+	return result, nil
 }
 
 func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {

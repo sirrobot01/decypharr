@@ -197,3 +197,34 @@ func testTorbox(host string) *Torbox {
 		config: config.Debrid{Name: "torbox"},
 	}
 }
+
+func TestAvailabilityPreservesKeysAndReportsIncompleteBatches(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls > 1 {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"success":true,"data":{"abc":{"size":100}}}`)
+	}))
+	defer server.Close()
+	hashes := []string{"abc", "AbC", "missing"}
+	for len(hashes) < 100 {
+		hashes = append(hashes, fmt.Sprintf("hash%d", len(hashes)))
+	}
+	hashes = append(hashes, "unchecked")
+	result, err := testTorbox(server.URL).IsAvailable(hashes)
+	if err == nil {
+		t.Fatal("failed batch returned no error")
+	}
+	if !result["abc"] || !result["AbC"] {
+		t.Fatalf("input spelling was lost: %v", result)
+	}
+	if cached, checked := result["missing"]; !checked || cached {
+		t.Fatalf("cache miss = %v, %v", cached, checked)
+	}
+	if _, checked := result["unchecked"]; checked {
+		t.Fatal("failed batch reported a result")
+	}
+}

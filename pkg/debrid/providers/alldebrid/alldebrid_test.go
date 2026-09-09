@@ -230,3 +230,10 @@ func testAllDebrid(host string) *AllDebrid {
 		noPeerRetryBackoff: []time.Duration{0, 0, 0},
 	}
 }
+
+func TestAvailabilityReportsUnsupported(t *testing.T) {
+	result, err := (&AllDebrid{}).IsAvailable([]string{"hash"})
+	if err != debridTypes.ErrAvailabilityUnsupported || result != nil {
+		t.Fatalf("IsAvailable = %v, %v", result, err)
+	}
+}

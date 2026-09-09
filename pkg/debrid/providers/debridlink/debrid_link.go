@@ -129,7 +129,7 @@ func (dl *DebridLink) doGet(endpoint string, queryParams map[string]string, resu
 	return resp, nil
 }
 
-func (dl *DebridLink) IsAvailable(hashes []string) map[string]bool {
+func (dl *DebridLink) IsAvailable(hashes []string) (map[string]bool, error) {
 	result := make(map[string]bool)
 
 	for i := 0; i < len(hashes); i += 100 {
@@ -151,21 +151,23 @@ func (dl *DebridLink) IsAvailable(hashes []string) map[string]bool {
 		var data AvailableResponse
 
 		resp, err := dl.doGet(endpoint, nil, &data)
-		if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			continue
+		if err != nil {
+			return result, fmt.Errorf("check availability: %w", err)
 		}
-		if data.Value == nil {
-			return result
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return result, fmt.Errorf("check availability: HTTP %d", resp.StatusCode)
 		}
-		value := *data.Value
-		for _, h := range hashes[i:end] {
-			_, exists := value[h]
-			if exists {
-				result[h] = true
+		if !data.Success {
+			return result, fmt.Errorf("check availability: provider rejected the request")
+		}
+		for _, h := range validHashes {
+			result[h] = false
+			if data.Value != nil {
+				_, result[h] = (*data.Value)[h]
 			}
 		}
 	}
-	return result
+	return result, nil
 }
 
 func (dl *DebridLink) GetTorrent(torrentId string) (*types.Torrent, error) {

@@ -108,29 +108,7 @@ func (r *RealDebrid) Logger() zerolog.Logger {
 
 // doGet performs a GET request using the main client
 func (r *RealDebrid) doGet(endpoint string, result any) (*http.Response, error) {
-	u, err := url.Parse(r.Host + endpoint)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := r.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer request.DrainAndClose(resp.Body)
-
-	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
-		if err := request.DecodeJSON(resp, result); err != nil {
-			return resp, err
-		}
-	}
-
-	return resp, nil
+	return r.doGetWithClient(r.client, r.Host+endpoint, nil, result)
 }
 
 // doPost performs a POST request with form data
@@ -411,7 +389,7 @@ func (r *RealDebrid) getTorrentFiles(t *types.Torrent, data torrentInfo) map[str
 	return files
 }
 
-func (r *RealDebrid) IsAvailable(hashes []string) map[string]bool {
+func (r *RealDebrid) IsAvailable(hashes []string) (map[string]bool, error) {
 	result := make(map[string]bool)
 
 	for i := 0; i < len(hashes); i += 200 {
@@ -433,20 +411,17 @@ func (r *RealDebrid) IsAvailable(hashes []string) map[string]bool {
 
 		resp, err := r.doGet(fmt.Sprintf("/torrents/instantAvailability/%s", hashStr), &data)
 		if err != nil {
-			r.logger.Error().Err(err).Msg("Error checking availability")
-			continue
+			return result, fmt.Errorf("check availability: %w", err)
 		}
 
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			for _, h := range hashes[i:end] {
-				hosters, exists := data[strings.ToLower(h)]
-				if exists && len(hosters.Rd) > 0 {
-					result[h] = true
-				}
-			}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return result, fmt.Errorf("check availability: HTTP %d", resp.StatusCode)
+		}
+		for _, h := range validHashes {
+			result[h] = len(data[strings.ToLower(h)].Rd) > 0
 		}
 	}
-	return result
+	return result, nil
 }
 
 func (r *RealDebrid) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
