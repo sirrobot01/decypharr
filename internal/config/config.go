@@ -197,9 +197,10 @@ type VirtualFolderCondition struct {
 }
 
 type Auth struct {
-	Username string `json:"username,omitempty"`
-	Password string `json:"password,omitempty"`
-	APIToken string `json:"api_token,omitempty"`
+	SessionVersion string `json:"session_version,omitempty"`
+	Username       string `json:"username,omitempty"`
+	Password       string `json:"password,omitempty"`
+	APIToken       string `json:"api_token,omitempty"`
 
 	// TokenOnly makes the API token the sole credential: there is no username
 	// or password, so registration stays closed and the login page accepts the
@@ -253,6 +254,8 @@ func (r RepairConfig) IsZero() bool {
 }
 
 type Config struct {
+	SessionSecret string `json:"session_secret,omitempty"`
+
 	// server
 	BindAddress string `json:"bind_address,omitempty"`
 	URLBase     string `json:"url_base,omitempty"`
@@ -352,6 +355,7 @@ func (c *Config) loadConfig() error {
 		return fmt.Errorf("error parsing config JSON: %w", err)
 	}
 	hadStrmSecret := c.Strm.Secret != ""
+	hadSessionSecret := c.SessionSecret != ""
 
 	// Set defaults for any missing values
 	c.setDefaults()
@@ -359,9 +363,8 @@ func (c *Config) loadConfig() error {
 	// Apply environment variable overrides
 	c.applyEnvOverrides()
 
-	// Persist a first-load generated STRM secret; signatures must survive
-	// restarts.
-	if !hadStrmSecret {
+	// Save new signing secrets so signatures remain valid after a restart.
+	if !hadStrmSecret || !hadSessionSecret {
 		return c.Save()
 	}
 
@@ -446,7 +449,7 @@ func (c *Config) GetMaxFileSize() int64 {
 }
 
 func (c *Config) SecretKey() string {
-	return cmp.Or(getEnv("SECRET_KEY"), "\"wqj(v%lj*!-+kf@4&i95rhh_!5_px5qnuwqbr%cjrvrozz_r*(\"")
+	return cmp.Or(getEnv("SECRET_KEY"), c.SessionSecret)
 }
 
 func (c *Config) GetAuth() *Auth {
@@ -466,12 +469,23 @@ func (c *Config) GetAuth() *Auth {
 }
 
 func (c *Config) SaveAuth(auth *Auth) error {
-	c.Auth = auth
-	data, err := json.Marshal(auth)
+	if auth == nil {
+		return errors.New("authentication settings are required")
+	}
+	updated := *auth
+	updated.SessionVersion = rand.Text()
+	data, err := json.Marshal(&updated)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(c.AuthFile(), data, 0644)
+	if err := os.Chmod(c.AuthFile(), 0600); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.WriteFile(c.AuthFile(), data, 0600); err != nil {
+		return err
+	}
+	c.Auth = &updated
+	return nil
 }
 
 // NeedsAuth reports whether auth is enabled but no credential has been set up
@@ -551,6 +565,11 @@ func (c *Config) migrateNotifications() {
 }
 
 func (c *Config) setDefaults() {
+	if c.SessionSecret == "" {
+		var key [32]byte
+		_, _ = rand.Read(key[:])
+		c.SessionSecret = hex.EncodeToString(key[:])
+	}
 	// Migrate deprecated fields to Manager (backward compatibility)
 	c.migrateQBitTorrentToManager()
 	c.migrateNotifications()
@@ -749,7 +768,10 @@ func (c *Config) Save() error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(c.JsonFile(), data, 0644); err != nil {
+	if err := os.Chmod(c.JsonFile(), 0600); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.WriteFile(c.JsonFile(), data, 0600); err != nil {
 		fmt.Printf("Failed to write config file: %v\n", err)
 		return err
 	}

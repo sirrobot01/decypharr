@@ -42,6 +42,10 @@ func (s *Server) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	username := credentials.Username
+	sessionVersion := ""
+	if auth != nil {
+		sessionVersion = auth.SessionVersion
+	}
 	ok := config.VerifyAuth(credentials.Username, credentials.Password)
 	if !ok && tokenOnly {
 		// Token-only mode has no password, so the API token takes its place.
@@ -58,6 +62,7 @@ func (s *Server) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	session, _ := s.cookie.Get(r, "auth-session")
 	session.Values["authenticated"] = true
 	session.Values["username"] = username
+	session.Values["auth_version"] = sessionVersion
 	if err := session.Save(r, w); err != nil {
 		http.Error(w, "Error saving session", http.StatusInternalServerError)
 		return

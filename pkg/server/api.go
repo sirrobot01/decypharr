@@ -484,6 +484,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	// Create response with API token info
 	type ConfigResponse struct {
 		*config.Config
+		SessionSecret string `json:"session_secret,omitempty"`
 		APIToken      string `json:"api_token,omitempty"`
 		AuthUsername  string `json:"auth_username,omitempty"`
 		AuthTokenOnly bool   `json:"auth_token_only"`
@@ -530,6 +531,7 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 
 	// Preserve fields that shouldn't be overwritten by frontend
 	newConfig.Auth = currentConfig.GetAuth()
+	newConfig.SessionSecret = currentConfig.SessionSecret
 	// The frontend config form doesn't include use_auth or enable_webdav_auth,
 	// so they would be zero-valued (false) in the decoded payload. Preserve
 	// them from the live config so auth isn't silently disabled on every save.

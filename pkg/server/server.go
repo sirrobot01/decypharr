@@ -98,7 +98,8 @@ func New(mgr *manager.Manager) *Server {
 	cookieStore.Options = &sessions.Options{
 		Path:     "/",
 		MaxAge:   86400 * 7,
-		HttpOnly: false,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
 	}
 
 	statsCollector := stats.New(mgr)

@@ -2,6 +2,7 @@ package sabnzbd
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"strings"
@@ -114,10 +115,15 @@ func (s *SABnzbd) authenticate(ctx context.Context, category, username, password
 			}
 		}
 	}
-	// In token-only mode the arr sends the API token as the password and may
-	// leave the username empty.
-	if (username == "" || password == "") && cfg.UseAuth && !config.VerifyToken(password) {
-		return arr.Arr{}, fmt.Errorf("unauthorized: Host and token are required for authentication(you've enabled authentication)")
+	if cfg.UseAuth {
+		if config.VerifyAuth(username, password) || config.VerifyToken(password) {
+			return instance, nil
+		}
+		if known && instance.Source != arr.SourceAuto && username == instance.Host && password != "" &&
+			subtle.ConstantTimeCompare([]byte(password), []byte(instance.Token)) == 1 {
+			return instance, nil
+		}
+		return arr.Arr{}, fmt.Errorf("unauthorized: invalid credentials")
 	}
 	if instance.Source == arr.SourceAuto {
 		instance.Host = username
@@ -129,12 +135,7 @@ func (s *SABnzbd) authenticate(ctx context.Context, category, username, password
 	if validated {
 		instance.Type = kind
 	}
-	if !validated && cfg.UseAuth {
-		if !config.VerifyAuth(username, password) && !config.VerifyToken(password) {
-			return arr.Arr{}, fmt.Errorf("unauthorized: invalid credentials")
-		}
-	}
-	if username != "" && password != "" {
+	if validated && username != "" && password != "" {
 		s.manager.Arr().AddOrUpdate(instance)
 	}
 	return instance, nil
