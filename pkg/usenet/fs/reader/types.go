@@ -2,7 +2,6 @@
 package reader
 
 import (
-	"context"
 	"sync/atomic"
 	"time"
 
@@ -293,19 +292,4 @@ func (s *ReaderStats) Snapshot() map[string]int64 {
 		"prefetch_misses":    s.PrefetchMisses.Load(),
 		"prefetch_cancelled": s.PrefetchCancelled.Load(),
 	}
-}
-
-// PrefetchableReaderAt extends io.ReaderAt with prefetch capability.
-// This allows callers to trigger segment downloads before starting reads.
-type PrefetchableReaderAt interface {
-	// ReadAt reads len(p) bytes from the reader starting at offset off.
-	// Blocks until the data is available or an error occurs.
-	ReadAt(p []byte, off int64) (n int, err error)
-
-	// ReadAtContext reads with caller cancellation.
-	ReadAtContext(ctx context.Context, p []byte, off int64) (n int, err error)
-
-	// Prefetch triggers segment downloads for the given byte range without blocking.
-	// This is a hint to the reader to start downloading segments that will be needed soon.
-	Prefetch(ctx context.Context, off, length int64)
 }
