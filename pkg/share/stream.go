@@ -54,13 +54,13 @@ func (r *streamReader) ReadAt(p []byte, off int64) (int, error) {
 	if off < 0 {
 		return 0, fs.ErrInvalid
 	}
+	if len(p) == 0 {
+		return 0, nil
+	}
 	if off >= r.size {
 		return 0, io.EOF
 	}
-	want := int64(len(p))
-	if off+want > r.size {
-		want = r.size - off
-	}
+	want := min(int64(len(p)), r.size-off)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -73,15 +73,9 @@ func (r *streamReader) ReadAt(p []byte, off int64) (int, error) {
 
 	n, err := io.ReadFull(r.session, p[:want])
 	r.pos += int64(n)
-	if err == io.ErrUnexpectedEOF {
-		err = nil // short read inside the file; the caller keeps n bytes
-	}
 	if err != nil {
 		// A spent session is never reused; the next read opens a fresh one.
 		r.dropLocked()
-		if err == io.EOF && n > 0 {
-			err = nil
-		}
 		return n, err
 	}
 	if off+want == r.size {

@@ -189,3 +189,29 @@ func TestStreamReaderCloseReleasesSession(t *testing.T) {
 		t.Fatalf("read after close: err = %v, want os.ErrClosed", err)
 	}
 }
+
+func TestStreamReaderShortReadDropsSession(t *testing.T) {
+	var first *fakeSession
+	r, opens := newTestReader([]byte("abcdef"), func(s *fakeSession) {
+		if first == nil {
+			first = s
+			s.data = s.data[:2]
+		}
+	})
+	defer r.close()
+	buf := make([]byte, 4)
+	n, err := r.ReadAt(buf, 0)
+	if n != 2 || err != io.ErrUnexpectedEOF || string(buf[:n]) != "ab" {
+		t.Fatalf("short read = %q, %v", buf[:n], err)
+	}
+	if !first.closed {
+		t.Fatal("failed session remains open")
+	}
+	n, err = r.ReadAt(buf, 2)
+	if n != 4 || err != io.EOF || string(buf[:n]) != "cdef" {
+		t.Fatalf("retry = %q, %v", buf[:n], err)
+	}
+	if opens.Load() != 2 {
+		t.Fatalf("session count = %d, want 2", opens.Load())
+	}
+}
