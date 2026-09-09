@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/arr"
 )
 
 type Torrent struct {
@@ -29,8 +28,6 @@ type Torrent struct {
 	DeletedFiles     []string        `json:"deleted_files"`
 
 	Debrid string `json:"debrid"`
-
-	Arr arr.Arr `json:"arr"`
 
 	SizeDownloaded   int64 `json:"-"` // This is used for local download
 	DownloadUncached bool  `json:"-"`
@@ -69,7 +66,6 @@ func (t *Torrent) Copy() *Torrent {
 		Seeders:          t.Seeders,
 		Links:            append([]string{}, t.Links...),
 		Debrid:           t.Debrid,
-		Arr:              t.Arr,
 	}
 }
 
