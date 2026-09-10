@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/crypto"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sirrobot01/decypharr/pkg/usenet/types"
@@ -458,7 +457,7 @@ func (p *RARParser) parseRAR5Headers(data []byte, volumeIndex int, volumeName st
 
 		// Parse file headers
 		if header.Type == RAR5HeaderTypeFile {
-			file := p.parseRAR5FileHeader(header.Data, volumeIndex, volumeName, dataOffset, dataSize, password)
+			file := p.parseRAR5FileHeader(header.Data, header.ExtraSize, volumeIndex, volumeName, dataOffset, dataSize, password)
 			if file != nil {
 				files = append(files, file)
 			}
@@ -490,9 +489,10 @@ func (p *RARParser) parseRAR5Headers(data []byte, volumeIndex int, volumeName st
 
 // rar5HeaderData represents a RAR 5.0 header
 type rar5HeaderData struct {
-	Type  uint64
-	Flags uint64
-	Data  []byte
+	ExtraSize uint64
+	Type      uint64
+	Flags     uint64
+	Data      []byte
 }
 
 // readRAR5Header reads a single RAR 5.0 header
@@ -515,6 +515,8 @@ func (p *RARParser) readRAR5Header(r *bytes.Reader) (*rar5HeaderData, int, int64
 		return nil, 0, 0, fmt.Errorf("invalid RAR5 header size: %d (too large)", headerSize)
 	}
 
+	contentStart, _ := r.Seek(0, io.SeekCurrent)
+
 	// Read header type (vint)
 	headerType, err := readVInt(r)
 	if err != nil {
@@ -528,8 +530,9 @@ func (p *RARParser) readRAR5Header(r *bytes.Reader) (*rar5HeaderData, int, int64
 	}
 
 	// Read extra area size if present
+	var extraSize uint64
 	if headerFlags&RAR5HeaderFlagExtraArea != 0 {
-		_, err = readVInt(r)
+		extraSize, err = readVInt(r)
 		if err != nil {
 			return nil, 0, 0, err
 		}
@@ -547,7 +550,7 @@ func (p *RARParser) readRAR5Header(r *bytes.Reader) (*rar5HeaderData, int, int64
 
 	// Calculate remaining header data size based on actual bytes consumed
 	currentPos, _ := r.Seek(0, io.SeekCurrent)
-	consumedSize := int(currentPos-startPos) - 4 // Exclude CRC
+	consumedSize := int(currentPos - contentStart)
 	remainingHeaderSize := int(headerSize) - consumedSize
 
 	// Read remaining header data
@@ -565,19 +568,24 @@ func (p *RARParser) readRAR5Header(r *bytes.Reader) (*rar5HeaderData, int, int64
 		}
 	}
 
-	totalHeaderSize := int(headerSize) + 4 // Include CRC
+	totalHeaderSize := int(headerSize) + int(contentStart-startPos)
 
 	return &rar5HeaderData{
-		Type:  headerType,
-		Flags: headerFlags,
-		Data:  headerData,
+		ExtraSize: extraSize,
+		Type:      headerType,
+		Flags:     headerFlags,
+		Data:      headerData,
 	}, totalHeaderSize, dataAreaSize, nil
 }
 
 // parseRAR5FileHeader parses a RAR 5.0 file header
 // If password is provided and encryption salt is found, it derives the file-specific encryption key.
-func (p *RARParser) parseRAR5FileHeader(data []byte, volumeIndex int, volumeName string, dataOffset int64, packedSize int64, password string) *RARFileEntry {
-	r := bytes.NewReader(data)
+func (p *RARParser) parseRAR5FileHeader(data []byte, extraSize uint64, volumeIndex int, volumeName string, dataOffset int64, packedSize int64, password string) *RARFileEntry {
+	if extraSize > uint64(len(data)) {
+		return nil
+	}
+	baseEnd := len(data) - int(extraSize)
+	r := bytes.NewReader(data[:baseEnd])
 
 	// Read file flags (vint)
 	fileFlags, err := readVInt(r)
@@ -677,110 +685,24 @@ func (p *RARParser) parseRAR5FileHeader(data []byte, volumeIndex int, volumeName
 	// - Bit 6 (0x0040): Solid flag
 	// - Bits 8-10 (0x0380): Compression method (0-5, where 0 = stored/no compression)
 	// - Bits 11-15 (0x7C00): Dictionary size
-	compressionMethod := (compressionInfo >> 8) & 0x07 // Extract bits 8-10
-	isStored := compressionMethod == 0                 // Method 0 = no compression
+	compressionMethod := (compressionInfo & 0x0380) >> 7
+	isStored := compressionMethod == 0 // Method 0 = no compression
 
-	// Parse extra area if present (remaining bytes after filename)
-	// Extra area contains encryption info, hash, etc.
-	var isEncrypted bool
-	var encryptionIV []byte
-	var encryptionKey []byte
-
-	if r.Len() > 0 {
-		// Parse extra area records
-		for r.Len() > 2 {
-			// Read record size (vint)
-			recordSize, err := readVInt(r)
-			if err != nil || recordSize == 0 || recordSize > 65536 {
-				break
-			}
-
-			// Read record type (vint)
-			recordType, err := readVInt(r)
-			if err != nil {
-				break
-			}
-
-			// Calculate remaining data in this record
-			recordDataSize := int(recordSize) - 1 // Minus the type byte (approximate)
-			if recordDataSize <= 0 || recordDataSize > 65536 || recordDataSize > r.Len() {
-				// Invalid or too large record - stop parsing extra area
-				break
-			}
-
-			if recordType == RAR5ExtraTypeEncryption {
-				// Encryption record format:
-				// - Version (vint)
-				// - Flags (vint)
-				// - KDF count (1 byte)
-				// - Salt (16 bytes, if UseAES256 flag set)
-				// - IV (16 bytes)
-				// - Check value (12 bytes, optional if flags & 0x01)
-				isEncrypted = true
-
-				// Read encryption version
-				_, err := readVInt(r)
-				if err != nil {
-					break
-				}
-
-				// Read flags
-				encFlags, err := readVInt(r)
-				if err != nil {
-					break
-				}
-
-				// Read KDF count (1 byte)
-				kdfByte, err := r.ReadByte()
-				if err != nil {
-					break
-				}
-				kdfCount := int(kdfByte)
-
-				// Read salt (16 bytes)
-				salt := make([]byte, 16)
-				if _, err := io.ReadFull(r, salt); err != nil {
-					break
-				}
-
-				// If we have a password, derive the file-specific key using this salt
-				if password != "" {
-					derivedKeys := crypto.DeriveKeys([]byte(password), salt, kdfCount)
-					encryptionKey = derivedKeys.Key
-				}
-
-				// Read IV (16 bytes) - THIS IS WHAT WE NEED
-				iv := make([]byte, 16)
-				if _, err := io.ReadFull(r, iv); err != nil {
-					break
-				}
-				encryptionIV = iv
-
-				// Skip check value if present (flags & 0x01 = has check)
-				if encFlags&0x01 != 0 {
-					checkValue := make([]byte, 12)
-					_, _ = io.ReadFull(r, checkValue)
-				}
-			} else {
-				// Skip other record types
-				skipData := make([]byte, recordDataSize)
-				if _, err := io.ReadFull(r, skipData); err != nil {
-					break
-				}
-			}
-		}
+	encryption, err := parseRAR5Extra(data[baseEnd:], password)
+	if err != nil {
+		return nil
 	}
 
 	return &RARFileEntry{
-		Name:             strings.ToValidUTF8(string(nameBytes), ""),
+		Name:             filename,
 		UncompressedSize: int64(unpackedSize),
 		PackedSize:       packedSize,
 		DataOffset:       dataOffset,
 		IsStored:         isStored,
 		IsDirectory:      isDirectory,
-		IsEncrypted:      isEncrypted,
-		EncryptionKey:    encryptionKey,
-		EncryptionIV:     encryptionIV,
+		IsEncrypted:      encryption.Encrypted,
+		EncryptionKey:    encryption.Key,
+		EncryptionIV:     encryption.IV,
 		CRC32:            crc32,
 		VolumeIndex:      volumeIndex,
 		VolumeParts: []*types.RARVolumePart{{
