@@ -123,7 +123,7 @@ func (q *JobQueue) Len() int {
 	return len(q.jobs)
 }
 
-// ActiveCount returns the number of jobs currently holding an active-download slot.
+// ActiveCount returns the number of jobs that workers are processing.
 func (q *JobQueue) ActiveCount() int {
 	return int(q.active.Load())
 }

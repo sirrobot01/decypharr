@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -349,10 +348,6 @@ func (m *Manager) processJob(ctx context.Context, job *Job) {
 	if job == nil {
 		return
 	}
-	if job.Entry != nil && job.Request == nil && job.DebridTorrent == nil && job.NZBMeta == nil && !job.ResumeExisting {
-		m.waitForDownloadCompletion(ctx, job.Entry)
-		return
-	}
 
 	var err error
 	switch job.Type {
@@ -390,47 +385,12 @@ func (m *Manager) processJob(ctx context.Context, job *Job) {
 	// submitted. processQueuedEntries drives the entry from here.
 }
 
-// activeDownloadWaitTimeout bounds how long a job may hold a worker slot while
-// it waits on an entry it does not drive itself. Without a bound, an entry the
-// queue scheduler never picks up parked its worker forever, and enough of them
-// drained the pool to zero.
-const activeDownloadWaitTimeout = 35 * time.Minute
-
-func (m *Manager) waitForDownloadCompletion(ctx context.Context, entry *storage.Entry) {
-	if entry == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(ctx, activeDownloadWaitTimeout)
-	defer cancel()
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		current, err := m.queue.GetTorrent(entry.InfoHash)
-		if err != nil || current.State != storage.EntryStateDownloading {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				m.logger.Warn().
-					Str("name", entry.Name).
-					Str("infohash", entry.InfoHash).
-					Dur("waited", activeDownloadWaitTimeout).
-					Msg("Stopped waiting for download completion, releasing worker slot")
-			}
-			return
-		case <-ticker.C:
-		}
-	}
-}
-
 func (m *Manager) migrate() {
 	// Check if migration has already been done
 	status, err := m.migrator.GetStatus()
 	if err == nil && !status.Running && status.Completed > 0 {
 		m.logger.Info().
 			Int("completed", status.Completed).
-			Int("errors", status.Errors).
 			Msg("Migration already completed previously")
 		return
 	}

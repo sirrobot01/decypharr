@@ -83,8 +83,7 @@ func (m *Manager) processTorrentJob(ctx context.Context, job *Job) error {
 	}
 	if job.DebridTorrent == nil {
 		if job.Request == nil {
-			m.waitForDownloadCompletion(ctx, job.Entry)
-			return nil
+			return fmt.Errorf("torrent job has no request or processing payload")
 		}
 		debridTorrent, err := m.SendToDebrid(ctx, job.Request)
 		if err != nil {
