@@ -12,6 +12,7 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/hearsay"
 	"github.com/sirrobot01/decypharr/pkg/repair"
 	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/sirrobot01/decypharr/pkg/storage/migration"
 	"github.com/sirrobot01/decypharr/pkg/strm"
 	"github.com/sirrobot01/decypharr/pkg/usenet"
 )
@@ -37,7 +38,7 @@ func (m *Manager) Scheduler() gocron.Scheduler {
 }
 
 // Migrator returns the migrator instance
-func (m *Manager) Migrator() *Migrator {
+func (m *Manager) Migrator() *migration.Migrator {
 	return m.migrator
 }
 

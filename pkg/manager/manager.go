@@ -24,9 +24,11 @@ import (
 	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/hearsay"
 	"github.com/sirrobot01/decypharr/pkg/manager/link"
+	"github.com/sirrobot01/decypharr/pkg/manager/virtualfolders"
 	"github.com/sirrobot01/decypharr/pkg/notifications"
 	"github.com/sirrobot01/decypharr/pkg/repair"
 	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/sirrobot01/decypharr/pkg/storage/migration"
 	"github.com/sirrobot01/decypharr/pkg/strm"
 	"github.com/sirrobot01/decypharr/pkg/usenet"
 	"github.com/sirrobot01/decypharr/pkg/version"
@@ -36,7 +38,7 @@ import (
 // Manager handles unified torrent management - replaces wire.Store completely
 type Manager struct {
 	storage      *storage.Storage
-	migrator     *Migrator
+	migrator     *migration.Migrator
 	repair       *repair.Service
 	clients      *xsync.Map[string, debrid.Client]
 	arr          *arr.Service
@@ -74,7 +76,7 @@ type Manager struct {
 	strm *strm.Reconciler
 
 	virtualFoldersMu sync.RWMutex
-	virtualFolders   *VirtualFolders
+	virtualFolders   *virtualfolders.Folders
 	mountManager     MountManager
 
 	startTime     time.Time
@@ -218,7 +220,7 @@ func (m *Manager) init() {
 
 	m.scheduler = scheduler
 	m.cetScheduler = cetScheduler
-	m.migrator = NewMigrator(m.storage)
+	m.migrator = migration.New(m.storage)
 	m.downloader = NewDownloadManager(m)
 
 	// Initialize HTTP pool for streaming

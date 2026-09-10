@@ -38,7 +38,7 @@ func NewEntryCache(manager *Manager) *EntryCache {
 func (e *EntryCache) Get(name string) (*FileInfo, []FileInfo) {
 	// Relative-time views change as the clock advances even when library
 	// metadata does not, so never retain their children in the entry cache.
-	if !strings.HasPrefix(name, torrentEntryCachePrefix) && e.manager.virtualFoldersSnapshot().isTimeSensitive(name) {
+	if !strings.HasPrefix(name, torrentEntryCachePrefix) && e.manager.virtualFoldersSnapshot().IsTimeSensitive(name) {
 		return e.manager.getEntryChildren(name)
 	}
 	item, ok := e.entries.Load(name)

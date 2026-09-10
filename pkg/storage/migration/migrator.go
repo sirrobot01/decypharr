@@ -1,4 +1,4 @@
-package manager
+package migration
 
 import (
 	"context"
@@ -29,8 +29,8 @@ type Migrator struct {
 	ctx        context.Context
 }
 
-// NewMigrator creates a new migrator
-func NewMigrator(storage *storage.Storage) *Migrator {
+// New creates a new migrator
+func New(storage *storage.Storage) *Migrator {
 	cacheDir := filepath.Join(config.GetMainPath(), "cache")
 	backupPath := filepath.Join(config.GetMainPath(), "backups")
 

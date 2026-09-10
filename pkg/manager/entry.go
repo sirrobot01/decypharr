@@ -7,6 +7,7 @@ import (
 	"time"
 
 	debrid "github.com/sirrobot01/decypharr/pkg/debrid/common"
+	"github.com/sirrobot01/decypharr/pkg/manager/virtualfolders"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sirrobot01/decypharr/pkg/version"
 )
@@ -116,7 +117,7 @@ func (m *Manager) GetEntries() []FileInfo {
 
 	// Add virtual folders.
 	if virtualFolders := m.virtualFoldersSnapshot(); virtualFolders != nil {
-		for _, folderName := range virtualFolders.folders {
+		for _, folderName := range virtualFolders.Names() {
 			subDirs = append(subDirs, FileInfo{
 				name:    folderName,
 				isDir:   true,
@@ -364,7 +365,7 @@ func (m *Manager) getEntryChildren(group string) (*FileInfo, []FileInfo) {
 			return currentDir, infos
 		}
 		virtualFolders := m.virtualFoldersSnapshot()
-		if !virtualFolders.has(group) {
+		if !virtualFolders.Has(group) {
 			return nil, nil
 		}
 		currentDir.kind = EntryKindVirtual
@@ -484,12 +485,12 @@ func (m *Manager) RemoveTorrentFile(torrentName, filename string) error {
 	return nil
 }
 
-func (m *Manager) getVirtualFolderChildren(virtualFolders *VirtualFolders, folder string) []FileInfo {
+func (m *Manager) getVirtualFolderChildren(virtualFolders *virtualfolders.Folders, folder string) []FileInfo {
 	// Use metadata-only iteration (no disk reads)
 	var infos []FileInfo
 	seen := make(map[string]struct{})
 	err := m.storage.ForEachMeta(func(meta *storage.EntryMetaInfo) error {
-		if virtualFolders.matchesFilter(folder, meta, m.virtualFolderFileNames(meta)) {
+		if virtualFolders.Matches(folder, meta, m.virtualFolderFileNames(meta)) {
 			if _, ok := seen[meta.Name]; ok {
 				return nil
 			}
