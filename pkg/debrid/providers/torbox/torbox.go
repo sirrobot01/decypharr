@@ -146,19 +146,7 @@ func (tb *Torbox) doGetWithClient(ctx context.Context, client *request.Client, e
 		return nil, err
 	}
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer request.DrainAndClose(resp.Body)
-
-	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
-		if err := request.DecodeJSON(resp, result); err != nil {
-			return resp, err
-		}
-	}
-
-	return resp, nil
+	return client.DoJSON(req, result)
 }
 
 func (tb *Torbox) doPostFormWithClient(client *request.Client, endpoint string, formData map[string]string, result any) (*http.Response, error) {
@@ -173,19 +161,7 @@ func (tb *Torbox) doPostFormWithClient(client *request.Client, endpoint string, 
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer request.DrainAndClose(resp.Body)
-
-	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
-		if err := request.DecodeJSON(resp, result); err != nil {
-			return resp, err
-		}
-	}
-
-	return resp, nil
+	return client.DoJSON(req, result)
 }
 
 // doPostJSON performs a POST request with a JSON body.
@@ -205,19 +181,7 @@ func (tb *Torbox) doPostJSON(endpoint string, payload any, result any) (*http.Re
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := tb.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer request.DrainAndClose(resp.Body)
-
-	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
-		if err := request.DecodeJSON(resp, result); err != nil {
-			return resp, err
-		}
-	}
-
-	return resp, nil
+	return tb.client.DoJSON(req, result)
 }
 
 func (tb *Torbox) IsAvailable(hashes []string) (map[string]bool, error) {

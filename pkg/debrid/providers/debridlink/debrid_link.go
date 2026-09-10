@@ -114,19 +114,7 @@ func (dl *DebridLink) doGet(endpoint string, queryParams map[string]string, resu
 		return nil, err
 	}
 
-	resp, err := dl.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer request.DrainAndClose(resp.Body)
-
-	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
-		if err := request.DecodeJSON(resp, result); err != nil {
-			return resp, err
-		}
-	}
-
-	return resp, nil
+	return dl.client.DoJSON(req, result)
 }
 
 func (dl *DebridLink) IsAvailable(hashes []string) (map[string]bool, error) {

@@ -114,19 +114,7 @@ func (ad *AllDebrid) doRequest(ctx context.Context, client *request.Client, endp
 		return nil, err
 	}
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer request.DrainAndClose(resp.Body)
-
-	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
-		if err := request.DecodeJSON(resp, result); err != nil {
-			return resp, err
-		}
-	}
-
-	return resp, nil
+	return client.DoJSON(req, result)
 }
 
 func (ad *AllDebrid) IsAvailable(hashes []string) (map[string]bool, error) {
@@ -156,18 +144,7 @@ func (ad *AllDebrid) doPostFile(endpoint string, fileData []byte, result any) (*
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	resp, err := ad.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer request.DrainAndClose(resp.Body)
-
-	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		if err := request.DecodeJSON(resp, result); err != nil {
-			return resp, err
-		}
-	}
-	return resp, nil
+	return ad.client.DoJSON(req, result)
 }
 
 func (ad *AllDebrid) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {

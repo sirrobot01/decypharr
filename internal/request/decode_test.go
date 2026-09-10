@@ -3,6 +3,7 @@ package request
 import (
 	"errors"
 	"fmt"
+	"github.com/sirrobot01/decypharr/internal/config"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -230,6 +231,53 @@ func BenchmarkDecodeJSONArray(b *testing.B) {
 				if count != records {
 					b.Fatalf("visited %d records, want %d", count, records)
 				}
+			}
+		})
+	}
+}
+
+func TestDoJSONResponsePolicy(t *testing.T) {
+	config.SetConfigPath(t.TempDir())
+	t.Cleanup(config.Reset)
+	for _, tc := range []struct {
+		name, body                 string
+		status                     int
+		chunked, noResult, wantErr bool
+		wantID                     int
+	}{
+		{name: "success", body: `{"id":17}`, status: 200, wantID: 17},
+		{name: "HTTP failure", body: "not JSON", status: 404},
+		{name: "malformed success", body: `{"id":`, status: 200, wantErr: true},
+		{name: "empty success", status: 200},
+		{name: "empty chunked success", status: 200, chunked: true},
+		{name: "no result requested", body: "not JSON", status: 200, noResult: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				if tc.chunked {
+					w.(http.Flusher).Flush()
+				}
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer server.Close()
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result struct {
+				ID int `json:"id"`
+			}
+			var out any = &result
+			if tc.noResult {
+				out = nil
+			}
+			resp, err := New(WithMaxRetries(0)).DoJSON(req, out)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("error=%v, wantErr=%v", err, tc.wantErr)
+			}
+			if resp == nil || resp.StatusCode != tc.status || result.ID != tc.wantID {
+				t.Fatalf("response=%v result=%v", resp, result)
 			}
 		})
 	}

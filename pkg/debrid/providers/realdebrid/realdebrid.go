@@ -124,19 +124,7 @@ func (r *RealDebrid) doPostForm(endpoint string, formData map[string]string, res
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := r.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer request.DrainAndClose(resp.Body)
-
-	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
-		if err := request.DecodeJSON(resp, result); err != nil {
-			return resp, err
-		}
-	}
-
-	return resp, nil
+	return r.client.DoJSON(req, result)
 }
 
 // doPut performs a PUT request with body
@@ -154,19 +142,7 @@ func (r *RealDebrid) doPut(endpoint string, body []byte, contentType string, res
 		req.Header.Set("Content-Type", contentType)
 	}
 
-	resp, err := r.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer request.DrainAndClose(resp.Body)
-
-	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
-		if err := request.DecodeJSON(resp, result); err != nil {
-			return resp, err
-		}
-	}
-
-	return resp, nil
+	return r.client.DoJSON(req, result)
 }
 
 // doGetWithClient performs a GET using a specific client
@@ -189,19 +165,7 @@ func (r *RealDebrid) doGetWithClient(client *request.Client, fullURL string, que
 		return nil, err
 	}
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer request.DrainAndClose(resp.Body)
-
-	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
-		if err := request.DecodeJSON(resp, result); err != nil {
-			return resp, err
-		}
-	}
-
-	return resp, nil
+	return client.DoJSON(req, result)
 }
 
 // doPostFormWithClient performs a POST with form data using a specific client

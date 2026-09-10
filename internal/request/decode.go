@@ -75,3 +75,20 @@ func requireJSONEOF(decoder *json.Decoder) error {
 	}
 	return errors.New("response body contains more than one JSON value")
 }
+
+// DoJSON executes req and decodes a nonempty successful response into out.
+// It drains and closes the body before it returns. Callers inspect the status
+// for provider errors. Use Do when the caller must read an error response body.
+func (c *Client) DoJSON(req *http.Request, out any) (*http.Response, error) {
+	resp, err := c.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer DrainAndClose(resp.Body)
+	if out != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
+		if err := DecodeJSON(resp, out); err != nil && !errors.Is(err, io.EOF) {
+			return resp, err
+		}
+	}
+	return resp, nil
+}
