@@ -87,7 +87,7 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Premiumize
 		autoExpiresLinksAfter: autoExpiresLinksAfter,
 		logger:                _log,
 		config:                dc,
-		isFileAllowed:         config.Get().IsFileAllowed,
+		isFileAllowed:         func(name string, size int64) error { return config.Get().IsFileAllowed(name, size) },
 	}, nil
 }
 

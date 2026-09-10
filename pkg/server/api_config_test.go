@@ -1,6 +1,11 @@
 package server
 
 import (
+	"encoding/json"
+	"github.com/sirrobot01/decypharr/pkg/arr"
+	"github.com/sirrobot01/decypharr/pkg/manager"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -79,5 +84,44 @@ func TestMergeConfigUpdateAllowsExplicitClear(t *testing.T) {
 
 	if len(merged.Debrids) != 0 {
 		t.Fatalf("expected debrid config to be cleared, got %#v", merged.Debrids)
+	}
+}
+
+func TestConfigHandlersUseSnapshots(t *testing.T) {
+	config.Reset()
+	config.SetConfigPath(t.TempDir())
+	t.Cleanup(config.Reset)
+	before := config.Get()
+	mgr := manager.New()
+	t.Cleanup(func() { _ = mgr.Stop() })
+	mgr.Arr().AddOrUpdate(arr.Arr{Name: "manual", Host: "http://example.test", Token: "token", Source: arr.SourceManual})
+	server := &Server{manager: mgr}
+	response := httptest.NewRecorder()
+	server.handleGetConfig(response, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET status=%d", response.Code)
+	}
+	if len(before.Arrs) != 0 {
+		t.Fatal("GET changed the current snapshot")
+	}
+	response = httptest.NewRecorder()
+	server.handleUpdateConfig(response, httptest.NewRequest(http.MethodPost, "/api/config", strings.NewReader(`{"app_url":"https://new.example.test"}`)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("POST status=%d body=%s", response.Code, response.Body.String())
+	}
+	if before.AppURL == "https://new.example.test" {
+		t.Fatal("POST changed the previous snapshot")
+	}
+	if config.Get().AppURL != "https://new.example.test" {
+		t.Fatal("POST did not publish the update")
+	}
+	var result struct {
+		Restarted bool `json:"restarted"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Restarted {
+		t.Fatal("live URL update restarted services")
 	}
 }

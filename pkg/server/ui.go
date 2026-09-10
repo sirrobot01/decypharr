@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 
 	json "github.com/bytedance/sonic"
@@ -118,7 +119,13 @@ func (s *Server) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := cfg.SetCredentials(username, password); err != nil {
+	updated, err := config.Update(func(next *config.Config) error {
+		if !next.NeedsAuth() {
+			return fmt.Errorf("registration is closed")
+		}
+		return next.SetCredentials(username, password)
+	})
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -127,6 +134,7 @@ func (s *Server) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	session, _ := s.cookie.Get(r, "auth-session")
 	session.Values["authenticated"] = true
 	session.Values["username"] = username
+	session.Values["auth_version"] = updated.GetAuth().SessionVersion
 	if err := session.Save(r, w); err != nil {
 		http.Error(w, "Error saving session", http.StatusInternalServerError)
 		return

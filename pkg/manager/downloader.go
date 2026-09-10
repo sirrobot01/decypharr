@@ -199,7 +199,7 @@ func (d *Downloader) processSymlink(entry *storage.Entry, mountPath string) erro
 	// Usenet parsing/probing deliberately avoids the streaming read-ahead
 	// setting. A large playback window can turn a small import probe into a
 	// substantial background download and hold an active slot unnecessarily.
-	if !entry.IsNZB() && !d.manager.config.SkipPreCache && len(filePaths) > 0 {
+	if !entry.IsNZB() && !config.Get().SkipPreCache && len(filePaths) > 0 {
 		probeFiles := filePaths
 		if len(probeFiles) > MaxNZBPreCacheFiles {
 			probeFiles = probeFiles[:MaxNZBPreCacheFiles]

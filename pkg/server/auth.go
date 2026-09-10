@@ -15,8 +15,14 @@ func (s *Server) skipAuthHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	cfg.UseAuth = false
-	if err := cfg.Save(); err != nil {
+	_, err := config.Update(func(next *config.Config) error {
+		if err := next.SetupComplete(); err == nil {
+			return fmt.Errorf("setup is already complete")
+		}
+		next.UseAuth = false
+		return nil
+	})
+	if err != nil {
 		s.logger.Error().Err(err).Msg("failed to save config")
 		http.Error(w, "failed to save config", http.StatusInternalServerError)
 		return
@@ -51,24 +57,20 @@ func (s *Server) isValidAPIToken(r *http.Request) bool {
 
 // refreshAPIToken generates a new API token and saves it
 func (s *Server) refreshAPIToken() (string, error) {
-	auth := config.Get().GetAuth()
-	if auth == nil {
-		return "", fmt.Errorf("authentication not configured")
-	}
-
-	// Generate new token
 	token, err := config.GenerateAPIToken()
 	if err != nil {
 		return "", err
 	}
-
-	// Update auth config
-	auth.APIToken = token
-
-	// Save auth config
-	if err := config.Get().SaveAuth(auth); err != nil {
+	_, err = config.Update(func(next *config.Config) error {
+		auth := next.GetAuth()
+		if auth == nil {
+			return fmt.Errorf("authentication not configured")
+		}
+		auth.APIToken = token
+		return next.SaveAuth(auth)
+	})
+	if err != nil {
 		return "", err
 	}
-
 	return token, nil
 }
