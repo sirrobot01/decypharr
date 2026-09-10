@@ -287,6 +287,17 @@ func TestSessionSeek(t *testing.T) {
 	}
 }
 
+type closeNotifyingBody struct {
+	io.ReadCloser
+	closed chan<- struct{}
+}
+
+func (body *closeNotifyingBody) Close() error {
+	err := body.ReadCloser.Close()
+	close(body.closed)
+	return err
+}
+
 func TestSessionIdleClosesBodyAndResumes(t *testing.T) {
 	data := testPattern(64 << 10)
 	cdn := newFakeCDN(data)
@@ -295,7 +306,15 @@ func TestSessionIdleClosesBodyAndResumes(t *testing.T) {
 	var url atomic.Value
 	url.Store(cdn.url(server, ""))
 	s := newTestSession(t, testTransport(server.Client(), &url, nil, nil), int64(len(data)))
+	s.idleTimeout = 0
+	if err := s.Prime(); err != nil {
+		t.Fatal(err)
+	}
+	closed := make(chan struct{})
+	s.mu.Lock()
+	s.body = &closeNotifyingBody{ReadCloser: s.body, closed: closed}
 	s.idleTimeout = 50 * time.Millisecond
+	s.mu.Unlock()
 
 	buf := make([]byte, 1024)
 	if _, err := io.ReadFull(s, buf); err != nil {
@@ -305,7 +324,11 @@ func TestSessionIdleClosesBodyAndResumes(t *testing.T) {
 		t.Fatalf("expected 1 request, got %d", cdn.requests.Load())
 	}
 
-	time.Sleep(200 * time.Millisecond) // idle fires, body closes
+	select {
+	case <-closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("idle timeout did not close the response body")
+	}
 
 	if _, err := io.ReadFull(s, buf); err != nil {
 		t.Fatal(err)
