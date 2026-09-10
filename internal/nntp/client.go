@@ -1530,14 +1530,7 @@ func (c *Client) batchStatAcrossProviders(ctx context.Context, messageIDs []stri
 			continue
 		}
 
-		nextUnresolved := make([]int, 0, len(unresolved))
-		queryPos := 0
-		for _, idx := range unresolved {
-			if states[idx].exclusions.excludes(provider) {
-				nextUnresolved = append(nextUnresolved, idx)
-				continue
-			}
-
+		for queryPos, idx := range queryIdxs {
 			if queryPos >= len(providerResults) {
 				states[idx].sawOtherErr = true
 				if err != nil {
@@ -1545,12 +1538,10 @@ func (c *Client) batchStatAcrossProviders(ctx context.Context, messageIDs []stri
 				} else {
 					states[idx].lastErr = NewConnectionError(fmt.Errorf("provider %s returned incomplete batch results", provider.Host))
 				}
-				nextUnresolved = append(nextUnresolved, idx)
 				continue
 			}
 
 			res := providerResults[queryPos]
-			queryPos++
 			if res.Available {
 				results[idx] = res
 				continue
@@ -1569,9 +1560,8 @@ func (c *Client) batchStatAcrossProviders(ctx context.Context, messageIDs []stri
 					states[idx].lastErr = NewConnectionError(fmt.Errorf("provider %s returned an empty STAT result for %s", provider.Host, res.MessageID))
 				}
 			}
-			nextUnresolved = append(nextUnresolved, idx)
 		}
-		unresolved = nextUnresolved
+		unresolved = slices.DeleteFunc(unresolved, func(idx int) bool { return results[idx].Available })
 	}
 
 	for _, idx := range unresolved {

@@ -2,6 +2,7 @@ package nntp
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -269,4 +270,43 @@ func waitForQueuedWorkload(t *testing.T, client *Client, workload Workload) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("%s work did not enter the admission queue", workload)
+}
+
+func TestBatchStatPreservesMappingAcrossBackboneExclusions(t *testing.T) {
+	first, second, third := newTestPool(1), newTestPool(1), newTestPool(1)
+	first.config.Host, first.config.Backbone = "first", "shared"
+	second.config.Host, second.config.Backbone = "second", "shared"
+	third.config.Host, third.config.Backbone = "third", "other"
+	client := newTieredAcquireTestClient(first, second, 0)
+	client.providers = append(client.providers, third.config)
+	client.pools[third.config.ID()] = third
+	client.orderedPools = append(client.orderedPools, third)
+	var completed []<-chan error
+	for i, pp := range []*ProviderPool{first, second, third} {
+		conn, server := newBodyTestConn(t)
+		poolEntry(pp, conn, 0)
+		responses := [][]string{
+			{"430 missing on this backbone\r\n", "500 temporary error\r\n", "223 0 <third@example>\r\n"},
+			{"223 0 <second@example>\r\n"},
+			{"223 0 <first@example>\r\n"},
+		}[i]
+		completed = append(completed, serveStatPipeline(server, len(responses), responses))
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	ids := []string{"first@example", "second@example", "third@example"}
+	results, err := client.batchStatAcrossProviders(ctx, ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, result := range results {
+		if result.MessageID != ids[i] || !result.Available || result.Error != nil {
+			t.Fatalf("result %d = %#v", i, result)
+		}
+	}
+	for _, done := range completed {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
 }
