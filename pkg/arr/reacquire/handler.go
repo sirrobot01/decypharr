@@ -92,7 +92,7 @@ func (handler *arrHandler) Reacquire(ctx context.Context, job Job, progress JobP
 	if err != nil {
 		return err
 	}
-	if handler.invalidator != nil {
+	if handler.invalidator != nil && bindings[0].Confidence != ConfidenceLibraryFile {
 		invalidationJob := job
 		invalidationJob.Bindings = bindings
 		if err := handler.invalidator.InvalidateReacquire(ctx, invalidationJob); err != nil {

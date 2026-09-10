@@ -42,6 +42,10 @@ func (s *Service) Reacquire(request Request) (*Job, error) {
 	if !binding.AuthorizesMutation() {
 		return nil, fmt.Errorf("%w: entry %q file %q", ErrBindingUnsafe, request.EntryID, request.FileID)
 	}
+	return s.enqueue(request, binding)
+}
+
+func (s *Service) enqueue(request Request, binding Binding) (*Job, error) {
 	key := keyForBinding(binding)
 
 	s.jobsMu.Lock()
@@ -51,7 +55,24 @@ func (s *Service) Reacquire(request Request) (*Job, error) {
 		return &job, nil
 	}
 
-	bindings := s.index.ByDownloadID(binding.ArrName, binding.DownloadID)
+	// An unindexed file can become indexed while its replacement is pending.
+	// Keep both request paths attached to the existing job.
+	for _, id := range s.activeReacquisitions {
+		active := s.jobs[id]
+		for _, existing := range active.Bindings {
+			if existing.ArrName == binding.ArrName && existing.ArrFileID == binding.ArrFileID &&
+				existing.ArrInstanceFingerprint == binding.ArrInstanceFingerprint {
+				job := cloneJob(active)
+				s.jobsMu.Unlock()
+				return &job, nil
+			}
+		}
+	}
+
+	var bindings []Binding
+	if binding.DownloadID != "" {
+		bindings = s.index.ByDownloadID(binding.ArrName, binding.DownloadID)
+	}
 	bindings = slices.DeleteFunc(bindings, func(binding Binding) bool {
 		return !binding.AuthorizesMutation()
 	})
@@ -194,6 +215,7 @@ func (s *Service) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			s.reconcileLibraryJobs(ctx)
 			s.maintainJobs()
 			s.signal()
 		case <-s.wake:
@@ -538,6 +560,9 @@ func (s *Service) completeJobFromIndex(job Job) error {
 }
 
 func (s *Service) replacementsForJob(job Job) ([]string, bool) {
+	if len(job.Bindings) == 1 && job.Bindings[0].Confidence == ConfidenceLibraryFile {
+		return nil, false
+	}
 	downloads := make(map[string]struct{})
 	for _, target := range job.Bindings {
 		var candidates []Binding

@@ -23,7 +23,9 @@ var (
 type Confidence string
 
 const (
-	ConfidenceExactPath Confidence = "exact_path"
+	// ConfidenceLibraryFile records an Arr file verified without a managed entry.
+	ConfidenceLibraryFile Confidence = "library_file"
+	ConfidenceExactPath   Confidence = "exact_path"
 	// ConfidenceManagedTarget binds a library symlink that points into the
 	// managed mount to the one managed file with that name and size. It is
 	// used when the entry folder no longer matches, which happens after a
@@ -59,7 +61,8 @@ func (b Binding) AuthorizesMutation() bool {
 		b.ArrInstanceFingerprint != "" &&
 		b.LibraryPath != "" &&
 		(b.ArrType == arr.Sonarr || b.ArrType == arr.Radarr) &&
-		(b.Confidence == ConfidenceExactPath ||
+		(b.Confidence == ConfidenceLibraryFile ||
+			b.Confidence == ConfidenceExactPath ||
 			b.Confidence == ConfidenceManagedTarget ||
 			b.Confidence == ConfidenceDownloadHistory)
 }

@@ -283,6 +283,7 @@ func (m *Manager) init() {
 
 func (m *Manager) initArrServices() {
 	service, err := reacquire.NewService(reacquire.ServiceOptions{
+		Arrs:      m.arr,
 		Directory: filepath.Join(config.GetMainPath(), "db"),
 		Handler:   reacquire.NewHandler(m.arr, m),
 	})

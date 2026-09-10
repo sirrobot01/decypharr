@@ -1,7 +1,7 @@
 package repair
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -14,13 +14,23 @@ import (
 )
 
 type fakeReacquirer struct {
-	requests  []reacquire.Request
-	reacquire func(reacquire.Request) (*reacquire.Job, error)
+	libraryRequests []reacquire.LibraryRequest
+	library         func(reacquire.LibraryRequest) (*reacquire.Job, error)
+	requests        []reacquire.Request
+	reacquire       func(reacquire.Request) (*reacquire.Job, error)
 }
 
 func (fake *fakeReacquirer) Reacquire(request reacquire.Request) (*reacquire.Job, error) {
 	fake.requests = append(fake.requests, request)
 	return fake.reacquire(request)
+}
+
+func (fake *fakeReacquirer) ReacquireLibraryFile(_ context.Context, request reacquire.LibraryRequest) (*reacquire.Job, error) {
+	fake.libraryRequests = append(fake.libraryRequests, request)
+	if fake.library == nil {
+		return nil, errors.New("library recovery unavailable")
+	}
+	return fake.library(request)
 }
 
 func TestHealBrokenEntryQueuesStableFileIdentity(t *testing.T) {
@@ -181,65 +191,55 @@ func TestHealBrokenEntrySkipsArrsWithoutReacquisition(t *testing.T) {
 	}
 }
 
-func TestHealBrokenEntryFallsBackToLegacyRepairWhenUnmapped(t *testing.T) {
-	var (
-		mu      sync.Mutex
-		deleted []int
-		searchd bool
-	)
+func TestHealBrokenEntryQueuesUnindexedLibraryFile(t *testing.T) {
+	var mutations int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
-		switch {
-		case r.Method == http.MethodDelete && r.URL.Path == "/api/v3/episodefile/bulk":
-			var payload struct {
-				EpisodeFileIds []int `json:"episodeFileIds"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&payload)
-			deleted = append(deleted, payload.EpisodeFileIds...)
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v3/command":
-			searchd = true
+		if r.Method != http.MethodGet {
+			mutations++
 		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"records":[]}`))
+		http.Error(w, "unexpected direct Arr request", http.StatusInternalServerError)
 	}))
 	t.Cleanup(server.Close)
-
 	store := newRepairTestStorage(t)
 	registry := arr.New()
 	registry.AddOrUpdate(arr.Arr{Name: "sonarr", Host: server.URL, Token: "token"})
-
-	reacquirer := &fakeReacquirer{reacquire: func(reacquire.Request) (*reacquire.Job, error) {
-		return nil, reacquire.ErrBindingNotFound
+	reacquirer := &fakeReacquirer{library: func(reacquire.LibraryRequest) (*reacquire.Job, error) {
+		return &reacquire.Job{ID: "library-job"}, nil
 	}}
 	service := New(Dependencies{Storage: store, Arrs: registry, Reacquirer: reacquirer})
 	run := &storage.RepairRun{ID: "repair-run-4"}
-	health := &storage.EntryHealth{
-		EntryName:   "Series.Release",
-		Status:      storage.HealthBroken,
-		FileCount:   2,
-		BrokenCount: 1,
-		BrokenFiles: []storage.BrokenFile{{
-			FileName:  "Episode.mkv",
-			InfoHash:  "nzb-entry-4",
-			ArrName:   "sonarr",
-			ArrFileID: 4242,
-			EpisodeID: 7,
-		}},
+	health := &storage.EntryHealth{EntryName: "Series.Release", Status: storage.HealthBroken, FileCount: 2, BrokenCount: 1,
+		BrokenFiles: []storage.BrokenFile{{FileName: "Episode.mkv", InfoHash: "missing-entry", ArrName: "sonarr",
+			ArrFileID: 4242, EpisodeID: 7, SourcePath: "/library/Episode.mkv"}},
 	}
-
 	var statsMu sync.Mutex
 	service.healBrokenEntry(t.Context(), run, &statsMu, health)
-
-	mu.Lock()
-	defer mu.Unlock()
-	if len(deleted) != 1 || deleted[0] != 4242 {
-		t.Fatalf("deleted episode files = %v, want [4242]", deleted)
+	if mutations != 0 {
+		t.Fatal("repair sent direct Arr mutations")
 	}
-	if !searchd {
-		t.Fatal("legacy fallback did not re-search the missing episode")
+	if len(reacquirer.libraryRequests) != 1 || reacquirer.libraryRequests[0].LibraryPath != "/library/Episode.mkv" || reacquirer.libraryRequests[0].ArrFileID != 4242 {
+		t.Fatalf("library requests = %#v", reacquirer.libraryRequests)
 	}
 	if run.Stats.Repaired != 1 || run.Stats.RepairFailed != 0 {
 		t.Fatalf("repair stats = %#v", run.Stats)
+	}
+}
+
+func TestHealBrokenEntryDoesNotBypassUnsafeOrUnavailableReacquisition(t *testing.T) {
+	for _, cause := range []error{reacquire.ErrBindingUnsafe, reacquire.ErrServiceNotStarted, reacquire.ErrServiceClosed} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			store := newRepairTestStorage(t)
+			if err := store.AddOrUpdate(&storage.Entry{InfoHash: "entry", Name: "release", Files: map[string]*storage.File{
+				"movie.mkv": {ID: "file", Name: "movie.mkv", InfoHash: "entry"},
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			reacquirer := &fakeReacquirer{reacquire: func(reacquire.Request) (*reacquire.Job, error) { return nil, cause }}
+			service := New(Dependencies{Storage: store, Reacquirer: reacquirer})
+			_, err := service.reacquireBrokenFile(t.Context(), storage.BrokenFile{InfoHash: "entry", FileName: "movie.mkv", ArrFileID: 7, ArrName: "radarr", SourcePath: "/library/movie.mkv"})
+			if !errors.Is(err, cause) || len(reacquirer.libraryRequests) != 0 {
+				t.Fatalf("error = %v, fallback calls = %d", err, len(reacquirer.libraryRequests))
+			}
+		})
 	}
 }

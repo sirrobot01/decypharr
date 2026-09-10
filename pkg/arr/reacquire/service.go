@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/sirrobot01/decypharr/pkg/arr"
 )
 
 const (
@@ -24,6 +26,7 @@ type Handler interface {
 }
 
 type ServiceOptions struct {
+	Arrs      *arr.Service
 	Directory string
 	Index     *Index
 	Handler   Handler
@@ -37,6 +40,7 @@ type jobKey struct {
 }
 
 type Service struct {
+	arrs                 *arr.Service
 	index                *Index
 	bindingRepository    *BindingRepository
 	jobRepository        *JobRepository
@@ -72,6 +76,7 @@ func NewService(options ServiceOptions) (*Service, error) {
 		index = NewIndex()
 	}
 	return &Service{
+		arrs:                 options.Arrs,
 		index:                index,
 		bindingRepository:    bindingRepository,
 		jobRepository:        jobRepository,

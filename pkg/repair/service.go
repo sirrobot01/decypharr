@@ -72,6 +72,7 @@ type Backend interface {
 
 type Reacquirer interface {
 	Reacquire(reacquire.Request) (*reacquire.Job, error)
+	ReacquireLibraryFile(context.Context, reacquire.LibraryRequest) (*reacquire.Job, error)
 }
 
 type Dependencies struct {
