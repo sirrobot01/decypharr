@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/sirrobot01/decypharr/internal/utils"
 	debrid "github.com/sirrobot01/decypharr/pkg/debrid/common"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sirrobot01/decypharr/pkg/version"
@@ -69,7 +68,7 @@ func (m *Manager) setMountPaths() {
 		name:    "",
 		size:    0,
 		kind:    EntryKindSystem,
-		modTime: utils.Now(),
+		modTime: time.Now(),
 		isDir:   true,
 	}
 }
@@ -80,7 +79,7 @@ func (m *Manager) RootInfo() *FileInfo {
 			name:    "",
 			size:    0,
 			kind:    EntryKindSystem,
-			modTime: utils.Now(),
+			modTime: time.Now(),
 			isDir:   true,
 		}
 	}
@@ -90,7 +89,7 @@ func (m *Manager) RootInfo() *FileInfo {
 // GetEntries returns the subdirectories under a given mount name
 // It shows built-in, per-provider, and virtual folders.
 func (m *Manager) GetEntries() []FileInfo {
-	now := utils.Now()
+	now := time.Now()
 	var subDirs []FileInfo
 	extras := []string{EntryAllFolder, EntryBadFolder, EntryTorrentFolder, EntryNZBFolder}
 	for _, dir := range extras {
@@ -214,7 +213,7 @@ func (m *Manager) getEntryChildren(group string) (*FileInfo, []FileInfo) {
 	currentDir := &FileInfo{
 		name:    group,
 		size:    0,
-		modTime: utils.Now(),
+		modTime: time.Now(),
 		isDir:   true,
 	}
 	switch group {

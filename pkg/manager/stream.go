@@ -4,9 +4,9 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/arr"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
@@ -43,7 +43,7 @@ type ActiveStream struct {
 func (m *Manager) registerStream(entry *storage.Entry, fileName string, file *storage.File, source, debrid, client string) string {
 	// Use deterministic ID to ensure a single entry per file
 	streamID := entry.Name + ":" + fileName
-	now := utils.NowUnix()
+	now := time.Now().Unix()
 
 	stream := &ActiveStream{
 		ID:         streamID,
@@ -84,7 +84,7 @@ func (m *Manager) unregisterStream(streamID string) {
 // readers go through GetActiveStreams, which snapshots them atomically.
 func (m *Manager) touchStream(streamID string, resumes int64) {
 	if stream, ok := m.activeStreams.Load(streamID); ok {
-		atomic.StoreInt64(&stream.LastActive, utils.NowUnix())
+		atomic.StoreInt64(&stream.LastActive, time.Now().Unix())
 		atomic.StoreInt64(&stream.Resumes, resumes)
 	}
 }

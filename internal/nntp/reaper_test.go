@@ -8,7 +8,6 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/utils"
 )
 
 // newPipeConnection builds a Connection backed by net.Pipe and starts a fake
@@ -52,11 +51,7 @@ func newReaperTestClient(pp *ProviderPool) *Client {
 		staleThreshold: 60 * time.Second,
 		pingInterval:   30 * time.Second,
 		pingTimeout:    1500 * time.Millisecond,
-		// Deadlines come off utils.Now(), which the cached clock only
-		// refreshes every 500ms — a budget near that granularity is already
-		// expired when it is set and times out instantly. Production uses
-		// KeepalivePingTimeout.
-		keepalivePing: 1500 * time.Millisecond,
+		keepalivePing:  1500 * time.Millisecond,
 	}
 }
 
@@ -70,7 +65,7 @@ func newTestPool(max int) *ProviderPool {
 }
 
 func poolEntry(pp *ProviderPool, conn *Connection, idleFor time.Duration) *connectionEntry {
-	entry := acquireConnectionEntry(conn, pp.config, utils.Now().Add(-idleFor))
+	entry := acquireConnectionEntry(conn, pp.config, time.Now().Add(-idleFor))
 	pp.conns = append(pp.conns, entry)
 	return entry
 }

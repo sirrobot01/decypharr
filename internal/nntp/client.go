@@ -427,7 +427,7 @@ func (c *Client) put(conn *Connection, provider config.UsenetProvider) {
 		return
 	}
 
-	entry := acquireConnectionEntry(conn, provider, utils.Now())
+	entry := acquireConnectionEntry(conn, provider, time.Now())
 
 	pp.mu.Lock()
 	// Cap stack size (shouldn't happen with semaphore, but be safe)
@@ -808,7 +808,7 @@ func (c *Client) getOrCreateFromPool(ctx context.Context, pp *ProviderPool, prov
 			pp.conns = pp.conns[:n-1]
 			pp.mu.Unlock()
 
-			now := utils.Now()
+			now := time.Now()
 			if c.isIdleExpired(entry.lastUsed, now) {
 				conn := entry.conn
 				releaseConnectionEntry(entry)
@@ -976,7 +976,7 @@ func (c *Client) createConnection(ctx context.Context, provider config.UsenetPro
 
 	// Set deadline for handshake (greeting + auth)
 	// If the server doesn't respond quickly during setup, we should abort.
-	_ = netConn.SetDeadline(utils.Now().Add(timeouts.HandshakeTimeout))
+	_ = netConn.SetDeadline(time.Now().Add(timeouts.HandshakeTimeout))
 
 	// Read greeting
 	line, err := reader.ReadString('\n')
@@ -1021,7 +1021,7 @@ func (c *Client) reaper() {
 }
 
 func (c *Client) reapIdleConnections() {
-	now := utils.Now()
+	now := time.Now()
 	for _, pp := range c.pools {
 		var toClose, toPing []*connectionEntry
 
@@ -1699,7 +1699,7 @@ func (c *Client) findProvider(key string) *config.UsenetProvider {
 func (c *Client) SpeedTest(ctx context.Context, providerID string, messageID string) SpeedTestResult {
 	result := SpeedTestResult{
 		Provider: providerID,
-		TestedAt: utils.Now(),
+		TestedAt: time.Now(),
 	}
 
 	targetProvider := c.findProvider(providerID)
@@ -1724,8 +1724,7 @@ func (c *Client) SpeedTest(ctx context.Context, providerID string, messageID str
 		return result
 	}
 
-	// Measure latency using ping (true network RTT). time.Now, not the
-	// cached clock: utils.Now lags up to 500ms, which would swamp the RTT.
+	// Measure the ping round-trip time with the monotonic clock.
 	pingStart := time.Now()
 	if err := conn.ping(c.pingTimeout); err != nil {
 		c.release(conn)

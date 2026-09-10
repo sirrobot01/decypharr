@@ -440,7 +440,7 @@ func (c *Cache) reclaimClosedDisk(needed int64) int64 {
 	sizeBefore := scan.totalSize
 	target := max(sizeBefore-needed, int64(1))
 	totalSize, removedCount, removalErrors, removedKeys := c.evictCandidates(
-		utils.Now(),
+		time.Now(),
 		scan.candidates,
 		sizeBefore,
 		target,
@@ -583,8 +583,8 @@ func (c *Cache) newItem(key, entryName, filename string, fileSize int64) (*Cache
 	}
 
 	info.Size = fileSize
-	info.ModTime = utils.Now()
-	info.ATime = utils.Now()
+	info.ModTime = time.Now()
+	info.ATime = time.Now()
 
 	item = &CacheItem{
 		cache:    c,
@@ -765,7 +765,7 @@ func (c *Cache) evict() cleanupRunSummary {
 	c.cleanupMu.Lock()
 	defer c.cleanupMu.Unlock()
 
-	now := utils.Now()
+	now := time.Now()
 
 	closedIdleItems := c.cleanupItems(now, false)
 
@@ -834,7 +834,7 @@ func (c *Cache) PurgeCache() map[string]any {
 	c.cleanupMu.Lock()
 	defer c.cleanupMu.Unlock()
 
-	now := utils.Now()
+	now := time.Now()
 	forcedClosed := c.cleanupItems(now, true)
 	scan := c.scanDiskCandidates()
 	sizeBefore := scan.totalSize
@@ -1147,7 +1147,7 @@ type ItemInfo struct {
 // touch updates access time
 func (item *CacheItem) touch() {
 	item.metaMu.Lock()
-	item.info.ATime = utils.Now()
+	item.info.ATime = time.Now()
 	item.metaMu.Unlock()
 	item.markMetadataDirty()
 }

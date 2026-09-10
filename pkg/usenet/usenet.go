@@ -19,7 +19,6 @@ import (
 	"github.com/sirrobot01/decypharr/internal/customerror"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/nntp"
-	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sirrobot01/decypharr/pkg/usenet/fs"
 	"github.com/sirrobot01/decypharr/pkg/usenet/fs/reader"
@@ -433,7 +432,7 @@ func (u *Usenet) getOrCreateEntry(ctx context.Context, nzoID, filename string, r
 	// once the janitor claims an idle entry no new reference can be taken, so
 	// a stream can never end up on an entry whose reader is being closed.
 	if entry, ok := u.fs.Load(key); ok && entry.acquire() {
-		entry.lastAccessed.Store(utils.NowUnix())
+		entry.lastAccessed.Store(time.Now().Unix())
 		return entry, key, nil
 	}
 
@@ -461,13 +460,13 @@ func (u *Usenet) getOrCreateEntry(ctx context.Context, nzoID, filename string, r
 			if !newEntry.acquire() {
 				return nil, key, fmt.Errorf("new file-system entry was claimed during creation")
 			}
-			newEntry.lastAccessed.Store(utils.NowUnix())
+			newEntry.lastAccessed.Store(time.Now().Unix())
 			return newEntry, key, nil
 		}
 		// Another goroutine created the entry first - use theirs.
 		// Our newEntry was never used (readers are lazy), GC reclaims it.
 		if actual.acquire() {
-			actual.lastAccessed.Store(utils.NowUnix())
+			actual.lastAccessed.Store(time.Now().Unix())
 			return actual, key, nil
 		}
 		// The mapped entry is claimed for teardown; the janitor removes it
@@ -487,7 +486,7 @@ func (u *Usenet) releaseFS(key string) {
 		return
 	}
 
-	entry.lastAccessed.Store(utils.NowUnix())
+	entry.lastAccessed.Store(time.Now().Unix())
 	entry.release()
 }
 
@@ -506,7 +505,7 @@ func (u *Usenet) cleanupIdleFS() {
 			return
 		case <-ticker.C:
 		}
-		now := utils.NowUnix()
+		now := time.Now().Unix()
 
 		u.fs.Range(func(key string, entry *fsEntry) bool {
 			if entry.refCount.Load() == 0 {
@@ -882,7 +881,7 @@ func (h *FileHandle) ReadAtContext(ctx context.Context, p []byte, off int64) (in
 	if h.closed.Load() {
 		return 0, io.ErrClosedPipe
 	}
-	h.entry.lastAccessed.Store(utils.NowUnix())
+	h.entry.lastAccessed.Store(time.Now().Unix())
 	n, err := h.cursor.ReadAtContext(ctx, p, off)
 	if err != nil && ctx != nil && ctx.Err() != nil {
 		return n, ctx.Err()

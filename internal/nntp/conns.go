@@ -16,7 +16,6 @@ import (
 
 	"github.com/rs/zerolog"
 	nntpyenc "github.com/sirrobot01/decypharr/internal/nntp/yenc"
-	"github.com/sirrobot01/decypharr/internal/utils"
 )
 
 // Note: Timeout values are defined in TimeoutConfig (client.go).
@@ -184,7 +183,7 @@ func (c *Connection) readResponseWithDeadline(timeout time.Duration) (Response, 
 	if timeout <= 0 {
 		timeout = timeouts.StreamBodyTimeout
 	}
-	_ = c.conn.SetReadDeadline(utils.Now().Add(timeout))
+	_ = c.conn.SetReadDeadline(time.Now().Add(timeout))
 	defer func() { _ = c.conn.SetReadDeadline(time.Time{}) }()
 	return c.readResponse()
 }
@@ -193,7 +192,7 @@ func (c *Connection) readResponseCodeWithDeadline(timeout time.Duration) (int, [
 	if timeout <= 0 {
 		timeout = timeouts.StreamBodyTimeout
 	}
-	_ = c.conn.SetReadDeadline(utils.Now().Add(timeout))
+	_ = c.conn.SetReadDeadline(time.Now().Add(timeout))
 	defer func() { _ = c.conn.SetReadDeadline(time.Time{}) }()
 	return c.readResponseCode()
 }
@@ -300,7 +299,7 @@ func (c *Connection) ping(timeout time.Duration) error {
 	if timeout <= 0 {
 		timeout = timeouts.PingTimeout
 	}
-	_ = c.conn.SetDeadline(utils.Now().Add(timeout))
+	_ = c.conn.SetDeadline(time.Now().Add(timeout))
 	c.writeTimeout = timeout
 	defer func() {
 		c.writeTimeout = 0
@@ -330,7 +329,7 @@ func (c *Connection) sendCommandArg(command, arg string) error {
 	if writeTimeout <= 0 {
 		writeTimeout = timeouts.HandshakeTimeout
 	}
-	_ = c.conn.SetWriteDeadline(utils.Now().Add(writeTimeout))
+	_ = c.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	defer func() { _ = c.conn.SetWriteDeadline(time.Time{}) }()
 	if err := c.writeCommandArg(command, arg); err != nil {
 		return err
@@ -561,7 +560,7 @@ func (c *Connection) GetBody(messageID string) ([]byte, error) {
 	}
 
 	// Set read deadline to prevent hanging on stalled servers
-	_ = c.conn.SetReadDeadline(utils.Now().Add(timeouts.StreamBodyTimeout))
+	_ = c.conn.SetReadDeadline(time.Now().Add(timeouts.StreamBodyTimeout))
 	defer func() { _ = c.conn.SetReadDeadline(time.Time{}) }()
 
 	body, err := c.readDotBytes()
@@ -634,7 +633,7 @@ func (c *Connection) PipelineBodies(messageIDs []string, destinations []BodyDest
 	if writeTimeout <= 0 {
 		writeTimeout = timeouts.HandshakeTimeout
 	}
-	_ = c.conn.SetWriteDeadline(utils.Now().Add(writeTimeout))
+	_ = c.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	for i, messageID := range messageIDs {
 		if destinations[i].Skip {
 			continue
@@ -801,7 +800,7 @@ func (c *Connection) GetHead(messageID string) ([]byte, error) {
 }
 
 func (c *Connection) Post(messageID, filename string, body []byte) error {
-	now := utils.Now().Format("2006-01-02 15:04:05")
+	now := time.Now().Format("2006-01-02 15:04:05")
 	if err := c.sendCommand("POST"); err != nil {
 		return NewConnectionError(fmt.Errorf("failed to send POST command: %w", err))
 	}
@@ -925,7 +924,7 @@ func (c *Connection) StatBatch(messageIDs []string) ([]StatResult, error) {
 	if writeTimeout <= 0 {
 		writeTimeout = timeouts.HandshakeTimeout
 	}
-	_ = c.conn.SetWriteDeadline(utils.Now().Add(writeTimeout))
+	_ = c.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	for i, messageID := range messageIDs {
 		if err := c.writeCommandArg("STAT", FormatMessageID(messageID)); err != nil {
 			_ = c.conn.SetWriteDeadline(time.Time{})

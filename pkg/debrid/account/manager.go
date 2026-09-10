@@ -174,7 +174,7 @@ func (m *Manager) Reset() {
 }
 
 func (m *Manager) warnNoActiveAccounts(message string) {
-	now := utils.Now().UnixNano()
+	now := time.Now().UnixNano()
 	lastWarning := m.lastNoActiveWarning.Load()
 	if lastWarning != 0 && time.Duration(now-lastWarning) < noActiveWarningInterval {
 		return
@@ -300,7 +300,7 @@ func (m *Manager) Sync(syncer SyncFunc) {
 				return
 			}
 			// Check if account has expired
-			if !acc.Expiration.IsZero() && utils.Now().After(acc.Expiration) {
+			if !acc.Expiration.IsZero() && time.Now().After(acc.Expiration) {
 				m.logger.Warn().Str("debrid", m.debrid).Str("account_token", utils.Mask(acc.Token)).Msg("Account has expired, disabling")
 				m.Disable(acc)
 				m.UpdateAccount(acc)

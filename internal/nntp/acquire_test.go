@@ -8,7 +8,6 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/utils"
 )
 
 func newAcquireTestClient(pp *ProviderPool) *Client {
@@ -70,7 +69,7 @@ func TestWaitForConnectionUnblocksOnRelease(t *testing.T) {
 
 	// The fictitious user returns a healthy connection to the pool.
 	pp.mu.Lock()
-	pp.conns = append(pp.conns, acquireConnectionEntry(conn, pp.config, utils.Now()))
+	pp.conns = append(pp.conns, acquireConnectionEntry(conn, pp.config, time.Now()))
 	pp.mu.Unlock()
 	c.releaseSlot(pp)
 

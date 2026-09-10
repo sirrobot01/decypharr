@@ -16,7 +16,6 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/mount/dfs/backend"
 	"github.com/sirrobot01/decypharr/pkg/mount/dfs/config"
 	"github.com/sirrobot01/decypharr/pkg/mount/dfs/vfs"
@@ -47,7 +46,7 @@ type Backend struct {
 
 // NewBackend creates a new hanwen backend
 func NewBackend(vfs *vfs.Manager, config *config.FuseConfig) (backend.Backend, error) {
-	now := utils.Now()
+	now := time.Now()
 	log := logger.New("hanwen-backend")
 	// One shared rate-limited logger for the whole mount. Files/Dirs reference
 	// it instead of allocating their own xsync map per inode — dedup keys are

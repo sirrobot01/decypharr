@@ -11,7 +11,6 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/utils"
 )
 
 // newBenchClient builds a Client around the given pools (index-aligned with
@@ -53,7 +52,7 @@ func newBenchPool(b *testing.B, host string, max int) (*ProviderPool, config.Use
 			writer: bufio.NewWriter(clientSide),
 		}
 		b.Cleanup(func() { _ = conn.Close(); _ = serverSide.Close() })
-		pp.conns = append(pp.conns, acquireConnectionEntry(conn, provider, utils.Now()))
+		pp.conns = append(pp.conns, acquireConnectionEntry(conn, provider, time.Now()))
 	}
 	return pp, provider
 }
@@ -277,11 +276,6 @@ func startSilentServer(b *testing.B) (addr *net.TCPAddr) {
 func BenchmarkAcquireDeadPrimary(b *testing.B) {
 	addr := startSilentServer(b)
 
-	// createConnection stamps its handshake deadline with utils.Now(), the
-	// cached clock: start the updater or the deadline is frozen in the past.
-	// The updater ticks every 500ms, so the timeout must stay above that
-	// staleness to be meaningful; production uses 10s.
-	utils.StartGlobalCachedTime()
 	saved := timeouts
 	timeouts.HandshakeTimeout = 1 * time.Second
 	b.Cleanup(func() { timeouts = saved })

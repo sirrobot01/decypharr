@@ -10,7 +10,6 @@ import (
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/utils"
 )
 
 // closedPort returns a loopback port with nothing listening, so dials to it
@@ -152,7 +151,7 @@ func TestHandoffFIFO(t *testing.T) {
 	// A's put.
 	conn := newPipeConnection(t, true)
 	pp.mu.Lock()
-	pp.conns = append(pp.conns, acquireConnectionEntry(conn, pp.config, utils.Now()))
+	pp.conns = append(pp.conns, acquireConnectionEntry(conn, pp.config, time.Now()))
 	pp.mu.Unlock()
 	c.releaseSlot(pp)
 

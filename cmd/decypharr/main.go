@@ -11,7 +11,6 @@ import (
 
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/manager"
 	"github.com/sirrobot01/decypharr/pkg/mount/dfs"
 	"github.com/sirrobot01/decypharr/pkg/mount/external"
@@ -22,10 +21,6 @@ import (
 )
 
 func Start(ctx context.Context) error {
-	// Start the global cached time updater to reduce time.Now() syscall overhead
-	utils.StartGlobalCachedTime()
-	defer utils.StopGlobalCachedTime()
-
 	if umaskStr := os.Getenv("UMASK"); umaskStr != "" {
 		umask, err := strconv.ParseInt(umaskStr, 8, 32)
 		if err != nil {
