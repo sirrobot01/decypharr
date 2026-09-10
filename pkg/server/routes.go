@@ -50,6 +50,7 @@ func (s *Server) WebRoutes() http.Handler {
 			r.Post("/add", s.handleAddContent)
 			r.Get("/arr/reacquire/jobs", s.handleListArrReacquireJobs)
 			r.Get("/arr/reacquire/jobs/{id}", s.handleGetArrReacquireJob)
+			r.Post("/arr/reacquire/jobs/{id}/acknowledge", s.handleAcknowledgeArrReacquireJob)
 			r.Delete("/arr/reacquire/jobs", s.handleDeleteArrReacquireJobs)
 			r.Post("/arr/reacquire", s.handleArrReacquire)
 			r.Post("/arr/index/refresh", s.handleRefreshArrIndex)

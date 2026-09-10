@@ -189,3 +189,21 @@ func (s *Server) handleSearchArrBindings(w http.ResponseWriter, r *http.Request)
 	arrName := strings.TrimSpace(r.URL.Query().Get("arr"))
 	utils.JSONResponse(w, service.SearchBindings(arrName, query, limit), http.StatusOK)
 }
+
+func (s *Server) handleAcknowledgeArrReacquireJob(w http.ResponseWriter, r *http.Request) {
+	service := s.manager.ArrService()
+	if service == nil {
+		s.sendJSONError(w, "Arr reacquisition service is not available", http.StatusServiceUnavailable)
+		return
+	}
+	job, err := service.AcknowledgeJob(strings.TrimSpace(chi.URLParam(r, "id")))
+	if errors.Is(err, reacquire.ErrJobNotBlocked) {
+		s.sendJSONError(w, err.Error(), http.StatusConflict)
+		return
+	}
+	if err != nil {
+		s.handleArrReacquireError(w, err)
+		return
+	}
+	utils.JSONResponse(w, job, http.StatusOK)
+}

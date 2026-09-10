@@ -15,6 +15,7 @@ class ReacquireManager {
         waiting_for_grab: {label: 'Waiting for grab', badge: 'badge-warning', icon: 'bi-clock'},
         waiting_for_download: {label: 'Downloading', badge: 'badge-warning', icon: 'bi-download'},
         waiting_for_import: {label: 'Waiting for import', badge: 'badge-warning', icon: 'bi-box-arrow-in-down'},
+        needs_attention: {label: 'Needs attention', badge: 'badge-error', icon: 'bi-exclamation-triangle'},
         ready: {label: 'Ready', badge: 'badge-success', icon: 'bi-check-circle'},
         failed: {label: 'Failed', badge: 'badge-error', icon: 'bi-x-circle'},
         cancelled: {label: 'Cancelled', badge: 'badge-ghost', icon: 'bi-dash-circle'},
@@ -91,7 +92,7 @@ class ReacquireManager {
 
     scheduleNextPoll() {
         clearTimeout(this.timer);
-        const working = this.jobs.some((job) => !this.isTerminal(job.status));
+        const working = this.jobs.some((job) => !this.isTerminal(job.status) && job.status !== 'needs_attention');
         if (working) {
             this.timer = setTimeout(() => this.loadJobs(), 5000);
         }
@@ -108,7 +109,7 @@ class ReacquireManager {
     }
 
     renderCounts() {
-        const counts = {active: 0, waiting: 0, ready: 0, failed: 0, cancelled: 0};
+        const counts = {active: 0, waiting: 0, needs_attention: 0, ready: 0, failed: 0, cancelled: 0};
         this.jobs.forEach((job) => {
             const group = this.group(job.status);
             if (group in counts) counts[group]++;
@@ -118,6 +119,7 @@ class ReacquireManager {
             {key: 'active', label: 'Working', tone: 'text-info', icon: 'bi-arrow-repeat'},
             {key: 'waiting', label: 'Waiting', tone: 'text-warning', icon: 'bi-clock'},
             {key: 'ready', label: 'Ready', tone: 'text-success', icon: 'bi-check-circle'},
+            {key: 'needs_attention', label: 'Needs attention', tone: 'text-error', icon: 'bi-exclamation-triangle'},
             {key: 'failed', label: 'Failed', tone: 'text-error', icon: 'bi-x-circle'},
             {key: 'cancelled', label: 'Cancelled', tone: 'opacity-60', icon: 'bi-dash-circle'},
         ];
@@ -435,6 +437,27 @@ class ReacquireManager {
                     </table>
                 </div>` : ''}`;
 
+        if (job.status === 'needs_attention') {
+            const button = document.createElement('button');
+            button.className = 'btn btn-warning btn-sm';
+            button.textContent = 'Acknowledge Arr actions';
+            button.addEventListener('click', async () => {
+                if (!window.confirm('Check this job’s actions in Arr first. Acknowledgement releases duplicate protection and allows a new reacquisition. Have you checked the remote actions?')) return;
+                button.disabled = true;
+                try {
+                    const response = await fetch(`${this.api}/arr/reacquire/jobs/${encodeURIComponent(job.id)}/acknowledge`, {
+                        method: 'POST', credentials: 'same-origin',
+                    });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    modal.close();
+                    await this.loadJobs();
+                } catch (error) {
+                    this.toast(`Could not acknowledge job: ${error.message}`, 'error');
+                    button.disabled = false;
+                }
+            });
+            body.append(button);
+        }
         this.openModal(modal);
     }
 

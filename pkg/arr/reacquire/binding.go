@@ -14,6 +14,7 @@ import (
 var (
 	ErrBindingNotFound   = errors.New("arr binding not found")
 	ErrBindingUnsafe     = errors.New("arr binding is not authoritative")
+	ErrJobNotBlocked     = errors.New("reacquire job does not need attention")
 	ErrJobNotTerminal    = errors.New("only completed reacquire jobs can be deleted")
 	ErrServiceNotStarted = errors.New("arr service not started")
 	ErrServiceClosed     = errors.New("arr service closed")
@@ -124,6 +125,7 @@ const (
 	StatusWaitingForGrab     Status = "waiting_for_grab"
 	StatusWaitingForDownload Status = "waiting_for_download"
 	StatusWaitingForImport   Status = "waiting_for_import"
+	StatusNeedsAttention     Status = "needs_attention"
 	StatusReady              Status = "ready"
 	StatusFailed             Status = "failed"
 	StatusCancelled          Status = "cancelled"
@@ -143,6 +145,7 @@ func (status Status) valid() bool {
 		StatusWaitingForGrab,
 		StatusWaitingForDownload,
 		StatusWaitingForImport,
+		StatusNeedsAttention,
 		StatusReady,
 		StatusFailed,
 		StatusCancelled:
