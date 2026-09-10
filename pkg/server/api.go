@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"reflect"
 	"sort"
@@ -16,12 +15,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/arr"
-	"github.com/sirrobot01/decypharr/pkg/manager"
 	"github.com/sirrobot01/decypharr/pkg/repair"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sirrobot01/decypharr/pkg/version"
-	"github.com/sourcegraph/conc/iter"
 )
 
 type mountCacheCleaner interface {
@@ -34,192 +30,6 @@ type mountCachePurger interface {
 
 func (s *Server) handleGetArrs(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, s.manager.Arr().All(), http.StatusOK)
-}
-
-func (s *Server) handleAddContent(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	arrName := r.FormValue("arr")
-	action := r.FormValue("action")
-	debridName := r.FormValue("debrid")
-	callbackUrl := r.FormValue("callbackUrl")
-	downloadFolder := r.FormValue("downloadFolder")
-	if downloadFolder == "" {
-		downloadFolder = config.Get().DownloadFolder
-	}
-	skipMultiSeason := r.FormValue("skipMultiSeason") == "true"
-
-	dlUncached := r.FormValue("downloadUncached") == "true"
-	var downloadUncached *bool
-	if dlUncached {
-		downloadUncached = &dlUncached
-	}
-	rmTrackerUrls := r.FormValue("rmTrackerUrls") == "true"
-
-	// Check config setting - if always remove tracker URLs is enabled, force it to true
-	cfg := config.Get()
-	if cfg.AlwaysRmTrackerUrls {
-		rmTrackerUrls = true
-	}
-
-	// A category with no configured Arr is a throwaway that only routes the
-	// download.
-	instance, known := s.manager.Arr().Get(arrName)
-	if !known {
-		instance = arr.Arr{Name: arrName}
-	}
-
-	// Unified task type for all content types
-	type addTask struct {
-		taskType   string // "torrent", "nzbURL", "nzbFile"
-		magnet     *utils.Magnet
-		nzbContent []byte
-		name       string
-		source     string // for error messages
-	}
-
-	var tasks []addTask
-
-	// Collect torrent URLs
-	if urls := r.FormValue("urls"); urls != "" {
-		for u := range strings.SplitSeq(urls, "\n") {
-			if trimmed := strings.TrimSpace(u); trimmed != "" {
-				magnet, err := utils.GetMagnetFromUrl(trimmed, rmTrackerUrls)
-				if err != nil {
-					tasks = append(tasks, addTask{
-						taskType: "error",
-						source:   fmt.Sprintf("Failed to parse URL %s: %v", trimmed, err),
-					})
-					continue
-				}
-				tasks = append(tasks, addTask{taskType: "torrent", magnet: magnet, source: fmt.Sprintf("URL %s", trimmed)})
-			}
-		}
-	}
-
-	// Collect torrent files
-	if files := r.MultipartForm.File["files"]; len(files) > 0 {
-		for _, fileHeader := range files {
-			file, err := fileHeader.Open()
-			if err != nil {
-				tasks = append(tasks, addTask{
-					taskType: "error",
-					source:   fmt.Sprintf("Failed to open file %s: %v", fileHeader.Filename, err),
-				})
-				continue
-			}
-
-			magnet, err := utils.GetMagnetFromFile(file, fileHeader.Filename, rmTrackerUrls)
-			if err != nil {
-				tasks = append(tasks, addTask{
-					taskType: "error",
-					source:   fmt.Sprintf("Failed to parse torrent file %s: %v", fileHeader.Filename, err),
-				})
-				continue
-			}
-			tasks = append(tasks, addTask{taskType: "torrent", magnet: magnet, source: fmt.Sprintf("File %s", fileHeader.Filename), name: fileHeader.Filename})
-		}
-	}
-
-	// Collect NZB URLs
-	if nzbURLs := r.FormValue("nzbURLs"); nzbURLs != "" {
-		for u := range strings.SplitSeq(nzbURLs, "\n") {
-			if trimmed := strings.TrimSpace(u); trimmed != "" {
-				filename, content, err := utils.DownloadFile(trimmed, utils.WithHeader("User-Agent", s.nzbUserAgent))
-				if err != nil {
-					tasks = append(tasks, addTask{
-						taskType: "error",
-						source:   fmt.Sprintf("Failed to fetch NZB from URL %s: %v", trimmed, err),
-					})
-					continue
-				}
-				tasks = append(tasks, addTask{taskType: "nzb", nzbContent: content, name: filename, source: fmt.Sprintf("NZB URL %s", trimmed)})
-			}
-		}
-	}
-
-	// Collect NZB files
-	if nzbFiles := r.MultipartForm.File["nzbFiles"]; len(nzbFiles) > 0 {
-		for _, fileHeader := range nzbFiles {
-			content, err := getNZBContentFromFile(fileHeader)
-			if err != nil {
-				tasks = append(tasks, addTask{
-					taskType: "error",
-					source:   fmt.Sprintf("Failed to read NZB file %s: %v", fileHeader.Filename, err),
-				})
-				continue
-			}
-			tasks = append(tasks, addTask{taskType: "nzb", nzbContent: content, source: fmt.Sprintf("NZB File %s", fileHeader.Filename), name: fileHeader.Filename})
-		}
-	}
-
-	// Parse all tasks in parallel using iter.Map
-	mapper := iter.Mapper[addTask, *manager.ImportRequest]{
-		MaxGoroutines: min(len(tasks), 10),
-	}
-
-	results := mapper.Map(tasks, func(task *addTask) *manager.ImportRequest {
-		switch task.taskType {
-		case "error":
-			// Task already failed during collection phase
-			return &manager.ImportRequest{
-				Status: "error",
-				Error:  fmt.Sprintf("Failed to import torrent %s: %v", task.name, task.magnet),
-			}
-
-		case "torrent":
-			importReq := manager.NewTorrentRequest(debridName, downloadFolder, task.magnet, instance, config.DownloadAction(action), downloadUncached, callbackUrl, manager.ImportTypeAPI, skipMultiSeason)
-			if err := s.manager.AddNewTorrent(ctx, importReq); err != nil {
-				s.logger.Error().Err(err).Str("source", task.source).Msg("Failed to add torrent")
-				importReq.Error = err.Error()
-				importReq.Status = "error"
-			}
-			return importReq
-
-		case "nzb":
-			importReq := manager.NewNZBRequest(task.name, downloadFolder, task.nzbContent, instance, config.DownloadAction(action), callbackUrl, manager.ImportTypeAPI, skipMultiSeason)
-			nzoID, err := s.manager.AddNewNZB(ctx, importReq)
-			if err != nil {
-				s.logger.Error().Err(err).Str("source", task.source).Msg("Failed to add NZB")
-				importReq.Error = err.Error()
-				importReq.Status = "error"
-			}
-			importReq.Id = nzoID
-			return importReq
-
-		default:
-			return nil
-		}
-	})
-
-	// Filter out nil results
-	filtered := make([]*manager.ImportRequest, 0, len(results))
-	for _, r := range results {
-		if r != nil {
-			filtered = append(filtered, r)
-		}
-	}
-
-	utils.JSONResponse(w, filtered, http.StatusOK)
-}
-
-func getNZBContentFromFile(fileHeader *multipart.FileHeader) ([]byte, error) {
-	file, err := fileHeader.Open()
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	// Read NZB content
-	nzbContent, err := io.ReadAll(file)
-	if err != nil {
-		return nil, err
-	}
-	return nzbContent, nil
 }
 
 func (s *Server) handleGetVersion(w http.ResponseWriter, r *http.Request) {
