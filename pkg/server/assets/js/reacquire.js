@@ -672,7 +672,7 @@ class ReacquireManager {
     }
 
     toast(message, type = 'info') {
-        if (typeof window.createToast === 'function') return window.createToast(message, type);
+        if (typeof window.decypharrUtils.createToast === 'function') return window.decypharrUtils.createToast(message, type);
         console.log(`[${type}]`, message);
     }
 }

@@ -268,7 +268,7 @@ class FileBrowser {
                 return;
             }
             console.error('Error loading entries:', error);
-            window.createToast('Failed to load directory', 'error');
+            window.decypharrUtils.createToast('Failed to load directory', 'error');
         }
     }
 
@@ -332,7 +332,7 @@ class FileBrowser {
 
     async recheckEntry(name) {
         try {
-            window.createToast?.(`Rechecking ${name}…`, 'info');
+            window.decypharrUtils.createToast?.(`Rechecking ${name}…`, 'info');
             const url = `${window.urlBase}api/repair/health/${encodeURIComponent(name)}/check`;
             const res = await fetch(url, {method: 'POST'});
             if (!res.ok) {
@@ -342,10 +342,10 @@ class FileBrowser {
             const state = await res.json();
             this.state.health.set(name, state);
             this.refreshHealthBadges();
-            window.createToast?.(`Health: ${state.status}`, state.status === 'broken' ? 'warning' : 'success');
+            window.decypharrUtils.createToast?.(`Health: ${state.status}`, state.status === 'broken' ? 'warning' : 'success');
         } catch (e) {
             console.error('Recheck failed', e);
-            window.createToast?.(`Recheck failed: ${e.message}`, 'error');
+            window.decypharrUtils.createToast?.(`Recheck failed: ${e.message}`, 'error');
         }
     }
 
@@ -621,11 +621,11 @@ class FileBrowser {
 
             if (!response.ok) throw new Error('Failed to delete entry');
 
-            window.createToast('Item deleted successfully', 'success');
+            window.decypharrUtils.createToast('Item deleted successfully', 'success');
             this.refresh();
         } catch (error) {
             console.error('Error deleting item:', error);
-            window.createToast('Failed to delete item', 'error');
+            window.decypharrUtils.createToast('Failed to delete item', 'error');
         }
     }
 
@@ -745,7 +745,7 @@ class FileBrowser {
         const files = selectedEntries.filter(e => !e.is_dir);
 
         if (files.length === 0) {
-            window.createToast('No files selected for download', 'warning');
+            window.decypharrUtils.createToast('No files selected for download', 'warning');
             return;
         }
 
@@ -753,7 +753,7 @@ class FileBrowser {
             this.downloadFile(entry.path, entry.name);
         });
 
-        window.createToast(`Downloading ${files.length} file(s)`, 'success');
+        window.decypharrUtils.createToast(`Downloading ${files.length} file(s)`, 'success');
     }
 
     async bulkDelete() {
@@ -761,7 +761,7 @@ class FileBrowser {
         const torrents = selectedEntries.filter(e => e.can_delete && e.info_hash);
 
         if (torrents.length === 0) {
-            window.createToast('No items selected for deletion', 'warning');
+            window.decypharrUtils.createToast('No items selected for deletion', 'warning');
             return;
         }
 
@@ -778,12 +778,12 @@ class FileBrowser {
                 body: JSON.stringify({ids})
             });
             if (!response.ok) throw new Error('Failed to delete selected items');
-            window.createToast(`Deleted ${ids.length} item(s)`, 'success');
+            window.decypharrUtils.createToast(`Deleted ${ids.length} item(s)`, 'success');
             this.clearSelection();
             this.refresh();
         } catch (error) {
             console.error('Error deleting selected items:', error);
-            window.createToast('Failed to delete selected items', 'error');
+            window.decypharrUtils.createToast('Failed to delete selected items', 'error');
         }
     }
 
@@ -794,7 +794,7 @@ class FileBrowser {
     async bulkRecheck() {
         const selected = this.getSelectedEntries();
         if (!selected.length) {
-            window.createToast('No items selected', 'warning');
+            window.decypharrUtils.createToast('No items selected', 'warning');
             return;
         }
         for (const entry of selected) {

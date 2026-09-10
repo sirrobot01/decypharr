@@ -53,7 +53,7 @@
             formData.append('username', document.getElementById('username').value);
             formData.append('password', password);
             formData.append('confirmPassword', confirmPassword);
-            await fetcher('/register', {
+            await window.decypharrUtils.fetcher('/register', {
                 method: 'POST',
                 body: formData
             })

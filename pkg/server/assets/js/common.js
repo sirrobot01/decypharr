@@ -319,16 +319,6 @@ class DecypharrUtils {
         }
     }
 
-    // Legacy methods for backward compatibility
-    togglePassword(fieldId) {
-        const field = document.getElementById(fieldId);
-        const button = field?.closest('.password-toggle-container')?.querySelector('.password-toggle-btn');
-        let icon = button.querySelector("i");
-        if (field && icon) {
-            this.togglePasswordField(field, icon);
-        }
-    }
-
     // Theme management
     setupThemeToggle() {
         const themeToggle = document.getElementById('themeToggle');
@@ -710,10 +700,6 @@ class DecypharrUtils {
 
 // Initialize utilities
 window.decypharrUtils = new DecypharrUtils();
-
-// Global functions for backward compatibility
-window.fetcher = (endpoint, options = {}) => window.decypharrUtils.fetcher(endpoint, options);
-window.createToast = (message, type, duration) => window.decypharrUtils.createToast(message, type, duration);
 
 // Export for ES6 modules if needed
 if (typeof module !== 'undefined' && module.exports) {
