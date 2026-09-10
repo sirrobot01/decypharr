@@ -103,9 +103,9 @@ func diskAllocatedMB(dir string) float64 {
 }
 
 // poolRAMMB reports resident bytes owned by both Usenet storage tiers.
-func poolRAMMB() float64 {
-	bufferBytes := usenetBufferPool().Stats().MemoryInUse
-	extentBytes := usenetExtentPool().stats().MemoryInUse
+func poolRAMMB(sr *StreamingReader) float64 {
+	bufferBytes := sr.cache.pools.buffers.Stats().MemoryInUse
+	extentBytes := sr.cache.pools.extents.stats().MemoryInUse
 	return float64(bufferBytes+extentBytes) / (1 << 20)
 }
 
@@ -139,7 +139,7 @@ func BenchmarkColdStream(b *testing.B) {
 				}
 
 				b.StopTimer()
-				peakPoolMB = max(peakPoolMB, poolRAMMB())
+				peakPoolMB = max(peakPoolMB, poolRAMMB(sr))
 				peakDiskMB = max(peakDiskMB, diskAllocatedMB(dir))
 				_ = sr.Close()
 				b.StartTimer()
@@ -304,7 +304,7 @@ func BenchmarkWarmReread(b *testing.B) {
 			}
 			b.StopTimer()
 			// After ResetTimer: it clears previously reported metrics.
-			b.ReportMetric(poolRAMMB(), "pool-ram-MB")
+			b.ReportMetric(poolRAMMB(sr), "pool-ram-MB")
 			b.ReportMetric(diskAllocatedMB(dir), "disk-MB")
 		})
 	}

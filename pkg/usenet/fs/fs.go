@@ -33,6 +33,7 @@ type PrefetchableReaderAt interface {
 
 // FS implements fs.FS for RAR volumes backed by NNTP Segments
 type FS struct {
+	pools             *reader.Pools
 	ctx               context.Context
 	volumes           *xsync.Map[string, *types.Volume]
 	client            *nntp.Client // Connection client for all readers
@@ -55,6 +56,9 @@ func WithRetention(retention reader.Retention) Option {
 func WithFetchScheduler(scheduler *reader.FetchScheduler) Option {
 	return func(f *FS) { f.scheduler = scheduler }
 }
+
+// WithPools shares the service cache budgets with this filesystem.
+func WithPools(pools *reader.Pools) Option { return func(f *FS) { f.pools = pools } }
 
 // NewFS creates a new filesystem backed by the provided connection nntpClient.
 // prefetchSize is the amount of data to prefetch ahead in bytes (e.g., 16*1024*1024 for 16MB)
@@ -127,6 +131,7 @@ func (f *FS) Open(name string) (fs.File, error) {
 		diskPath:          f.diskPath,
 		retention:         f.retention,
 		scheduler:         f.scheduler,
+		pools:             f.pools,
 		logger:            f.logger,
 		volume:            vol,
 	}, nil
@@ -241,6 +246,7 @@ func (f *FS) createNewReaderForVolume(vol *types.Volume) (PrefetchableReaderAt, 
 		reader.WithDiskPath(readerConfig.DiskPath),
 		reader.WithRetention(readerConfig.Retention),
 		reader.WithFetchScheduler(readerConfig.Scheduler),
+		reader.WithPools(f.pools),
 	}
 	// Create the new streaming reader
 	var streamReader *reader.StreamingReader

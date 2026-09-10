@@ -446,7 +446,8 @@ func TestMaxPrefetchSegmentsTracksFairShare(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.DiskPath = t.TempDir()
 
-	withTestPool(t, 64<<20)
+	cfg.Pools = NewPools(64 << 20)
+	t.Cleanup(func() { _ = cfg.Pools.Close() })
 
 	first, err := NewSegmentCache(context.Background(), segs, cfg, &ReaderStats{}, zerolog.Nop())
 	if err != nil {

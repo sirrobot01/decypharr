@@ -739,6 +739,7 @@ func (rp *Pool) GetReader(
 			WithDiskPath(rp.config.DiskPath),
 			WithRetention(rp.config.Retention),
 			WithFetchScheduler(rp.config.Scheduler),
+			WithPools(rp.config.Pools),
 		)
 	} else {
 		reader, err = NewStreamingReader(
@@ -749,6 +750,7 @@ func (rp *Pool) GetReader(
 			WithDiskPath(rp.config.DiskPath),
 			WithRetention(rp.config.Retention),
 			WithFetchScheduler(rp.config.Scheduler),
+			WithPools(rp.config.Pools),
 		)
 	}
 	if err != nil {

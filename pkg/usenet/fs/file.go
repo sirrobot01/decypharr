@@ -17,6 +17,7 @@ import (
 )
 
 type File struct {
+	pools             *reader.Pools
 	ctx               context.Context
 	volume            *types.Volume
 	info              volumeInfo
@@ -191,6 +192,7 @@ func (vf *File) getOrCreateStreamingReader() *reader.StreamingReader {
 				reader.WithDiskPath(readerConfig.DiskPath),
 				reader.WithRetention(readerConfig.Retention),
 				reader.WithFetchScheduler(readerConfig.Scheduler),
+				reader.WithPools(vf.pools),
 			)
 		} else {
 			r, err = reader.NewStreamingReader(
@@ -203,6 +205,7 @@ func (vf *File) getOrCreateStreamingReader() *reader.StreamingReader {
 				reader.WithDiskPath(readerConfig.DiskPath),
 				reader.WithRetention(readerConfig.Retention),
 				reader.WithFetchScheduler(readerConfig.Scheduler),
+				reader.WithPools(vf.pools),
 			)
 		}
 
@@ -295,6 +298,7 @@ func (vf *File) newReaderForRange(start, end int64) (io.ReadCloser, error) {
 			reader.WithDiskPath(readerConfig.DiskPath),
 			reader.WithRetention(readerConfig.Retention),
 			reader.WithFetchScheduler(readerConfig.Scheduler),
+			reader.WithPools(vf.pools),
 		)
 	} else {
 		r, err = reader.NewStreamingReader(
@@ -307,6 +311,7 @@ func (vf *File) newReaderForRange(start, end int64) (io.ReadCloser, error) {
 			reader.WithDiskPath(readerConfig.DiskPath),
 			reader.WithRetention(readerConfig.Retention),
 			reader.WithFetchScheduler(readerConfig.Scheduler),
+			reader.WithPools(vf.pools),
 		)
 	}
 

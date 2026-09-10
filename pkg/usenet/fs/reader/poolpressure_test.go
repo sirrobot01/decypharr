@@ -7,39 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirrobot01/decypharr/internal/buffer"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/nntp"
 	"github.com/sirrobot01/decypharr/internal/testutil/nntpd"
 )
-
-// withTestPool swaps the process-wide usenet buffer pool for one with a known
-// RAM budget, so behaviour under pool pressure is testable.
-func withTestPool(t *testing.T, budget int64) {
-	t.Helper()
-	old := bufPool
-	oldExtents := extents
-	bufPool = buffer.NewPool(buffer.PoolConfig{Name: "usenet-test", MemoryBudget: budget})
-	extents = newExtentPool(budget)
-	bufPoolOnce.Do(func() {}) // fence the singleton so usenetBufferPool keeps ours
-	extentOnce.Do(func() {})
-	t.Cleanup(func() {
-		_ = bufPool.Close()
-		if old == nil {
-			// The singleton had not been built yet, and Do above fenced it
-			// permanently — leave a real pool behind for later tests.
-			old = buffer.NewPool(buffer.PoolConfig{
-				Name:         "usenet",
-				MemoryBudget: config.Get().Usenet.BufferMemoryBytes(),
-			})
-		}
-		bufPool = old
-		if oldExtents == nil {
-			oldExtents = newExtentPool(config.Get().Usenet.BufferMemoryBytes())
-		}
-		extents = oldExtents
-	})
-}
 
 const ppSegSize = int64(750 * 1024)
 
@@ -111,7 +82,8 @@ func TestPlaybackUnderPoolPressure(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			withTestPool(t, tc.poolMB<<20)
+			pools := NewPools(tc.poolMB << 20)
+			t.Cleanup(func() { _ = pools.Close() })
 			srv, client, all := ppStack(t, tc.streams, tc.segsPer, 2*time.Millisecond)
 
 			fileSize := ppSegSize * int64(tc.segsPer)
@@ -119,7 +91,7 @@ func TestPlaybackUnderPoolPressure(t *testing.T) {
 			readers := make([]*StreamingReader, tc.streams)
 			for s := range tc.streams {
 				sr, err := NewStreamingReader(context.Background(), client, all[s],
-					WithMaxConnections(8), WithPrefetchAhead(22), WithRetention(RetentionWindow))
+					WithPools(pools), WithMaxConnections(8), WithPrefetchAhead(22), WithRetention(RetentionWindow))
 				if err != nil {
 					t.Fatal(err)
 				}

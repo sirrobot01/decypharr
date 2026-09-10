@@ -247,6 +247,7 @@ func (r *contextSectionReader) Read(p []byte) (int, error) {
 }
 
 type Usenet struct {
+	bufferPools              *reader.Pools
 	nntp                     *nntp.Client
 	analyzer                 *parser.NZBParser
 	fetchScheduler           *reader.FetchScheduler
@@ -360,6 +361,7 @@ func New() (*Usenet, error) {
 	}
 
 	u := &Usenet{
+		bufferPools:              reader.NewPools(usenetConfig.BufferMemoryBytes()),
 		nzbStorage:               nzbStorage,
 		nntp:                     client,
 		analyzer:                 parser.NewParser(client, processingMaxConns, _logger.With().Str("component", "parser").Logger()),
@@ -404,6 +406,7 @@ func (u *Usenet) createEntry(file *storage.NZBFile, prefetchSize int64, retentio
 		u.logger,
 		fs.WithRetention(retention),
 		fs.WithFetchScheduler(u.fetchScheduler),
+		fs.WithPools(u.bufferPools),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create usenet FS: %w", err)
@@ -787,6 +790,10 @@ func (u *Usenet) Close() error {
 		cleanup.Wait()
 		if u.fetchScheduler != nil {
 			u.fetchScheduler.Close()
+		}
+
+		if u.bufferPools != nil {
+			closeErr = errors.Join(closeErr, u.bufferPools.Close())
 		}
 
 		if u.nntp != nil {

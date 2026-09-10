@@ -20,6 +20,8 @@ import (
 // SegmentCache publishes verified segments as immutable RAM extents or as
 // ranges in a sparse rewind file.
 type SegmentCache struct {
+	pools     *Pools
+	ownsPools bool
 	// Segment metadata
 	segments   []SegmentMeta
 	segCount   int
@@ -136,14 +138,31 @@ func NewSegmentCache(
 		bufCfg.TotalSize = totalSize
 		bufCfg.ImmutableDisk = true
 	}
+	pools := config.Pools
+	ownsPools := pools == nil
+	if ownsPools {
+		pools = NewPools(memSize)
+	}
+	pools.mu.RLock()
+	defer pools.mu.RUnlock()
+	if pools.closed {
+		cancel()
+		if diskPath != "" {
+			_ = os.RemoveAll(diskPath)
+		}
+		return nil, buffer.ErrClosed
+	}
 	var buf *buffer.Buffer
 	if !memoryMode {
 		var err error
-		buf, err = usenetBufferPool().NewBuffer(bufCfg)
+		buf, err = pools.buffers.NewBuffer(bufCfg)
 		if err != nil {
 			cancel()
 			if diskPath != "" {
 				_ = os.RemoveAll(diskPath)
+			}
+			if ownsPools {
+				_ = pools.buffers.Close()
 			}
 			return nil, fmt.Errorf("create buffer: %w", err)
 		}
@@ -155,6 +174,8 @@ func NewSegmentCache(
 	}
 
 	sc := &SegmentCache{
+		pools:        pools,
+		ownsPools:    ownsPools,
 		segments:     segments,
 		segCount:     segCount,
 		segOffsets:   offsets,
@@ -176,7 +197,7 @@ func NewSegmentCache(
 		stats:        stats,
 	}
 	if sc.memoryMode {
-		sc.extentPool = usenetExtentPool()
+		sc.extentPool = pools.extents
 		sc.extentPool.register(sc)
 	}
 
@@ -977,6 +998,9 @@ func (sc *SegmentCache) Close() error {
 	}
 	if sc.diskPath != "" {
 		closeErr = errors.Join(closeErr, os.RemoveAll(sc.diskPath))
+	}
+	if sc.ownsPools {
+		closeErr = errors.Join(closeErr, sc.pools.Close())
 	}
 	return closeErr
 }

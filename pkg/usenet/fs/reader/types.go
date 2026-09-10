@@ -100,6 +100,10 @@ const (
 
 // Config holds configuration for StreamingReader.
 type Config struct {
+	// Pools shares memory budgets across readers in one service run.
+	// A nil value gives a standalone reader its own pools.
+	Pools *Pools
+
 	// DiskPath is the base directory for disk cache (default: system temp dir).
 	DiskPath string
 
@@ -293,3 +297,6 @@ func (s *ReaderStats) Snapshot() map[string]int64 {
 		"prefetch_cancelled": s.PrefetchCancelled.Load(),
 	}
 }
+
+// WithPools sets the cache pools for this reader.
+func WithPools(pools *Pools) Option { return func(c *Config) { c.Pools = pools } }
