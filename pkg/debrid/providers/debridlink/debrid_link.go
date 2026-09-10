@@ -184,11 +184,13 @@ func (dl *DebridLink) GetTorrent(torrentId string) (*types.Torrent, error) {
 		Id:               t.ID,
 		Name:             name,
 		Bytes:            t.TotalSize,
-		Status:           "downloaded",
+		Status:           types.TorrentStatusDownloaded,
 		Filename:         name,
 		OriginalFilename: name,
 		Debrid:           dl.config.Name,
 		Added:            time.Unix(t.Created, 0),
+		Files:            make(map[string]types.File, len(t.Files)),
+		InfoHash:         t.HashString,
 	}
 	cfg := config.Get()
 	for _, f := range t.Files {
@@ -541,6 +543,10 @@ func (dl *DebridLink) getTorrents(page, perPage int) ([]*types.Torrent, error) {
 		return torrents, fmt.Errorf("debridlink API error: Status: %d", resp.StatusCode)
 	}
 
+	if !res.Success || res.Value == nil {
+		return nil, fmt.Errorf("error getting torrents")
+	}
+
 	data := *res.Value
 
 	if len(data) == 0 {
@@ -554,11 +560,11 @@ func (dl *DebridLink) getTorrents(page, perPage int) ([]*types.Torrent, error) {
 			Id:               t.ID,
 			Name:             t.Name,
 			Bytes:            t.TotalSize,
-			Status:           "downloaded",
+			Status:           types.TorrentStatusDownloaded,
 			Filename:         t.Name,
 			OriginalFilename: t.Name,
 			InfoHash:         t.HashString,
-			Files:            make(map[string]types.File),
+			Files:            make(map[string]types.File, len(t.Files)),
 			Debrid:           dl.config.Name,
 			Added:            time.Unix(t.Created, 0),
 		}
