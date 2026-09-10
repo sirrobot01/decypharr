@@ -309,7 +309,7 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 
 	for _, f := range data.Files {
 		fileName := filepath.Base(f.Name)
-		if err := cfg.IsFileAllowed(f.AbsolutePath, f.Size); err != nil {
+		if err := cfg.ValidateFileAllowed(f.AbsolutePath, f.Size); err != nil {
 			continue
 		}
 
@@ -403,7 +403,7 @@ func (tb *Torbox) updateTorrentWithClient(client *request.Client, t *types.Torre
 	for _, f := range data.Files {
 		fileName := filepath.Base(f.Name)
 
-		if err := cfg.IsFileAllowed(f.AbsolutePath, f.Size); err != nil {
+		if err := cfg.ValidateFileAllowed(f.AbsolutePath, f.Size); err != nil {
 			continue
 		}
 
@@ -573,7 +573,7 @@ func (tb *Torbox) getTorrents(offset int) ([]*types.Torrent, error) {
 
 		for _, f := range data.Files {
 			fileName := filepath.Base(f.Name)
-			if err := cfg.IsFileAllowed(f.AbsolutePath, f.Size); err != nil {
+			if err := cfg.ValidateFileAllowed(f.AbsolutePath, f.Size); err != nil {
 				continue
 			}
 			file := types.File{

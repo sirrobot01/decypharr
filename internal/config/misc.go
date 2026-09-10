@@ -29,7 +29,7 @@ func isSample(path string) bool {
 	return sampleRegex.MatchString(filename)
 }
 
-func (c *Config) IsFileAllowed(filename string, filesize int64) error {
+func (c *Config) ValidateFileAllowed(filename string, filesize int64) error {
 	// Skip samples if configured
 	if !c.AllowSamples && isSample(filename) {
 		// Skip sample files

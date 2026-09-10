@@ -48,7 +48,7 @@ type Premiumize struct {
 	config                config.Debrid
 	profile               *types.Profile
 	profileLastFetched    time.Time
-	isFileAllowed         func(string, int64) error
+	validateFileAllowed   func(string, int64) error
 }
 
 func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Premiumize, error) {
@@ -87,7 +87,7 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Premiumize
 		autoExpiresLinksAfter: autoExpiresLinksAfter,
 		logger:                _log,
 		config:                dc,
-		isFileAllowed:         func(name string, size int64) error { return config.Get().IsFileAllowed(name, size) },
+		validateFileAllowed:   func(name string, size int64) error { return config.Get().ValidateFileAllowed(name, size) },
 	}, nil
 }
 
@@ -467,8 +467,8 @@ func (pm *Premiumize) addFile(files map[string]types.File, links *[]string, tran
 	if itemPath == "" {
 		itemPath = name
 	}
-	if pm.isFileAllowed != nil {
-		if err := pm.isFileAllowed(itemPath, size); err != nil {
+	if pm.validateFileAllowed != nil {
+		if err := pm.validateFileAllowed(itemPath, size); err != nil {
 			return
 		}
 	} else if filepath.Ext(itemPath) == "" {

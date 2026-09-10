@@ -37,10 +37,10 @@ func TestGetTorrentsAssignsStableUniqueHashesWithoutMagnetSources(t *testing.T) 
 	t.Cleanup(server.Close)
 
 	pm := &Premiumize{
-		Host:          server.URL,
-		client:        request.New(request.WithMaxRetries(0)),
-		config:        config.Debrid{Name: "premiumize-primary"},
-		isFileAllowed: func(string, int64) error { return nil },
+		Host:                server.URL,
+		client:              request.New(request.WithMaxRetries(0)),
+		config:              config.Debrid{Name: "premiumize-primary"},
+		validateFileAllowed: func(string, int64) error { return nil },
 	}
 
 	first, err := pm.GetTorrents()

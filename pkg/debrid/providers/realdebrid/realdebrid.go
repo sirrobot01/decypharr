@@ -336,7 +336,7 @@ func (r *RealDebrid) getTorrentFiles(t *types.Torrent, data torrentInfo) map[str
 
 	for _, f := range data.Files {
 		name := filepath.Base(f.Path)
-		if err := cfg.IsFileAllowed(name, f.Bytes); err != nil {
+		if err := cfg.ValidateFileAllowed(name, f.Bytes); err != nil {
 			continue
 		}
 

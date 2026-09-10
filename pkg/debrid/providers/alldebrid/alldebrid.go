@@ -235,7 +235,7 @@ func (ad *AllDebrid) flattenFiles(torrentId string, files []MagnetFile, parentPa
 		} else {
 			fileName := filepath.Base(f.Name)
 
-			if err := cfg.IsFileAllowed(f.Name, f.Size); err != nil {
+			if err := cfg.ValidateFileAllowed(f.Name, f.Size); err != nil {
 				continue
 			}
 
@@ -559,7 +559,7 @@ func (ad *AllDebrid) GetTorrents() ([]*types.Torrent, error) {
 			Added:            time.Unix(magnet.CompletionDate, 0),
 		}
 		for _, f := range magnet.Files {
-			if err := cfg.IsFileAllowed(f.Name, f.Size); err != nil {
+			if err := cfg.ValidateFileAllowed(f.Name, f.Size); err != nil {
 				continue
 			}
 			file := types.File{
