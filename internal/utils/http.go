@@ -147,9 +147,6 @@ func DownloadFile(url string, options ...DownloadOptions) (string, []byte, error
 	if resp.StatusCode != http.StatusOK {
 		return "", nil, fmt.Errorf("failed to download file: status code %d", resp.StatusCode)
 	}
-	if resp.StatusCode != http.StatusOK {
-		return "", nil, fmt.Errorf("failed to download file: status code %d", resp.StatusCode)
-	}
 
 	filename := getFilenameFromResponse(resp, url)
 
