@@ -1,7 +1,8 @@
-package manager
+package strm
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,12 +11,10 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/pkg/arr"
 	"github.com/sirrobot01/decypharr/pkg/storage"
-	"github.com/sirrobot01/decypharr/pkg/strm"
 )
 
-func newStrmTestManager(t *testing.T) *Manager {
+func newTestReconciler(t *testing.T) *Reconciler {
 	t.Helper()
 	config.Reset()
 	config.SetConfigPath(t.TempDir())
@@ -27,13 +26,7 @@ func newStrmTestManager(t *testing.T) *Manager {
 	}
 	t.Cleanup(func() { _ = strg.Close() })
 
-	m := &Manager{
-		storage: strg,
-		logger:  zerolog.Nop(),
-		arr:     arr.New(),
-		ctx:     context.Background(),
-	}
-	m.strm = NewStrm(m)
+	m := NewReconciler(t.Context(), strg, nil, zerolog.Nop())
 
 	cfg := config.Get()
 	cfg.AppURL = "http://media.local:8282"
@@ -44,7 +37,7 @@ func newStrmTestManager(t *testing.T) *Manager {
 	return m
 }
 
-func addStrmTestEntry(t *testing.T, m *Manager, infohash, name string, files ...string) *storage.Entry {
+func addStrmTestEntry(t *testing.T, m *Reconciler, infohash, name string, files ...string) *storage.Entry {
 	t.Helper()
 	entry := &storage.Entry{
 		InfoHash: infohash,
@@ -83,13 +76,13 @@ func mustRead(t *testing.T, path string) string {
 // foreign .strm files, then assert the sweep converges disk to the desired
 // state and leaves foreign files alone.
 func TestStrmSweepGoldenTree(t *testing.T) {
-	m := newStrmTestManager(t)
+	m := newTestReconciler(t)
 	cfg := config.Get()
 
 	infohash := "aabbccddeeff00112233445566778899aabbccdd"
 	entry := addStrmTestEntry(t, m, infohash, "Movie.2023.1080p", "Movie.2023.1080p.mkv")
 	fileID := entry.Files["Movie.2023.1080p.mkv"].ID
-	want := strm.FileURL(strm.BaseURL(cfg), cfg.Strm.Secret, infohash, fileID, "Movie.2023.1080p.mkv")
+	want := FileURL(BaseURL(cfg), cfg.Strm.Secret, infohash, fileID, "Movie.2023.1080p.mkv")
 
 	unknown := strings.Repeat("00", 20)
 	strmPath := filepath.Join(cfg.Strm.Path, "Movie.2023.1080p", "Movie.2023.1080p.strm")
@@ -100,10 +93,10 @@ func TestStrmSweepGoldenTree(t *testing.T) {
 	// entry, and a foreign file we must never touch.
 	stale := "http://old-host:9999/stream/" + infohash + "/" + fileID + "/Movie.2023.1080p.mkv?s=deadbeef"
 	mustWrite(t, strmPath, stale)
-	mustWrite(t, orphanPath, strm.FileURL("http://media.local:8282", cfg.Strm.Secret, unknown, "0123456789abcdef", "Gone.mkv"))
+	mustWrite(t, orphanPath, FileURL("http://media.local:8282", cfg.Strm.Secret, unknown, "0123456789abcdef", "Gone.mkv"))
 	mustWrite(t, foreignPath, "plex://movie/12345")
 
-	rep, err := m.strm.Sweep(context.Background())
+	rep, err := m.Sweep(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +120,7 @@ func TestStrmSweepGoldenTree(t *testing.T) {
 	}
 
 	// Convergence: a second sweep verifies everything and writes nothing.
-	rep, err = m.strm.Sweep(context.Background())
+	rep, err = m.Sweep(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,24 +130,24 @@ func TestStrmSweepGoldenTree(t *testing.T) {
 }
 
 func TestStrmSweepDisabled(t *testing.T) {
-	m := newStrmTestManager(t)
+	m := newTestReconciler(t)
 	config.Get().Strm.Enabled = false
 
-	if _, err := m.strm.Sweep(context.Background()); err == nil {
+	if _, err := m.Sweep(context.Background()); err == nil {
 		t.Fatal("sweep must refuse to run while disabled")
 	}
 }
 
-// A repair that renames a file (new file ID) must replace the old .strm.
+// A repair that renames a file (new file ID) must replace the old .
 func TestStrmSyncEntryRemovesStaleAfterRename(t *testing.T) {
-	m := newStrmTestManager(t)
+	m := newTestReconciler(t)
 	cfg := config.Get()
 
 	infohash := "aabbccddeeff00112233445566778899aabbccdd"
 	entry := addStrmTestEntry(t, m, infohash, "Show.S01", "Show.S01E01.mkv")
 
-	rep := &StrmReport{}
-	m.strm.syncEntry(context.Background(), entry, rep)
+	rep := &Report{}
+	m.syncEntry(context.Background(), entry, rep)
 	oldPath := filepath.Join(cfg.Strm.Path, entry.GetFolder(), "Show.S01E01.strm")
 	if _, err := os.Stat(oldPath); err != nil {
 		t.Fatal(err)
@@ -166,14 +159,14 @@ func TestStrmSyncEntryRemovesStaleAfterRename(t *testing.T) {
 	if err := m.storage.AddOrUpdate(entry); err != nil {
 		t.Fatal(err)
 	}
-	m.strm.syncEntry(context.Background(), entry, rep)
+	m.syncEntry(context.Background(), entry, rep)
 
 	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
 		t.Error("stale .strm for renamed file not removed")
 	}
 	newPath := filepath.Join(cfg.Strm.Path, entry.GetFolder(), "Show.S01E01.Repack.strm")
 	content := mustRead(t, newPath)
-	ih, id, ok := strm.ParseURL(content)
+	ih, id, ok := ParseURL(content)
 	if !ok || ih != infohash || id != entry.Files["Show.S01E01.Repack.mkv"].ID {
 		t.Errorf("new .strm content = %q", content)
 	}
@@ -182,13 +175,13 @@ func TestStrmSyncEntryRemovesStaleAfterRename(t *testing.T) {
 // Deleting an entry removes its files from the export tree without waiting
 // for a sweep; the folder is pruned when empty.
 func TestStrmRemoveEntry(t *testing.T) {
-	m := newStrmTestManager(t)
+	m := newTestReconciler(t)
 	cfg := config.Get()
 
 	infohash := "aabbccddeeff00112233445566778899aabbccdd"
 	entry := addStrmTestEntry(t, m, infohash, "Movie.2023", "Movie.2023.mkv")
-	rep := &StrmReport{}
-	m.strm.syncEntry(context.Background(), entry, rep)
+	rep := &Report{}
+	m.syncEntry(context.Background(), entry, rep)
 
 	dir := filepath.Join(cfg.Strm.Path, entry.GetFolder())
 	if _, err := os.Stat(filepath.Join(dir, "Movie.2023.strm")); err != nil {
@@ -197,7 +190,7 @@ func TestStrmRemoveEntry(t *testing.T) {
 
 	// Synchronous variant of RemoveEntryAsync's work for the test: reuse the
 	// async trigger and wait for the folder to disappear.
-	m.strm.RemoveEntryAsync(entry)
+	m.RemoveEntryAsync(entry)
 	for i := 0; i < 100; i++ {
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			return
@@ -205,4 +198,41 @@ func TestStrmRemoveEntry(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("entry folder %s not removed", dir)
+}
+
+func TestSidecarStreamIsCompleteBeforePublication(t *testing.T) {
+	for _, body := range []string{"complete", "short"} {
+		t.Run(body, func(t *testing.T) {
+			reconciler := newTestReconciler(t)
+			entry := &storage.Entry{InfoHash: "entry"}
+			file := &storage.File{Name: "movie.srt", Size: 8}
+			ctx := t.Context()
+			reconciler.openStream = func(gotCtx context.Context, gotEntry *storage.Entry, filename string) (io.ReadCloser, error) {
+				if gotCtx != ctx || gotEntry != entry || filename != file.Name {
+					t.Fatal("stream request lost its context or identity")
+				}
+				return io.NopCloser(strings.NewReader(body)), nil
+			}
+			dest := filepath.Join(t.TempDir(), file.Name)
+			err := reconciler.downloadSidecar(ctx, entry, file, dest)
+			if body == "complete" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := mustRead(t, dest); got != body {
+					t.Fatalf("sidecar = %q", got)
+				}
+			} else {
+				if err == nil {
+					t.Fatal("short sidecar was accepted")
+				}
+				if _, err := os.Stat(dest); !os.IsNotExist(err) {
+					t.Fatalf("partial sidecar was published: %v", err)
+				}
+				if _, err := os.Stat(dest + ".part"); !os.IsNotExist(err) {
+					t.Fatalf("partial temporary file remains: %v", err)
+				}
+			}
+		})
+	}
 }

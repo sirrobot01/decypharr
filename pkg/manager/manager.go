@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -27,6 +28,7 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/notifications"
 	"github.com/sirrobot01/decypharr/pkg/repair"
 	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/sirrobot01/decypharr/pkg/strm"
 	"github.com/sirrobot01/decypharr/pkg/usenet"
 	"github.com/sirrobot01/decypharr/pkg/version"
 	"golang.org/x/sync/singleflight"
@@ -70,7 +72,7 @@ type Manager struct {
 	ctx   context.Context
 
 	// strm reconciler
-	strm *Strm
+	strm *strm.Reconciler
 
 	virtualFoldersMu sync.RWMutex
 	virtualFolders   *VirtualFolders
@@ -248,7 +250,9 @@ func (m *Manager) init() {
 	m.fixer = NewFixer(m)
 
 	// Initialize strm reconciler
-	m.strm = NewStrm(m)
+	m.strm = strm.NewReconciler(m.ctx, m.storage, func(ctx context.Context, entry *storage.Entry, filename string) (io.ReadCloser, error) {
+		return m.OpenStreamUntracked(ctx, entry, filename, 0)
+	}, m.logger)
 
 	// Set mount paths
 	m.setMountPaths()

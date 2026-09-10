@@ -1,4 +1,4 @@
-package manager
+package strm
 
 import (
 	"context"
@@ -14,33 +14,29 @@ import (
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/storage"
-	"github.com/sirrobot01/decypharr/pkg/strm"
 )
 
 // maxStrmRead bounds .strm content reads; canonical URLs are far smaller.
 const maxStrmRead = 1024
 
-// Strm maintains the .strm export tree. When enabled, every entry in storage
-// gets a folder of identity-URL .strm files (plus sidecars) under the
-// configured path. Decypharr owns that tree completely: the reconciler
-// writes, rewrites, and removes files so disk always matches
-// f(entries, config). Files whose content is not one of our URLs are never
-// touched.
-type Strm struct {
-	manager *Manager
-	logger  zerolog.Logger
-	sweepMu sync.Mutex
+// Reconciler maintains the STRM export tree and its sidecar files.
+// It removes stale files only when their URLs identify them as our exports.
+type Reconciler struct {
+	storage    *storage.Storage
+	ctx        context.Context
+	openStream func(context.Context, *storage.Entry, string) (io.ReadCloser, error)
+	logger     zerolog.Logger
+	sweepMu    sync.Mutex
 }
 
-func NewStrm(m *Manager) *Strm {
-	return &Strm{
-		manager: m,
-		logger:  m.logger.With().Str("component", "strm").Logger(),
-	}
+// NewReconciler creates the export service with its storage and stream source.
+func NewReconciler(ctx context.Context, store *storage.Storage, openStream func(context.Context, *storage.Entry, string) (io.ReadCloser, error), logger zerolog.Logger) *Reconciler {
+	return &Reconciler{ctx: ctx, storage: store, openStream: openStream,
+		logger: logger.With().Str("component", "strm").Logger()}
 }
 
-// StrmReport is the outcome of a reconcile pass.
-type StrmReport struct {
+// Report is the outcome of a reconcile pass.
+type Report struct {
 	Entries  int      `json:"entries"`
 	Verified int      `json:"verified"`
 	Written  int      `json:"written"`
@@ -49,7 +45,7 @@ type StrmReport struct {
 	Errors   []string `json:"errors,omitempty"`
 }
 
-func (r *StrmReport) addError(err error) {
+func (r *Report) addError(err error) {
 	r.Errors = append(r.Errors, err.Error())
 }
 
@@ -65,9 +61,9 @@ func entryDir(cfg *config.Config, entry *storage.Entry) string {
 }
 
 // desired returns the .strm files and sidecar downloads an entry should have.
-func (s *Strm) desired(entry *storage.Entry) ([]strmTarget, []*storage.File) {
+func (s *Reconciler) desired(entry *storage.Entry) ([]strmTarget, []*storage.File) {
 	cfg := config.Get()
-	base := strm.BaseURL(cfg)
+	base := BaseURL(cfg)
 	dir := entryDir(cfg, entry)
 	maxSidecar := cfg.Strm.SidecarMaxBytes()
 
@@ -77,10 +73,10 @@ func (s *Strm) desired(entry *storage.Entry) ([]strmTarget, []*storage.File) {
 		switch {
 		case utils.IsVideoFile(f.Name):
 			targets = append(targets, strmTarget{
-				path:    filepath.Join(dir, strm.FileName(f.Name, cfg.Strm.KeepMediaExtension)),
-				content: strm.FileURL(base, cfg.Strm.Secret, entry.InfoHash, f.ID, f.Name),
+				path:    filepath.Join(dir, FileName(f.Name, cfg.Strm.KeepMediaExtension)),
+				content: FileURL(base, cfg.Strm.Secret, entry.InfoHash, f.ID, f.Name),
 			})
-		case cfg.Strm.SidecarsEnabled() && strm.IsSidecar(f.Name) && f.Size > 0 && f.Size <= maxSidecar:
+		case cfg.Strm.SidecarsEnabled() && IsSidecar(f.Name) && f.Size > 0 && f.Size <= maxSidecar:
 			sidecars = append(sidecars, f)
 		}
 	}
@@ -90,16 +86,16 @@ func (s *Strm) desired(entry *storage.Entry) ([]strmTarget, []*storage.File) {
 // SyncEntryAsync reconciles one entry's export folder in the background —
 // the post-download and entry-updated trigger. Only entries present in main
 // storage are exported; their URLs must resolve.
-func (s *Strm) SyncEntryAsync(entry *storage.Entry) {
+func (s *Reconciler) SyncEntryAsync(entry *storage.Entry) {
 	if !config.Get().Strm.Active() {
 		return
 	}
 	go func() {
-		if ok, _ := s.manager.storage.Exists(entry.InfoHash); !ok {
+		if ok, _ := s.storage.Exists(entry.InfoHash); !ok {
 			return
 		}
-		rep := &StrmReport{}
-		s.syncEntry(s.manager.ctx, entry, rep)
+		rep := &Report{}
+		s.syncEntry(s.ctx, entry, rep)
 		for _, e := range rep.Errors {
 			s.logger.Warn().Str("entry", entry.Name).Msg("strm sync: " + e)
 		}
@@ -109,7 +105,7 @@ func (s *Strm) SyncEntryAsync(entry *storage.Entry) {
 // syncEntry reconciles one entry's folder: (re)write desired .strm files,
 // remove stale ones this entry owns, download missing sidecars. Returns the
 // desired targets so sweeps know which paths are accounted for.
-func (s *Strm) syncEntry(ctx context.Context, entry *storage.Entry, rep *StrmReport) []strmTarget {
+func (s *Reconciler) syncEntry(ctx context.Context, entry *storage.Entry, rep *Report) []strmTarget {
 	if len(entry.Files) == 0 {
 		return nil
 	}
@@ -118,7 +114,7 @@ func (s *Strm) syncEntry(ctx context.Context, entry *storage.Entry, rep *StrmRep
 	// AddOrUpdate assigns and persists them.
 	for _, f := range entry.Files {
 		if f.ID == "" {
-			if err := s.manager.storage.AddOrUpdate(entry); err != nil {
+			if err := s.storage.AddOrUpdate(entry); err != nil {
 				rep.addError(fmt.Errorf("assign file ids for %s: %w", entry.Name, err))
 				return nil
 			}
@@ -154,7 +150,7 @@ func (s *Strm) syncEntry(ctx context.Context, entry *storage.Entry, rep *StrmRep
 // entry's infohash but are no longer desired (renamed by a repair, naming
 // config changed). Other entries may share the folder name; their files are
 // left alone.
-func (s *Strm) removeStale(entry *storage.Entry, targets []strmTarget, rep *StrmReport) {
+func (s *Reconciler) removeStale(entry *storage.Entry, targets []strmTarget, rep *Report) {
 	keep := make(map[string]struct{}, len(targets))
 	for _, t := range targets {
 		keep[t.path] = struct{}{}
@@ -170,7 +166,7 @@ func (s *Strm) removeStale(entry *storage.Entry, targets []strmTarget, rep *Strm
 		if err != nil {
 			return nil
 		}
-		if infohash, _, ok := strm.ParseURL(content); !ok || infohash != entry.InfoHash {
+		if infohash, _, ok := ParseURL(content); !ok || infohash != entry.InfoHash {
 			return nil
 		}
 		if err := os.Remove(path); err != nil {
@@ -182,7 +178,7 @@ func (s *Strm) removeStale(entry *storage.Entry, targets []strmTarget, rep *Strm
 	})
 }
 
-func (s *Strm) syncSidecar(ctx context.Context, entry *storage.Entry, file *storage.File, rep *StrmReport) {
+func (s *Reconciler) syncSidecar(ctx context.Context, entry *storage.Entry, file *storage.File, rep *Report) {
 	dest := filepath.Join(entryDir(config.Get(), entry), file.Name)
 	if fi, err := os.Stat(dest); err == nil && fi.Size() == file.Size {
 		return
@@ -194,8 +190,8 @@ func (s *Strm) syncSidecar(ctx context.Context, entry *storage.Entry, file *stor
 	rep.Sidecars++
 }
 
-func (s *Strm) downloadSidecar(ctx context.Context, entry *storage.Entry, file *storage.File, dest string) error {
-	stream, err := s.manager.OpenStreamUntracked(ctx, entry, file.Name, 0)
+func (s *Reconciler) downloadSidecar(ctx context.Context, entry *storage.Entry, file *storage.File, dest string) error {
+	stream, err := s.openStream(ctx, entry, file.Name)
 	if err != nil {
 		return err
 	}
@@ -227,7 +223,7 @@ func (s *Strm) downloadSidecar(ctx context.Context, entry *storage.Entry, file *
 // then any .strm left in the tree that is ours but no longer desired —
 // deleted entries, renamed files, stale folder names — is removed, pruning
 // directories that become empty.
-func (s *Strm) Sweep(ctx context.Context) (*StrmReport, error) {
+func (s *Reconciler) Sweep(ctx context.Context) (*Report, error) {
 	cfg := config.Get()
 	if !cfg.Strm.Active() {
 		return nil, fmt.Errorf("strm is disabled or has no path configured")
@@ -236,8 +232,8 @@ func (s *Strm) Sweep(ctx context.Context) (*StrmReport, error) {
 	s.sweepMu.Lock()
 	defer s.sweepMu.Unlock()
 
-	rep := &StrmReport{}
-	entries, err := s.manager.storage.List(nil)
+	rep := &Report{}
+	entries, err := s.storage.List(nil)
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +260,7 @@ func (s *Strm) Sweep(ctx context.Context) (*StrmReport, error) {
 		if err != nil {
 			return ctx.Err()
 		}
-		if _, _, ok := strm.ParseURL(content); ok {
+		if _, _, ok := ParseURL(content); ok {
 			stale = append(stale, path)
 		}
 		return ctx.Err()
@@ -283,12 +279,12 @@ func (s *Strm) Sweep(ctx context.Context) (*StrmReport, error) {
 
 // SweepAsync runs a background sweep — the regenerate, config-change, and
 // startup trigger. A no-op while strm is disabled.
-func (s *Strm) SweepAsync(reason string) {
+func (s *Reconciler) SweepAsync(reason string) {
 	if !config.Get().Strm.Active() {
 		return
 	}
 	go func() {
-		rep, err := s.Sweep(s.manager.ctx)
+		rep, err := s.Sweep(s.ctx)
 		if err != nil {
 			s.logger.Warn().Err(err).Str("reason", reason).Msg("strm sweep failed")
 			return
@@ -308,7 +304,7 @@ func (s *Strm) SweepAsync(reason string) {
 // RemoveEntryAsync deletes an entry's .strm files right after the entry is
 // deleted, so its folder doesn't linger until the next sweep. Only files
 // carrying the entry's infohash are removed.
-func (s *Strm) RemoveEntryAsync(entry *storage.Entry) {
+func (s *Reconciler) RemoveEntryAsync(entry *storage.Entry) {
 	cfg := config.Get()
 	if !cfg.Strm.Active() {
 		return
@@ -323,7 +319,7 @@ func (s *Strm) RemoveEntryAsync(entry *storage.Entry) {
 			if err != nil {
 				return nil
 			}
-			if infohash, _, ok := strm.ParseURL(content); ok && infohash == entry.InfoHash {
+			if infohash, _, ok := ParseURL(content); ok && infohash == entry.InfoHash {
 				_ = os.Remove(path)
 			}
 			return nil
@@ -331,7 +327,7 @@ func (s *Strm) RemoveEntryAsync(entry *storage.Entry) {
 		// Sidecars carry no signature; remove them by name while we still
 		// know the entry's file list.
 		for _, f := range entry.Files {
-			if strm.IsSidecar(f.Name) {
+			if IsSidecar(f.Name) {
 				_ = os.Remove(filepath.Join(dir, f.Name))
 			}
 		}
