@@ -12,8 +12,8 @@ import (
 
 	"github.com/javi11/sevenzip"
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/internal/utils"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 // SevenZParser parses 7z archives from NNTP segments

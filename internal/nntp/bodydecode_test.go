@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	nntpyenc "github.com/sirrobot01/decypharr/internal/nntp/yenc"
+	nntpyenc "github.com/dylanmazurek/decypharr/internal/nntp/yenc"
 )
 
 // testPayload returns bytes from 'A'..'Z' cycling; every encoded byte

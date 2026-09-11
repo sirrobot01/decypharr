@@ -10,10 +10,10 @@ import (
 
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/nntp"
-	"github.com/sirrobot01/decypharr/pkg/usenet/fs/reader"
-	"github.com/sirrobot01/decypharr/pkg/usenet/types"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/nntp"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/fs/reader"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/types"
 	"go4.org/readerutil"
 )
 

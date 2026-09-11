@@ -11,8 +11,8 @@ import (
 	"time"
 
 	json "github.com/bytedance/sonic"
-	"github.com/sirrobot01/decypharr/internal/request"
-	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/dylanmazurek/decypharr/internal/request"
+	"github.com/dylanmazurek/decypharr/internal/utils"
 )
 
 var (

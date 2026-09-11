@@ -13,8 +13,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/sirrobot01/decypharr/internal/buffer"
-	"github.com/sirrobot01/decypharr/internal/nntp"
+	"github.com/dylanmazurek/decypharr/internal/buffer"
+	"github.com/dylanmazurek/decypharr/internal/nntp"
 )
 
 // SegmentCache publishes verified segments as immutable RAM extents or as

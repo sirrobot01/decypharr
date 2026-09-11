@@ -4,7 +4,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	usenetfs "github.com/sirrobot01/decypharr/pkg/usenet/fs"
+	usenetfs "github.com/dylanmazurek/decypharr/pkg/usenet/fs"
 )
 
 type idleReleaseReader struct {

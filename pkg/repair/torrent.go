@@ -6,11 +6,11 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/customerror"
-	debrid "github.com/sirrobot01/decypharr/pkg/debrid/common"
-	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/customerror"
+	debrid "github.com/dylanmazurek/decypharr/pkg/debrid/common"
+	debridTypes "github.com/dylanmazurek/decypharr/pkg/debrid/types"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 func (r *Service) probeTorrentFile(ctx context.Context, entry *storage.Entry, file *storage.File, name string, result fileResult, opts RunOptions) fileResult {

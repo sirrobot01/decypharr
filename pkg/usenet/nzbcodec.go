@@ -8,7 +8,7 @@ import (
 	"unsafe"
 
 	"github.com/klauspost/compress/zstd"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 // On-disk NZB metadata format v2.

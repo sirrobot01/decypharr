@@ -2,7 +2,7 @@ package storage
 
 import "maps"
 
-import "github.com/sirrobot01/decypharr/internal/config"
+import "github.com/dylanmazurek/decypharr/internal/config"
 
 // HandleExistingEntryMerge merges an incoming entry with an existing one that
 // shares the same infohash. This preserves placements, files, and tags from

@@ -8,12 +8,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/customerror"
-	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"github.com/sirrobot01/decypharr/pkg/hearsay"
-	"github.com/sirrobot01/decypharr/pkg/storage"
-	"github.com/sirrobot01/decypharr/pkg/usenet/parser"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/customerror"
+	debridTypes "github.com/dylanmazurek/decypharr/pkg/debrid/types"
+	"github.com/dylanmazurek/decypharr/pkg/hearsay"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/parser"
 )
 
 // AddNewNZB persists an NZB and returns as soon as it enters the active-download queue.

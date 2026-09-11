@@ -14,10 +14,10 @@ import (
 	hearsaylib "github.com/sirrobot01/hearsay"
 	hsdebrid "github.com/sirrobot01/hearsay/debrid"
 
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/pkg/storage"
-	"github.com/sirrobot01/decypharr/pkg/usenet/manifest"
-	"github.com/sirrobot01/decypharr/pkg/usenet/parser"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/manifest"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/parser"
 )
 
 func TestZerologHandlerDemotesRoutineSyncTraffic(t *testing.T) {

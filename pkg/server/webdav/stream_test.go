@@ -6,10 +6,10 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/pkg/manager"
-	"github.com/sirrobot01/decypharr/pkg/storage"
-	"github.com/sirrobot01/decypharr/pkg/strm"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/pkg/manager"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/strm"
 )
 
 const testInfohash = "aabbccddeeff00112233445566778899aabbccdd"

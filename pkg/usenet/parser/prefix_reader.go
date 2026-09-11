@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 // ErrPrefixReadUnsupported asks the caller to use the full serving reader for

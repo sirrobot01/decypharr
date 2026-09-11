@@ -9,8 +9,8 @@ import (
 	json "github.com/bytedance/sonic"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/arr/reacquire"
+	"github.com/dylanmazurek/decypharr/internal/utils"
+	"github.com/dylanmazurek/decypharr/pkg/arr/reacquire"
 )
 
 // arrBindingSearchMax bounds a binding search: the index can hold hundreds of

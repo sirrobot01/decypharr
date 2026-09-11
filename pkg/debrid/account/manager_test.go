@@ -8,7 +8,7 @@ import (
 
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"github.com/dylanmazurek/decypharr/pkg/debrid/types"
 )
 
 func newTestManager(logOutput *bytes.Buffer) (*Manager, *Account) {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sirrobot01/decypharr/pkg/arr/reacquire"
+	"github.com/dylanmazurek/decypharr/pkg/arr/reacquire"
 )
 
 func (m *Manager) InvalidateReacquire(ctx context.Context, job reacquire.Job) error {

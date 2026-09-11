@@ -8,12 +8,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/customerror"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/arr"
-	"github.com/sirrobot01/decypharr/pkg/manager"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/customerror"
+	"github.com/dylanmazurek/decypharr/internal/utils"
+	"github.com/dylanmazurek/decypharr/pkg/arr"
+	"github.com/dylanmazurek/decypharr/pkg/manager"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 // All torrent-related helpers goes here
@@ -66,8 +66,8 @@ func (q *QBit) RefreshTorrent(t *storage.Entry) bool {
 func (q *QBit) GetTorrentProperties(t *storage.Entry) *TorrentProperties {
 	return &TorrentProperties{
 		AdditionDate:       t.AddedOn.Unix(),
-		Comment:            "Provider Blackhole <https://github.com/sirrobot01/decypharr>",
-		CreatedBy:          "Provider Blackhole <https://github.com/sirrobot01/decypharr>",
+		Comment:            "Provider Blackhole <https://github.com/dylanmazurek/decypharr>",
+		CreatedBy:          "Provider Blackhole <https://github.com/dylanmazurek/decypharr>",
 		CreationDate:       t.AddedOn.Unix(),
 		DlLimit:            -1,
 		UpLimit:            -1,

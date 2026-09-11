@@ -14,7 +14,7 @@ import (
 
 	json "github.com/bytedance/sonic"
 
-	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/config"
 )
 
 // HealthStatus represents the status of various components

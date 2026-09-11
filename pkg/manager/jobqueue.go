@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/logger"
-	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"github.com/sirrobot01/decypharr/pkg/storage"
-	"github.com/sirrobot01/decypharr/pkg/usenet/parser"
+	"github.com/dylanmazurek/decypharr/internal/logger"
+	debridTypes "github.com/dylanmazurek/decypharr/pkg/debrid/types"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/parser"
 )
 
 // JobType represents the type of processing job

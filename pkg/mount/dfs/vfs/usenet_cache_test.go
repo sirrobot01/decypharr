@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	appconfig "github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/pkg/manager"
-	dfsconfig "github.com/sirrobot01/decypharr/pkg/mount/dfs/config"
-	"github.com/sirrobot01/decypharr/pkg/mount/dfs/vfs/ranges"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	appconfig "github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/pkg/manager"
+	dfsconfig "github.com/dylanmazurek/decypharr/pkg/mount/dfs/config"
+	"github.com/dylanmazurek/decypharr/pkg/mount/dfs/vfs/ranges"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 type persistedNZBBackend struct {

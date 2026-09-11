@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 func TestCreateSymlinksSkipsMatchingDirectoryName(t *testing.T) {

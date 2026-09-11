@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/arr"
+	"github.com/dylanmazurek/decypharr/internal/utils"
+	"github.com/dylanmazurek/decypharr/pkg/arr"
 )
 
 func TestTorrentSubmissionGateUsesSlidingWindow(t *testing.T) {

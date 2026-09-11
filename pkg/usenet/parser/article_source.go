@@ -9,7 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/sirrobot01/decypharr/internal/nntp"
+	"github.com/dylanmazurek/decypharr/internal/nntp"
 	"golang.org/x/sync/singleflight"
 )
 

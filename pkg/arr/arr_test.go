@@ -3,7 +3,7 @@ package arr
 import (
 	"testing"
 
-	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/config"
 )
 
 func TestSyncFromConfigAppliesValidHost(t *testing.T) {

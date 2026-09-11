@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirrobot01/decypharr/internal/buffer"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/nntp"
-	"github.com/sirrobot01/decypharr/internal/testutil/nntpd"
+	"github.com/dylanmazurek/decypharr/internal/buffer"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/nntp"
+	"github.com/dylanmazurek/decypharr/internal/testutil/nntpd"
 )
 
 // withTestPool swaps the process-wide usenet buffer pool for one with a known

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/utils"
 )
 
 // FuseConfig holds the simplified configuration for the FUSE filesystem

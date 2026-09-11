@@ -15,16 +15,16 @@ import (
 
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/customerror"
-	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/internal/nntp"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/storage"
-	"github.com/sirrobot01/decypharr/pkg/usenet/fs"
-	"github.com/sirrobot01/decypharr/pkg/usenet/fs/reader"
-	"github.com/sirrobot01/decypharr/pkg/usenet/parser"
-	"github.com/sirrobot01/decypharr/pkg/usenet/types"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/customerror"
+	"github.com/dylanmazurek/decypharr/internal/logger"
+	"github.com/dylanmazurek/decypharr/internal/nntp"
+	"github.com/dylanmazurek/decypharr/internal/utils"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/fs"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/fs/reader"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/parser"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/types"
 )
 
 const (

@@ -3,7 +3,7 @@ package manager
 import (
 	"slices"
 
-	"github.com/sirrobot01/decypharr/pkg/arr/reacquire"
+	"github.com/dylanmazurek/decypharr/pkg/arr/reacquire"
 )
 
 // ArrRecovery is the stream-facing subset of the Arr service.

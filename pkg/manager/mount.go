@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/dylanmazurek/decypharr/internal/utils"
 	"github.com/sourcegraph/conc/pool"
 )
 

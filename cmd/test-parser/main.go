@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/nntp"
-	"github.com/sirrobot01/decypharr/pkg/usenet/manifest"
-	"github.com/sirrobot01/decypharr/pkg/usenet/parser"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/nntp"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/manifest"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/parser"
 )
 
 func main() {

@@ -7,13 +7,13 @@ import (
 	"testing"
 
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/customerror"
-	"github.com/sirrobot01/decypharr/internal/nntp"
-	"github.com/sirrobot01/decypharr/internal/testutil/nntpd"
-	"github.com/sirrobot01/decypharr/pkg/storage"
-	"github.com/sirrobot01/decypharr/pkg/usenet/manifest"
-	"github.com/sirrobot01/decypharr/pkg/usenet/types"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/customerror"
+	"github.com/dylanmazurek/decypharr/internal/nntp"
+	"github.com/dylanmazurek/decypharr/internal/testutil/nntpd"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/manifest"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/types"
 )
 
 func TestProbeContentAvailabilityReportsAllMissingContent(t *testing.T) {

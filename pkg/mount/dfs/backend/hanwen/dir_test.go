@@ -10,11 +10,11 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 	"github.com/rs/zerolog"
-	internalconfig "github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/pkg/manager"
-	mountconfig "github.com/sirrobot01/decypharr/pkg/mount/dfs/config"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	internalconfig "github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/logger"
+	"github.com/dylanmazurek/decypharr/pkg/manager"
+	mountconfig "github.com/dylanmazurek/decypharr/pkg/mount/dfs/config"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 func TestChildStableAttrIsDeterministic(t *testing.T) {

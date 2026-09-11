@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 func TestReadFilePrefixReusesObservedBodies(t *testing.T) {

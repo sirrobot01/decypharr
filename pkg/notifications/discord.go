@@ -10,7 +10,7 @@ import (
 
 	json "github.com/bytedance/sonic"
 
-	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/config"
 )
 
 // DiscordEmbed represents a Discord embed object

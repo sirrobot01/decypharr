@@ -17,11 +17,11 @@ import (
 
 	grab "github.com/cavaliergopher/grab/v3"
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"github.com/sirrobot01/decypharr/pkg/manager/link"
-	"github.com/sirrobot01/decypharr/pkg/notifications"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/pkg/debrid/types"
+	"github.com/dylanmazurek/decypharr/pkg/manager/link"
+	"github.com/dylanmazurek/decypharr/pkg/notifications"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 	"github.com/sourcegraph/conc/pool"
 )
 

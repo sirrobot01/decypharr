@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/buffer"
-	fuseconfig "github.com/sirrobot01/decypharr/pkg/mount/dfs/config"
-	"github.com/sirrobot01/decypharr/pkg/mount/dfs/vfs/ranges"
+	"github.com/dylanmazurek/decypharr/internal/buffer"
+	fuseconfig "github.com/dylanmazurek/decypharr/pkg/mount/dfs/config"
+	"github.com/dylanmazurek/decypharr/pkg/mount/dfs/vfs/ranges"
 )
 
 // newTestBuffer returns a disk-backed buffer over a fresh temp file.

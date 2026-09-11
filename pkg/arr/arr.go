@@ -9,7 +9,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/config"
 )
 
 type Type string

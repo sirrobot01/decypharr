@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/sirrobot01/decypharr/pkg/manager"
+	"github.com/dylanmazurek/decypharr/pkg/manager"
 )
 
 // fakeSession is one sequential body over data, the shape a manager session

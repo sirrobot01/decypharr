@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/retry"
-	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/retry"
+	"github.com/dylanmazurek/decypharr/internal/utils"
 	"golang.org/x/net/context"
 )
 

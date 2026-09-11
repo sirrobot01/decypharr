@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 // SegmentMeta holds metadata for a single Usenet segment.

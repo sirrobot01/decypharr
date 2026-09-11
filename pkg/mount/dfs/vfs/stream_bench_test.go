@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/buffer"
-	"github.com/sirrobot01/decypharr/internal/logger"
-	fuseconfig "github.com/sirrobot01/decypharr/pkg/mount/dfs/config"
-	"github.com/sirrobot01/decypharr/pkg/mount/dfs/vfs/ranges"
+	"github.com/dylanmazurek/decypharr/internal/buffer"
+	"github.com/dylanmazurek/decypharr/internal/logger"
+	fuseconfig "github.com/dylanmazurek/decypharr/pkg/mount/dfs/config"
+	"github.com/dylanmazurek/decypharr/pkg/mount/dfs/vfs/ranges"
 )
 
 // newBenchItem builds a CacheItem wired the way newItem does, but without a

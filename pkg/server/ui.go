@@ -5,7 +5,7 @@ import (
 
 	json "github.com/bytedance/sonic"
 
-	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/config"
 )
 
 func (s *Server) LoginHandler(w http.ResponseWriter, r *http.Request) {

@@ -3,8 +3,8 @@ package sabnzbd
 import (
 	"fmt"
 
-	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	debridTypes "github.com/dylanmazurek/decypharr/pkg/debrid/types"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 // SABnzbd API response types based on official documentation

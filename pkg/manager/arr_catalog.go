@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/pkg/arr/reacquire"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/arr/reacquire"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 // managedCatalogBatch bounds how many entries a full catalog scan holds at once.

@@ -4,15 +4,15 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
-	"syscall"
 	"testing"
 	"time"
 
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/nntp"
-	"github.com/sirrobot01/decypharr/internal/testutil/nntpd"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/nntp"
+	"github.com/dylanmazurek/decypharr/internal/testutil/nntpd"
 )
 
 const (
@@ -85,18 +85,15 @@ func newBenchReader(b *testing.B, client *nntp.Client, segs []SegmentMeta, memor
 	return sr
 }
 
-// diskAllocatedMB reports the allocated (non-hole) bytes of the cache's
-// segments.bin under dir. st.Blocks counts 512-byte units actually backed by
-// the filesystem, so a sparse file that was never written reports ~0 no
-// matter its logical size — this is the metric that proves memory mode kept
-// segment data off the disk.
+// diskAllocatedMB reports the size of the cache's segments.bin under dir.
+// On Windows, sparse-file allocation isn't available through syscall.Stat_t,
+// so this uses logical file size for portability.
 func diskAllocatedMB(dir string) float64 {
 	matches, _ := filepath.Glob(filepath.Join(dir, "cache-*", "segments.bin"))
 	var total int64
 	for _, m := range matches {
-		var st syscall.Stat_t
-		if err := syscall.Stat(m, &st); err == nil {
-			total += st.Blocks * 512
+		if info, err := os.Stat(m); err == nil {
+			total += info.Size()
 		}
 	}
 	return float64(total) / (1 << 20)

@@ -5,7 +5,7 @@ import (
 
 	json "github.com/bytedance/sonic"
 
-	"github.com/sirrobot01/decypharr/internal/rclone"
+	"github.com/dylanmazurek/decypharr/internal/rclone"
 )
 
 // Stats represents rclone statistics

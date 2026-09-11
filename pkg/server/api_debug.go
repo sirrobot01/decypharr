@@ -6,8 +6,8 @@ import (
 	json "github.com/bytedance/sonic"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/manager"
+	"github.com/dylanmazurek/decypharr/internal/utils"
+	"github.com/dylanmazurek/decypharr/pkg/manager"
 )
 
 func (s *Server) handleIngests(w http.ResponseWriter, r *http.Request) {

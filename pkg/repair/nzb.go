@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/customerror"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/customerror"
 )
 
 type nzbProbeClient interface {

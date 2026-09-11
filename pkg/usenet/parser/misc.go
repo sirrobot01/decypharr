@@ -9,10 +9,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/storage"
-	"github.com/sirrobot01/decypharr/pkg/usenet/manifest"
-	"github.com/sirrobot01/decypharr/pkg/usenet/types"
+	"github.com/dylanmazurek/decypharr/internal/utils"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/manifest"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/types"
 )
 
 // getRARVolumeOrder returns a sort key for RAR volume ordering.

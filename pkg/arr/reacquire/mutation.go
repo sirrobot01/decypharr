@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sirrobot01/decypharr/pkg/arr"
+	"github.com/dylanmazurek/decypharr/pkg/arr"
 )
 
 const (

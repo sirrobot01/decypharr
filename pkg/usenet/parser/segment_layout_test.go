@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 func TestSegmentLayoutSlicesAcrossBoundaries(t *testing.T) {

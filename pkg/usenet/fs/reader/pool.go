@@ -3,8 +3,8 @@ package reader
 import (
 	"sync"
 
-	"github.com/sirrobot01/decypharr/internal/buffer"
-	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/buffer"
+	"github.com/dylanmazurek/decypharr/internal/config"
 )
 
 // usenet owns its streaming-buffer pool here rather than the buffer package

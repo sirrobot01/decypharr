@@ -3,7 +3,7 @@ package types
 import (
 	"io"
 
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 // SegmentRange is the slice of segments that cover [TotalStart, TotalEnd],

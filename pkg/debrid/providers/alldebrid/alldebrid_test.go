@@ -11,10 +11,10 @@ import (
 	"time"
 
 	json "github.com/bytedance/sonic"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/customerror"
-	"github.com/sirrobot01/decypharr/internal/request"
-	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/customerror"
+	"github.com/dylanmazurek/decypharr/internal/request"
+	debridTypes "github.com/dylanmazurek/decypharr/pkg/debrid/types"
 )
 
 func TestMagnetsUnmarshalJSON(t *testing.T) {
