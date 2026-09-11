@@ -6,30 +6,26 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/rs/zerolog"
 	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/rs/zerolog"
 )
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	return &Server{
-		urlBase: "/",
-		logger:  zerolog.Nop(),
-		templates: template.Must(template.ParseFS(
-			content,
-			"templates/layout.html",
-			"templates/setup_layout.html",
-			"templates/index.html",
-			"templates/download.html",
-			"templates/repair.html",
-			"templates/stats.html",
-			"templates/config.html",
-			"templates/browse.html",
-			"templates/login.html",
-			"templates/register.html",
-			"templates/setup.html",
-		)),
+		urlBase:   "/",
+		logger:    zerolog.Nop(),
+		templates: mustLoadTestTemplates(t),
 	}
+}
+
+func mustLoadTestTemplates(t *testing.T) *template.Template {
+	t.Helper()
+	tmpl, err := parseTemplatesFromFrontend()
+	if err != nil {
+		t.Fatalf("parse templates: %v", err)
+	}
+	return tmpl
 }
 
 // serve runs one request through the middleware chain the router actually

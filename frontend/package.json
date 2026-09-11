@@ -1,7 +1,7 @@
 {
   "name": "decypharr",
-  "version": "1.0.0",
-  "description": "Media management tool",
+  "version": "1.1.5",
+  "description": "media management tool",
   "type": "module",
   "scripts": {
     "build-css": "npx @tailwindcss/cli --input ../frontend/assets/styles.css --output ../frontend/assets/build/css/styles.css --minify",
