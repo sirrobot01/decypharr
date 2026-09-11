@@ -77,4 +77,3 @@ func hexPrefix(b []byte) string {
 	}
 	return buf.String()
 }
-

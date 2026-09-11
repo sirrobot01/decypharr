@@ -30,7 +30,7 @@ type Torrent struct {
 
 	Debrid string `json:"debrid"`
 
-	Arr *arr.Arr `json:"arr"`
+	Arr arr.Arr `json:"arr"`
 
 	SizeDownloaded   int64 `json:"-"` // This is used for local download
 	DownloadUncached bool  `json:"-"`

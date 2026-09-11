@@ -200,6 +200,12 @@ type Auth struct {
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
 	APIToken string `json:"api_token,omitempty"`
+
+	// TokenOnly makes the API token the sole credential: there is no username
+	// or password, so registration stays closed and the login page accepts the
+	// token in place of a password. WebDAV never accepts the token, in either
+	// mode.
+	TokenOnly bool `json:"token_only,omitempty"`
 }
 
 // RepairSource selects where the health checker enumerates entries from.
@@ -223,7 +229,6 @@ type RepairConfig struct {
 	RecheckInterval       string       `json:"recheck_interval,omitempty"`
 	Arrs                  []string     `json:"arrs,omitempty"`
 	AutoRepair            bool         `json:"auto_repair,omitempty"`
-	SkipNZBRepair         bool         `json:"skip_nzb_repair,omitempty"`
 
 	// VerifyContent makes NZB probes also read each media file's head through
 	// the streaming stack and check for a valid container signature, catching
@@ -244,7 +249,7 @@ type RepairConfig struct {
 func (r RepairConfig) IsZero() bool {
 	return !r.Enabled && r.Source == "" && r.Schedule == "" && r.Workers == 0 &&
 		r.NNTPConnectionPercent == 0 && r.Strategy == "" && r.RecheckInterval == "" && len(r.Arrs) == 0 &&
-		!r.AutoRepair && !r.SkipNZBRepair && r.StopSchedule == ""
+		!r.AutoRepair && r.StopSchedule == ""
 }
 
 type Config struct {
@@ -306,6 +311,8 @@ type Config struct {
 	Repair RepairConfig `json:"repair,omitzero"`
 
 	Strm Strm `json:"strm,omitzero"`
+
+	Hearsay Hearsay `json:"hearsay,omitzero"`
 
 	// QueueCleanup is the global arr queue-cleanup policy (see CleanupQueue).
 	QueueCleanup QueueCleanup `json:"queue_cleanup"`
@@ -386,8 +393,8 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// generateAPIToken creates a new random API token
-func generateAPIToken() (string, error) {
+// GenerateAPIToken creates a new random API token
+func GenerateAPIToken() (string, error) {
 	bytes := make([]byte, 32) // 256-bit token
 	if _, err := rand.Read(bytes); err != nil {
 		return "", err
@@ -467,8 +474,19 @@ func (c *Config) SaveAuth(auth *Auth) error {
 	return os.WriteFile(c.AuthFile(), data, 0644)
 }
 
+// NeedsAuth reports whether auth is enabled but no credential has been set up
+// yet. That is the only state in which registration is open.
 func (c *Config) NeedsAuth() bool {
-	return c.UseAuth && (c.Auth == nil || c.Auth.Username == "" || c.Auth.Password == "")
+	if !c.UseAuth {
+		return false
+	}
+	if c.Auth == nil {
+		return true
+	}
+	if c.Auth.TokenOnly {
+		return c.Auth.APIToken == ""
+	}
+	return c.Auth.Username == "" || c.Auth.Password == ""
 }
 
 // migrateQBitTorrentToManager migrates deprecated QBitTorrent config to Manager
@@ -685,7 +703,7 @@ func (c *Config) setDefaults() {
 			c.Auth = &Auth{}
 		}
 		if c.Auth.APIToken == "" {
-			if token, err := generateAPIToken(); err == nil {
+			if token, err := GenerateAPIToken(); err == nil {
 				c.Auth.APIToken = token
 				// Save the updated auth config
 				_ = c.SaveAuth(c.Auth)

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb">
+  <head>
+    <meta type="title">Pretty printed fixture</meta>
+  </head>
+  <file poster="poster-a" date="1" subject="&quot;alpha.rar&quot; [1/2] yEnc (1/2)">
+    <groups>
+      <group>alt.binaries.test</group>
+    </groups>
+    <segments>
+      <segment bytes="100" number="1">
+        alpha-1@example
+      </segment>
+      <segment bytes="200" number="2">
+        alpha-2@example
+      </segment>
+    </segments>
+  </file>
+  <file poster="poster-b" date="2" subject="&quot;beta.r00&quot; [2/2] yEnc (1/1)">
+    <groups>
+      <group>alt.binaries.test</group>
+    </groups>
+    <segments>
+      <segment bytes="300" number="1">
+        beta-1@example
+      </segment>
+    </segments>
+  </file>
+</nzb>

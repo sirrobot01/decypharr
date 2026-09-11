@@ -121,7 +121,7 @@ func (dl *DebridLink) doGet(endpoint string, queryParams map[string]string, resu
 	defer request.DrainAndClose(resp.Body)
 
 	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
-		if err := json.ConfigDefault.NewDecoder(resp.Body).Decode(result); err != nil {
+		if err := request.DecodeJSON(resp, result); err != nil {
 			return resp, err
 		}
 	}
@@ -320,7 +320,7 @@ func (dl *DebridLink) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
 	if resp.ContentLength == 0 {
 		return nil, fmt.Errorf("empty response from debridlink API")
 	}
-	if err := json.ConfigDefault.NewDecoder(resp.Body).Decode(&res); err != nil {
+	if err := request.DecodeJSON(resp, &res); err != nil {
 		return nil, err
 	}
 	if !res.Success || res.Value == nil {
@@ -376,7 +376,7 @@ func (dl *DebridLink) CheckStatus(torrent *types.Torrent) (*types.Torrent, error
 		switch torrent.Status {
 		case types.TorrentStatusDownloading:
 			if !torrent.DownloadUncached {
-				return torrent, fmt.Errorf("torrent: %s not cached", torrent.Name)
+				return torrent, fmt.Errorf("torrent %s: %w", torrent.Name, customerror.TorrentNotCachedError)
 			}
 			return torrent, nil
 		case types.TorrentStatusDownloaded:
@@ -495,7 +495,7 @@ func (dl *DebridLink) _fetchDownloadLinks(account *account.Account, page, limit 
 	if resp.ContentLength == 0 {
 		return links, fmt.Errorf("empty response from debridlink API")
 	}
-	if err := json.ConfigDefault.NewDecoder(resp.Body).Decode(&res); err != nil {
+	if err := request.DecodeJSON(resp, &res); err != nil {
 		return links, err
 	}
 	if !res.Success || res.Value == nil {

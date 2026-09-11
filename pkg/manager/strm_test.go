@@ -30,7 +30,7 @@ func newStrmTestManager(t *testing.T) *Manager {
 	m := &Manager{
 		storage: strg,
 		logger:  zerolog.Nop(),
-		arr:     arr.NewStorage(),
+		arr:     arr.New(),
 		ctx:     context.Background(),
 	}
 	m.strm = NewStrm(m)

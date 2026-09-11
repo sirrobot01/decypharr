@@ -2,6 +2,7 @@ package stats
 
 import (
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"github.com/sirrobot01/decypharr/pkg/hearsay"
 	"github.com/sirrobot01/decypharr/pkg/manager"
 )
 
@@ -18,6 +19,7 @@ type Snapshot struct {
 	Queue         QueueStats        `json:"queue"`
 	Arrs          ArrStats          `json:"arrs"`
 	Repair        RepairStats       `json:"repair"`
+	Hearsay       hearsay.Status    `json:"hearsay"`
 }
 
 // AccessStats describes the network file servers that expose the library to

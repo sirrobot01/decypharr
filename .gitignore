@@ -22,3 +22,7 @@ node_modules/
 .venv/
 .stignore
 .stfolder/**
+
+# profiling artifacts
+*.pprof
+*.prof

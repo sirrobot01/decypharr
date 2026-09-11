@@ -5,10 +5,13 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 
+	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/customerror"
 	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/manager"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
@@ -42,7 +45,14 @@ func (h *Handler) StreamResponse(entry *storage.Entry, name string, size int64, 
 		client = "Unknown"
 	}
 
-	stream, err := h.manager.OpenStream(r.Context(), entry, name, start, client)
+	owner := manager.RewindOwnerApplication
+	cfg := config.Get()
+	if cfg.Mount.Type == config.MountTypeRclone &&
+		strings.EqualFold(cfg.Mount.Rclone.VfsCacheMode, "full") &&
+		strings.HasPrefix(strings.ToLower(client), "rclone/") {
+		owner = manager.RewindOwnerDownstream
+	}
+	stream, err := h.manager.OpenStreamWithRewindOwner(r.Context(), entry, name, start, client, owner)
 	if err != nil {
 		return customerror.NewError(err, http.StatusInternalServerError, "server.internal_error", false, false)
 	}
@@ -51,7 +61,7 @@ func (h *Handler) StreamResponse(entry *storage.Entry, name string, size int64, 
 	// Fast-fail before headers: an unreachable link becomes a proper error
 	// status instead of a dead 200.
 	if err := stream.Prime(); err != nil {
-		return customerror.NewError(err, http.StatusInternalServerError, "server.internal_error", false, false)
+		return customerror.FromError(err)
 	}
 
 	length := end - start + 1

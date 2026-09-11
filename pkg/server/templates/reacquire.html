@@ -1,0 +1,241 @@
+{{ define "reacquire" }}
+<div class="space-y-6">
+    {{ template "repair_tabs" . }}
+
+    {{ if .SetupError }}
+    <div role="alert" class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle text-xl"></i>
+        <div>
+            <h3 class="font-bold">Configuration Required</h3>
+            <div class="text-sm">Your configuration is incomplete ({{ .SetupError }}). Please complete the setup in the
+                <a href="{{.URLBase}}settings" class="link link-hover font-semibold">Settings page</a>.
+            </div>
+        </div>
+    </div>
+    {{ end }}
+
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-body">
+            <div class="flex flex-col lg:flex-row gap-4 lg:items-center lg:justify-between">
+                <div>
+                    <h2 class="card-title text-2xl">
+                        <i class="bi bi-arrow-repeat mr-2 text-primary"></i>Reacquisition
+                    </h2>
+                    <p class="text-sm opacity-70 mt-1" id="reacquireStatusLine">Loading…</p>
+                    <p class="text-xs opacity-60 mt-1">
+                        A file that can no longer be served is deleted from Sonarr or Radarr, its release is
+                        blocklisted, and the Arr searches for a replacement.
+                    </p>
+                </div>
+                <div class="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
+                    <button id="reacquireBtn" class="btn btn-primary btn-sm w-full sm:w-auto"
+                            title="Replace a file through its Arr">
+                        <i class="bi bi-arrow-repeat mr-1"></i>Reacquire
+                    </button>
+                    <button id="refreshIndexBtn" class="btn btn-outline btn-sm w-full sm:w-auto"
+                            title="Rebuild the link between managed files and Arr library files">
+                        <i class="bi bi-arrow-clockwise mr-1"></i>Rebuild index
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 mt-4" id="jobCountsGrid">
+                <!-- filled by JS -->
+            </div>
+        </div>
+    </div>
+
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-body">
+            <h3 class="card-title text-lg">
+                <i class="bi bi-diagram-3 mr-2 text-secondary"></i>Binding index
+            </h3>
+            <p class="text-xs opacity-60">
+                Each managed file is bound to the Arr library symlink that points at its entry folder and filename.
+            </p>
+            <div id="indexSummary" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-2">
+                <!-- filled by JS -->
+            </div>
+        </div>
+    </div>
+
+    <div class="card bg-base-100 shadow-xl">
+        <div class="card-body">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <h3 class="card-title text-lg">
+                    <i class="bi bi-list-task mr-2 text-accent"></i>Jobs
+                    <span id="jobsCount" class="badge badge-ghost badge-sm">0</span>
+                </h3>
+                <div class="grid w-full grid-cols-2 gap-2 sm:flex sm:flex-wrap lg:w-auto">
+                    <div class="min-w-0 sm:w-40">
+                        <label class="sr-only" for="jobStatusFilter">Filter jobs by status</label>
+                        <select id="jobStatusFilter" class="select select-bordered select-sm w-full">
+                            <option value="">All statuses</option>
+                            <option value="active">Active</option>
+                            <option value="waiting">Waiting</option>
+                            <option value="ready">Ready</option>
+                            <option value="failed">Failed</option>
+                            <option value="cancelled">Cancelled</option>
+                        </select>
+                    </div>
+                    <div class="min-w-0 sm:w-32">
+                        <label class="sr-only" for="jobPageSize">Jobs per page</label>
+                        <select id="jobPageSize" class="select select-bordered select-sm w-full"
+                                aria-label="Jobs per page">
+                            <option value="10" selected>10 per page</option>
+                            <option value="25">25 per page</option>
+                            <option value="50">50 per page</option>
+                        </select>
+                    </div>
+                    <button id="refreshJobsBtn" class="btn btn-outline btn-sm col-span-2 sm:col-span-1">
+                        <i class="bi bi-arrow-clockwise mr-1"></i>Refresh
+                    </button>
+                </div>
+            </div>
+
+            <div id="jobBulkActions" class="hidden mt-3 rounded-lg bg-base-200 px-4 py-3">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <span class="text-sm font-medium">
+                        Selected completed jobs: <span id="selectedJobsCount">0</span>
+                    </span>
+                    <div class="flex gap-2">
+                        <button type="button" id="deleteSelectedJobsBtn" class="btn btn-error btn-sm">
+                            <i class="bi bi-trash3 mr-1"></i>Delete selected
+                        </button>
+                        <button type="button" id="clearJobSelectionBtn" class="btn btn-ghost btn-sm"
+                                aria-label="Clear job selection">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto mt-2">
+                <table class="table table-hover">
+                    <caption class="sr-only">Reacquisition jobs</caption>
+                    <thead class="bg-base-200">
+                    <tr>
+                        <th class="w-12">
+                            <input type="checkbox" id="selectAllJobs"
+                                   class="checkbox checkbox-sm checkbox-primary"
+                                   aria-label="Select all completed jobs on this page">
+                        </th>
+                        <th>Status</th>
+                        <th>File</th>
+                        <th>Arr</th>
+                        <th>Source</th>
+                        <th>Updated</th>
+                        <th class="text-right">Details</th>
+                    </tr>
+                    </thead>
+                    <tbody id="jobsTableBody">
+                    <tr>
+                        <td colspan="7" class="text-center py-8 opacity-60">Loading…</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="mt-2 flex flex-col items-center justify-between gap-3 border-t border-base-200 pt-4 sm:flex-row">
+                <span id="jobsPaginationInfo" class="text-sm opacity-70">Loading…</span>
+                <div id="jobsPaginationControls" class="join max-w-full overflow-x-auto"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<dialog id="jobDetailModal" class="modal">
+    <div class="modal-box max-w-4xl">
+        <form method="dialog">
+            <button class="btn btn-sm btn-circle btn-ghost absolute right-3 top-3" aria-label="Close">✕</button>
+        </form>
+        <h3 class="font-bold text-lg flex items-center gap-2 mb-4 pr-10">
+            <i class="bi bi-info-circle text-info"></i>Job detail
+        </h3>
+        <div id="jobDetailBody" class="space-y-4">
+            <!-- filled by JS -->
+        </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
+
+<dialog id="reacquireModal" class="modal">
+    <div class="modal-box max-w-3xl">
+        <form method="dialog">
+            <button class="btn btn-sm btn-circle btn-ghost absolute right-3 top-3" aria-label="Close">✕</button>
+        </form>
+        <h3 class="font-bold text-lg flex items-center gap-2 mb-1 pr-10">
+            <i class="bi bi-arrow-repeat text-primary"></i>Reacquire a file
+        </h3>
+        <p class="text-xs opacity-60 mb-4">
+            The Arr deletes the file, blocklists the release it came from, and searches for a replacement. Pick the
+            file from the binding index.
+        </p>
+
+        <form id="reacquireForm" class="space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <label class="form-control">
+                    <div class="label"><span class="label-text text-xs">Arr</span></div>
+                    <select id="reacquireArr" class="select select-bordered select-sm">
+                        <option value="">All</option>
+                    </select>
+                </label>
+                <label class="form-control sm:col-span-2">
+                    <div class="label"><span class="label-text text-xs">Search by name</span></div>
+                    <input id="reacquireQuery" type="search" class="input input-bordered input-sm"
+                           placeholder="Series or file name" autocomplete="off">
+                </label>
+            </div>
+
+            <div class="border border-base-300 rounded-lg max-h-72 overflow-y-auto">
+                <table class="table table-sm table-pin-rows">
+                    <thead class="bg-base-200">
+                    <tr>
+                        <th class="w-10"></th>
+                        <th>File</th>
+                        <th>Arr</th>
+                        <th>Media</th>
+                    </tr>
+                    </thead>
+                    <tbody id="bindingResults">
+                    <tr>
+                        <td colspan="4" class="text-center py-6 opacity-60">Search to list indexed files</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <label class="form-control">
+                <div class="label"><span class="label-text text-xs">Strategy</span></div>
+                <select id="reacquireStrategy" class="select select-bordered select-sm">
+                    <option value="history_failed">Fail the grab (blocklist, then the Arr re-searches)</option>
+                    <option value="command_search">Search only (no blocklist)</option>
+                    <option value="interactive_best">Grab the best release Decypharr can see</option>
+                </select>
+            </label>
+
+            <div id="reacquireError" class="alert alert-error py-2 text-sm hidden"></div>
+
+            <div class="modal-action">
+                <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('reacquireModal').close()">
+                    Cancel
+                </button>
+                <button type="submit" id="reacquireSubmit" class="btn btn-primary btn-sm" disabled>
+                    <i class="bi bi-arrow-repeat mr-1"></i>Reacquire
+                </button>
+            </div>
+        </form>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        window.reacquireManager = new ReacquireManager();
+    });
+</script>
+{{ end }}

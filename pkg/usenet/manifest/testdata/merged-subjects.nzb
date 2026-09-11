@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb">
+<!-- merged subjects fixture -->
+<head><meta type="password">fixture</meta></head>
+<file poster="one" date="1" subject="&quot;merged.bin&quot; [1/2] yEnc (1/3)"><groups><group>a</group></groups><segments><segment bytes="20" number="2">merged-2@example</segment><segment bytes="10" number="1">merged-1@example</segment></segments></file>
+<file poster="two" date="2" subject="&quot;merged.bin&quot; [1/2] yEnc (1/3)"><groups><group>b</group></groups><segments><segment bytes="30" number="3">merged-3@example</segment><segment bytes="10" number="1">merged-1@example</segment></segments></file>
+<file poster="three" date="3" subject="&quot;tail.nfo&quot; [2/2] yEnc (1/1)"><groups><group>c</group></groups><segments><segment bytes="5" number="1">tail-1@example</segment></segments></file>
+</nzb>

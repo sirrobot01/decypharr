@@ -4,16 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/customerror"
 	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"github.com/sirrobot01/decypharr/pkg/hearsay"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sirrobot01/decypharr/pkg/usenet/parser"
 )
 
-// AddNewNZB parses an NZB before entering the active-download queue.
+// AddNewNZB persists an NZB and returns as soon as it enters the active-download queue.
 func (m *Manager) AddNewNZB(ctx context.Context, req *ImportRequest) (string, error) {
 	if m.usenet == nil {
 		return "", fmt.Errorf("usenet not configured")
@@ -21,7 +24,7 @@ func (m *Manager) AddNewNZB(ctx context.Context, req *ImportRequest) (string, er
 	if req == nil || len(req.NZBContent) == 0 {
 		return "", fmt.Errorf("NZB content is empty")
 	}
-	if req.Arr == nil {
+	if req.Arr.Name == "" {
 		return "", fmt.Errorf("arr is required")
 	}
 
@@ -30,21 +33,21 @@ func (m *Manager) AddNewNZB(ctx context.Context, req *ImportRequest) (string, er
 		Str("category", req.Arr.Name).
 		Msg("Adding new NZB to usenet")
 
-	meta, groups, err := m.usenet.ParseWithID(ctx, req.Id, req.Name, req.NZBContent, req.Arr.Name)
+	stagedPath, err := m.usenet.StageNZB(req.Id, req.NZBContent)
 	if err != nil {
-		return "", fmt.Errorf("usenet parse failed: %w", err)
+		return "", err
 	}
+	req.NZBContent = nil
 
 	entry := &storage.Entry{
-		InfoHash:         meta.ID,
-		Name:             meta.Name,
-		OriginalFilename: meta.Name,
-		Size:             meta.TotalSize,
+		InfoHash:         req.Id,
+		Name:             req.Name,
+		OriginalFilename: req.Name,
 		Protocol:         config.ProtocolNZB,
-		Bytes:            meta.TotalSize,
+		Magnet:           stagedPath,
 		Category:         req.Arr.Name,
 		SavePath:         filepath.Join(req.DownloadFolder, req.Arr.Name),
-		Status:           debridTypes.TorrentStatusDownloading,
+		Status:           debridTypes.TorrentStatusQueued,
 		State:            storage.EntryStateDownloading,
 		Progress:         0,
 		Action:           req.Action,
@@ -59,24 +62,22 @@ func (m *Manager) AddNewNZB(ctx context.Context, req *ImportRequest) (string, er
 	}
 
 	entry.ContentPath = entry.DownloadPath()
-	entry.ActiveProvider = "usenet"
-	_ = entry.AddUsenetProvider(meta)
 	if err := m.queue.Add(entry); err != nil {
+		m.usenet.RemoveStagedNZB(stagedPath)
 		return "", fmt.Errorf("failed to add nzb to queue: %w", err)
 	}
 
-	req.Status = "started"
+	req.Status = "queued"
 	job := NewJob(JobTypeNZB, req)
 	job.ID = entry.InfoHash
 	job.Entry = entry
-	job.NZBMeta = meta
-	job.NZBGroups = groups
 	if err := m.SubmitJob(job); err != nil {
+		m.usenet.RemoveStagedNZB(stagedPath)
 		entry.MarkAsError(err)
 		_ = m.queue.Update(entry)
 		return "", fmt.Errorf("failed to queue NZB: %w", err)
 	}
-	return meta.ID, nil
+	return req.Id, nil
 }
 
 func (m *Manager) processNZBJob(ctx context.Context, job *Job) error {
@@ -91,7 +92,47 @@ func (m *Manager) processNZBJob(ctx context.Context, job *Job) error {
 			m.waitForDownloadCompletion(ctx, job.Entry)
 			return nil
 		}
-		return fmt.Errorf("parsed NZB metadata missing")
+		content, err := os.ReadFile(job.Entry.Magnet)
+		if err != nil {
+			return fmt.Errorf("read staged NZB: %w", err)
+		}
+		// Parsing stats segments over NNTP. It ran on the bare queue context,
+		// so a degraded provider held the worker slot with no upper bound;
+		// give it the same budget the processing stage gets.
+		parseCtx, cancelParse := context.WithTimeout(ctx, m.usenetTimeout)
+		meta, groups, err := m.usenet.ParseWithID(parseCtx, job.Entry.InfoHash, job.Request.Name, content, job.Request.Arr.Name)
+		cancelParse()
+		if err != nil {
+			// A missing article at the parse stage is a definitive
+			// availability result: record and share it before failing the
+			// queued entry, so the arr can move to another release.
+			if m.hearsay != nil && errors.Is(err, customerror.UsenetSegmentMissingError) {
+				m.hearsay.ReportNZB(hearsay.NZBSubjectFromGroups(groups), false)
+			}
+			return fmt.Errorf("usenet parse failed: %w", err)
+		}
+
+		// Own truth or a strong network consensus that the segments are
+		// gone means the availability check is doomed. The accepted SAB
+		// job is marked failed in history, which tells the arr to retry.
+		if m.hearsay != nil && m.hearsay.NZBClaimedIncomplete(hearsay.NZBSubjectFromGroups(groups)) {
+			return fmt.Errorf("nzb rejected: hearsay claims segments missing on every configured backbone")
+		}
+
+		m.usenet.RemoveStagedNZB(job.Entry.Magnet)
+		job.Entry.Magnet = ""
+		job.NZBMeta = meta
+		job.NZBGroups = groups
+		job.Entry.Name = meta.Name
+		job.Entry.OriginalFilename = meta.Name
+		job.Entry.Size = meta.TotalSize
+		job.Entry.Bytes = meta.TotalSize
+		job.Entry.Status = debridTypes.TorrentStatusDownloading
+		job.Entry.ActiveProvider = "usenet"
+		_ = job.Entry.AddUsenetProvider(meta)
+		if err := m.queue.Update(job.Entry); err != nil {
+			return fmt.Errorf("update queued NZB: %w", err)
+		}
 	}
 	if job.Request != nil {
 		job.Request.Status = "started"
@@ -135,13 +176,25 @@ func (m *Manager) processNewNzb(parentCtx context.Context, entry *storage.Entry,
 	ctx, cancel := context.WithTimeout(parentCtx, m.usenetTimeout)
 	defer cancel()
 
+	// Derive the content identifier from the parsed groups. Process is
+	// what fills in metadata.Files, so hashing the NZB here would
+	// always see an empty list and produce no subject at all.
+	var hearsaySubject string
+	if m.hearsay != nil {
+		hearsaySubject = hearsay.NZBSubjectFromGroups(groups)
+	}
+
 	updatedNZB, err := m.usenet.Process(ctx, metadata, groups)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			return fmt.Errorf("usenet processing timed out after %s: %w", m.usenetTimeout, err)
 		}
+		if errors.Is(err, customerror.UsenetSegmentMissingError) {
+			m.hearsay.ReportNZB(hearsaySubject, false)
+		}
 		return fmt.Errorf("failed to process nzb: %w", err)
 	}
+	m.hearsay.ReportNZB(hearsaySubject, true)
 
 	metadata = updatedNZB
 	return m.processNZB(ctx, entry, metadata)

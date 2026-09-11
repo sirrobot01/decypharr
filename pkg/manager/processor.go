@@ -21,10 +21,22 @@ func (m *Manager) AddNewTorrent(ctx context.Context, importReq *ImportRequest) e
 	if importReq == nil || importReq.Magnet == nil {
 		return fmt.Errorf("magnet is required")
 	}
-	if importReq.Arr == nil {
+	if importReq.Arr.Name == "" {
 		return fmt.Errorf("arr is required")
 	}
 
+	return m.torrentSubmissions.Do(ctx, torrentSubmissionKey(importReq), func() error {
+		// qBittorrent treats adding an existing hash as an idempotent success.
+		// Check again inside the singleflight call so concurrent requests cannot
+		// both pass the lookup and submit the same hash to a provider.
+		if _, err := m.queue.GetTorrent(importReq.Magnet.InfoHash); err == nil {
+			return nil
+		}
+		return m.addNewTorrent(ctx, importReq)
+	})
+}
+
+func (m *Manager) addNewTorrent(ctx context.Context, importReq *ImportRequest) error {
 	debridTorrent, err := m.SendToDebrid(ctx, importReq)
 	if err != nil {
 		if isTooManyActiveDownloads(err) {
@@ -430,6 +442,13 @@ func (m *Manager) SendToDebrid(ctx context.Context, importRequest *ImportRequest
 			overrideDownloadUncached = db.Config().DownloadUncached
 		}
 		debridTorrent.DownloadUncached = overrideDownloadUncached
+
+		decision := m.hearsay.EvaluateAdd(db.Config().Provider, debridTorrent.InfoHash)
+		if !overrideDownloadUncached && decision.Reject() {
+			m.hearsay.DiscardAdd(decision)
+			errs = append(errs, fmt.Errorf("%s: %s recently proven not cached, skipping submit", db.Config().Name, debridTorrent.InfoHash))
+			continue
+		}
 		_logger := db.Logger()
 		_logger.Info().
 			Str("Provider", db.Config().Name).
@@ -441,6 +460,14 @@ func (m *Manager) SendToDebrid(ctx context.Context, importRequest *ImportRequest
 
 		dbt, err := db.SubmitMagnet(debridTorrent)
 		if err != nil || dbt == nil || dbt.Id == "" {
+			if errors.Is(err, customerror.TorrentBlockedError) {
+				m.hearsay.RecordAdd(decision, false)
+			} else {
+				m.hearsay.DiscardAdd(decision)
+			}
+			if err == nil {
+				err = fmt.Errorf("%s returned an empty torrent after submission", db.Config().Name)
+			}
 			errs = append(errs, err)
 			continue
 		}
@@ -448,6 +475,10 @@ func (m *Manager) SendToDebrid(ctx context.Context, importRequest *ImportRequest
 		_logger.Info().Str("id", dbt.Id).Msgf("Entry: %s submitted to %s", dbt.Name, db.Config().Name)
 
 		torrent, err := db.CheckStatus(dbt)
+		reported := errors.Is(err, customerror.TorrentNotCachedError)
+		if reported {
+			m.hearsay.RecordAdd(decision, false)
+		}
 		if err != nil && torrent != nil && torrent.Id != "" {
 			// Delete the torrent if it was not downloaded
 			go func(id string) {
@@ -455,13 +486,18 @@ func (m *Manager) SendToDebrid(ctx context.Context, importRequest *ImportRequest
 			}(torrent.Id)
 		}
 		if err != nil {
+			if !reported {
+				m.hearsay.DiscardAdd(decision)
+			}
 			errs = append(errs, err)
 			continue
 		}
 		if torrent == nil {
+			m.hearsay.DiscardAdd(decision)
 			errs = append(errs, fmt.Errorf("torrent %s returned nil after checking status", dbt.Name))
 			continue
 		}
+		m.hearsay.RecordAdd(decision, torrent.Status == debridTypes.TorrentStatusDownloaded)
 		return torrent, nil
 	}
 	if len(errs) == 0 {

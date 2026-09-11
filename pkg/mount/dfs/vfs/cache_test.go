@@ -80,6 +80,91 @@ func TestScanDiskCandidates_RemovesOrphanMetadataWithCachedRanges(t *testing.T) 
 	}
 }
 
+func TestDiskAdmissionReclaimsClosedCacheFile(t *testing.T) {
+	cacheDir := t.TempDir()
+	entryDir := filepath.Join(cacheDir, "entry")
+	if err := os.MkdirAll(entryDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldData := filepath.Join(entryDir, "old.mkv")
+	oldMeta := oldData + ".json"
+	if err := os.WriteFile(oldData, make([]byte, 80), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	metadata := []byte(`{"size":80,"ranges":[{"Pos":0,"Size":80}],"mod_time":"` + now + `","atime":"` + now + `"}`)
+	if err := os.WriteFile(oldMeta, metadata, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := newTestCache(cacheDir)
+	c.config.CacheExpiry = 0
+	p := buffer.NewPool(buffer.PoolConfig{
+		Name:             "test",
+		DiskLimit:        100,
+		InitialDiskUsage: 80,
+		ReclaimDisk:      c.reclaimClosedDisk,
+	})
+	t.Cleanup(func() { _ = p.Close() })
+	c.pool = p
+
+	b, err := p.NewBuffer(buffer.Config{
+		DiskPath:      filepath.Join(entryDir, "new.mkv"),
+		TotalSize:     30,
+		ImmutableDisk: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	if _, err := b.WriteAt(make([]byte, 30), 0); err != nil {
+		t.Fatalf("write after cold-cache reclaim: %v", err)
+	}
+	if got := p.Stats().DiskInUse; got != 30 {
+		t.Fatalf("disk usage after admission = %d, want 30", got)
+	}
+	if _, err := os.Stat(oldData); !os.IsNotExist(err) {
+		t.Fatalf("cold data file should be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(oldMeta); !os.IsNotExist(err) {
+		t.Fatalf("cold metadata file should be removed, stat err=%v", err)
+	}
+}
+
+func TestNewCacheAccountsPersistentUsageAtStartup(t *testing.T) {
+	cacheDir := t.TempDir()
+	entryDir := filepath.Join(cacheDir, "entry")
+	if err := os.MkdirAll(entryDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	dataPath := filepath.Join(entryDir, "video.mkv")
+	metaPath := dataPath + ".json"
+	if err := os.WriteFile(dataPath, make([]byte, 80), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	metadata := []byte(`{"size":80,"ranges":[{"Pos":0,"Size":80}],"mod_time":"` + now + `","atime":"` + now + `"}`)
+	if err := os.WriteFile(metaPath, metadata, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := NewCache(t.Context(), nil, &fuseconfig.FuseConfig{
+		CacheDir:             cacheDir,
+		CacheDiskSize:        100,
+		CacheCleanupInterval: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	if got := c.GetStats()["total_size"]; got != int64(80) {
+		t.Fatalf("startup disk usage = %#v, want 80", got)
+	}
+}
+
 func TestEvictCandidates_RemovesOnlyTargetPair(t *testing.T) {
 	cacheDir := t.TempDir()
 	entryDir := filepath.Join(cacheDir, "entry")
@@ -249,6 +334,7 @@ func TestPurgeCacheRemovesIdleDiskItemsAndSkipsActiveItems(t *testing.T) {
 		cache:    c,
 		key:      "entry/active.mkv",
 		metaPath: activeMeta,
+		buf:      newTestBuffer(t, 1024),
 	}
 	activeItem.opens.Store(1)
 	c.items.Store(activeItem.key, activeItem)

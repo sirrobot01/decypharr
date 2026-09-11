@@ -8,7 +8,6 @@ import (
 	"io"
 
 	"github.com/sirrobot01/decypharr/internal/crypto"
-	"github.com/sirrobot01/decypharr/internal/nntp"
 	"github.com/sirrobot01/decypharr/pkg/usenet/types"
 )
 
@@ -16,7 +15,7 @@ import (
 // It can efficiently skip large data sections without downloading them
 type rarReader struct {
 	ctx      context.Context
-	manager  *nntp.Client
+	source   ArticleSource
 	volumes  []*types.Volume
 	position int64 // Current absolute position in the archive
 
@@ -26,10 +25,10 @@ type rarReader struct {
 	currentSegmentOffset int // Offset within current segment data
 }
 
-func newRarReader(ctx context.Context, manager *nntp.Client, volumes []*types.Volume) *rarReader {
+func newRarReader(ctx context.Context, source ArticleSource, volumes []*types.Volume) *rarReader {
 	return &rarReader{
 		ctx:                 ctx,
-		manager:             manager,
+		source:              source,
 		volumes:             volumes,
 		position:            0,
 		currentVolumeIndex:  0,
@@ -139,13 +138,7 @@ func (r *rarReader) loadNextSegment() error {
 
 		segment := volume.Segments[r.currentSegmentIndex]
 
-		// Download segment using manager
-		var data []byte
-		err := r.manager.ExecuteWithFailover(r.ctx, func(conn *nntp.Connection) error {
-			d, e := conn.GetDecodedBody(segment.MessageID)
-			data = d
-			return e
-		})
+		data, err := fetchSegmentData(r.ctx, r.source, segment)
 		if err != nil {
 			return fmt.Errorf("failed to fetch segment: %w", err)
 		}

@@ -159,6 +159,23 @@ func (r *rangeSet) anyPresent(off, length int64) bool {
 	return i < len(r.rs) && r.rs[i].off < end
 }
 
+// missingTail returns [off, off+length) with any present prefix trimmed off.
+// Zero length means the range starts with everything the caller asked for.
+func (r *rangeSet) missingTail(off, length int64) (int64, int64) {
+	if length <= 0 {
+		return off, 0
+	}
+	end := off + length
+	i := sort.Search(len(r.rs), func(i int) bool { return r.rs[i].end > off })
+	if i == len(r.rs) || r.rs[i].off > off {
+		return off, length
+	}
+	if r.rs[i].end >= end {
+		return end, 0
+	}
+	return r.rs[i].end, end - r.rs[i].end
+}
+
 // presentRanges returns the subranges of [off, off+length) that are present.
 // The returned slice is fresh and owned by the caller.
 func (r *rangeSet) presentRanges(off, length int64) []Range {
@@ -174,6 +191,27 @@ func (r *rangeSet) presentRanges(off, length int64) []Range {
 		if hi > lo {
 			out = append(out, Range{Off: lo, Size: hi - lo})
 		}
+	}
+	return out
+}
+
+// missingWithin returns the subranges of [off, off+length) that are absent.
+func (r *rangeSet) missingWithin(off, length int64) []Range {
+	if length <= 0 {
+		return nil
+	}
+	end := off + length
+	var out []Range
+	cur := off
+	i := sort.Search(len(r.rs), func(i int) bool { return r.rs[i].end > off })
+	for ; i < len(r.rs) && r.rs[i].off < end; i++ {
+		if r.rs[i].off > cur {
+			out = append(out, Range{Off: cur, Size: min(r.rs[i].off, end) - cur})
+		}
+		cur = max(cur, min(r.rs[i].end, end))
+	}
+	if cur < end {
+		out = append(out, Range{Off: cur, Size: end - cur})
 	}
 	return out
 }

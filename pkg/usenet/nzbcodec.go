@@ -627,6 +627,144 @@ func decodeSegments(nzb *storage.NZB, counts []int, segMeta, msgIDs []byte) erro
 	return nil
 }
 
+// decodeFileV2 decodes the header plus exactly one file's segment map. It
+// builds NZBSegment structs for that file alone and copies its message ids, so
+// neither decompressed region stays reachable once it returns. Callers that
+// need one file must use this instead of a full decode: decodeSegments builds
+// every file's segments and aliases every id into the multi-megabyte message-id
+// buffer, which keeps that buffer alive for as long as any id survives.
+//
+// It returns (nil, nil) when the file is absent or deleted.
+func decodeFileV2(data []byte, filename string) (*storage.NZBFile, error) {
+	hc, sc, mc, err := splitRegions(data)
+	if err != nil {
+		return nil, err
+	}
+	header, err := zstdDec.DecodeAll(hc, nil)
+	if err != nil {
+		return nil, fmt.Errorf("nzbcodec: decompress header: %w", err)
+	}
+	nzb, counts, err := decodeHeader(header)
+	if err != nil {
+		return nil, err
+	}
+
+	// Locate the requested (non-deleted) file and its segment range.
+	target := -1
+	before := 0
+	for i := range nzb.Files {
+		if nzb.Files[i].Name == filename && !nzb.Files[i].IsDeleted {
+			target = i
+			break
+		}
+		before += counts[i]
+	}
+	if target == -1 {
+		return nil, nil
+	}
+
+	file := nzb.Files[target]
+	count := counts[target]
+	if count == 0 {
+		// Empty, not nil: matches what the full decode hands a zero-segment file.
+		file.Segments = []storage.NZBSegment{}
+		return &file, nil
+	}
+	total := 0
+	for _, c := range counts {
+		total += c
+	}
+	after := total - before - count
+
+	segMeta, err := zstdDec.DecodeAll(sc, nil)
+	if err != nil {
+		return nil, fmt.Errorf("nzbcodec: decompress seg meta: %w", err)
+	}
+	r := &byteReader{buf: segMeta}
+	groups, err := readStrings(r)
+	if err != nil {
+		return nil, err
+	}
+
+	segs := make([]storage.NZBSegment, count)
+
+	// The numeric columns each hold one value per segment of the whole NZB, so
+	// reaching this file's window means reading past the files before it.
+	column := func(assign func(seg *storage.NZBSegment, v int64)) error {
+		for range before {
+			if _, err := r.varint(); err != nil {
+				return err
+			}
+		}
+		for i := range segs {
+			v, err := r.varint()
+			if err != nil {
+				return err
+			}
+			assign(&segs[i], v)
+		}
+		for range after {
+			if _, err := r.varint(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if err := column(func(seg *storage.NZBSegment, v int64) { seg.Number = int(v) }); err != nil {
+		return nil, err
+	}
+	if err := column(func(seg *storage.NZBSegment, v int64) { seg.Bytes = v }); err != nil {
+		return nil, err
+	}
+	if err := column(func(seg *storage.NZBSegment, v int64) { seg.StartOffset = v }); err != nil {
+		return nil, err
+	}
+	if err := column(func(seg *storage.NZBSegment, v int64) { seg.EndOffset = v }); err != nil {
+		return nil, err
+	}
+	if err := column(func(seg *storage.NZBSegment, v int64) { seg.SegmentDataStart = v }); err != nil {
+		return nil, err
+	}
+
+	// Group column is last, so the trailing entries need no skip.
+	for range before {
+		if _, err := r.uvarint(); err != nil {
+			return nil, err
+		}
+	}
+	for i := range segs {
+		idx, err := r.uvarint()
+		if err != nil {
+			return nil, err
+		}
+		if int(idx) >= len(groups) {
+			return nil, fmt.Errorf("nzbcodec: group index %d out of range", idx)
+		}
+		segs[i].Group = groups[idx]
+	}
+
+	msgIDs, err := zstdDec.DecodeAll(mc, nil)
+	if err != nil {
+		return nil, fmt.Errorf("nzbcodec: decompress msg ids: %w", err)
+	}
+	mr := &byteReader{buf: msgIDs}
+	for range before {
+		if err := mr.skip(); err != nil {
+			return nil, err
+		}
+	}
+	for i := range segs {
+		// Owned copies: lets the decompressed buffer be collected.
+		if segs[i].MessageID, err = mr.strCopy(); err != nil {
+			return nil, err
+		}
+	}
+
+	file.Segments = segs
+	return &file, nil
+}
+
 // decodeFileMessageIDsSampled decodes only the sampled message ids of a single
 // file. It decompresses just the header and the message-id region (never the
 // numeric segMeta), builds no NZBSegment structs, and returns owned copies of

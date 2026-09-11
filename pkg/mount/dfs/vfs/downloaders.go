@@ -47,10 +47,15 @@ const (
 	// Without a cap, binary doubling eventually produces chunk sizes in the GB range,
 	// causing oversized HTTP range requests that are wasteful on seeks.
 	maxChunkSizeMultiplier = 16
-	// downloadBatchSize is how many streamed bytes accumulate before one
-	// cacheWriter.Write when no reader is parked; matches the buffer's
-	// block size.
+	// downloadBatchSize is the largest background-transfer batch. It matches
+	// the DFS buffer block size, while reads serving a parked caller are
+	// limited to that caller's remaining range instead.
 	downloadBatchSize = 1 << 20
+	// readAheadPokeInterval is how far a read may advance through cached bytes
+	// before keepAhead re-extends the download frontier. Playback crosses it
+	// several times a second, so the frontier stays well ahead while most warm
+	// reads skip dls.mu entirely.
+	readAheadPokeInterval = 1 << 20
 )
 
 // Downloaders coordinates multiple concurrent downloads to a cache item
@@ -59,7 +64,7 @@ type Downloaders struct {
 	ctx           context.Context
 	cancel        context.CancelFunc
 	item          *CacheItem
-	manager       *manager.Manager
+	manager       Backend
 	chunkSize     int64
 	readAheadSize int64
 	retries       int
@@ -100,6 +105,10 @@ type Downloaders struct {
 	// it. Fills this gate misses are rescued by the active-waiter ticker.
 	// Recomputed under dls.mu whenever the waiter set changes.
 	minWaiterEnd atomic.Int64
+
+	// lastPoke is the read offset keepAhead last extended the frontier from;
+	// -1 means "poke on the next read".
+	lastPoke atomic.Int64
 
 	// Idle timeout tracking
 	lastActivity atomic.Int64  // Unix nano timestamp of last download activity
@@ -188,25 +197,75 @@ type downloader struct {
 	copyBuf []byte
 }
 
-// batchBuf returns the downloader's reusable copy buffer.
-func (dl *downloader) batchBuf() []byte {
-	if dl.copyBuf == nil {
-		dl.copyBuf = make([]byte, downloadBatchSize)
+// batchBuf returns a reusable copy buffer no larger than the current missing
+// range. Small probes therefore do not retain a full 1 MiB allocation.
+func (dl *downloader) batchBuf(size int64) []byte {
+	want := int(min(size, int64(downloadBatchSize)))
+	if want <= 0 {
+		return nil
 	}
-	return dl.copyBuf
+	if cap(dl.copyBuf) < want {
+		dl.copyBuf = make([]byte, want)
+	}
+	return dl.copyBuf[:want]
 }
 
 // copyBatched copies size bytes from src to dst through buf, coalescing
-// writes to len(buf) unless flushNow reports a latency-sensitive consumer
-// (then every read is flushed immediately). A src error is returned only
-// after the bytes read alongside it were flushed.
-func copyBatched(dst io.Writer, src io.Reader, size int64, buf []byte, flushNow func() bool) error {
+// writes to len(buf) in throughput mode. nextReadLimit returns zero for that
+// mode. A positive value switches to latency mode: pending bytes are published
+// before another source read, that read is capped to the returned size, and
+// its bytes are published immediately. A src error is returned only after the
+// bytes read alongside it were flushed.
+func copyBatched(dst io.Writer, src io.Reader, size int64, buf []byte, nextReadLimit func() int64) error {
+	if size < 0 {
+		return fmt.Errorf("copy size must be non-negative: %d", size)
+	}
+	if size == 0 {
+		return nil
+	}
+	if len(buf) == 0 {
+		return io.ErrShortBuffer
+	}
+
 	remaining := size
 	fill := 0
+	flush := func() error {
+		if fill == 0 {
+			return nil
+		}
+		n, err := dst.Write(buf[:fill])
+		if err != nil {
+			return err
+		}
+		if n != fill {
+			return io.ErrShortWrite
+		}
+		fill = 0
+		return nil
+	}
+
 	for remaining > 0 {
+		var limit int64
+		if nextReadLimit != nil {
+			limit = nextReadLimit()
+		}
+		latencyMode := limit > 0
+
+		// A waiter may arrive while a background batch is partly full. Publish
+		// those bytes before initiating any more potentially-blocking I/O.
+		if latencyMode && fill > 0 {
+			if err := flush(); err != nil {
+				return err
+			}
+			continue // dst progress may have changed the waiter's remaining range
+		}
+
 		want := min(int64(len(buf)-fill), remaining)
+		if latencyMode {
+			want = min(want, limit)
+		}
 		n, rerr := src.Read(buf[fill : fill+int(want)])
-		if n > int(want) {
+		if n < 0 || n > int(want) {
 			// A Reader that reports more bytes than the slice it was handed
 			// would make the write below slice past the batch buffer and
 			// panic the process (this goroutine has no recover). Fail the
@@ -215,12 +274,21 @@ func copyBatched(dst io.Writer, src io.Reader, size int64, buf []byte, flushNow 
 		}
 		fill += n
 		remaining -= int64(n)
-		if rerr != nil || fill == len(buf) || remaining == 0 || flushNow() {
-			if fill > 0 {
-				if _, werr := dst.Write(buf[:fill]); werr != nil {
-					return werr
-				}
-				fill = 0
+		if n == 0 && rerr == nil {
+			if err := flush(); err != nil {
+				return err
+			}
+			return io.ErrNoProgress
+		}
+
+		// Recheck after Read: a waiter could have arrived while the source was
+		// blocked, in which case the bytes just returned must be visible now.
+		if !latencyMode && nextReadLimit != nil {
+			latencyMode = nextReadLimit() > 0
+		}
+		if rerr != nil || fill == len(buf) || remaining == 0 || latencyMode {
+			if err := flush(); err != nil {
+				return err
 			}
 		}
 		if rerr != nil {
@@ -230,8 +298,22 @@ func copyBatched(dst io.Writer, src io.Reader, size int64, buf []byte, flushNow 
 	return nil
 }
 
+// waiterReadLimit returns how many bytes this downloader may request before it
+// reaches the earliest parked reader's end offset. Zero means this downloader
+// cannot currently advance that waiter and may use throughput-sized batches.
+func (dls *Downloaders) waiterReadLimit(off int64) int64 {
+	if dls.waiterCount.Load() <= 0 {
+		return 0
+	}
+	end := dls.minWaiterEnd.Load()
+	if end == math.MaxInt64 || end <= off {
+		return 0
+	}
+	return end - off
+}
+
 // NewDownloaders creates a new download coordinator
-func NewDownloaders(ctx context.Context, mgr *manager.Manager, item *CacheItem, cfg *fuseconfig.FuseConfig) *Downloaders {
+func NewDownloaders(ctx context.Context, mgr Backend, item *CacheItem, cfg *fuseconfig.FuseConfig) *Downloaders {
 	parentCtx := ctx
 	ctx, cancel := context.WithCancel(parentCtx)
 	chunkSize := cfg.ChunkSize
@@ -261,12 +343,41 @@ func NewDownloaders(ctx context.Context, mgr *manager.Manager, item *CacheItem, 
 		streamID: "",
 	}
 	dls.minWaiterEnd.Store(math.MaxInt64)
+	dls.lastPoke.Store(-1)
 	dls.touchActivity() // Initialize activity timestamp
 
 	// Background kicker to handle stalled waiters and idle detection
 	dls.startKicker()
 
 	return dls
+}
+
+// keepAhead extends the download frontier past a read that was served from
+// cache. Warm sequential playback calls this on every read, so it is gated on
+// read position: only a seek or readAheadPokeInterval of progress takes the
+// coordinator lock.
+func (dls *Downloaders) keepAhead(off, length int64) {
+	last := dls.lastPoke.Load()
+	if last >= 0 && off >= last && off-last < readAheadPokeInterval {
+		return
+	}
+	if !dls.lastPoke.CompareAndSwap(last, off) {
+		return
+	}
+
+	dls.ensureStreamTracked()
+	dls.touchActivity()
+
+	dls.mu.Lock()
+	defer dls.mu.Unlock()
+	if dls.closed || dls.stopping {
+		return
+	}
+	if dls.idle {
+		dls.idle = false
+		dls.ensureKickerRunningLocked()
+	}
+	_ = dls.ensureDownloaderLocked(ranges.Range{Pos: off, Size: length}, false)
 }
 
 // Download blocks until the range r is on disk, or until ctx is canceled.
@@ -476,8 +587,52 @@ func (dls *Downloaders) ensureDownloaderLocked(r ranges.Range, priority bool) er
 		return nil
 	}
 
-	// Start new downloader
+	// Reaching here means the read position is served by no existing
+	// downloader — a seek. Retire the ones it left behind before starting the
+	// new one, or their read-ahead keeps pulling into a cache nobody will read
+	// while competing for the same pipe as the range the reader is waiting on.
+	//
+	// A priority read is exempt: it is a probe excursion (ffprobe reaching for
+	// the moov atom near EOF), not a change of playback position, and playback
+	// resumes where it was. Retiring on it would tear down the downloader the
+	// player is about to read from and cost a whole extra session.
+	if !priority {
+		dls.retireAbandonedLocked(r.Pos)
+	}
+
 	return dls.newDownloaderLocked(r, targetEnd, priority)
+}
+
+// retireAbandonedLocked stops downloaders that no longer serve the read
+// position and have no reader parked on them. Caller holds dls.mu.
+//
+// Only with a single open handle: then a downloader that matches no read
+// position really has been left behind. With several handles open the same
+// downloader may be feeding another reader mid-file, and at the instant of a
+// seek the two are indistinguishable — so there we leave them alone and let
+// the idle timeout do the work.
+func (dls *Downloaders) retireAbandonedLocked(pos int64) {
+	if dls.item.opens.Load() > 1 {
+		return
+	}
+	window := dls.downloaderMatchWindowLocked()
+	for _, dl := range dls.dls {
+		start, off := dl.getRange()
+		if pos >= start && pos < off+window {
+			continue // still serves the new position
+		}
+		needed := false
+		for _, w := range dls.waiters {
+			if w.r.Pos < off+window && w.r.End() > start {
+				needed = true
+				break
+			}
+		}
+		if needed {
+			continue
+		}
+		dl.stop()
+	}
 }
 
 // extendAndFindMissingRangeLocked expands a request by read-ahead and returns
@@ -642,16 +797,13 @@ func (dls *Downloaders) kickWaiters() {
 
 	fulfilled := 0
 	remaining := dls.waiters[:0]
-	// One metaMu acquisition for the whole scan; this runs under dls.mu, so
-	// the critical section length is what every reader of this file waits on.
-	dls.item.metaMu.RLock()
 	fileSize := dls.item.info.Size
 	for _, w := range dls.waiters {
 		// Clip range to actual file size
 		r := w.r
 		r.Clip(fileSize)
 
-		if dls.item.info.Rs.Present(r) {
+		if dls.item.HasRange(r) {
 			w.errChan <- nil // Fulfilled!
 			fulfilled++
 		} else if circuitOpen || dls.errorCount >= maxErrorCount {
@@ -662,7 +814,6 @@ func (dls *Downloaders) kickWaiters() {
 			remaining = append(remaining, w)
 		}
 	}
-	dls.item.metaMu.RUnlock()
 	dls.waiters = remaining
 	if fulfilled > 0 {
 		dls.waiterCount.Add(-int32(fulfilled))
@@ -1154,9 +1305,10 @@ func (dl *downloader) getRange() (start, offset int64) {
 	return dl.start, dl.offset
 }
 
-// ensureSession lazily opens the downloader's session. It is untracked: the
-// Downloaders keeps a single active-stream registration for the file (see
-// ensureStreamTracked), so per-downloader sessions must not register their own.
+// ensureSession lazily opens the downloader's session. It is untracked because
+// Downloaders keeps one active-stream registration for the shared file (see
+// ensureStreamTracked), and it declares DFS as the rewind owner so an NZB is
+// not staged through a second persistent cache underneath this one.
 func (dl *downloader) ensureSession() (manager.StreamReader, error) {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
@@ -1166,7 +1318,7 @@ func (dl *downloader) ensureSession() (manager.StreamReader, error) {
 	if dl.session != nil {
 		return dl.session, nil
 	}
-	s, err := dl.dls.manager.OpenStreamUntracked(dl.ctx, dl.dls.item.entry, dl.dls.item.filename, dl.offset)
+	s, err := dl.dls.manager.OpenStreamUntrackedForCache(dl.ctx, dl.dls.item.entry, dl.dls.item.filename, dl.offset)
 	if err != nil {
 		return nil, err
 	}
@@ -1203,9 +1355,10 @@ func (dl *downloader) streamChunk(start, end int64) (int64, error) {
 	}
 
 	writer := &cacheWriter{
-		dl:     dl,
-		item:   dl.dls.item,
-		offset: missingRange.Pos,
+		dl:       dl,
+		item:     dl.dls.item,
+		offset:   missingRange.Pos,
+		ackStart: missingRange.Pos,
 	}
 
 	// Pull the missing bytes from the downloader's long-lived session. The
@@ -1221,6 +1374,13 @@ func (dl *downloader) streamChunk(start, end int64) (int64, error) {
 		}
 		return 0, err
 	}
+	// Only NZB sources own disposable decoded extents. Avoid putting even a
+	// no-op acknowledgement/mutex on the HTTP/debrid hot path.
+	if dl.dls.item.entry != nil && dl.dls.item.entry.Protocol == config.ProtocolNZB {
+		if acknowledger, ok := stream.(manager.CacheRangeAcknowledger); ok {
+			writer.acknowledge = acknowledger.AcknowledgeCachedRange
+		}
+	}
 	if _, err := stream.Seek(missingRange.Pos, io.SeekStart); err != nil {
 		if dl.ctx.Err() != nil {
 			return writer.written, dl.ctx.Err()
@@ -1228,18 +1388,33 @@ func (dl *downloader) streamChunk(start, end int64) (int64, error) {
 		return writer.written, err
 	}
 
-	// Batch when nobody is waiting; flush per session read while a reader is
-	// parked so its first byte is never held back (see the cacheWriter doc
-	// comment for why that liveness matters).
-	err = copyBatched(writer, stream, missingRange.Size, dl.batchBuf(), func() bool {
-		return dl.dls.waiterCount.Load() > 0
+	// Batch to one DFS block in the background. While a reader is parked, cap
+	// the source Read itself at that reader's remaining range before publishing
+	// it. Checking only after Read is too late for Usenet: ReadAtContext waits
+	// for every segment covering the supplied slice.
+	err = copyBatched(writer, stream, missingRange.Size, dl.batchBuf(missingRange.Size), func() int64 {
+		return dl.dls.waiterReadLimit(writer.offset)
 	})
-	// io.EOF here is not a failure: either the session delivered the exact
-	// range and reported end-of-source, or the cacheWriter signaled a
-	// skip-stop (skipped past maxSkipBytes of already-present data). Both mean
-	// "done with this chunk".
-	if err == io.EOF {
-		err = nil
+	// io.EOF is successful only when the session delivered the whole missing
+	// range, or when cacheWriter deliberately stopped after skipping cached
+	// data. Treat an earlier source EOF as truncated input. Previously it was
+	// cleared here and then reported as the generic "stream produced no data",
+	// which hid the real condition and emitted one debug line per scanned file.
+	if errors.Is(err, io.EOF) {
+		dl.mu.Lock()
+		stopped := dl.stopped
+		dl.mu.Unlock()
+		if stopped || writer.offset >= missingRange.End() {
+			err = nil
+		} else {
+			err = fmt.Errorf(
+				"stream ended at offset %d before requested range %d-%d: %w",
+				writer.offset,
+				missingRange.Pos,
+				missingRange.End(),
+				io.ErrUnexpectedEOF,
+			)
+		}
 	}
 
 	if err != nil {
@@ -1380,24 +1555,17 @@ func (dl *downloader) retryAttempts() int {
 
 // cacheWriter writes streamed body bytes straight through to the cache item.
 //
-// Earlier iterations buffered writes here into a 4–16 MB scratch slice
-// before flushing — the idea being to amortize sparse-file WriteAt syscalls.
-// That was the right optimization *before* the cache item had a real block
-// cache underneath. With the buffer.Buffer in place, the buffer's 1 MB
-// blocks already batch small writes into block-sized disk writes at the
-// correct layer; a second coalescer in front of WriteAtNoOverwrite only
-// delays when bytes become visible to waiting readers (a 16 MB buffer
-// pushes the first-byte latency for a player by seconds at typical NNTP
-// throughput, since the waiter is only woken when the buffer flushes).
-//
-// So Write goes directly to WriteAtNoOverwrite. The buffer underneath does
-// the actual write batching — at the right granularity, with the right
-// liveness, and without holding bytes hostage from readers.
+// copyBatched handles only transport batching: up to one 1 MiB DFS block when
+// nobody is waiting, or the exact waiter frontier on a latency-sensitive read.
+// Once Write is called, cacheWriter publishes immediately. The buffer beneath
+// it owns block storage, persistence, and disk-write coalescing.
 type cacheWriter struct {
-	dl      *downloader
-	item    *CacheItem
-	offset  int64 // next write offset; advances with Write
-	written int64
+	dl          *downloader
+	item        *CacheItem
+	offset      int64 // next write offset; advances with Write
+	written     int64
+	ackStart    int64
+	acknowledge func(off, length int64)
 	// onProgress is called whenever bytes are consumed from the stream.
 	onProgress func(int)
 }
@@ -1431,6 +1599,11 @@ func (w *cacheWriter) Write(p []byte) (int, error) {
 	w.offset += int64(n)
 	actuallyWritten := int64(n - skipped)
 	w.written += actuallyWritten
+	if w.acknowledge != nil {
+		// The cumulative interval makes segments split across 1 MiB DFS
+		// batches releasable once their final bytes have been published.
+		w.acknowledge(w.ackStart, w.offset-w.ackStart)
+	}
 
 	if actuallyWritten > 0 {
 		w.dl.dls.item.cache.AddDownloadedBytes(actuallyWritten)
@@ -1443,7 +1616,3 @@ func (w *cacheWriter) Write(p []byte) (int, error) {
 	}
 	return n, nil
 }
-
-// flush is a no-op shim kept so streamChunk's existing call site stays
-// legible. The coalescer is gone; nothing buffers.
-func (w *cacheWriter) flush() error { return nil }

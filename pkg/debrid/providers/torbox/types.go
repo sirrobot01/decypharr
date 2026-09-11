@@ -1,6 +1,11 @@
 package torbox
 
-import "time"
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
 type APIResponse[T any] struct {
 	Success bool   `json:"success"`
@@ -70,7 +75,54 @@ type torboxInfo struct {
 	TrackerMessage   any     `json:"tracker_message"`
 }
 
-type InfoResponse APIResponse[torboxInfo]
+type InfoResponse struct {
+	Success bool        `json:"success"`
+	Error   any         `json:"error"`
+	Detail  string      `json:"detail"`
+	Data    *torboxInfo `json:"data"`
+}
+
+// UnmarshalJSON accepts both documented object responses and the one-element
+// array response TorBox occasionally returns for /torrents/mylist?id=... .
+func (r *InfoResponse) UnmarshalJSON(data []byte) error {
+	var envelope struct {
+		Success bool            `json:"success"`
+		Error   any             `json:"error"`
+		Detail  string          `json:"detail"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return err
+	}
+
+	r.Success = envelope.Success
+	r.Error = envelope.Error
+	r.Detail = envelope.Detail
+	r.Data = nil
+
+	raw := bytes.TrimSpace(envelope.Data)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil
+	}
+
+	if raw[0] == '[' {
+		var items []torboxInfo
+		if err := json.Unmarshal(raw, &items); err != nil {
+			return fmt.Errorf("decode TorBox torrent array: %w", err)
+		}
+		if len(items) > 0 {
+			r.Data = &items[0]
+		}
+		return nil
+	}
+
+	var item torboxInfo
+	if err := json.Unmarshal(raw, &item); err != nil {
+		return fmt.Errorf("decode TorBox torrent object: %w", err)
+	}
+	r.Data = &item
+	return nil
+}
 
 type DownloadLinksResponse APIResponse[string]
 

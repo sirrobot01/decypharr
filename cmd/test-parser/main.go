@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -10,166 +12,139 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/nntp"
+	"github.com/sirrobot01/decypharr/pkg/usenet/manifest"
 	"github.com/sirrobot01/decypharr/pkg/usenet/parser"
 )
 
 func main() {
-	// Setup logger
 	output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
-	logger := zerolog.New(output).With().Timestamp().Logger()
+	log := zerolog.New(output).With().Timestamp().Logger()
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 
-	// Check arguments
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: test-parser <nzb-file>")
-		fmt.Println("Example: test-parser test.nzb")
-		fmt.Println("")
-		fmt.Println("This tool parses an NZB file and displays:")
-		fmt.Println("  - File structure and sizes")
-		fmt.Println("  - RAR detection and compression method")
-		fmt.Println("  - M0 (stored) validation")
-		fmt.Println("  - Segment information")
-		os.Exit(1)
+	localOnly := flag.Bool("local-only", false, "decode the local NZB manifest without connecting to NNTP")
+	flag.Usage = func() {
+		fmt.Fprintln(flag.CommandLine.Output(), "Usage: test-parser [-local-only] <nzb-file>")
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+
+	if flag.NArg() != 1 {
+		flag.Usage()
+		os.Exit(2)
 	}
 
-	nzbFile := os.Args[1]
-
-	logger.Info().
-		Str("file", nzbFile).
-		Msg("Reading NZB file")
-
-	// Read NZB file
-	nzbContent, err := os.ReadFile(nzbFile)
+	nzbFile := flag.Arg(0)
+	content, err := os.ReadFile(nzbFile)
 	if err != nil {
-		logger.Fatal().
-			Err(err).
-			Str("file", nzbFile).
-			Msg("Failed to read NZB file")
+		log.Fatal().Err(err).Str("file", nzbFile).Msg("Failed to read NZB file")
+	}
+	if *localOnly {
+		started := time.Now()
+		decoded, err := manifest.Decode(bytes.NewReader(content))
+		if err != nil {
+			log.Fatal().Err(err).Str("file", nzbFile).Msg("Failed to decode local NZB manifest")
+		}
+		printManifestSummary(nzbFile, decoded, time.Since(started))
+		return
 	}
 
-	logger.Info().
-		Int("size", len(nzbContent)).
-		Msg("NZB file read successfully")
-
-	// Create NNTP client (10 max connections for test)
 	config.SetConfigPath("data/")
 	cfg := config.Get()
-	nntpClient, err := nntp.NewClient(cfg)
+	client, err := nntp.NewClient(cfg)
 	if err != nil {
-		logger.Fatal().
-			Err(err).
-			Msg("Failed to create NNTP client")
+		log.Fatal().Err(err).Msg("Failed to create NNTP client")
 	}
-	defer nntpClient.Close()
+	defer func() {
+		if err := client.Close(); err != nil {
+			log.Warn().Err(err).Msg("Failed to close NNTP client")
+		}
+	}()
 
-	logger.Info().Msg("NNTP client created successfully")
-
-	// Create NZB parser with manager
-	p := parser.NewParser(nntpClient, 10, logger)
-
-	logger.Info().Msg("Parsing NZB file...")
-
-	// Parse NZB
-	ctx := context.Background()
-	nzb, groups, err := p.Parse(ctx, nzbFile, nzbContent)
+	maxConcurrent := cfg.Usenet.ProcessingMaxConnections
+	if maxConcurrent <= 0 {
+		maxConcurrent = cfg.Usenet.MaxConnections
+	}
+	if maxConcurrent <= 0 {
+		maxConcurrent = 10
+	}
+	p := parser.NewParser(client, maxConcurrent, log)
+	parseStarted := time.Now()
+	nzb, groups, err := p.Parse(context.Background(), nzbFile, content)
 	if err != nil {
-		logger.Fatal().
-			Err(err).
-			Msg("Failed to parse NZB")
+		log.Fatal().Err(err).Msg("Failed to parse NZB")
 	}
-	updatedNZB, err := p.Process(ctx, nzb, groups)
+	parseElapsed := time.Since(parseStarted)
+	processStarted := time.Now()
+	nzb, err = p.Process(context.Background(), nzb, groups)
 	if err != nil {
-		logger.Fatal().
-			Err(err).
-			Msg("Failed to process NZB")
+		log.Fatal().Err(err).Msg("Failed to process NZB")
 	}
-	nzb = updatedNZB
+	processElapsed := time.Since(processStarted)
 
-	logger.Info().
-		Str("id", nzb.ID).
-		Str("name", nzb.Name).
-		Int64("total_size", nzb.TotalSize).
-		Int("logical_files", len(nzb.Files)).
-		Int("source_files", len(nzb.Files)).
-		Msg("NZB parsed successfully")
-
-	// Print detailed file summary
-	fmt.Println("\n" + strings.Repeat("=", 80))
+	fmt.Println(strings.Repeat("=", 80))
 	fmt.Println("FILE SUMMARY")
 	fmt.Println(strings.Repeat("=", 80))
-	fmt.Printf("NZB ID:     %s\n", nzb.ID)
-	fmt.Printf("Name:       %s\n", nzb.Name)
-	fmt.Printf("Total Size: %.2f GB\n", float64(nzb.TotalSize)/(1024*1024*1024))
+	fmt.Printf("NZB ID:        %s\n", nzb.ID)
+	fmt.Printf("Name:          %s\n", nzb.Name)
+	fmt.Printf("Total Size:    %.2f GB\n", float64(nzb.TotalSize)/(1024*1024*1024))
 	fmt.Printf("Logical Files: %d\n", len(nzb.Files))
-	fmt.Printf("Source Parts:  %d\n", len(nzb.Files))
-	fmt.Println(strings.Repeat("=", 80))
+	fmt.Printf("Parse Phase:   %s\n", parseElapsed.Round(time.Microsecond))
+	fmt.Printf("Process Phase: %s\n", processElapsed.Round(time.Microsecond))
 
 	for i, file := range nzb.Files {
 		fmt.Printf("\n[%d] %s\n", i+1, file.Name)
 		fmt.Printf("    Size:         %.2f MB (%d bytes)\n", float64(file.Size)/(1024*1024), file.Size)
 		fmt.Printf("    Segments:     %d\n", len(file.Segments))
-
-		if file.SegmentSize > 0 {
-			fmt.Printf("    Segment Size: %.2f KB\n", float64(file.SegmentSize)/1024)
-		}
-
-		fmt.Printf("      Password:     %s\n", getPasswordStatus(file.Password))
-		fmt.Printf("      Entry:        %s (%d bytes)\n", file.Name, file.Size)
+		fmt.Printf("    Password:     %s\n", passwordStatus(file.Password))
 		if file.InternalPath != "" {
-			fmt.Printf("      Internal:     %s\n", file.InternalPath)
+			fmt.Printf("    Internal:     %s\n", file.InternalPath)
 		}
 		if file.IsStored {
-			fmt.Printf("      Compression:  ✅ Stored (seekable)\n")
+			fmt.Println("    Compression:  Stored (seekable)")
 		} else {
-			fmt.Printf("      Compression:  ⚠️  Compressed\n")
+			fmt.Println("    Compression:  Compressed")
 		}
 
-		// Groups
-		if len(file.Groups) > 0 {
-			fmt.Printf("    Groups:       %v\n", file.Groups[:min(3, len(file.Groups))])
-		}
-
-		// Check for zero-byte segments
-		zeroByteCount := 0
-		for segIdx, seg := range file.Segments {
-			if seg.Bytes <= 0 {
-				zeroByteCount++
-				if zeroByteCount <= 5 {
-					fmt.Printf("    ⚠️  ZERO BYTE SEG[%d]: Bytes=%d, StartOffset=%d, EndOffset=%d, DataStart=%d\n",
-						segIdx, seg.Bytes, seg.StartOffset, seg.EndOffset, seg.SegmentDataStart)
-				}
+		zeroBytes := 0
+		for _, segment := range file.Segments {
+			if segment.Bytes <= 0 {
+				zeroBytes++
 			}
 		}
-		if zeroByteCount > 5 {
-			fmt.Printf("    ⚠️  ... and %d more zero-byte segments\n", zeroByteCount-5)
+		if zeroBytes > 0 {
+			fmt.Printf("    Zero-byte segments: %d\n", zeroBytes)
 		}
-		if zeroByteCount > 0 {
-			fmt.Printf("    ⚠️  TOTAL ZERO-BYTE SEGMENTS: %d (this breaks seeking!)\n", zeroByteCount)
-		}
-
-		// Show first few and any problematic segment offsets
-		if len(file.Segments) > 0 {
-			fmt.Printf("    First segment: Bytes=%d, StartOff=%d, EndOff=%d, DataStart=%d\n",
-				file.Segments[0].Bytes, file.Segments[0].StartOffset, file.Segments[0].EndOffset, file.Segments[0].SegmentDataStart)
-		}
-		if len(file.Segments) > 3 {
-			fmt.Printf("    Seg[3]: Bytes=%d, StartOff=%d, EndOff=%d, DataStart=%d\n",
-				file.Segments[3].Bytes, file.Segments[3].StartOffset, file.Segments[3].EndOffset, file.Segments[3].SegmentDataStart)
-		}
-
-		fmt.Println("    " + strings.Repeat("-", 76))
 	}
 
-	// Summary statistics
-	fmt.Println("\n" + strings.Repeat("=", 80))
-	fmt.Println("SUMMARY")
-	fmt.Println(strings.Repeat("=", 80))
-	fmt.Println(strings.Repeat("=", 80))
+	metrics := p.Metrics()
+	fmt.Printf("\nAnalyzer article traffic\n")
+	fmt.Printf("    Header requests: %d\n", metrics.HeaderRequests)
+	fmt.Printf("    Body requests:   %d\n", metrics.BodyRequests)
+	fmt.Printf("    STAT requests:   %d\n", metrics.StatRequests)
+	fmt.Printf("    Network BODY:    %d\n", metrics.NetworkBodies)
+	fmt.Printf("    Network STAT:    %d\n", metrics.NetworkStats)
+	fmt.Printf("    Cache hits:      %d\n", metrics.CacheHits)
+	fmt.Printf("    Shared loads:    %d\n", metrics.SharedLoads)
+	fmt.Printf("    Bytes fetched:   %d\n", metrics.BytesFetched)
+	fmt.Printf("    Cached bodies:   %d (%d bytes)\n", metrics.CachedBodies, metrics.CachedBodyBytes)
+	fmt.Printf("    Cached entries:  %d\n", metrics.CachedEntries)
 
-	logger.Info().Msg("Test completed successfully")
+	log.Info().Msg("Parser test completed successfully")
 }
 
-func getPasswordStatus(password string) string {
+func printManifestSummary(filename string, decoded *manifest.Manifest, elapsed time.Duration) {
+	fmt.Println(strings.Repeat("=", 80))
+	fmt.Println("LOCAL MANIFEST SUMMARY")
+	fmt.Println(strings.Repeat("=", 80))
+	fmt.Printf("File:              %s\n", filename)
+	fmt.Printf("Posted Files:      %d\n", len(decoded.Files))
+	fmt.Printf("Available Segments: %d\n", decoded.Stats.AvailableSegments)
+	fmt.Printf("Total Segments:    %d\n", decoded.Stats.TotalSegments)
+	fmt.Printf("Reported Bytes:    %d\n", decoded.Stats.Bytes)
+	fmt.Printf("Decode Time:       %s\n", elapsed.Round(time.Microsecond))
+}
+
+func passwordStatus(password string) string {
 	if password == "" {
 		return "None"
 	}

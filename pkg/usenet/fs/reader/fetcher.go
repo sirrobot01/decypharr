@@ -3,6 +3,8 @@ package reader
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math/bits"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,13 +13,7 @@ import (
 	"github.com/sirrobot01/decypharr/internal/nntp"
 )
 
-// SegmentFetcher handles downloading segments from NNTP with deduplication and retry.
-//
-// Key features:
-//   - Request deduplication: Only one goroutine fetches a segment at a time
-//   - Semaphore for connection limiting
-//   - Background prefetch queue for read-ahead
-//   - Streams directly to disk via cache's StreamWriter
+// SegmentFetcher deduplicates downloads and submits them to the shared scheduler.
 type SegmentFetcher struct {
 	client *nntp.Client
 	cache  *SegmentCache
@@ -25,17 +21,18 @@ type SegmentFetcher struct {
 	logger zerolog.Logger
 	stats  *ReaderStats
 
-	// Concurrency control
-	semaphore chan struct{} // Limits concurrent downloads
-
 	// Request deduplication
 	inFlight   map[int]*fetchPromise
 	inFlightMu sync.Mutex
 
 	// Background prefetch
-	prefetchCh     chan int
+	scheduler      *FetchScheduler
+	ownedScheduler bool
 	prefetchQueued []atomic.Uint64 // one deduplication bit per segment
-	prefetchWg     sync.WaitGroup
+	prefetchGen    atomic.Uint64
+	taskMu         sync.Mutex
+	taskWg         sync.WaitGroup
+	closing        bool
 
 	// Lifecycle
 	ctx    context.Context
@@ -65,45 +62,104 @@ func NewSegmentFetcher(
 	}
 
 	sf := &SegmentFetcher{
-		client:     client,
-		cache:      cache,
-		config:     config,
-		logger:     logger.With().Str("component", "fetcher").Logger(),
-		stats:      stats,
-		semaphore:  make(chan struct{}, maxConns),
-		inFlight:   make(map[int]*fetchPromise),
-		prefetchCh: make(chan int, 256), // Buffer for prefetch hints
-		// A packed atomic bitmap keeps duplicate suppression cheap even for
-		// very large NZBs: 100k segments consume about 12 KiB, versus roughly
-		// 400 KiB for one atomic.Bool per segment.
+		client:   client,
+		cache:    cache,
+		config:   config,
+		logger:   logger.With().Str("component", "fetcher").Logger(),
+		stats:    stats,
+		inFlight: make(map[int]*fetchPromise),
+		// A packed bitmap avoids per-segment goroutines and large bool arrays.
 		prefetchQueued: make([]atomic.Uint64, (cache.SegmentCount()+63)/64),
 		ctx:            ctx,
 		cancel:         cancel,
 	}
-
-	// Start fewer prefetch workers than foreground connection slots: seeky
-	// callers such as ffprobe jump while read-ahead is still in flight, and
-	// reserving two slots keeps a post-seek foreground read from queueing
-	// behind the prefetch fleet.
-	numPrefetchWorkers := 0
-	if maxConns >= 2 {
-		numPrefetchWorkers = max(1, maxConns-2)
-	}
-	if numPrefetchWorkers > 0 {
-		for i := range numPrefetchWorkers {
-			sf.prefetchWg.Add(1)
-			go sf.prefetchWorker(i)
+	sf.scheduler = config.Scheduler
+	if sf.scheduler == nil {
+		workers := maxConns
+		if client == nil {
+			workers = 0
 		}
+		sf.scheduler = NewFetchScheduler(workers)
+		sf.ownedScheduler = true
 	}
 
 	return sf
 }
 
-// Fetch downloads a segment synchronously, with deduplication.
-// Multiple goroutines calling Fetch for the same segment will share the download.
+// Fetch schedules a foreground download and waits for it. Provider concurrency
+// is shared across readers, so opening more files cannot multiply workers.
 func (sf *SegmentFetcher) Fetch(ctx context.Context, segIdx int) error {
-	// Fast path: already cached, or wait out an in-progress eviction so we
-	// don't dedup/fetch against a segment whose disk range is mid-punch.
+	return sf.scheduleAndWait(ctx, priorityDemand, func() error {
+		return sf.fetchWithRetryDirect(sf.ctx, segIdx)
+	})
+}
+
+func (sf *SegmentFetcher) scheduleAndWait(ctx context.Context, priority fetchPriority, run func() error) error {
+	return sf.waitScheduled(ctx, sf.schedule(ctx, priority, run))
+}
+
+func (sf *SegmentFetcher) schedule(ctx context.Context, priority fetchPriority, run func() error) <-chan error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	done := make(chan error, 1)
+	if sf.scheduler.workers == 0 && priority == priorityDemand {
+		done <- run()
+		return done
+	}
+	if !sf.submit(ctx, priority, func() { done <- run() }, func() { done <- ErrCacheClosed }) {
+		if err := ctx.Err(); err != nil {
+			done <- err
+		} else if err := sf.ctx.Err(); err != nil {
+			done <- err
+		} else {
+			done <- ErrCacheClosed
+		}
+	}
+	return done
+}
+
+func (sf *SegmentFetcher) waitScheduled(ctx context.Context, done <-chan error) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-sf.ctx.Done():
+		return sf.ctx.Err()
+	}
+}
+
+func (sf *SegmentFetcher) submit(ctx context.Context, priority fetchPriority, run, drop func()) bool {
+	sf.taskMu.Lock()
+	if sf.closing {
+		sf.taskMu.Unlock()
+		return false
+	}
+	sf.taskWg.Add(1)
+	sf.taskMu.Unlock()
+
+	if sf.scheduler.submit(ctx, priority, func() {
+		defer sf.taskWg.Done()
+		run()
+	}, func() {
+		defer sf.taskWg.Done()
+		if drop != nil {
+			drop()
+		}
+	}) {
+		return true
+	}
+	sf.taskWg.Done()
+	return false
+}
+
+// fetchDirect performs one deduplicated fetch inside a scheduler worker.
+func (sf *SegmentFetcher) fetchDirect(ctx context.Context, segIdx int) error {
+	// Fast path: already cached, or wait until an extent eviction completes.
 	for {
 		state := sf.cache.GetState(segIdx)
 		if state == StateEvicting {
@@ -156,9 +212,22 @@ func (sf *SegmentFetcher) Fetch(ctx context.Context, segIdx int) error {
 
 // doFetch performs the actual NNTP download.
 func (sf *SegmentFetcher) doFetch(ctx context.Context, segIdx int) error {
+	return sf.doFetchAttempt(ctx, segIdx, 0)
+}
+
+// doFetchRestarts bounds how many times a single doFetch may restart because
+// another party held the slot and then lost it (a cancelled fetch, or an
+// eviction landing between the state check and the claim). Each restart does
+// real work, so this only stops a pathological loop.
+const doFetchRestarts = 4
+
+func (sf *SegmentFetcher) doFetchAttempt(ctx context.Context, segIdx, restarts int) error {
 	seg := sf.cache.GetSegment(segIdx)
 	if seg == nil {
 		return ErrSegmentNotFound
+	}
+	if restarts > doFetchRestarts {
+		return fmt.Errorf("segment %d: slot contended after %d restarts", segIdx, restarts)
 	}
 
 	// Try to mark as fetching (atomic transition Empty -> Fetching)
@@ -171,29 +240,21 @@ func (sf *SegmentFetcher) doFetch(ctx context.Context, segIdx int) error {
 		case StateFailed:
 			return sf.cache.GetError(segIdx)
 		case StateFetching:
-			// Wait for the other fetcher
-			return sf.cache.WaitForSegment(ctx, segIdx)
+			// Wait for the other fetcher. If it released the slot (cancel)
+			// or the segment was dropped right after it landed, the wait
+			// reports ErrSegmentEvicted rather than blocking on an event
+			// that is no longer coming — retry the fetch ourselves.
+			err := sf.cache.WaitForSegment(ctx, segIdx)
+			if errors.Is(err, ErrSegmentEvicted) {
+				return sf.doFetchAttempt(ctx, segIdx, restarts+1)
+			}
+			return err
 		case StateEvicting:
-			// An evictor grabbed the slot between Fetch's check and here.
-			// Wait for the punch to finish, then retry the fetch into the
-			// released range.
 			if err := sf.cache.WaitForEvictionRelease(ctx, segIdx); err != nil {
 				return err
 			}
-			return sf.doFetch(ctx, segIdx)
+			return sf.doFetchAttempt(ctx, segIdx, restarts+1)
 		}
-	}
-
-	// Acquire connection slot
-	select {
-	case sf.semaphore <- struct{}{}:
-		defer func() { <-sf.semaphore }()
-	case <-ctx.Done():
-		sf.cache.ReleaseFetching(segIdx)
-		return ctx.Err()
-	case <-sf.ctx.Done():
-		sf.cache.ReleaseFetching(segIdx)
-		return sf.ctx.Err()
 	}
 
 	messageID := seg.MessageID
@@ -205,23 +266,29 @@ func (sf *SegmentFetcher) doFetch(ctx context.Context, segIdx int) error {
 	downloadCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// ExecuteWithFailover already retries per provider and across providers —
-	// a single call is sufficient.  An outer retry loop would multiply the
-	// total attempts by retries×providers, leading to very long failure times.
+	// ExecuteWithFailover already retries across configured providers.
 	err := sf.client.ExecuteWithFailover(downloadCtx, func(conn *nntp.Connection) error {
 		stopCancel := context.AfterFunc(downloadCtx, func() {
 			_ = conn.Close()
 		})
 		defer stopCancel()
 
-		// Get the segment writer for the disk cache.
 		writer := sf.cache.StreamWriter(segIdx)
 		if writer == nil {
 			return ErrCacheClosed
 		}
 
-		// Stream the decoded body into the chosen tier.
-		n, err := conn.StreamBody(messageID, writer)
+		var n int64
+		var err error
+		if decodeBuffer := writer.DecodeBuffer(); decodeBuffer != nil {
+			var decoded []byte
+			decoded, err = conn.DecodeBodyInto(messageID, decodeBuffer)
+			if err == nil {
+				n, err = writer.Adopt(decoded)
+			}
+		} else {
+			n, err = conn.StreamBody(messageID, writer)
+		}
 		if err != nil {
 			writer.Discard()
 			if ctxErr := downloadCtx.Err(); ctxErr != nil {
@@ -290,26 +357,48 @@ func (sf *SegmentFetcher) clearPrefetchQueued(segIdx int) {
 	word.And(^mask)
 }
 
-// QueuePrefetch adds a segment to the background prefetch queue (non-blocking).
+// QueuePrefetch submits speculative work without creating a per-file worker.
 func (sf *SegmentFetcher) QueuePrefetch(segIdx int) {
-	// Check if already cached
+	sf.queueSpeculative(segIdx, priorityPrefetch)
+}
+
+func (sf *SegmentFetcher) QueueProbe(segIdx int) {
+	if sf.scheduler.workers > 1 {
+		sf.queueSpeculative(segIdx, priorityProbe)
+	}
+}
+
+func (sf *SegmentFetcher) QueueProbeRange(startSeg, endSeg int) {
+	for i := startSeg; i <= endSeg; i++ {
+		sf.QueueProbe(i)
+	}
+}
+
+func (sf *SegmentFetcher) queueSpeculative(segIdx int, priority fetchPriority) {
 	state := sf.cache.GetState(segIdx)
 	if state == StateOnDisk || state == StateFetching {
 		return
 	}
-	// State remains Empty while a hint is waiting in prefetchCh. Track that
-	// interval separately so frequent small ReadAt calls cannot enqueue the
-	// same read-ahead window hundreds of times and crowd useful hints out.
 	if !sf.markPrefetchQueued(segIdx) {
 		return
 	}
-
-	select {
-	case sf.prefetchCh <- segIdx:
-		// Queued successfully
-	default:
+	gen := sf.prefetchGen.Load()
+	if !sf.submit(sf.ctx, priority, func() {
+		if gen != sf.prefetchGen.Load() {
+			return
+		}
+		defer func() {
+			if gen == sf.prefetchGen.Load() {
+				sf.clearPrefetchQueued(segIdx)
+			}
+		}()
+		sf.prefetchOne(segIdx)
+	}, func() {
+		if gen == sf.prefetchGen.Load() {
+			sf.clearPrefetchQueued(segIdx)
+		}
+	}) {
 		sf.clearPrefetchQueued(segIdx)
-		// Queue full, drop the hint
 		sf.stats.PrefetchMisses.Add(1)
 	}
 }
@@ -321,25 +410,6 @@ func (sf *SegmentFetcher) QueuePrefetchRange(startSeg, endSeg int) {
 	}
 }
 
-// prefetchWorker processes segments from the prefetch queue.
-func (sf *SegmentFetcher) prefetchWorker(id int) {
-	defer sf.prefetchWg.Done()
-
-	for {
-		select {
-		case <-sf.ctx.Done():
-			return
-		case segIdx, ok := <-sf.prefetchCh:
-			if !ok {
-				return
-			}
-			sf.prefetchOne(segIdx)
-			sf.clearPrefetchQueued(segIdx)
-		}
-	}
-}
-
-// prefetchOne uses the deduplicated, failover-aware single-segment fetch path.
 func (sf *SegmentFetcher) prefetchOne(segIdx int) {
 	state := sf.cache.GetState(segIdx)
 	if state == StateOnDisk {
@@ -348,7 +418,7 @@ func (sf *SegmentFetcher) prefetchOne(segIdx int) {
 	}
 
 	fetchCtx, cancel := context.WithTimeout(sf.ctx, sf.config.DownloadTimeout)
-	err := sf.Fetch(fetchCtx, segIdx)
+	err := sf.fetchWithRetryDirect(fetchCtx, segIdx)
 	cancel()
 
 	if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
@@ -356,15 +426,14 @@ func (sf *SegmentFetcher) prefetchOne(segIdx int) {
 	}
 }
 
-// EnsureSegments fetches all segments in the range, returning when all are
-// available. Missing segments are fetched concurrently — the connection
-// semaphore still caps real parallelism — so a cold multi-segment read (a
-// seek, or playback catching up to the prefetch front) pays roughly one
-// download's latency instead of one per segment. In steady-state playback the
-// background prefetch workers have already downloaded them, so this usually
-// just confirms cache presence. fetchWithRetry keeps a single transient
-// segment failure from tearing down the whole stream.
+// EnsureSegments fetches all missing segments through the shared scheduler.
 func (sf *SegmentFetcher) EnsureSegments(ctx context.Context, startSeg, endSeg int) error {
+	return sf.PrepareSegments(ctx, startSeg, endSeg)()
+}
+
+// PrepareSegments submits all required downloads before returning a waiter.
+// Callers can enqueue speculative work after demand owns its queue position.
+func (sf *SegmentFetcher) PrepareSegments(ctx context.Context, startSeg, endSeg int) func() error {
 	var missing []int
 	for i := startSeg; i <= endSeg; i++ {
 		if sf.cache.GetState(i) != StateOnDisk {
@@ -372,57 +441,47 @@ func (sf *SegmentFetcher) EnsureSegments(ctx context.Context, startSeg, endSeg i
 		}
 	}
 	if len(missing) == 0 {
+		return func() error { return nil }
+	}
+
+	waits := make([]<-chan error, len(missing))
+	for j, segIdx := range missing {
+		waits[j] = sf.schedule(ctx, priorityDemand, func() error {
+			return sf.fetchWithRetryDirect(sf.ctx, segIdx)
+		})
+	}
+	return func() error {
+		for _, wait := range waits {
+			if err := sf.waitScheduled(ctx, wait); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
-	if len(missing) == 1 {
-		return sf.fetchWithRetry(ctx, missing[0])
-	}
-
-	errs := make([]error, len(missing))
-	var wg sync.WaitGroup
-	for j, segIdx := range missing {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs[j] = sf.fetchWithRetry(ctx, segIdx)
-		}()
-	}
-	wg.Wait()
-
-	// Report the failure of the lowest segment: that's where the caller's
-	// read would have stopped under the old sequential behavior.
-	for _, err := range errs {
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
-// CancelPendingPrefetch drains every queued prefetch hint. The reader calls
-// this when it detects a seek: hints for the abandoned window would otherwise
-// keep the prefetch workers — and the connection slots they hold — busy
-// downloading data the player just jumped away from (up to a full read-ahead
-// window of stale segments) while the blocking foreground read competes for
-// leftovers. In-flight downloads are left to finish: a segment completes in
-// well under a second and lands in the cache anyway; only not-yet-started
-// work is dropped.
+// CancelPendingPrefetch invalidates queued work in O(bitmap words). Tasks
+// already running finish and remain reusable; stale queued tasks become no-ops.
 func (sf *SegmentFetcher) CancelPendingPrefetch() {
-	for {
-		select {
-		case segIdx := <-sf.prefetchCh:
-			sf.clearPrefetchQueued(segIdx)
-			sf.stats.PrefetchCancelled.Add(1)
-		default:
-			return
-		}
+	sf.prefetchGen.Add(1)
+	var cancelled int64
+	for i := range sf.prefetchQueued {
+		cancelled += int64(bits.OnesCount64(sf.prefetchQueued[i].Swap(0)))
+	}
+	if cancelled > 0 {
+		sf.stats.PrefetchCancelled.Add(cancelled)
 	}
 }
 
-// fetchWithRetry fetches a single segment, retrying transient failures so a
-// momentary provider hiccup or stall does not tear down the whole stream.
-// Permanent failures (article-not-found) and cancellations return immediately.
-func (sf *SegmentFetcher) fetchWithRetry(ctx context.Context, segIdx int) error {
+func (sf *SegmentFetcher) pendingPrefetch() int {
+	var pending int
+	for i := range sf.prefetchQueued {
+		pending += bits.OnesCount64(sf.prefetchQueued[i].Load())
+	}
+	return pending
+}
+
+func (sf *SegmentFetcher) fetchWithRetryDirect(ctx context.Context, segIdx int) error {
 	maxAttempts := sf.config.MaxRetries
 	if maxAttempts < 1 {
 		maxAttempts = 3
@@ -444,14 +503,14 @@ func (sf *SegmentFetcher) fetchWithRetry(ctx context.Context, segIdx int) error 
 			}
 		}
 
-		err := sf.Fetch(ctx, segIdx)
+		err := sf.fetchDirect(ctx, segIdx)
 		if err == nil {
 			return nil
 		}
 		lastErr = err
 
 		// Don't retry permanent errors or cancellations.
-		if nntp.IsArticleNotFoundError(err) || ctx.Err() != nil || sf.ctx.Err() != nil {
+		if nntp.IsArticleNotFoundError(err) || nntp.IsYencDecodeError(err) || ctx.Err() != nil || sf.ctx.Err() != nil {
 			return err
 		}
 		// The failover layer already retried per provider and across
@@ -477,15 +536,20 @@ func (sf *SegmentFetcher) retryBackoff(attempt int) time.Duration {
 	return d
 }
 
-// Close stops all workers and waits for them to finish.
-//
-// prefetchCh is deliberately never closed: QueuePrefetch can race Close (a
-// ReadAtContext already past the reader's closed check), and a send on a
-// closed channel panics even inside a select. Workers exit via sf.ctx instead,
-// and the channel is garbage-collected with the fetcher.
+// Close cancels this reader's work. Shared scheduler workers outlive it.
 func (sf *SegmentFetcher) Close() {
+	sf.taskMu.Lock()
+	if sf.closing {
+		sf.taskMu.Unlock()
+		return
+	}
+	sf.closing = true
+	sf.taskMu.Unlock()
 	sf.cancel()
-	sf.prefetchWg.Wait()
+	if sf.ownedScheduler {
+		sf.scheduler.Close()
+	}
+	sf.taskWg.Wait()
 }
 
 // Error types

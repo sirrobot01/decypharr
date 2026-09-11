@@ -79,7 +79,7 @@ func (s *SABnzbd) SetConfig(cfg *config.Config) {
 }
 
 func (s *SABnzbd) getCategories() []Category {
-	arrs := s.manager.Arr().GetAll()
+	arrs := s.manager.Arr().All()
 	categories := make([]Category, 0, len(arrs))
 	added := map[string]struct{}{}
 

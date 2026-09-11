@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -224,7 +225,7 @@ func (pm *Premiumize) UpdateAndReturnTorrent(t *types.Torrent) (*types.Torrent, 
 	}
 	if t.Status == types.TorrentStatusDownloading || t.Status == types.TorrentStatusQueued {
 		if !t.DownloadUncached {
-			return t, fmt.Errorf("torrent: %s not cached", t.Name)
+			return t, fmt.Errorf("torrent %s: %w", t.Name, customerror.TorrentNotCachedError)
 		}
 		return t, nil
 	}
@@ -369,7 +370,7 @@ func (pm *Premiumize) transferToTorrent(tr premiumizeTransfer, fallbackInfoHash 
 	}
 	return &types.Torrent{
 		Id:               tr.ID,
-		InfoHash:         cmp.Or(utils.ExtractInfoHash(tr.Src), fallbackInfoHash),
+		InfoHash:         pm.transferInfoHash(tr, fallbackInfoHash),
 		Name:             name,
 		Filename:         name,
 		OriginalFilename: name,
@@ -382,6 +383,19 @@ func (pm *Premiumize) transferToTorrent(tr premiumizeTransfer, fallbackInfoHash 
 		Debrid:           pm.config.Name,
 		Added:            added,
 	}, nil
+}
+
+func (pm *Premiumize) transferInfoHash(tr premiumizeTransfer, fallbackInfoHash string) string {
+	if infoHash := cmp.Or(utils.ExtractInfoHash(tr.Src), fallbackInfoHash); infoHash != "" {
+		return infoHash
+	}
+
+	// Premiumize documents src as a deprecated proxy URL, not the original
+	// magnet, so completed transfers commonly have no recoverable infohash.
+	// Use a provider-scoped, deterministic 40-character key so separate cloud
+	// transfers cannot collapse into the same empty storage record during sync.
+	digest := sha256.Sum256([]byte("premiumize\x00" + pm.config.Name + "\x00" + tr.ID))
+	return fmt.Sprintf("%x", digest[:20])
 }
 
 func (pm *Premiumize) filesForTransfer(tr premiumizeTransfer) (map[string]types.File, []string, bool, error) {
