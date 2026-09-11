@@ -1,9 +1,8 @@
-name: Release
+name: release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -12,20 +11,31 @@ permissions:
 env:
   REGISTRY_GHCR: ghcr.io/dylanmazurek/decypharr
   LDFLAGS_PKG: github.com/dylanmazurek/decypharr/pkg/version
+  GO_VERSION: 1.27.1
+  RCLONE_VERSION: 1.69.3
 
 jobs:
   # Determine release channel from tag
   prepare:
     runs-on: ubuntu-latest
     outputs:
+      tag: ${{ steps.meta.outputs.tag }}
       version: ${{ steps.meta.outputs.version }}
       channel: ${{ steps.meta.outputs.channel }}
       docker_latest: ${{ steps.meta.outputs.docker_latest }}
     steps:
       - name: Extract version and channel
         id: meta
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
+          TAG="$TAG_NAME"
+          if [ -z "$TAG" ]; then
+            echo "Release event missing tag_name" >&2
+            exit 1
+          fi
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           VERSION="${TAG#v}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           if [[ "$TAG" == *"-beta"* ]]; then
@@ -43,6 +53,7 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     needs: prepare
+    name: build-linux (${{ matrix.arch }})
     strategy:
       matrix:
         include:
@@ -58,7 +69,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.27.1'
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       - name: Install Zig
@@ -89,25 +100,26 @@ jobs:
         run: |
           ARCH="${{ matrix.arch }}"
           [ "$ARCH" = "amd64" ] && ARCH="x86_64"
-          tar czf "dist/decypharr_Linux_${ARCH}.tar.gz" -C dist decypharr
+          tar czf "dist/decypharr_linux_${ARCH}.tar.gz" -C dist decypharr
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-${{ matrix.arch }}
-          path: dist/decypharr_Linux_*.tar.gz
+          path: dist/decypharr_linux_*.tar.gz
 
   # Build Windows binary (no CGO — cgofuse uses syscall.LoadLibrary for WinFsp)
   build-windows:
     runs-on: ubuntu-latest
     needs: prepare
+    name: build-windows (amd64)
     steps:
       - uses: actions/checkout@v5
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.27.1'
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       - name: Build
@@ -125,18 +137,19 @@ jobs:
 
       - name: Package
         working-directory: dist
-        run: zip decypharr_Windows_x86_64.zip decypharr.exe
+        run: zip decypharr_windows_x86_64.zip decypharr.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-amd64
-          path: dist/decypharr_Windows_x86_64.zip
+          path: dist/decypharr_windows_x86_64.zip
 
   # Build macOS binaries (CGO required, needs macFUSE headers)
   build-darwin:
     runs-on: macos-latest
     needs: prepare
+    name: build-darwin (${{ matrix.arch }})
     strategy:
       matrix:
         include:
@@ -150,7 +163,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.27.1'
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       - name: Install macFUSE headers
@@ -170,13 +183,13 @@ jobs:
             -o dist/decypharr
 
       - name: Package
-        run: tar czf "dist/decypharr_Darwin_${{ matrix.label }}.tar.gz" -C dist decypharr
+        run: tar czf "dist/decypharr_darwin_${{ matrix.label }}.tar.gz" -C dist decypharr
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: darwin-${{ matrix.arch }}
-          path: dist/decypharr_Darwin_*.tar.gz
+          path: dist/decypharr_darwin_*.tar.gz
 
   # Build and push multi-platform Docker images
   docker:
@@ -207,9 +220,9 @@ jobs:
           build-args: |
             VERSION=${{ needs.prepare.outputs.version }}
             CHANNEL=${{ needs.prepare.outputs.channel }}
-            RCLONE_VERSION=1.69.3
+            RCLONE_VERSION=${{ env.RCLONE_VERSION }}
           tags: |
-            ${{ env.REGISTRY_GHCR }}:${{ github.ref_name }}
+            ${{ env.REGISTRY_GHCR }}:${{ needs.prepare.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -218,7 +231,7 @@ jobs:
         run: |
           docker buildx imagetools create \
             --tag "${{ env.REGISTRY_GHCR }}:latest" \
-            "${{ env.REGISTRY_GHCR }}:${{ github.ref_name }}"
+            "${{ env.REGISTRY_GHCR }}:${{ needs.prepare.outputs.tag }}"
 
   # Create GitHub release with all binaries
   release:
@@ -235,19 +248,9 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Create release
+      - name: Upload release assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
-          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          PRERELEASE=""
-          if [ "$CHANNEL" != "stable" ]; then
-            PRERELEASE="--prerelease"
-          fi
-
-          gh release create "$TAG" dist/* \
-            --title "decypharr ${TAG}" \
-            --generate-notes \
-            $PRERELEASE \
-            --notes-start-tag "$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")"
+          gh release upload "$TAG" dist/* --clobber

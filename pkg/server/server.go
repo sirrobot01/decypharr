@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"embed"
 	"errors"
 	"fmt"
 	"html/template"
@@ -13,10 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/gorilla/sessions"
-	"github.com/rs/zerolog"
 	"github.com/dylanmazurek/decypharr/internal/config"
 	"github.com/dylanmazurek/decypharr/internal/logger"
 	"github.com/dylanmazurek/decypharr/pkg/manager"
@@ -24,16 +19,64 @@ import (
 	"github.com/dylanmazurek/decypharr/pkg/server/sabnzbd"
 	"github.com/dylanmazurek/decypharr/pkg/server/webdav"
 	"github.com/dylanmazurek/decypharr/pkg/stats"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/gorilla/sessions"
+	"github.com/rs/zerolog"
 )
 
-//go:embed templates/*
-var content embed.FS
+const (
+	containerFrontendRoot = "/app/frontend"
+)
 
-//go:embed assets/build/*
-var assetsEmbed embed.FS
+var templateNames = []string{
+	"layout.html",
+	"setup_layout.html",
+	"index.html",
+	"download.html",
+	"repair.html",
+	"stats.html",
+	"config.html",
+	"browse.html",
+	"login.html",
+	"register.html",
+	"setup.html",
+}
 
-//go:embed assets/images/*
-var imagesEmbed embed.FS
+var optionalTemplateNames = []string{
+	"reacquire.html",
+	"repair_tabs.html",
+}
+
+func frontendRoot() string {
+	candidates := []string{
+		containerFrontendRoot,
+		"frontend",
+		filepath.Join("..", "..", "frontend"),
+	}
+	for _, root := range candidates {
+		if st, err := os.Stat(root); err == nil && st.IsDir() {
+			return root
+		}
+	}
+	// Fall back to the repository-relative default to preserve prior behavior.
+	return filepath.Join("..", "..", "frontend")
+}
+
+func parseTemplatesFromFrontend() (*template.Template, error) {
+	root := frontendRoot()
+	templatePaths := make([]string, 0, len(templateNames)+len(optionalTemplateNames))
+	for _, name := range templateNames {
+		templatePaths = append(templatePaths, filepath.Join(root, "templates", name))
+	}
+	for _, name := range optionalTemplateNames {
+		path := filepath.Join(root, "templates", name)
+		if st, err := os.Stat(path); err == nil && !st.IsDir() {
+			templatePaths = append(templatePaths, path)
+		}
+	}
+	return template.ParseFiles(templatePaths...)
+}
 
 type AddRequest struct {
 	Url        string   `json:"url"`
@@ -78,22 +121,7 @@ func New(mgr *manager.Manager) *Server {
 
 	cfg := config.Get()
 
-	templates := template.Must(template.ParseFS(
-		content,
-		"templates/layout.html",
-		"templates/setup_layout.html",
-		"templates/index.html",
-		"templates/download.html",
-		"templates/repair.html",
-		"templates/reacquire.html",
-		"templates/repair_tabs.html",
-		"templates/stats.html",
-		"templates/config.html",
-		"templates/browse.html",
-		"templates/login.html",
-		"templates/register.html",
-		"templates/setup.html",
-	))
+	templates := template.Must(parseTemplatesFromFrontend())
 	cookieStore := sessions.NewCookieStore([]byte(cfg.SecretKey()))
 	cookieStore.Options = &sessions.Options{
 		Path:     "/",
