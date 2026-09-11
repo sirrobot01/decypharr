@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/nntp"
+	"github.com/dylanmazurek/decypharr/internal/nntp"
 )
 
 // SegmentFetcher deduplicates downloads and submits them to the shared scheduler.

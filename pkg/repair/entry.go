@@ -6,7 +6,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 func (r *Service) probeEntry(ctx context.Context, runID string, c *candidate, heal *errorCache, nzb *nzbProber, opts RunOptions, autoRepair bool) *storage.EntryHealth {

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirrobot01/decypharr/pkg/arr"
+	"github.com/dylanmazurek/decypharr/pkg/arr"
 )
 
 // maxIndexBytesPerBinding is the budget one indexed binding may retain. A

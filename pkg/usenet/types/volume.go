@@ -1,6 +1,6 @@
 package types
 
-import "github.com/sirrobot01/decypharr/pkg/storage"
+import "github.com/dylanmazurek/decypharr/pkg/storage"
 
 type Volume struct {
 	Index         int

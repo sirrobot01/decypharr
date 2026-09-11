@@ -1,9 +1,9 @@
 package qbit
 
 import (
-	"github.com/sirrobot01/decypharr/internal/config"
-	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	debridTypes "github.com/dylanmazurek/decypharr/pkg/debrid/types"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 type BuildInfo struct {

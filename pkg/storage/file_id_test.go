@@ -3,7 +3,7 @@ package storage
 import (
 	"testing"
 
-	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/config"
 )
 
 // File IDs must be assigned once and survive entries being rebuilt from

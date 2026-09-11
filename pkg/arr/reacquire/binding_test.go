@@ -5,7 +5,7 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/sirrobot01/decypharr/pkg/arr"
+	"github.com/dylanmazurek/decypharr/pkg/arr"
 )
 
 func TestBindingsFromMatchesOwnLibraryPath(t *testing.T) {

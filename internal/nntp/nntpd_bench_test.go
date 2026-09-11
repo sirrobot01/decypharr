@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/testutil/nntpd"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/testutil/nntpd"
 )
 
 const benchSegmentSize = 750 * 1024

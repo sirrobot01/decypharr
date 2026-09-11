@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/sirrobot01/decypharr/internal/request"
+	"github.com/dylanmazurek/decypharr/internal/request"
 	"golang.org/x/sync/errgroup"
 )
 

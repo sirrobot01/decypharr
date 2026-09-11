@@ -11,7 +11,7 @@ import (
 
 	json "github.com/bytedance/sonic"
 	"github.com/sirrobot01/appendstore"
-	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/config"
 )
 
 // RepairStrategy controls how the probe groups files for a single entry.

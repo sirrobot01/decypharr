@@ -11,10 +11,10 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/crypto"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/storage"
-	"github.com/sirrobot01/decypharr/pkg/usenet/types"
+	"github.com/dylanmazurek/decypharr/internal/crypto"
+	"github.com/dylanmazurek/decypharr/internal/utils"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/types"
 	"github.com/sourcegraph/conc/iter"
 )
 

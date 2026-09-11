@@ -3,8 +3,8 @@ package manager
 import (
 	"context"
 
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 func (m *Manager) fixNZBFileSizes(ctx context.Context) {

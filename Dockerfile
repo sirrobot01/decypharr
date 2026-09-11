@@ -2,11 +2,10 @@
 FROM --platform=$BUILDPLATFORM tonistiigi/xx AS xx
 
 # Stage 1: Build binaries — pinned to BUILDPLATFORM so Go runs natively (fast)
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
-ARG TARGETPLATFORM
 ARG VERSION=0.0.0
 ARG CHANNEL=dev
 
@@ -21,7 +20,7 @@ RUN apk add --no-cache clang lld && \
 
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download -x
+    go mod download
 
 COPY . .
 
@@ -33,7 +32,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=1 \
     xx-go build -trimpath -tags disable_libutp \
-    -ldflags="-w -s -X github.com/sirrobot01/decypharr/pkg/version.Version=${VERSION} -X github.com/sirrobot01/decypharr/pkg/version.Channel=${CHANNEL}" \
+    -ldflags="-w -s -X github.com/dylanmazurek/decypharr/pkg/version.Version=${VERSION} -X github.com/dylanmazurek/decypharr/pkg/version.Channel=${CHANNEL}" \
     -o /decypharr && \
     xx-verify /decypharr
 
@@ -45,16 +44,17 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -o /healthcheck cmd/healthcheck/main.go
 
 # Stage 2: Final image
-FROM alpine:latest
+FROM alpine:3.24.1
 
 ARG VERSION=0.0.0
 ARG CHANNEL=dev
+ARG RCLONE_VERSION=1.69.3
 
 LABEL version="${VERSION}-${CHANNEL}"
-LABEL org.opencontainers.image.source="https://github.com/sirrobot01/decypharr"
+LABEL org.opencontainers.image.source="https://github.com/dylanmazurek/decypharr"
 LABEL org.opencontainers.image.title="decypharr"
-LABEL org.opencontainers.image.authors="sirrobot01"
-LABEL org.opencontainers.image.documentation="https://github.com/sirrobot01/decypharr/blob/main/README.md"
+LABEL org.opencontainers.image.authors="dylanmazurek"
+LABEL org.opencontainers.image.documentation="https://github.com/dylanmazurek/decypharr/blob/main/README.md"
 
 # Install dependencies including rclone (from binary).
 # libstdc++/libgcc: required at runtime by rapidyenc's C++ decoder.
@@ -66,19 +66,20 @@ RUN apk add --no-cache fuse3 ca-certificates su-exec shadow curl unzip tzdata li
         armv7l|armv7) ARCH=arm ;; \
         *) echo "Unsupported architecture: $(uname -m)" && exit 1 ;; \
     esac && \
-    curl -O "https://downloads.rclone.org/rclone-current-linux-${ARCH}.zip" && \
-    unzip "rclone-current-linux-${ARCH}.zip" && \
+    curl -fsSLO "https://downloads.rclone.org/v${RCLONE_VERSION}/rclone-v${RCLONE_VERSION}-linux-${ARCH}.zip" && \
+    curl -fsSLO "https://downloads.rclone.org/v${RCLONE_VERSION}/SHA256SUMS" && \
+    grep "rclone-v${RCLONE_VERSION}-linux-${ARCH}.zip" SHA256SUMS | sha256sum -c - && \
+    unzip -q "rclone-v${RCLONE_VERSION}-linux-${ARCH}.zip" && \
     cp rclone-*/rclone /usr/local/bin/ && \
     chmod +x /usr/local/bin/rclone && \
-    rm -rf rclone-* && \
+    rm -rf rclone-* SHA256SUMS && \
     apk del curl unzip
 
 # Copy binaries, frontend, and entrypoint
 COPY --from=builder /decypharr /usr/bin/decypharr
 COPY --from=builder /healthcheck /usr/bin/healthcheck
 COPY --from=builder /app/frontend /app/frontend
-COPY scripts/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY --chmod=755 scripts/entrypoint.sh /entrypoint.sh
 
 # Set environment variables
 ENV PUID=1000
@@ -91,7 +92,8 @@ ENV GO_LOG=client-unlock-handlers.go=err
 EXPOSE 8282
 VOLUME ["/app"]
 
-HEALTHCHECK --interval=10s --retries=10 CMD ["/usr/bin/healthcheck", "--config", "/app"]
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=10 \
+    CMD ["/usr/bin/healthcheck", "--config", "/app"]
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/usr/bin/decypharr", "--config", "/app"]

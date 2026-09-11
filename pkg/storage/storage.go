@@ -10,7 +10,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/appendstore"
-	"github.com/sirrobot01/decypharr/internal/logger"
+	"github.com/dylanmazurek/decypharr/internal/logger"
 	"google.golang.org/protobuf/proto"
 )
 

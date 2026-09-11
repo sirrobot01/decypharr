@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
-const path = require('path');
-const {minify} = require('terser');
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { basename, join } from 'path';
+import { minify } from 'terser';
 
-const sourceDir = './pkg/server/assets/js';
-const buildDir = './pkg/server/assets/build/js';
+const sourceDir = '../frontend/assets/js';
+const buildDir = '../frontend/assets/build/js';
 
 // Create build directory
-if (!fs.existsSync(buildDir)) {
-    fs.mkdirSync(buildDir, {recursive: true});
+if (!existsSync(buildDir)) {
+    mkdirSync(buildDir, {recursive: true});
 }
 
 // Minify options
@@ -41,23 +41,23 @@ const minifyOptions = {
 
 async function minifyFile(inputPath, outputPath) {
     try {
-        console.log(`🗜️  Minifying ${path.basename(inputPath)}...`);
+        console.log(`🗜️  Minifying ${basename(inputPath)}...`);
 
-        const code = fs.readFileSync(inputPath, 'utf8');
+        const code = readFileSync(inputPath, 'utf8');
         const result = await minify(code, minifyOptions);
 
         if (result.error) {
             throw result.error;
         }
 
-        fs.writeFileSync(outputPath, result.code);
+        writeFileSync(outputPath, result.code);
 
         // Show size reduction
-        const originalSize = fs.statSync(inputPath).size;
-        const minifiedSize = fs.statSync(outputPath).size;
+        const originalSize = statSync(inputPath).size;
+        const minifiedSize = statSync(outputPath).size;
         const reduction = ((originalSize - minifiedSize) / originalSize * 100).toFixed(1);
 
-        console.log(`   ✓ ${path.basename(inputPath)}: ${(originalSize / 1024).toFixed(1)}KB → ${(minifiedSize / 1024).toFixed(1)}KB (${reduction}% reduction)`);
+        console.log(`   ✓ ${basename(inputPath)}: ${(originalSize / 1024).toFixed(1)}KB → ${(minifiedSize / 1024).toFixed(1)}KB (${reduction}% reduction)`);
 
         return {original: originalSize, minified: minifiedSize};
 
@@ -72,15 +72,15 @@ async function minifyAllJS() {
 
     try {
         // Check if source directory exists
-        if (!fs.existsSync(sourceDir)) {
+        if (!existsSync(sourceDir)) {
             console.log(`Creating source directory ${sourceDir}...`);
-            fs.mkdirSync(sourceDir, {recursive: true});
+            mkdirSync(sourceDir, {recursive: true});
             console.log('ℹ️  No JavaScript files found to minify');
             return;
         }
 
         // Get all JS files from source directory
-        const jsFiles = fs.readdirSync(sourceDir).filter(file => file.endsWith('.js'));
+        const jsFiles = readdirSync(sourceDir).filter(file => file.endsWith('.js'));
 
         if (jsFiles.length === 0) {
             console.log('ℹ️  No JavaScript files found to minify');
@@ -93,8 +93,8 @@ async function minifyAllJS() {
 
         // Minify each file
         for (const file of jsFiles) {
-            const inputPath = path.join(sourceDir, file);
-            const outputPath = path.join(buildDir, file);
+            const inputPath = join(sourceDir, file);
+            const outputPath = join(buildDir, file);
             const result = await minifyFile(inputPath, outputPath);
 
             if (result) {

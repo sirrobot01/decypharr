@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/gorilla/sessions"
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/pkg/arr/reacquire"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/pkg/arr/reacquire"
 )
 
 func TestArrReacquireRoutesRequireAuthentication(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sirrobot01/decypharr/internal/customerror"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/internal/customerror"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 type stubNZBRepairClient struct {

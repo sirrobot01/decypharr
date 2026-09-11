@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"github.com/sirrobot01/decypharr/pkg/manager/link"
-	"github.com/sirrobot01/decypharr/pkg/usenet"
+	"github.com/dylanmazurek/decypharr/pkg/debrid/types"
+	"github.com/dylanmazurek/decypharr/pkg/manager/link"
+	"github.com/dylanmazurek/decypharr/pkg/usenet"
 )
 
 func testPattern(n int) []byte {

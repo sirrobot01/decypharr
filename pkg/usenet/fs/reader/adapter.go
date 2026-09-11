@@ -1,7 +1,7 @@
 package reader
 
 import (
-	"github.com/sirrobot01/decypharr/pkg/usenet/types"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/types"
 )
 
 // VolumeToSegmentMeta converts a types.Volume to []SegmentMeta for the new reader.

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirrobot01/decypharr/internal/customerror"
-	"github.com/sirrobot01/decypharr/pkg/mount/dfs/vfs/ranges"
+	"github.com/dylanmazurek/decypharr/internal/customerror"
+	"github.com/dylanmazurek/decypharr/pkg/mount/dfs/vfs/ranges"
 )
 
 // chunkReader yields readSize bytes per Read up to total, then io.EOF.

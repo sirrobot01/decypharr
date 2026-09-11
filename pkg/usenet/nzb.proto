@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package usenet;
 
-option go_package = "github.com/sirrobot01/decypharr/pkg/usenet";
+option go_package = "github.com/dylanmazurek/decypharr/pkg/usenet";
 
 // NZBSegment represents a segment with all necessary download info
 message NZBSegmentProto {

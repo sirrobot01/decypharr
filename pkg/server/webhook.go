@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	json "github.com/bytedance/sonic"
-	"github.com/sirrobot01/decypharr/pkg/repair"
+	"github.com/dylanmazurek/decypharr/pkg/repair"
 )
 
 // handleTautulli handles webhooks from Tautulli. When the payload includes a

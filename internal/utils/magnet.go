@@ -15,7 +15,7 @@ import (
 	"strings"
 
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/sirrobot01/decypharr/internal/logger"
+	"github.com/dylanmazurek/decypharr/internal/logger"
 )
 
 var (

@@ -3,8 +3,8 @@ package storage
 import (
 	"time"
 
-	"github.com/sirrobot01/decypharr/internal/config"
-	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	debridTypes "github.com/dylanmazurek/decypharr/pkg/debrid/types"
 )
 
 // ============================================================================

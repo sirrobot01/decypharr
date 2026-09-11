@@ -9,8 +9,8 @@ import (
 
 	"github.com/go-co-op/gocron/v2"
 
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/internal/utils"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 // Start reconciles repair state and registers configured schedules.

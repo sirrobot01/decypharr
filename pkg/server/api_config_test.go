@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/config"
 )
 
 func TestMergeConfigUpdatePreservesOmittedFields(t *testing.T) {

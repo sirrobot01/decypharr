@@ -7,7 +7,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/sirrobot01/decypharr/pkg/manager"
+	"github.com/dylanmazurek/decypharr/pkg/manager"
 	"github.com/sirrobot01/facetfs"
 )
 

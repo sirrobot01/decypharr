@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/nntp"
+	"github.com/dylanmazurek/decypharr/internal/nntp"
 )
 
 // newTestFetcher builds a cache+fetcher pair with no NNTP client. Its private

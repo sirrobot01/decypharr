@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sirrobot01/decypharr/pkg/arr"
+	"github.com/dylanmazurek/decypharr/pkg/arr"
 )
 
 func TestCollectArrFilesUsesUniqueManagedSizeFallback(t *testing.T) {

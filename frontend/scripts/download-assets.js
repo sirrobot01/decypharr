@@ -1,37 +1,37 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
-const path = require('path');
-const https = require('https');
+import { createWriteStream, existsSync, mkdirSync, statSync, writeFileSync } from 'fs';
+import { get } from 'https';
+import { basename, join } from 'path';
 
 const buildDir = {
-    css: './pkg/server/assets/build/css',
-    js: './pkg/server/assets/build/js',
-    fonts: './pkg/server/assets/build/fonts'
+    css: '../frontend/assets/build/css',
+    js: '../frontend/assets/build/js',
+    fonts: '../frontend/assets/build/fonts'
 };
 
 // Create directories
 Object.values(buildDir).forEach(dir => {
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, {recursive: true});
+    if (!existsSync(dir)) {
+        mkdirSync(dir, {recursive: true});
     }
 });
 
 // Download function
 function downloadFile(url, filepath) {
     return new Promise((resolve, reject) => {
-        console.log(`📥 Downloading ${path.basename(filepath)}...`);
+        console.log(`📥 Downloading ${basename(filepath)}...`);
 
-        const file = fs.createWriteStream(filepath);
+        const file = createWriteStream(filepath);
 
-        https.get(url, (response) => {
+        get(url, (response) => {
             if (response.statusCode === 200) {
                 response.pipe(file);
                 file.on('finish', () => {
                     file.close();
-                    const stats = fs.statSync(filepath);
+                    const stats = statSync(filepath);
                     const size = (stats.size / 1024).toFixed(1) + 'KB';
-                    console.log(`   ✓ Downloaded ${path.basename(filepath)} (${size})`);
+                    console.log(`   ✓ Downloaded ${basename(filepath)} (${size})`);
                     resolve();
                 });
             } else if (response.statusCode === 302 || response.statusCode === 301) {
@@ -46,7 +46,7 @@ function downloadFile(url, filepath) {
 // Download text content
 function downloadText(url) {
     return new Promise((resolve, reject) => {
-        https.get(url, (response) => {
+        get(url, (response) => {
             let data = '';
             response.on('data', chunk => data += chunk);
             response.on('end', () => {
@@ -64,15 +64,15 @@ function downloadText(url) {
 const downloads = [
     {
         url: 'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/fonts/bootstrap-icons.woff',
-        path: path.join(buildDir.fonts, 'bootstrap-icons.woff')
+        path: join(buildDir.fonts, 'bootstrap-icons.woff')
     },
     {
         url: 'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/fonts/bootstrap-icons.woff2',
-        path: path.join(buildDir.fonts, 'bootstrap-icons.woff2')
+        path: join(buildDir.fonts, 'bootstrap-icons.woff2')
     },
     {
         url: 'https://code.jquery.com/jquery-3.7.1.min.js',
-        path: path.join(buildDir.js, 'jquery-3.7.1.min.js')
+        path: join(buildDir.js, 'jquery-3.7.1.min.js')
     }
 ];
 
@@ -92,8 +92,8 @@ async function downloadAssets() {
         );
 
         // Write fixed CSS to source directory so it can be minified
-        const biCSSSourcePath = path.join('./pkg/server/assets/css', 'bootstrap-icons.css');
-        fs.writeFileSync(biCSSSourcePath, fixedCSS);
+        const biCSSSourcePath = join('../frontend/assets/css', 'bootstrap-icons.css');
+        writeFileSync(biCSSSourcePath, fixedCSS);
         console.log(`   ✓ Downloaded Bootstrap Icons CSS (${(fixedCSS.length / 1024).toFixed(1)}KB)`);
 
         // Download other assets

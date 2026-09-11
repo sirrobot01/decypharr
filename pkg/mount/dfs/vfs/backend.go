@@ -3,8 +3,8 @@ package vfs
 import (
 	"context"
 
-	"github.com/sirrobot01/decypharr/pkg/manager"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/manager"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 // Backend is the slice of the manager the streaming path uses. It is an

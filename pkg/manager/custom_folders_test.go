@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 func TestVirtualFolderEmptyConditionsMatchHealthyItems(t *testing.T) {

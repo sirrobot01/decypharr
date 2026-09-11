@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/crypto"
-	"github.com/sirrobot01/decypharr/internal/nntp"
+	"github.com/dylanmazurek/decypharr/internal/crypto"
+	"github.com/dylanmazurek/decypharr/internal/nntp"
 )
 
 // decryptionBufPool stores *[]byte so Put does not box the slice header.

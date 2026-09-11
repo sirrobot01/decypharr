@@ -9,16 +9,16 @@ import (
 	"github.com/go-co-op/gocron/v2"
 	"github.com/rs/zerolog"
 
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/internal/logger"
-	"github.com/sirrobot01/decypharr/internal/utils"
-	"github.com/sirrobot01/decypharr/pkg/arr"
-	"github.com/sirrobot01/decypharr/pkg/arr/reacquire"
-	debrid "github.com/sirrobot01/decypharr/pkg/debrid/common"
-	"github.com/sirrobot01/decypharr/pkg/hearsay"
-	"github.com/sirrobot01/decypharr/pkg/notifications"
-	"github.com/sirrobot01/decypharr/pkg/storage"
-	"github.com/sirrobot01/decypharr/pkg/usenet"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/logger"
+	"github.com/dylanmazurek/decypharr/internal/utils"
+	"github.com/dylanmazurek/decypharr/pkg/arr"
+	"github.com/dylanmazurek/decypharr/pkg/arr/reacquire"
+	debrid "github.com/dylanmazurek/decypharr/pkg/debrid/common"
+	"github.com/dylanmazurek/decypharr/pkg/hearsay"
+	"github.com/dylanmazurek/decypharr/pkg/notifications"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/usenet"
 )
 
 // Status is the snapshot returned by the /api/repair/status endpoint.

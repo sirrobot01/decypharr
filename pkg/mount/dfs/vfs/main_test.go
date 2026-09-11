@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/config"
 )
 
 // TestMain pins the global config to a temp dir: several dependencies

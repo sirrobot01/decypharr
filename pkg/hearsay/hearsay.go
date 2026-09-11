@@ -24,8 +24,8 @@ import (
 	"github.com/sirrobot01/hearsay/transport"
 	hsusenet "github.com/sirrobot01/hearsay/usenet"
 
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/pkg/usenet/parser"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/pkg/usenet/parser"
 )
 
 type Service struct {

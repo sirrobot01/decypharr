@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 // segmentLayout is an immutable prefix index over decoded article segments.

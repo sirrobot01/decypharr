@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/pkg/arr"
-	"github.com/sirrobot01/decypharr/pkg/manager"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/pkg/arr"
+	"github.com/dylanmazurek/decypharr/pkg/manager"
 )
 
 func newAuthenticationTestQBit(t *testing.T) *QBit {

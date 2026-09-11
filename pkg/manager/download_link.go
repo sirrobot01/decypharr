@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	debrid "github.com/sirrobot01/decypharr/pkg/debrid/common"
-	"github.com/sirrobot01/decypharr/pkg/debrid/types"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	debrid "github.com/dylanmazurek/decypharr/pkg/debrid/common"
+	"github.com/dylanmazurek/decypharr/pkg/debrid/types"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 // GetDownloadLink fetches and validates a download link for a file in an entry.

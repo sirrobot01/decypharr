@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/internal/config"
 )
 
 func TestFileURLRoundTrip(t *testing.T) {

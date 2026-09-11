@@ -11,9 +11,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/sirrobot01/decypharr/internal/config"
-	"github.com/sirrobot01/decypharr/pkg/notifications"
-	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/dylanmazurek/decypharr/internal/config"
+	"github.com/dylanmazurek/decypharr/pkg/notifications"
+	"github.com/dylanmazurek/decypharr/pkg/storage"
 )
 
 // runSweep is the entry-point shared by RunNow and the scheduled callback. It

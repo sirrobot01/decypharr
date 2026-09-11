@@ -9,7 +9,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/sirrobot01/decypharr/internal/nntp"
+	"github.com/dylanmazurek/decypharr/internal/nntp"
 )
 
 type fakeArticleBackend struct {

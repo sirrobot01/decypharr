@@ -20,6 +20,7 @@ jobs:
     outputs:
       version: ${{ steps.meta.outputs.version }}
       channel: ${{ steps.meta.outputs.channel }}
+      docker_latest: ${{ steps.meta.outputs.docker_latest }}
     steps:
       - name: Extract version and channel
         id: meta
@@ -29,10 +30,13 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           if [[ "$TAG" == *"-beta"* ]]; then
             echo "channel=beta" >> "$GITHUB_OUTPUT"
+            echo "docker_latest=false" >> "$GITHUB_OUTPUT"
           elif [[ "$TAG" == *"-rc"* ]]; then
             echo "channel=rc" >> "$GITHUB_OUTPUT"
+            echo "docker_latest=false" >> "$GITHUB_OUTPUT"
           else
             echo "channel=stable" >> "$GITHUB_OUTPUT"
+            echo "docker_latest=true" >> "$GITHUB_OUTPUT"
           fi
 
   # Build Linux binaries (CGO required for FUSE + rapidyenc)
@@ -54,7 +58,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version: '1.27.1'
           cache: true
 
       - name: Install Zig
@@ -77,7 +81,7 @@ jobs:
           CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
           mkdir -p dist
-          go build -trimpath \
+          go build -trimpath -tags disable_libutp \
             -ldflags="-s -w -X ${LDFLAGS_PKG}.Version=${VERSION} -X ${LDFLAGS_PKG}.Channel=${CHANNEL}" \
             -o dist/decypharr
 
@@ -103,7 +107,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version: '1.27.1'
           cache: true
 
       - name: Build
@@ -115,7 +119,7 @@ jobs:
           CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
           mkdir -p dist
-          go build -trimpath \
+          go build -trimpath -tags disable_libutp \
             -ldflags="-s -w -X ${LDFLAGS_PKG}.Version=${VERSION} -X ${LDFLAGS_PKG}.Channel=${CHANNEL}" \
             -o dist/decypharr.exe
 
@@ -146,7 +150,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version: '1.27.1'
           cache: true
 
       - name: Install macFUSE headers
@@ -161,7 +165,7 @@ jobs:
           CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
           mkdir -p dist
-          go build -trimpath \
+          go build -trimpath -tags disable_libutp \
             -ldflags="-s -w -X ${LDFLAGS_PKG}.Version=${VERSION} -X ${LDFLAGS_PKG}.Channel=${CHANNEL}" \
             -o dist/decypharr
 
@@ -203,11 +207,18 @@ jobs:
           build-args: |
             VERSION=${{ needs.prepare.outputs.version }}
             CHANNEL=${{ needs.prepare.outputs.channel }}
+            RCLONE_VERSION=1.69.3
           tags: |
             ${{ env.REGISTRY_GHCR }}:${{ github.ref_name }}
-            ${{ env.REGISTRY_GHCR }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Tag stable as latest
+        if: needs.prepare.outputs.docker_latest == 'true'
+        run: |
+          docker buildx imagetools create \
+            --tag "${{ env.REGISTRY_GHCR }}:latest" \
+            "${{ env.REGISTRY_GHCR }}:${{ github.ref_name }}"
 
   # Create GitHub release with all binaries
   release:
