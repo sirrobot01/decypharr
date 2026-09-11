@@ -90,10 +90,10 @@ ENV LOG_PATH=/app/logs
 ENV GO_LOG=client-unlock-handlers.go=err
 
 EXPOSE 8282
-VOLUME ["/app"]
+VOLUME ["/data"]
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=10 \
-    CMD ["/usr/bin/healthcheck", "--config", "/app"]
+    CMD ["/usr/bin/healthcheck", "--config", "/data"]
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["/usr/bin/decypharr", "--config", "/app"]
+CMD ["/usr/bin/decypharr", "--config", "/data"]

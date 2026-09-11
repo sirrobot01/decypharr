@@ -10,7 +10,7 @@ services:
       - 8282:8282
     volumes:
       - /mnt/:/mnt:rshared
-      - ./data:/app
+      - ./data:/data
     restart: unless-stopped
     cap_add:
       - SYS_ADMIN
