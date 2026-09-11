@@ -20,6 +20,17 @@ func (m *Manager) restoreActiveDownloadJobs() {
 		return entries[i].AddedOn.Before(entries[j].AddedOn)
 	})
 
+	// Nothing is in flight in a fresh process, so a persisted IsDownloading is
+	// always stale: it was written by a run that died mid-symlink. Leaving it
+	// set made processQueuedEntries skip the entry forever while a restored job
+	// waited on it forever, leaking a worker slot on every restart.
+	for _, entry := range entries {
+		if entry.IsDownloading {
+			entry.IsDownloading = false
+			_ = m.queue.Update(entry)
+		}
+	}
+
 	// Existing active downloads reserve slots before queued imports are resumed.
 	for _, entry := range entries {
 		if entry.Status == debridTypes.TorrentStatusQueued || m.nzbNeedsReprocessing(entry) {
@@ -126,7 +137,9 @@ func (m *Manager) rebuildQueuedNZBJob(entry *storage.Entry) (*Job, error) {
 	if name == "" {
 		name = entry.Name
 	}
-	meta, groups, err := m.usenet.ParseWithID(context.Background(), entry.InfoHash, name, content, entry.Category)
+	ctx, cancel := context.WithTimeout(m.ctx, m.usenetTimeout)
+	defer cancel()
+	meta, groups, err := m.usenet.ParseWithID(ctx, entry.InfoHash, name, content, entry.Category)
 	if err != nil {
 		return nil, fmt.Errorf("usenet parse failed: %w", err)
 	}

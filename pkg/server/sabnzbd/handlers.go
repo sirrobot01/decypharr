@@ -108,7 +108,7 @@ func (s *SABnzbd) handleDelete(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Use atomic delete operation
-		if err := s.manager.Queue().Delete(nzoID, nil); err != nil {
+		if err := s.manager.Queue().Delete(nzoID, true, nil); err != nil {
 			errors = append(errors, fmt.Sprintf("Failed to delete %s: %v", nzoID, err))
 		} else {
 			successCount++
@@ -275,9 +275,9 @@ func (s *SABnzbd) handleAddURL(w http.ResponseWriter, r *http.Request) {
 	_arr := getArrFromContext(ctx)
 	cat := getCategory(ctx)
 
-	if _arr == nil {
+	if _arr.Name == "" {
 		// If Arr is not in context, create a new one with default values
-		_arr = arr.New(cat, "", "", false, nil, "", "")
+		_arr = arr.Arr{Name: cat}
 	}
 
 	if r.Method != http.MethodPost {
@@ -349,9 +349,9 @@ func (s *SABnzbd) handleAddFile(w http.ResponseWriter, r *http.Request) {
 	_arr := getArrFromContext(ctx)
 	cat := getCategory(ctx)
 
-	if _arr == nil {
+	if _arr.Name == "" {
 		// If Arr is not in context, create a new one with default values
-		_arr = arr.New(cat, "", "", false, nil, "", "")
+		_arr = arr.Arr{Name: cat}
 	}
 
 	if r.Method != http.MethodPost {
@@ -566,7 +566,7 @@ func (s *SABnzbd) writeError(w http.ResponseWriter, message string, status int) 
 	utils.JSONResponse(w, response, status)
 }
 
-func (s *SABnzbd) addNZBURL(ctx context.Context, url string, arr *arr.Arr, action config.DownloadAction) (string, error) {
+func (s *SABnzbd) addNZBURL(ctx context.Context, url string, arr arr.Arr, action config.DownloadAction) (string, error) {
 	if url == "" {
 		return "", fmt.Errorf("URL is required")
 	}
@@ -584,7 +584,7 @@ func (s *SABnzbd) addNZBURL(ctx context.Context, url string, arr *arr.Arr, actio
 	return s.addNZBFile(ctx, content, filename, arr, action)
 }
 
-func (s *SABnzbd) addNZBFile(ctx context.Context, content []byte, filename string, arr *arr.Arr, action config.DownloadAction) (string, error) {
+func (s *SABnzbd) addNZBFile(ctx context.Context, content []byte, filename string, arr arr.Arr, action config.DownloadAction) (string, error) {
 	if len(content) == 0 {
 		return "", fmt.Errorf("NZB content is empty")
 	}

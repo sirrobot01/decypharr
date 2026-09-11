@@ -1,5 +1,7 @@
 {{ define "repair" }}
 <div class="space-y-6">
+    {{ template "repair_tabs" . }}
+
     {{ if .SetupError }}
     <div role="alert" class="alert alert-warning">
         <i class="bi bi-exclamation-triangle text-xl"></i>
@@ -26,24 +28,24 @@
                         <a href="{{.URLBase}}settings#repair" class="link link-hover font-medium">Settings → Repair</a>.
                     </p>
                 </div>
-                <div class="flex flex-wrap gap-2">
-                    <button id="runNowBtn" class="btn btn-primary btn-sm">
+                <div class="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
+                    <button id="runNowBtn" class="btn btn-primary btn-sm w-full sm:w-auto">
                         <i class="bi bi-play-fill mr-1"></i>Run
                     </button>
-                    <button id="viewBrokenBtn" class="btn btn-outline btn-sm"
+                    <button id="viewBrokenBtn" class="btn btn-outline btn-sm w-full sm:w-auto"
                             title="See broken entries and their files">
                         <i class="bi bi-bug mr-1"></i>View broken
                         <span id="brokenCountBadge" class="badge badge-error badge-sm ml-1 hidden">0</span>
                     </button>
-                    <button id="fixBrokenBtn" class="btn btn-error btn-outline btn-sm"
+                    <button id="fixBrokenBtn" class="btn btn-error btn-outline btn-sm w-full sm:w-auto"
                             title="Trigger Arr delete + re-search on currently broken entries">
                         <i class="bi bi-bandaid mr-1"></i>Fix broken
                     </button>
-                    <button id="clearStateBtn" class="btn btn-warning btn-outline btn-sm"
+                    <button id="clearStateBtn" class="btn btn-warning btn-outline btn-sm w-full sm:w-auto"
                             title="Clear persisted repair state locally">
                         <i class="bi bi-eraser mr-1"></i>Clear State
                     </button>
-                    <button id="stopRunBtn" class="btn btn-warning btn-sm" disabled>
+                    <button id="stopRunBtn" class="btn btn-warning btn-sm w-full sm:w-auto" disabled>
                         <i class="bi bi-stop-fill mr-1"></i>Stop
                     </button>
                 </div>
@@ -127,15 +129,15 @@
     <!-- Run history -->
     <div class="card bg-base-100 shadow-xl">
         <div class="card-header">
-            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 p-6 border-b border-base-200">
+            <div class="flex flex-col items-start justify-between gap-3 border-b border-base-200 p-4 sm:flex-row sm:items-center sm:p-6">
                 <h3 class="card-title text-xl">
                     <i class="bi bi-clock-history mr-2"></i>Run history
                 </h3>
-                <div class="flex gap-2">
-                    <button id="clearHistoryBtn" class="btn btn-error btn-sm btn-outline">
+                <div class="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
+                    <button id="clearHistoryBtn" class="btn btn-error btn-sm btn-outline w-full sm:w-auto">
                         <i class="bi bi-trash mr-1"></i>Clear history
                     </button>
-                    <button id="refreshHistoryBtn" class="btn btn-outline btn-sm">
+                    <button id="refreshHistoryBtn" class="btn btn-outline btn-sm w-full sm:w-auto">
                         <i class="bi bi-arrow-clockwise mr-1"></i>Refresh
                     </button>
                 </div>
@@ -174,7 +176,7 @@
         <form method="dialog">
             <button class="btn btn-sm btn-circle btn-ghost absolute right-3 top-3" aria-label="Close">✕</button>
         </form>
-        <div class="px-6 py-5 border-b border-base-200">
+        <div class="border-b border-base-200 px-4 py-5 sm:px-6">
             <h3 class="font-bold text-lg flex items-center gap-2 pr-10">
                 <i class="bi bi-play-fill text-primary"></i>Run repair
             </h3>
@@ -182,7 +184,7 @@
         </div>
         <form id="runRepairForm">
             <div class="divide-y divide-base-200">
-                <label class="flex cursor-pointer items-start justify-between gap-4 px-6 py-4 hover:bg-base-200/60">
+                <label class="flex cursor-pointer items-start justify-between gap-3 px-4 py-4 hover:bg-base-200/60 sm:gap-4 sm:px-6">
                     <span class="flex gap-3">
                         <i class="bi bi-calendar-x text-lg text-primary mt-0.5"></i>
                         <span>
@@ -192,7 +194,7 @@
                     </span>
                     <input type="checkbox" class="toggle toggle-primary mt-1" id="runIgnoreLastChecked">
                 </label>
-                <div class="px-6 py-4">
+                <div class="px-4 py-4 sm:px-6">
                     <div class="flex gap-3 mb-3">
                         <i class="bi bi-filter-circle text-lg text-primary mt-0.5"></i>
                         <div>
@@ -215,7 +217,7 @@
                         </label>
                     </div>
                 </div>
-                <label class="flex cursor-pointer items-start justify-between gap-4 px-6 py-4 hover:bg-base-200/60">
+                <label class="flex cursor-pointer items-start justify-between gap-3 px-4 py-4 hover:bg-base-200/60 sm:gap-4 sm:px-6">
                     <span class="flex gap-3">
                         <i class="bi bi-file-earmark-check text-lg text-primary mt-0.5"></i>
                         <span>
@@ -225,20 +227,20 @@
                     </span>
                     <input type="checkbox" class="toggle toggle-primary mt-1" id="runVerifyContent">
                 </label>
-                <label class="flex cursor-pointer items-start justify-between gap-4 px-6 py-4 hover:bg-base-200/60">
+                <label class="flex cursor-pointer items-start justify-between gap-3 px-4 py-4 hover:bg-base-200/60 sm:gap-4 sm:px-6">
                     <span class="flex gap-3">
                         <i class="bi bi-bandaid text-lg text-error mt-0.5"></i>
                         <span>
                             <span class="block font-medium">Auto-repair</span>
-                            <span class="block text-sm opacity-70">Send broken Arr-known files through delete and search after probing.</span>
+                            <span class="block text-sm opacity-70">Send broken files through Arr delete and replacement search.</span>
                         </span>
                     </span>
                     <input type="checkbox" class="toggle toggle-primary mt-1" id="runAutoRepair">
                 </label>
             </div>
-            <div class="modal-action px-6 py-4 mt-0 bg-base-200/40">
-                <button type="button" class="btn btn-ghost" onclick="document.getElementById('runRepairModal').close()">Cancel</button>
-                <button type="submit" class="btn btn-primary" id="runRepairSubmitBtn">
+            <div class="modal-action mt-0 grid grid-cols-2 gap-2 bg-base-200/40 px-4 py-4 sm:flex sm:px-6">
+                <button type="button" class="btn btn-ghost w-full sm:w-auto" onclick="document.getElementById('runRepairModal').close()">Cancel</button>
+                <button type="submit" class="btn btn-primary w-full sm:w-auto" id="runRepairSubmitBtn">
                     <i class="bi bi-play-fill mr-1"></i>Run
                 </button>
             </div>
@@ -286,9 +288,9 @@
                 </label>
             </div>
             <div id="clearStateError" class="text-error text-sm hidden"></div>
-            <div class="modal-action">
-                <button type="button" class="btn btn-ghost" onclick="document.getElementById('clearStateModal').close()">Cancel</button>
-                <button type="submit" class="btn btn-warning" id="clearStateSubmitBtn">
+            <div class="modal-action grid grid-cols-2 gap-2 sm:flex">
+                <button type="button" class="btn btn-ghost w-full sm:w-auto" onclick="document.getElementById('clearStateModal').close()">Cancel</button>
+                <button type="submit" class="btn btn-warning w-full sm:w-auto" id="clearStateSubmitBtn">
                     <i class="bi bi-eraser mr-1"></i>Clear
                 </button>
             </div>

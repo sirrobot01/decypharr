@@ -10,6 +10,8 @@ import (
 	"syscall"
 )
 
+const usenetArticleNotFoundCode = "usenet_article_not_found"
+
 type Error struct {
 	err            error
 	silent         bool
@@ -46,6 +48,13 @@ func (e *Error) IsPermanent() bool {
 	return e.permanent
 }
 
+func (e *Error) StatusCode() int {
+	if e.statusCode < http.StatusBadRequest {
+		return http.StatusInternalServerError
+	}
+	return e.statusCode
+}
+
 func (e *Error) IsSilent() bool {
 	if e.err == nil {
 		return false
@@ -61,6 +70,7 @@ func NewError(err error, statusCode int, code string, silent bool, headersWritte
 		err:            err,
 		silent:         silent,
 		statusCode:     statusCode,
+		Code:           code,
 		HeadersWritten: headersWritten,
 	}
 }
@@ -132,6 +142,14 @@ func NewArticleNotFoundError(err error) *Error {
 		err = errors.New("article not found")
 	}
 	return (&Error{
-		err: err,
+		err:        err,
+		statusCode: http.StatusNotFound,
+		Code:       usenetArticleNotFoundCode,
 	}).Permanent()
+}
+
+// IsArticleNotFoundError reports a confirmed permanent Usenet article failure.
+func IsArticleNotFoundError(err error) bool {
+	customErr, ok := errors.AsType[*Error](err)
+	return ok && customErr.Code == usenetArticleNotFoundCode && customErr.IsPermanent()
 }

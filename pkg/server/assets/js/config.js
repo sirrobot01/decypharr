@@ -149,21 +149,84 @@ class ConfigManager {
 
         // Load repair config
         this.populateRepairSettings(config.repair, config.arrs);
+
+        // Load hearsay config
+        this.populateHearsaySettings(config.hearsay);
+    }
+
+    populateHearsaySettings(hearsay) {
+        const $ = (id) => document.getElementById(id);
+        const h = hearsay || {};
+        if ($('hearsay.enabled')) $('hearsay.enabled').checked = !h.disabled;
+        if ($('hearsay.participate')) $('hearsay.participate').checked = h.participate ?? true;
+        if ($('hearsay.publish')) $('hearsay.publish').checked = h.publish ?? true;
+        if ($('hearsay.advice_mode')) $('hearsay.advice_mode').value = h.advice_mode || 'shadow';
+        if ($('hearsay.min_support')) $('hearsay.min_support').value = h.min_support || '';
+        if ($('hearsay.min_evidence')) $('hearsay.min_evidence').value = h.min_evidence || '';
+        if ($('hearsay.min_sources')) $('hearsay.min_sources').value = h.min_sources || '';
+        if ($('hearsay.port')) $('hearsay.port').value = h.port || '';
+        if ($('hearsay.gossip_port')) $('hearsay.gossip_port').value = h.gossip_port || '';
+        if ($('hearsay.interval')) $('hearsay.interval').value = h.interval || '';
+        if ($('hearsay.max_storage_bytes')) $('hearsay.max_storage_bytes').value = h.max_storage_bytes || '';
+        if ($('hearsay.max_feeds_per_namespace')) $('hearsay.max_feeds_per_namespace').value = h.max_feeds_per_namespace || '';
+        if ($('hearsay.follow')) $('hearsay.follow').value = (h.follow || []).join('\n');
+    }
+
+    collectHearsayConfig() {
+        const $ = (id) => document.getElementById(id);
+        return {
+            disabled: !($('hearsay.enabled')?.checked ?? true),
+            participate: $('hearsay.participate')?.checked ?? true,
+            publish: $('hearsay.publish')?.checked ?? true,
+            advice_mode: $('hearsay.advice_mode')?.value || 'shadow',
+            min_support: parseFloat($('hearsay.min_support')?.value) || 0,
+            min_evidence: parseFloat($('hearsay.min_evidence')?.value) || 0,
+            min_sources: parseInt($('hearsay.min_sources')?.value, 10) || 0,
+            port: parseInt($('hearsay.port')?.value, 10) || 0,
+            gossip_port: parseInt($('hearsay.gossip_port')?.value, 10) || 0,
+            interval: $('hearsay.interval')?.value.trim() || '',
+            max_storage_bytes: parseInt($('hearsay.max_storage_bytes')?.value, 10) || 0,
+            max_feeds_per_namespace: parseInt($('hearsay.max_feeds_per_namespace')?.value, 10) || 0,
+            follow: ($('hearsay.follow')?.value || '')
+                .split('\n').map((k) => k.trim()).filter(Boolean),
+        };
     }
 
     populateRepairSettings(repair, arrs) {
-        // Always refresh the arrs multi-select so it tracks the latest *Arrs config.
-        const arrsSelect = document.getElementById('repair.arrs');
-        if (arrsSelect) {
+        // Always refresh the Arr choices so they track the latest *Arrs config.
+        const arrsGroup = document.getElementById('repair.arrs');
+        if (arrsGroup) {
             const wanted = new Set((repair && Array.isArray(repair.arrs)) ? repair.arrs : []);
-            arrsSelect.innerHTML = '';
+            arrsGroup.innerHTML = '';
+            let choiceCount = 0;
             for (const a of (arrs || [])) {
                 if (!a || !a.name) continue;
-                const opt = document.createElement('option');
-                opt.value = a.name;
-                opt.textContent = a.name;
-                if (wanted.has(a.name)) opt.selected = true;
-                arrsSelect.appendChild(opt);
+
+                const label = document.createElement('label');
+                label.className = 'flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 hover:bg-base-200';
+
+                const checkbox = document.createElement('input');
+                checkbox.className = 'checkbox checkbox-primary checkbox-sm';
+                checkbox.type = 'checkbox';
+                checkbox.name = 'repair.arrs[]';
+                checkbox.value = a.name;
+                checkbox.checked = wanted.has(a.name);
+
+                const name = document.createElement('span');
+                name.className = 'min-w-0 truncate text-sm';
+                name.textContent = a.name;
+
+                label.appendChild(checkbox);
+                label.appendChild(name);
+                arrsGroup.appendChild(label);
+                choiceCount++;
+            }
+
+            if (choiceCount === 0) {
+                const empty = document.createElement('p');
+                empty.className = 'px-3 py-2 text-sm opacity-60';
+                empty.textContent = 'No eligible Arrs configured.';
+                arrsGroup.appendChild(empty);
             }
         }
 
@@ -178,15 +241,16 @@ class ConfigManager {
         if ($('repair.strategy')) $('repair.strategy').value = repair.strategy || 'per_entry';
         if ($('repair.stop_schedule')) $('repair.stop_schedule').value = repair.stop_schedule || '';
         if ($('repair.auto_repair')) $('repair.auto_repair').checked = !!repair.auto_repair;
-        if ($('repair.skip_nzb_repair')) $('repair.skip_nzb_repair').checked = !!repair.skip_nzb_repair;
         if ($('repair.verify_content')) $('repair.verify_content').checked = !!repair.verify_content;
     }
 
     collectRepairConfig() {
         const $ = (id) => document.getElementById(id);
-        const arrsSelect = $('repair.arrs');
-        const arrs = arrsSelect
-            ? Array.from(arrsSelect.selectedOptions).map((o) => o.value).filter(Boolean)
+        const arrsGroup = $('repair.arrs');
+        const arrs = arrsGroup
+            ? Array.from(arrsGroup.querySelectorAll('input[type="checkbox"]:checked'))
+                .map((choice) => choice.value)
+                .filter(Boolean)
             : [];
         return {
             enabled: $('repair.enabled')?.checked || false,
@@ -198,7 +262,6 @@ class ConfigManager {
             strategy: $('repair.strategy')?.value || 'per_entry',
             stop_schedule: $('repair.stop_schedule')?.value.trim() || '',
             auto_repair: $('repair.auto_repair')?.checked || false,
-            skip_nzb_repair: $('repair.skip_nzb_repair')?.checked || false,
             verify_content: $('repair.verify_content')?.checked || false,
             arrs,
         };
@@ -535,7 +598,7 @@ class ConfigManager {
         return `
         <div class="card bg-base-100 border border-base-300 shadow-sm debrid-config" data-index="${index}">
             <div class="card-body">
-                <div class="flex justify-between items-start mb-4">
+                <div class="mb-4 flex items-start justify-between gap-3">
                     <h3 class="card-title text-lg">
                         <i class="bi bi-cloud mr-2 text-secondary"></i>
                         Debrid #${index + 1}
@@ -602,7 +665,7 @@ class ConfigManager {
                         </div>
                     </div>
                     <div class="space-y-4">
-                        <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                             <div>
                                 <label class="label" for="debrid[${index}].rate_limit">
                                     <span class=" font-medium">Rate Limit</span>
@@ -693,7 +756,7 @@ class ConfigManager {
                         <span class="text-sm opacity-70">Automatically expire links after this duration</span>
                     </div>
                 </div>
-                <div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
+                <div class="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     <div>
                         <label class="label cursor-pointer justify-start gap-2">
                             <input type="checkbox" class="checkbox checkbox-primary" 
@@ -760,7 +823,7 @@ class ConfigManager {
         return `
             <div class="card bg-base-200 border border-base-300 directory-item">
                 <div class="card-body">
-                    <div class="flex justify-between items-start mb-4">
+                    <div class="mb-4 flex items-start justify-between gap-3">
                         <h5 class="text-lg font-medium">Virtual Directory</h5>
                         <button type="button" class="btn btn-error btn-xs" onclick="this.closest('.directory-item').remove();">
                             <i class="bi bi-trash"></i>
@@ -1076,7 +1139,9 @@ class ConfigManager {
         Object.entries(data).forEach(([key, value]) => {
             const input = document.querySelector(`[name="arr[${index}].${key}"]`);
             if (input) {
-                if (input.type === 'checkbox') {
+                if (key === 'download_uncached' && input.tagName === 'SELECT') {
+                    input.value = value === true ? 'true' : value === false ? 'false' : '';
+                } else if (input.type === 'checkbox') {
                     input.checked = value;
                 } else {
                     input.value = value;
@@ -1147,7 +1212,7 @@ class ConfigManager {
 
                         <div>
                             <label class="label" for="arr[${index}].selected_debrid">
-                                <span class="font-medium">Preferred Provider</span>
+                                <span class="font-medium">Preferred Provider(debrid)</span>
                             </label>
                             <select class="select w-full" name="arr[${index}].selected_debrid" id="arr[${index}].selected_debrid">
                                 <option value="">Auto Select</option>
@@ -1167,11 +1232,15 @@ class ConfigManager {
                         </div>
 
                         <div class="rounded-box bg-base-200/50 px-3 py-2">
-                            <label class="label cursor-pointer justify-start gap-2 p-0">
-                                <input type="checkbox" class="checkbox checkbox-sm checkbox-primary"
-                                       name="arr[${index}].download_uncached" id="arr[${index}].download_uncached">
-                                <span class="text-sm leading-tight">Download Uncached</span>
+                            <label class="label p-0 pb-1" for="arr[${index}].download_uncached">
+                                <span class="text-sm leading-tight">Uncached Torrents</span>
                             </label>
+                            <select class="select select-sm w-full"
+                                    name="arr[${index}].download_uncached" id="arr[${index}].download_uncached">
+                                <option value="">Inherit provider setting</option>
+                                <option value="true">Allow for this Arr</option>
+                                <option value="false">Require cached for this Arr</option>
+                            </select>
                         </div>
                     </div>
                 </div>
@@ -1371,7 +1440,10 @@ class ConfigManager {
             repair: this.collectRepairConfig(),
 
             // Collect STRM config
-            strm: this.collectStrmConfig()
+            strm: this.collectStrmConfig(),
+
+            // Collect hearsay config
+            hearsay: this.collectHearsayConfig()
         };
     }
 
@@ -1448,8 +1520,8 @@ class ConfigManager {
             conn_idle_timeout: document.querySelector('[name="usenet.conn_idle_timeout"]')?.value || "",
             availability_sample_percent: parseInt(document.querySelector('[name="usenet.availability_sample_percent"]')?.value) || 10,
             import_availability_sample_percent: parseInt(document.querySelector('[name="usenet.import_availability_sample_percent"]')?.value) || 1,
-            disk_buffer_path: document.querySelector('[name="usenet.disk_buffer_path"]')?.value || "",
-            buffer_memory: document.querySelector('[name="usenet.buffer_memory"]')?.value || ""
+            disk_path: document.querySelector('[name="usenet.disk_path"]')?.value.trim() || "",
+			buffer_memory: document.querySelector('[name="usenet.buffer_memory"]')?.value || ""
         };
     }
 
@@ -1542,10 +1614,13 @@ class ConfigManager {
                 host: hostInput.value,
                 token: tokenInput.value,
                 skip_repair: skipRepairInput.checked,
-                download_uncached: downloadUncachedInput.checked,
                 selected_debrid: selectedDebridInput.value,
                 source: sourceInput.value
             };
+
+            if (downloadUncachedInput.value !== '') {
+                arr.download_uncached = downloadUncachedInput.value === 'true';
+            }
 
             if (arr.name && arr.host) {
                 arrs.push(arr);
@@ -1816,6 +1891,14 @@ class ConfigManager {
         const usernameField = document.getElementById('auth-username');
         if (usernameField && config.auth_username) {
             usernameField.value = config.auth_username;
+        }
+
+        const tokenOnlyField = document.getElementById('auth-token-only');
+        if (tokenOnlyField) {
+            tokenOnlyField.checked = !!config.auth_token_only;
+            if (typeof toggleTokenOnly === 'function') {
+                toggleTokenOnly();
+            }
         }
     }
 
@@ -2287,14 +2370,18 @@ class ConfigManager {
             'conn_idle_timeout': usenet.conn_idle_timeout,
             'availability_sample_percent': usenet.availability_sample_percent,
             'import_availability_sample_percent': usenet.import_availability_sample_percent,
-            'disk_buffer_path': usenet.disk_buffer_path,
+            'disk_path': usenet.disk_path,
             'buffer_memory': usenet.buffer_memory
         };
 
         Object.entries(streamFields).forEach(([id, value]) => {
             const input = document.getElementsByName(`usenet.${id}`)[0];
             if (input && value !== undefined) {
-                input.value = value;
+                if (input.type === 'checkbox') {
+                    input.checked = !!value;
+                } else {
+                    input.value = value;
+                }
             }
         });
     }
@@ -2328,7 +2415,7 @@ class ConfigManager {
         return `
         <div class="card bg-base-200 border border-base-300 usenet-provider" data-index="${index}">
             <div class="card-body">
-                <div class="flex justify-between items-start mb-4">
+                <div class="mb-4 flex items-start justify-between gap-3">
                     <h4 class="font-bold text-lg">
                         <i class="bi bi-server mr-2"></i>
                         Provider #${index + 1}

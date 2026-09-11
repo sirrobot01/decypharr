@@ -9,9 +9,8 @@ import (
 	"github.com/sirrobot01/decypharr/internal/nntp"
 )
 
-// newTestFetcher builds a cache+fetcher pair with no NNTP client. maxConns=1
-// keeps the prefetch worker count at zero, so queued hints stay queued and
-// nothing ever dereferences the nil client.
+// newTestFetcher builds a cache+fetcher pair with no NNTP client. Its private
+// scheduler has no workers, so hints stay queued without using the nil client.
 func newTestFetcher(t *testing.T, segCount int) *SegmentFetcher {
 	t.Helper()
 	const segSize = int64(1000)
@@ -47,13 +46,13 @@ func TestCancelPendingPrefetchDrainsQueue(t *testing.T) {
 	for i := 2; i <= 5; i++ {
 		sf.QueuePrefetch(i)
 	}
-	if got := len(sf.prefetchCh); got != 4 {
+	if got := sf.pendingPrefetch(); got != 4 {
 		t.Fatalf("expected 4 queued hints, got %d", got)
 	}
 
 	sf.CancelPendingPrefetch()
 
-	if got := len(sf.prefetchCh); got != 0 {
+	if got := sf.pendingPrefetch(); got != 0 {
 		t.Errorf("expected empty queue after cancel, got %d hints", got)
 	}
 	if got := sf.stats.PrefetchCancelled.Load(); got != 4 {
@@ -63,7 +62,7 @@ func TestCancelPendingPrefetchDrainsQueue(t *testing.T) {
 	// The dedup bits must be cleared so the same segments can be re-hinted
 	// for the new window.
 	sf.QueuePrefetch(3)
-	if got := len(sf.prefetchCh); got != 1 {
+	if got := sf.pendingPrefetch(); got != 1 {
 		t.Errorf("expected segment re-queueable after cancel, queue len = %d", got)
 	}
 }

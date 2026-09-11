@@ -61,9 +61,7 @@ class RepairManager {
         if (ignore) ignore.checked = false;
         if (autoRepair) autoRepair.checked = !!this.repairConfig.auto_repair;
         if (verifyContent) verifyContent.checked = !!this.repairConfig.verify_content;
-        const defaultProtocol = this.repairConfig.skip_nzb_repair ? 'torrent' : 'all';
-        const protocol = document.querySelector(`input[name="runProtocol"][value="${defaultProtocol}"]`)
-            || document.getElementById('runProtocolAll');
+        const protocol = document.getElementById('runProtocolAll');
         if (protocol) protocol.checked = true;
         if (typeof modal.showModal === 'function') {
             modal.showModal();
@@ -446,13 +444,14 @@ class RepairManager {
             ['broken', 'Broken'],
             ['repaired', 'Repaired'],
             ['cleared', 'Cleared'],
-            ['repair_failed', 'Repair fail'],
+			['repair_failed', 'Repair fail'],
         ];
         container.innerHTML = '';
         for (const [k, label] of fields) {
-            const el = document.createElement('div');
-            el.className = 'bg-base-100 rounded p-2';
-            el.innerHTML = `<div class="text-[10px] opacity-60 uppercase">${label}</div><div class="font-mono">${stats[k] || 0}</div>`;
+			const el = document.createElement('div');
+			el.className = 'bg-base-100 rounded p-2';
+			const value = stats[k] ?? 0;
+            el.innerHTML = `<div class="text-[10px] opacity-60 uppercase">${label}</div><div class="font-mono">${value}</div>`;
             container.appendChild(el);
         }
     }

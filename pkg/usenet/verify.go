@@ -10,6 +10,7 @@ import (
 	"github.com/sirrobot01/decypharr/internal/nntp"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/sirrobot01/decypharr/pkg/usenet/parser"
 )
 
 // verifyHeadBytes is how much of the file head is read for verification. It
@@ -34,8 +35,8 @@ func headSignatureOK(head []byte) bool {
 		bytes.HasPrefix(head, []byte("OggS")), // ogv/ogm/ogg/opus
 		bytes.HasPrefix(head, []byte("FLV\x01")),
 		bytes.HasPrefix(head, []byte{0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11}), // ASF: wmv/wma
-		bytes.HasPrefix(head, []byte{0x00, 0x00, 0x01, 0xBA}), // MPEG-PS: mpg/vob
-		bytes.HasPrefix(head, []byte("ID3")),                  // MP3 with ID3v2 tag
+		bytes.HasPrefix(head, []byte{0x00, 0x00, 0x01, 0xBA}),                         // MPEG-PS: mpg/vob
+		bytes.HasPrefix(head, []byte("ID3")),                                          // MP3 with ID3v2 tag
 		bytes.HasPrefix(head, []byte("fLaC")),
 		bytes.HasPrefix(head, []byte("FORM")),     // AIFF
 		bytes.HasPrefix(head, []byte("MAC ")),     // Monkey's Audio
@@ -79,7 +80,22 @@ func (u *Usenet) VerifyFileHead(ctx context.Context, file *storage.NZBFile) erro
 	if file.Size > 0 && file.Size < verifyHeadBytes {
 		return nil // too small to classify; not worth failing a grab over
 	}
-	entry, err := u.createEntry(file, 0)
+	if u.analyzer != nil {
+		head, err := u.analyzer.ReadFilePrefix(ctx, file, verifyHeadBytes)
+		if err == nil {
+			if headSignatureOK(head) {
+				return nil
+			}
+			return fmt.Errorf("head of %q matches no media container signature: %w", file.Name, customerror.UsenetCorruptContentError)
+		}
+		if !errors.Is(err, parser.ErrPrefixReadUnsupported) {
+			if nntp.IsArticleNotFoundError(err) {
+				return fmt.Errorf("head article of %q missing: %w", file.Name, customerror.UsenetSegmentMissingError)
+			}
+			return err
+		}
+	}
+	entry, err := u.createEntry(file, 0, RetentionWindow)
 	if err != nil {
 		return err
 	}
@@ -130,8 +146,7 @@ func (u *Usenet) verifyNZBContent(ctx context.Context, nzb *storage.NZB) error {
 		if file.IsDeleted || len(file.Segments) == 0 || !utils.IsMediaFile(file.Name) {
 			continue
 		}
-		switch file.FileType {
-		case storage.NZBFileTypePar2, storage.NZBFileTypeIgnore:
+		if file.FileType == storage.NZBFileTypeIgnore {
 			continue
 		}
 		if ctx.Err() != nil {

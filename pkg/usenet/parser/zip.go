@@ -1,22 +1,20 @@
 package parser
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
-	fs2 "io/fs"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/rs/zerolog"
-	"github.com/sirrobot01/decypharr/internal/nntp"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/storage"
-	"github.com/sirrobot01/decypharr/pkg/usenet/fs"
 	"github.com/sirrobot01/decypharr/pkg/usenet/types"
 )
 
@@ -47,6 +45,7 @@ type ZIPFileEntry struct {
 	IsStored          bool
 	IsDirectory       bool
 	LocalHeaderOffset int64
+	DiskNumberStart   int64
 	CRC32             uint32
 }
 
@@ -60,37 +59,55 @@ type ZIPArchiveInfo struct {
 
 // ZIPParser parses ZIP archives from NNTP segments
 type ZIPParser struct {
-	manager       *nntp.Client
-	maxConcurrent int
-	logger        zerolog.Logger
+	source ArticleSource
+	logger zerolog.Logger
 }
 
 // NewZIPParser creates a new ZIP parser
-func NewZIPParser(manager *nntp.Client, maxConcurrent int, logger zerolog.Logger) *ZIPParser {
+func NewZIPParser(source ArticleSource, _ int, logger zerolog.Logger) *ZIPParser {
 	return &ZIPParser{
-		manager:       manager,
-		maxConcurrent: maxConcurrent,
-		logger:        logger.With().Str("component", "zip_parser").Logger(),
+		source: source,
+		logger: logger.With().Str("component", "zip_parser").Logger(),
 	}
 }
 
 func (p *ZIPParser) Process(ctx context.Context, group *FileGroup, password string) ([]*storage.NZBFile, error) {
 	sort.Slice(group.Files, func(i, j int) bool {
+		oi := getZIPVolumeOrder(group.Files[i].Filename)
+		oj := getZIPVolumeOrder(group.Files[j].Filename)
+		if oi != oj {
+			return oi < oj
+		}
 		return group.Files[i].Filename < group.Files[j].Filename
 	})
 
-	volumes := buildArchiveVolumeDescriptors(group)
+	volumes, err := buildArchiveVolumeDescriptors(group)
+	if err != nil {
+		return nil, err
+	}
 	if len(volumes) == 0 {
 		return nil, fmt.Errorf("no volumes built from group")
 	}
+	readerAt, archiveSize, err := newArticleReaderAt(ctx, p.source, volumes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ZIP reader: %w", err)
+	}
+	volumeStarts := make([]int64, len(volumes))
+	var volumePosition int64
+	for index, volume := range volumes {
+		volumeStarts[index] = volumePosition
+		volumePosition += volume.Size
+	}
 
-	baseSegments, volumeInfos, _ := buildBaseSegments(group)
+	baseSegments, volumeInfos, _, err := buildBaseSegments(group)
+	if err != nil {
+		return nil, err
+	}
 	if len(baseSegments) == 0 {
 		return nil, fmt.Errorf("no base segments built from group")
 	}
 
-	// Use snippet-based parsing instead of downloading entire archive
-	archiveInfo, err := p.parseArchive(ctx, volumes)
+	archiveInfo, err := p.parseArchiveReader(readerAt, archiveSize, len(volumes) > 1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse ZIP archive: %w", err)
 	}
@@ -126,11 +143,15 @@ func (p *ZIPParser) Process(ctx context.Context, group *FileGroup, password stri
 		// directory's. Read the local header to get the exact data offset;
 		// without this the stream is shifted by the header length (garbage
 		// prefix + truncated tail) and the file won't play.
-		dataOffset, err := p.calculateZIPDataOffset(ctx, volumes, file)
+		headerOffset, err := absoluteZIPHeaderOffset(file, volumeStarts)
+		if err != nil {
+			return nil, fmt.Errorf("resolve local header for %q: %w", internal, err)
+		}
+		dataOffset, err := p.calculateZIPDataOffset(readerAt, headerOffset)
 		if err != nil {
 			// Best effort: assume no local extra field (common for archives
 			// that only store extra data in the central directory).
-			dataOffset = file.LocalHeaderOffset + 30 + int64(len(file.Name))
+			dataOffset = headerOffset + 30 + int64(len(file.Name))
 		}
 
 		extracted = append(extracted, &storage.ExtractedFileInfo{
@@ -146,7 +167,7 @@ func (p *ZIPParser) Process(ctx context.Context, group *FileGroup, password stri
 		return nil, fmt.Errorf("no stored files found in ZIP archive")
 	}
 
-	return buildExtractedArchiveFiles(group, password, storage.NZBFileTypeZip, baseSegments, volumeInfos, extracted), nil
+	return buildExtractedArchiveFiles(group, password, storage.NZBFileTypeZip, baseSegments, volumeInfos, extracted)
 }
 
 // ParseArchive parses ZIP archive from volumes
@@ -154,11 +175,22 @@ func (p *ZIPParser) parseArchive(ctx context.Context, volumes []*types.Volume) (
 	if len(volumes) == 0 {
 		return nil, fmt.Errorf("no volumes provided")
 	}
-
-	lastVolume := volumes[len(volumes)-1]
-	endSnippet, err := p.fetchVolumeEndSnippet(ctx, lastVolume)
+	readerAt, archiveSize, err := newArticleReaderAt(ctx, p.source, volumes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch end snippet: %w", err)
+		return nil, err
+	}
+	return p.parseArchiveReader(readerAt, archiveSize, len(volumes) > 1)
+}
+
+func (p *ZIPParser) parseArchiveReader(readerAt io.ReaderAt, archiveSize int64, multiPart bool) (*ZIPArchiveInfo, error) {
+	if archiveSize < 22 {
+		return nil, fmt.Errorf("ZIP archive is too small: %d bytes", archiveSize)
+	}
+	tailSize := min(archiveSize, int64(defaultZIPEndSnippetSize))
+	tailStart := archiveSize - tailSize
+	endSnippet := make([]byte, tailSize)
+	if _, err := readerAt.ReadAt(endSnippet, tailStart); err != nil {
+		return nil, fmt.Errorf("failed to read ZIP tail: %w", err)
 	}
 
 	// Find and parse End of Central Directory record
@@ -167,8 +199,17 @@ func (p *ZIPParser) parseArchive(ctx context.Context, volumes []*types.Volume) (
 		return nil, fmt.Errorf("failed to find central directory: %w", err)
 	}
 
-	// Parse central directory entries
-	files, err := p.parseCentralDirectory(endSnippet, endOfCentralDir, eocdPos)
+	totalEntries, centralDirSize, dirEnd, err := zipCentralDirectoryMetadata(endSnippet, endOfCentralDir, eocdPos)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve central directory: %w", err)
+	}
+	dirEnd += tailStart
+	dirStart := dirEnd - centralDirSize
+	if centralDirSize < 0 || dirStart < 0 || dirEnd > archiveSize {
+		return nil, fmt.Errorf("invalid central directory range [%d, %d) for %d-byte archive", dirStart, dirEnd, archiveSize)
+	}
+	section := io.NewSectionReader(readerAt, dirStart, centralDirSize)
+	files, err := p.parseCentralDirectoryReader(bufio.NewReaderSize(section, 64<<10), totalEntries)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse central directory: %w", err)
 	}
@@ -176,7 +217,7 @@ func (p *ZIPParser) parseArchive(ctx context.Context, volumes []*types.Volume) (
 	archiveInfo := &ZIPArchiveInfo{
 		Files:       files,
 		TotalFiles:  len(files),
-		IsMultiPart: len(volumes) > 1,
+		IsMultiPart: multiPart,
 	}
 
 	for _, file := range files {
@@ -191,43 +232,6 @@ func (p *ZIPParser) parseArchive(ctx context.Context, volumes []*types.Volume) (
 	return archiveInfo, nil
 }
 
-// fetchVolumeEndSnippet fetches the tail of a volume (the last segment,
-// widened backwards by up to three more if that alone is smaller than the
-// snippet target). A failed fetch aborts the parse: silently skipping a
-// segment would splice a hole into the concatenation and shift every central
-// directory offset parsed from it.
-func (p *ZIPParser) fetchVolumeEndSnippet(ctx context.Context, vol *types.Volume) ([]byte, error) {
-	if len(vol.Segments) == 0 {
-		return nil, fmt.Errorf("volume has no segments")
-	}
-
-	fetch := func(messageID string) ([]byte, error) {
-		var body []byte
-		err := p.manager.ExecuteWithFailover(ctx, func(conn *nntp.Connection) error {
-			data, e := conn.GetDecodedBody(messageID)
-			body = data
-			return e
-		})
-		return body, err
-	}
-
-	last := len(vol.Segments) - 1
-	body, err := fetch(vol.Segments[last].MessageID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch segment: %w", err)
-	}
-
-	for i := last - 1; i >= 0 && len(body) < defaultZIPEndSnippetSize && last-i <= 3; i-- {
-		data, err := fetch(vol.Segments[i].MessageID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch segment %s: %w", vol.Segments[i].MessageID, err)
-		}
-		body = append(data, body...)
-	}
-
-	return body, nil
-}
-
 // endOfCentralDirRecord represents the End of Central Directory record
 type endOfCentralDirRecord struct {
 	diskNumber       uint16
@@ -240,15 +244,20 @@ type endOfCentralDirRecord struct {
 }
 
 // findEndOfCentralDirectory finds and parses the End of Central Directory
-// record, returning it together with its byte position within data. The
 // position is what lets the caller anchor the central directory correctly
 // even when the archive has a trailing comment.
 func (p *ZIPParser) findEndOfCentralDirectory(data []byte) (*endOfCentralDirRecord, int, error) {
-	// Search backwards for the signature
-	// EOCD is at the end, but there might be a comment after it
-	for i := len(data) - 22; i >= 0; i-- {
-		sig := binary.LittleEndian.Uint32(data[i:])
-		if sig == ZIPEndOfCentralDirSig {
+	// Prefer a record whose declared comment ends exactly at the archive end.
+	// A second compatibility pass accepts trailing bytes used by some tools.
+	for requireExactEnd := true; ; requireExactEnd = false {
+		for i := len(data) - 22; i >= 0; i-- {
+			if binary.LittleEndian.Uint32(data[i:]) != ZIPEndOfCentralDirSig {
+				continue
+			}
+			commentLength := binary.LittleEndian.Uint16(data[i+20:])
+			if requireExactEnd && i+22+int(commentLength) != len(data) {
+				continue
+			}
 			record := &endOfCentralDirRecord{
 				diskNumber:       binary.LittleEndian.Uint16(data[i+4:]),
 				centralDirDisk:   binary.LittleEndian.Uint16(data[i+6:]),
@@ -256,10 +265,13 @@ func (p *ZIPParser) findEndOfCentralDirectory(data []byte) (*endOfCentralDirReco
 				totalEntries:     binary.LittleEndian.Uint16(data[i+10:]),
 				centralDirSize:   binary.LittleEndian.Uint32(data[i+12:]),
 				centralDirOffset: binary.LittleEndian.Uint32(data[i+16:]),
-				commentLength:    binary.LittleEndian.Uint16(data[i+20:]),
+				commentLength:    commentLength,
 			}
 
 			return record, i, nil
+		}
+		if !requireExactEnd {
+			break
 		}
 	}
 
@@ -272,44 +284,49 @@ func (p *ZIPParser) findEndOfCentralDirectory(data []byte) (*endOfCentralDirReco
 // correct when the archive has a trailing comment — the previous end-of-buffer
 // arithmetic was shifted by the comment length and failed on the first entry.
 func (p *ZIPParser) parseCentralDirectory(data []byte, eocd *endOfCentralDirRecord, eocdPos int) ([]*ZIPFileEntry, error) {
+	totalEntries, centralDirSize, dirEnd, err := zipCentralDirectoryMetadata(data, eocd, eocdPos)
+	if err != nil {
+		return nil, err
+	}
+	dirStart := dirEnd - centralDirSize
+	if dirStart < 0 || dirEnd > int64(len(data)) {
+		return nil, fmt.Errorf("central directory range [%d, %d) is outside the supplied %d bytes", dirStart, dirEnd, len(data))
+	}
+	return p.parseCentralDirectoryEntries(data[dirStart:dirEnd], totalEntries)
+}
+
+func zipCentralDirectoryMetadata(data []byte, eocd *endOfCentralDirRecord, eocdPos int) (int64, int64, int64, error) {
+	if eocd == nil || eocdPos < 0 || eocdPos > len(data) {
+		return 0, 0, 0, fmt.Errorf("invalid end of central directory record")
+	}
 	totalEntries := int64(eocd.totalEntries)
 	centralDirSize := int64(eocd.centralDirSize)
 	dirEnd := int64(eocdPos)
-
-	// ZIP64: 0xFFFF / 0xFFFFFFFF are sentinels meaning "the real value is in
-	// the ZIP64 EOCD record" — mandatory for archives over 4GB, i.e. most
-	// media zips. Without this the sentinel sizes made the anchor arithmetic
-	// garbage and every entry failed to parse.
 	if eocd.totalEntries == 0xFFFF || eocd.centralDirSize == 0xFFFFFFFF || eocd.centralDirOffset == 0xFFFFFFFF {
 		z64Entries, z64Size, z64Pos, ok := findZIP64EndOfCentralDirectory(data, eocdPos)
 		if !ok {
-			return nil, fmt.Errorf("ZIP64 archive but ZIP64 end of central directory record not found in snippet")
+			return 0, 0, 0, fmt.Errorf("ZIP64 archive but ZIP64 end of central directory record not found in tail")
 		}
 		totalEntries = z64Entries
 		centralDirSize = z64Size
 		dirEnd = z64Pos
 	}
-
-	dirStart := dirEnd - centralDirSize
-	if dirStart < 0 {
-		// Central directory extends beyond our snippet: it starts mid-entry,
-		// so realign to the first entry signature we can find and parse the
-		// (partial) rest.
-		dirStart = 0
-		for dirStart+4 <= dirEnd && binary.LittleEndian.Uint32(data[dirStart:]) != ZIPCentralDirectoryHeaderSig {
-			dirStart++
-		}
+	if totalEntries < 0 || centralDirSize < 0 {
+		return 0, 0, 0, fmt.Errorf("ZIP central directory values overflow int64")
 	}
+	return totalEntries, centralDirSize, dirEnd, nil
+}
 
-	r := bytes.NewReader(data[dirStart:dirEnd])
+func (p *ZIPParser) parseCentralDirectoryEntries(data []byte, totalEntries int64) ([]*ZIPFileEntry, error) {
+	return p.parseCentralDirectoryReader(bytes.NewReader(data), totalEntries)
+}
 
-	var files []*ZIPFileEntry
+func (p *ZIPParser) parseCentralDirectoryReader(reader io.Reader, totalEntries int64) ([]*ZIPFileEntry, error) {
+	files := make([]*ZIPFileEntry, 0, min(totalEntries, int64(1024)))
 	for i := int64(0); i < totalEntries; i++ {
-		file, err := p.parseCentralDirEntry(r)
+		file, err := p.parseCentralDirEntry(reader)
 		if err != nil {
-			// If we can't parse, we've likely run out of data
-			p.logger.Debug().Err(err).Int64("parsed", i).Msg("Stopped parsing central directory")
-			break
+			return nil, fmt.Errorf("parse central directory entry %d of %d: %w", i+1, totalEntries, err)
 		}
 
 		if file != nil {
@@ -339,20 +356,20 @@ func findZIP64EndOfCentralDirectory(data []byte, eocdPos int) (int64, int64, int
 		if binary.LittleEndian.Uint32(data[i:]) != ZIPZIP64EndOfCentralDirSig {
 			continue
 		}
-		totalEntries := int64(binary.LittleEndian.Uint64(data[i+32:]))
-		centralDirSize := int64(binary.LittleEndian.Uint64(data[i+40:]))
+		entriesValue := binary.LittleEndian.Uint64(data[i+32:])
+		sizeValue := binary.LittleEndian.Uint64(data[i+40:])
+		if entriesValue > uint64(1<<63-1) || sizeValue > uint64(1<<63-1) {
+			return 0, 0, 0, false
+		}
+		totalEntries := int64(entriesValue)
+		centralDirSize := int64(sizeValue)
 		return totalEntries, centralDirSize, int64(i), true
 	}
 	return 0, 0, 0, false
 }
 
 // parseCentralDirEntry parses a single central directory entry
-func (p *ZIPParser) parseCentralDirEntry(r *bytes.Reader) (*ZIPFileEntry, error) {
-	// Check if we have enough data for header
-	if r.Len() < 46 {
-		return nil, io.EOF
-	}
-
+func (p *ZIPParser) parseCentralDirEntry(r io.Reader) (*ZIPFileEntry, error) {
 	// Read signature
 	var sig uint32
 	if err := binary.Read(r, binary.LittleEndian, &sig); err != nil {
@@ -397,6 +414,7 @@ func (p *ZIPParser) parseCentralDirEntry(r *bytes.Reader) (*ZIPFileEntry, error)
 	uncompressedSize := int64(header.UncompressedSize)
 	compressedSize := int64(header.CompressedSize)
 	localHeaderOffset := int64(header.LocalHeaderOffset)
+	diskNumberStart := int64(header.DiskNumberStart)
 
 	// Parse the extra field: for ZIP64 archives the 32-bit size/offset fields
 	// hold 0xFFFFFFFF sentinels and the real 64-bit values live in the ZIP64
@@ -412,32 +430,56 @@ func (p *ZIPParser) parseCentralDirEntry(r *bytes.Reader) (*ZIPFileEntry, error)
 			size := int(binary.LittleEndian.Uint16(extra[2:]))
 			extra = extra[4:]
 			if size > len(extra) {
-				break
+				return nil, fmt.Errorf("ZIP extra field 0x%04x declares %d bytes with only %d remaining", id, size, len(extra))
 			}
 			if id == 0x0001 {
 				f := extra[:size]
-				take := func() (int64, bool) {
+				take64 := func() (int64, error) {
 					if len(f) < 8 {
-						return 0, false
+						return 0, io.ErrUnexpectedEOF
 					}
-					v := int64(binary.LittleEndian.Uint64(f))
+					value := binary.LittleEndian.Uint64(f)
 					f = f[8:]
-					return v, true
+					if value > uint64(1<<63-1) {
+						return 0, fmt.Errorf("ZIP64 value %d overflows int64", value)
+					}
+					return int64(value), nil
+				}
+				take32 := func() (int64, error) {
+					if len(f) < 4 {
+						return 0, io.ErrUnexpectedEOF
+					}
+					value := binary.LittleEndian.Uint32(f)
+					f = f[4:]
+					return int64(value), nil
 				}
 				if header.UncompressedSize == 0xFFFFFFFF {
-					if v, ok := take(); ok {
-						uncompressedSize = v
+					value, err := take64()
+					if err != nil {
+						return nil, fmt.Errorf("read ZIP64 uncompressed size: %w", err)
 					}
+					uncompressedSize = value
 				}
 				if header.CompressedSize == 0xFFFFFFFF {
-					if v, ok := take(); ok {
-						compressedSize = v
+					value, err := take64()
+					if err != nil {
+						return nil, fmt.Errorf("read ZIP64 compressed size: %w", err)
 					}
+					compressedSize = value
 				}
 				if header.LocalHeaderOffset == 0xFFFFFFFF {
-					if v, ok := take(); ok {
-						localHeaderOffset = v
+					value, err := take64()
+					if err != nil {
+						return nil, fmt.Errorf("read ZIP64 local header offset: %w", err)
 					}
+					localHeaderOffset = value
+				}
+				if header.DiskNumberStart == 0xFFFF {
+					value, err := take32()
+					if err != nil {
+						return nil, fmt.Errorf("read ZIP64 start disk: %w", err)
+					}
+					diskNumberStart = value
 				}
 			}
 			extra = extra[size:]
@@ -445,7 +487,7 @@ func (p *ZIPParser) parseCentralDirEntry(r *bytes.Reader) (*ZIPFileEntry, error)
 	}
 
 	// Skip comment
-	if _, err := r.Seek(int64(header.CommentLength), io.SeekCurrent); err != nil {
+	if _, err := io.CopyN(io.Discard, r, int64(header.CommentLength)); err != nil {
 		return nil, err
 	}
 
@@ -460,6 +502,7 @@ func (p *ZIPParser) parseCentralDirEntry(r *bytes.Reader) (*ZIPFileEntry, error)
 		IsStored:          header.Method == ZIPStoreMethod,
 		IsDirectory:       isDir,
 		LocalHeaderOffset: localHeaderOffset,
+		DiskNumberStart:   diskNumberStart,
 		CRC32:             header.CRC32,
 	}, nil
 }
@@ -474,19 +517,29 @@ func countStoredZIPFiles(files []*ZIPFileEntry) int {
 	return count
 }
 
-// calculateZIPDataOffset calculates the actual data offset by reading the local file header
-func (p *ZIPParser) calculateZIPDataOffset(ctx context.Context, volumes []*types.Volume, file *ZIPFileEntry) (int64, error) {
+func absoluteZIPHeaderOffset(file *ZIPFileEntry, volumeStarts []int64) (int64, error) {
+	if file == nil {
+		return 0, fmt.Errorf("ZIP file entry is nil")
+	}
+	if file.DiskNumberStart < 0 || file.DiskNumberStart >= int64(len(volumeStarts)) {
+		return 0, fmt.Errorf("start disk %d is outside %d archive volumes", file.DiskNumberStart, len(volumeStarts))
+	}
+	offset := volumeStarts[file.DiskNumberStart] + file.LocalHeaderOffset
+	if offset < volumeStarts[file.DiskNumberStart] {
+		return 0, fmt.Errorf("local header offset overflows int64")
+	}
+	return offset, nil
+}
+
+// calculateZIPDataOffset calculates the actual data offset by reading the local file header.
+func (p *ZIPParser) calculateZIPDataOffset(readerAt io.ReaderAt, headerOffset int64) (int64, error) {
 	// We need to read the local file header at LocalHeaderOffset to get:
 	// - Filename length (2 bytes at offset 26)
 	// - Extra field length (2 bytes at offset 28)
 	// Data starts at: LocalHeaderOffset + 30 + filename_length + extra_field_length
 
-	headerOffset := file.LocalHeaderOffset
-
-	// Create a temporary FS to read the local header
-	usenetFS, err := fs.NewFS(ctx, p.manager, p.maxConcurrent, 0, volumes, p.logger) // 0 prefetch for parsing
-	if err != nil {
-		return 0, fmt.Errorf("failed to create FS: %w", err)
+	if readerAt == nil {
+		return 0, fmt.Errorf("ZIP archive reader is nil")
 	}
 
 	// We only need to read 30 bytes to get filename and extra field lengths
@@ -497,26 +550,7 @@ func (p *ZIPParser) calculateZIPDataOffset(ctx context.Context, volumes []*types
 	// 28-29: extra field length (uint16)
 	headerData := make([]byte, 30)
 
-	// Open the volume
-	f, err := usenetFS.Open(volumes[0].Name)
-	if err != nil {
-		return 0, fmt.Errorf("failed to open volume: %w", err)
-	}
-	defer func(f fs2.File) {
-		_ = f.Close()
-	}(f)
-
-	// Seek to local header
-	if seeker, ok := f.(io.Seeker); ok {
-		if _, err := seeker.Seek(headerOffset, io.SeekStart); err != nil {
-			return 0, fmt.Errorf("failed to seek: %w", err)
-		}
-	} else {
-		return 0, fmt.Errorf("volume does not support seeking")
-	}
-
-	// Read the header
-	if _, err := io.ReadFull(f, headerData); err != nil {
+	if _, err := readerAt.ReadAt(headerData, headerOffset); err != nil {
 		return 0, fmt.Errorf("failed to read local header: %w", err)
 	}
 

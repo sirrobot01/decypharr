@@ -8,9 +8,8 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// newTestReader builds a StreamingReader over a fetcher rig (nil NNTP client,
-// maxConns=1 so no prefetch workers run) with every segment pre-filled, so
-// reads never need the network.
+// newTestReader builds a StreamingReader over a nil-client fetcher rig with
+// pre-filled demand segments, so reads never need the network.
 func newTestReader(t *testing.T, segCount int) *StreamingReader {
 	t.Helper()
 	const segSize = int64(1000)
@@ -64,9 +63,7 @@ func prefillSegments(t *testing.T, sr *StreamingReader, indices ...int) {
 	t.Helper()
 	for _, i := range indices {
 		data := make([]byte, sr.cache.SegmentDataSize(i))
-		if err := sr.cache.Put(i, data); err != nil {
-			t.Fatalf("Put(%d): %v", i, err)
-		}
+		putSegment(t, sr.cache, i, data)
 	}
 }
 
@@ -91,7 +88,7 @@ func TestCursorsDoNotCancelEachOthersPrefetch(t *testing.T) {
 	if _, err := play.ReadAtContext(ctx, buf, 0); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(sr.fetcher.prefetchCh); got != 4 {
+	if got := sr.fetcher.pendingPrefetch(); got != 4 {
 		t.Fatalf("setup: expected 4 queued playback hints, got %d", got)
 	}
 
@@ -102,7 +99,7 @@ func TestCursorsDoNotCancelEachOthersPrefetch(t *testing.T) {
 	if got := sr.stats.PrefetchCancelled.Load(); got != 0 {
 		t.Fatalf("probe read at tail cancelled %d playback hints", got)
 	}
-	if got := len(sr.fetcher.prefetchCh); got != 4 {
+	if got := sr.fetcher.pendingPrefetch(); got != 4 {
 		t.Fatalf("probe read at tail drained playback prefetch: %d hints left, want 4", got)
 	}
 

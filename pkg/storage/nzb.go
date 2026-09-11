@@ -12,8 +12,7 @@ const (
 	NZBFileTypeRar      NZBFileType = "rar"     // RAR archives (.rar, .r00, .r01, etc.)
 	NZBFileTypeSevenZip NZBFileType = "7z"      // 7z archives (.7z, .001, .002, etc.)
 	NZBFileTypeZip      NZBFileType = "zip"     // ZIP archives (.zip, .z01, .z02, etc.)
-	NZBFileTypePar2     NZBFileType = "par2"    // PAR2 files (.par2)
-	NZBFileTypeIgnore   NZBFileType = "ignore"  // Files to ignore (.nfo, .txt,par2 etc.)
+	NZBFileTypeIgnore   NZBFileType = "ignore"  // Non-content files to ignore
 	NZBFileTypeUnknown  NZBFileType = "unknown" // Unknown file type
 )
 
@@ -53,7 +52,7 @@ type NZBFile struct {
 	StartOffset   int64        `json:"start_offset" msgpack:"start_offset"`
 	Segments      []NZBSegment `json:"segments" msgpack:"segments"`
 	Groups        []string     `json:"groups" msgpack:"groups"`
-	FileType      NZBFileType  `json:"archive_type,omitempty" msgpack:"archive_type,omitempty"` // Type of the file (media, rar, 7z, zip, par2, ignore, unknown)
+	FileType      NZBFileType  `json:"archive_type,omitempty" msgpack:"archive_type,omitempty"` // Type of the file (media, rar, 7z, zip, ignore, unknown)
 	Password      string       `json:"password,omitempty" msgpack:"password,omitempty"`
 	IsDeleted     bool         `json:"is_deleted" msgpack:"is_deleted"`
 	IsStored      bool         `json:"is_stored,omitempty" msgpack:"is_stored,omitempty"`           // True if stored without compression (seekable)

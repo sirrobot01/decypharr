@@ -15,49 +15,61 @@
     <form id="configForm" class="space-y-6">
         <div class="card bg-base-100 shadow-xl">
             <div class="card-body">
-                <div class="border-b border-base-300 mb-8 overflow-x-auto">
-                    <nav class="flex min-w-max gap-8" aria-label="Configuration Tabs">
+                <div class="border-b border-base-300 mb-6 overflow-x-auto sm:mb-8">
+                    <nav class="flex min-w-max gap-3 sm:gap-8" aria-label="Configuration Tabs">
                         <button type="button"
                                 class="tab-button active cursor-pointer flex items-center gap-2 py-3 px-1 border-b-2 border-primary text-primary font-medium text-sm"
                                 data-tab="general">
                             <i class="bi bi-gear text-lg"></i>
-                            <span class="hidden sm:inline">General</span>
+                            <span>General</span>
                         </button>
                         <button type="button"
                                 class="tab-button cursor-pointer flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
-                                data-tab="providers">
-                            <i class="bi bi-collection text-lg"></i>
-                            <span class="hidden sm:inline">Providers</span>
+                                data-tab="debrid">
+                            <i class="bi bi-cloud text-lg"></i>
+                            <span>Debrid</span>
+                        </button>
+                        <button type="button"
+                                class="tab-button cursor-pointer flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                data-tab="usenet">
+                            <i class="bi bi-newspaper text-lg"></i>
+                            <span>Usenet</span>
                         </button>
                         <button type="button"
                                 class="tab-button cursor-pointer flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
                                 data-tab="arrs">
                             <i class="bi bi-collection text-lg"></i>
-                            <span class="hidden sm:inline">*Arrs</span>
+                            <span>*Arrs</span>
                         </button>
                         <button type="button"
                                 class="tab-button cursor-pointer flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
                                 data-tab="mounts">
                             <i class="bi bi-hdd-stack text-lg"></i>
-                            <span class="hidden sm:inline">Mounts</span>
+                            <span>Mounts</span>
                         </button>
                         <button type="button"
                                 class="tab-button cursor-pointer flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
                                 data-tab="shares">
                             <i class="bi bi-share text-lg"></i>
-                            <span class="hidden sm:inline">Shares</span>
+                            <span>Shares</span>
                         </button>
                         <button type="button"
                                 class="tab-button cursor-pointer flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
                                 data-tab="repair">
                             <i class="bi bi-heart-pulse text-lg"></i>
-                            <span class="hidden sm:inline">Repair</span>
+                            <span>Repair</span>
+                        </button>
+                        <button type="button"
+                                class="tab-button cursor-pointer flex items-center gap-2 py-3 px-1 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
+                                data-tab="hearsay">
+                            <i class="bi bi-broadcast text-lg"></i>
+                            <span>Hearsay</span>
                         </button>
                     </nav>
                 </div>
 
-                <div class="sticky top-10 z-30 flex justify-end mb-4">
-                    <button type="submit" class="btn btn-success btn-lg shadow-lg">
+                <div class="sticky top-20 z-30 flex justify-end mb-4">
+                    <button type="submit" class="btn btn-success btn-lg w-full shadow-lg sm:w-auto">
                         <i class="bi bi-save mr-2"></i>Save Configuration
                     </button>
                 </div>
@@ -66,8 +78,8 @@
 
                 <div class="tab-content" data-tab-content="general">
                     <div class="space-y-6">
-                    <div class="border-b border-base-300 mb-6">
-                        <nav class="subtab-nav flex flex-wrap gap-4" data-subtab-group="general" data-subtab-accent="primary" aria-label="general sub-tabs">
+                    <div class="border-b border-base-300 mb-6 overflow-x-auto">
+                        <nav class="subtab-nav flex min-w-max gap-2 sm:gap-4" data-subtab-group="general" data-subtab-accent="primary" aria-label="general sub-tabs">
                             <button type="button"
                                     class="subtab-button active cursor-pointer py-2 px-4 border-b-2 border-primary text-primary font-medium text-sm"
                                     data-subtab="settings">
@@ -400,6 +412,18 @@
                         <!-- Username/Password Section -->
                         <div class="space-y-4">
                             <h4 class="font-semibold text-base">Web Authentication</h4>
+                            <div>
+                                <label class="label cursor-pointer justify-start gap-3">
+                                    <input type="checkbox" class="checkbox checkbox-primary" id="auth-token-only"
+                                           onchange="toggleTokenOnly();">
+                                    <div>
+                                        <span class="label-text font-medium">Token-only authentication</span>
+                                        <div class="label-text-alt">No username or password. The API token below
+                                            becomes the only credential, and also logs you into this UI. WebDAV never
+                                            accepts the token, so leave WebDAV auth off in this mode.</div>
+                                    </div>
+                                </label>
+                            </div>
                             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                                 <div>
                                     <label class="label">
@@ -513,7 +537,7 @@
                         <div>
                             <p class="text-sm opacity-70 mb-4">Select which events should trigger notifications.
                                 If none are selected, all events are enabled.</p>
-                            <div class="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                                 <div>
                                     <label class="label cursor-pointer justify-start gap-2">
                                         <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
@@ -589,28 +613,11 @@
                     </div>
                 </div>
 
-                <div class="tab-content hidden" data-tab-content="providers">
-                    <div class="space-y-6">
-                    <div class="border-b border-base-300 mb-6">
-                        <nav class="subtab-nav flex flex-wrap gap-4" data-subtab-group="providers" data-subtab-accent="secondary" aria-label="providers sub-tabs">
-                            <button type="button"
-                                    class="subtab-button active cursor-pointer py-2 px-4 border-b-2 border-secondary text-secondary font-medium text-sm"
-                                    data-subtab="debrid">
-                                <i class="bi bi-cloud mr-2"></i>Debrid
-                            </button>
-                            <button type="button"
-                                    class="subtab-button cursor-pointer py-2 px-4 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
-                                    data-subtab="usenet">
-                                <i class="bi bi-newspaper mr-2"></i>Usenet
-                            </button>
-                        </nav>
-                    </div>
-
-                    <div class="subtab-panel" data-subtab-group="providers" data-subtab-panel="debrid">
+                <div class="tab-content hidden" data-tab-content="debrid">
                             <div class="space-y-6">
-                                <div class="flex justify-between items-center">
+                                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                     <h3 class="text-xl font-semibold flex items-center"></h3>
-                                    <button type="button" id="addDebridBtn" class="btn btn-secondary btn-sm">
+                                    <button type="button" id="addDebridBtn" class="btn btn-secondary btn-sm w-full sm:w-auto">
                                         <i class="bi bi-plus mr-2"></i>Add Account
                                     </button>
                                 </div>
@@ -618,11 +625,12 @@
                                     <!-- Debrid configs will be added here dynamically -->
                                 </div>
                             </div>
-                    </div>
+                </div>
 
-                    <div class="subtab-panel hidden" data-subtab-group="providers" data-subtab-panel="usenet">
-                    <div class="border-b border-base-300 mb-6">
-                        <nav class="subtab-nav flex flex-wrap gap-4" data-subtab-group="usenet" data-subtab-accent="secondary" aria-label="usenet sub-tabs">
+                <div class="tab-content hidden" data-tab-content="usenet">
+                    <div class="space-y-6">
+                    <div class="border-b border-base-300 mb-6 overflow-x-auto">
+                        <nav class="subtab-nav flex min-w-max gap-2 sm:gap-4" data-subtab-group="usenet" data-subtab-accent="secondary" aria-label="usenet sub-tabs">
                             <button type="button"
                                     class="subtab-button active cursor-pointer py-2 px-4 border-b-2 border-secondary text-secondary font-medium text-sm"
                                     data-subtab="settings">
@@ -640,7 +648,7 @@
                                 <!-- Streaming Settings -->
                                 <div class="card bg-base-200">
                                     <div class="card-body">
-                                        <div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
+                                        <div class="mt-2 mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:mt-6 lg:grid-cols-4">
                                             <div>
                                                 <label class="label" for="usenet.max_connections">
                                                     <span class="font-medium">Max Connections Per File</span>
@@ -666,7 +674,8 @@
                                                 <input type="text" class="input w-full" name="usenet.read_ahead"
                                                        id="usenet.read_ahead" min="1" placeholder="16MB">
                                                 <span class="text-sm opacity-70">Amount of data to read ahead when streaming
-                                                    (default: 16MB)</span>
+                                                    (default: 16MB). Also sizes the per-stream RAM window when
+                                                    buffering in memory</span>
                                             </div>
                                             <div>
                                                 <label class="label" for="usenet.processing_timeout">
@@ -709,13 +718,13 @@
                                                     adding an NZB (1-100, default: 1)</span>
                                             </div>
                                             <div>
-                                                <label class="label" for="usenet.disk_buffer_path">
-                                                    <span class="font-medium">Disk Buffer Path</span>
+                                                <label class="label" for="usenet.disk_path">
+                                                    <span class="font-medium">Disk Path <span class="opacity-60 font-normal">(optional)</span></span>
                                                 </label>
                                                 <input type="text" class="input w-full"
-                                                       name="usenet.disk_buffer_path" id="usenet.disk_buffer_path"
-                                                       placeholder="/cache">
-                                                <span class="text-sm opacity-70">Path for disk buffering during streaming</span>
+                                                       name="usenet.disk_path" id="usenet.disk_path"
+                                                       placeholder="/cache/usenet">
+                                                <span class="text-sm opacity-70">Leave empty to buffer in memory. Set a path to enable disk-backed rewind buffering.</span>
                                             </div>
                                             <div>
                                                 <label class="label" for="usenet.buffer_memory">
@@ -725,7 +734,8 @@
                                                        name="usenet.buffer_memory" id="usenet.buffer_memory"
                                                        placeholder="512MB">
                                                 <span class="text-sm opacity-70">Total RAM for usenet streaming buffers
-                                                    across all open streams (e.g., 512MB, 1GB)</span>
+                                                    across all open streams (e.g., 512MB, 1GB). Ignored when
+                                                    buffering to disk</span>
                                             </div>
                                         </div>
                                     </div>
@@ -736,8 +746,8 @@
                                 <!-- NNTP Servers -->
                                 <div class="card bg-base-200">
                                     <div class="card-body">
-                                        <div class="flex justify-between items-center mb-4">
-                                            <button type="button" id="addUsenetProviderBtn" class="btn btn-info btn-sm">
+                                        <div class="mb-4 flex sm:justify-end">
+                                            <button type="button" id="addUsenetProviderBtn" class="btn btn-info btn-sm w-full sm:w-auto">
                                                 <i class="bi bi-plus mr-2"></i>Add Server
                                             </button>
                                         </div>
@@ -749,15 +759,13 @@
                     </div>
 
                     </div>
-
-                    </div>
                 </div>
 
                 <div class="tab-content hidden" data-tab-content="arrs">
                     <div class="space-y-6">
 
-                    <div class="border-b border-base-300 mb-6">
-                        <nav class="subtab-nav flex flex-wrap gap-4" data-subtab-group="arrs" data-subtab-accent="warning" aria-label="arrs sub-tabs">
+                    <div class="border-b border-base-300 mb-6 overflow-x-auto">
+                        <nav class="subtab-nav flex min-w-max gap-2 sm:gap-4" data-subtab-group="arrs" data-subtab-accent="warning" aria-label="arrs sub-tabs">
                             <button type="button"
                                     class="subtab-button active cursor-pointer py-2 px-4 border-b-2 border-warning text-warning font-medium text-sm"
                                     data-subtab="applications">
@@ -778,7 +786,7 @@
                             </button>
                         </div>
 
-                        <div id="arrConfigs" class="grid grid-cols-2 gap-4">
+                        <div id="arrConfigs" class="grid grid-cols-1 gap-4 lg:grid-cols-2">
                         </div>
                     </div>
 
@@ -892,8 +900,8 @@
                         </div>
 
                         <!-- Sub-tabs for mount types -->
-                        <div class="border-b border-base-300 mb-6">
-                            <nav class="flex gap-4" aria-label="Mount Type Tabs">
+                        <div class="border-b border-base-300 mb-6 overflow-x-auto">
+                            <nav class="flex min-w-max gap-2 sm:gap-4" aria-label="Mount Type Tabs">
                                 <button type="button"
                                         class="mount-subtab-button active cursor-pointer py-2 px-4 border-b-2 border-primary text-primary font-medium text-sm"
                                         data-mount-tab="dfs">
@@ -1273,7 +1281,7 @@
                                         <h4 class="text-lg font-semibold mb-4 flex items-center">
                                             <i class="bi bi-gear mr-2"></i>Advanced Settings
                                         </h4>
-                                        <div class="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                                        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                                             <div>
                                                 <label class="label cursor-pointer justify-start gap-3">
                                                     <input type="checkbox" class="checkbox checkbox-primary"
@@ -1392,8 +1400,8 @@
 
                 <div class="tab-content hidden" data-tab-content="shares">
                     <div class="space-y-6">
-                    <div class="border-b border-base-300 mb-6">
-                        <nav class="subtab-nav flex flex-wrap gap-4" data-subtab-group="shares" data-subtab-accent="primary" aria-label="shares sub-tabs">
+                    <div class="border-b border-base-300 mb-6 overflow-x-auto">
+                        <nav class="subtab-nav flex min-w-max gap-2 sm:gap-4" data-subtab-group="shares" data-subtab-accent="primary" aria-label="shares sub-tabs">
                             <button type="button"
                                     class="subtab-button active cursor-pointer py-2 px-4 border-b-2 border-primary text-primary font-medium text-sm"
                                     data-subtab="nfs">
@@ -1403,11 +1411,6 @@
                                     class="subtab-button cursor-pointer py-2 px-4 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
                                     data-subtab="smb">
                                 <i class="bi bi-pc-display mr-2"></i>SMB
-                            </button>
-                            <button type="button"
-                                    class="subtab-button cursor-pointer py-2 px-4 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
-                                    data-subtab="share_cache">
-                                <i class="bi bi-database mr-2"></i>Cache
                             </button>
                             <button type="button"
                                     class="subtab-button cursor-pointer py-2 px-4 border-b-2 border-transparent text-base-content/70 hover:text-base-content hover:border-base-300 font-medium text-sm transition-colors"
@@ -1557,69 +1560,6 @@ fe80::/10</textarea>
                         </div>
                     </div>
 
-                    <div class="subtab-panel hidden" data-subtab-group="shares" data-subtab-panel="share_cache">
-                        <div class="card bg-base-200">
-                            <div class="card-body">
-                                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                    <div>
-                                        <h3 class="text-xl font-semibold flex items-center">
-                                            <i class="bi bi-database mr-2 text-info"></i>Share Read Cache
-                                        </h3>
-                                        <p class="text-sm opacity-70">On-disk cache shared by the NFS and SMB servers. It turns client seeks and repeated scanner reads into disk hits instead of new debrid sessions. Does not apply to WebDAV or the mount.</p>
-                                    </div>
-                                    <label class="label cursor-pointer justify-start gap-3">
-                                        <input type="checkbox" class="checkbox checkbox-primary" name="share_cache.enabled"
-                                               id="share_cache.enabled">
-                                        <span class="font-medium">Enabled</span>
-                                    </label>
-                                </div>
-
-                                <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                                    <div class="lg:col-span-3">
-                                        <label class="label" for="share_cache.dir">
-                                            <span class="font-medium">Cache Directory</span>
-                                        </label>
-                                        <input type="text" class="input w-full" name="share_cache.dir"
-                                               id="share_cache.dir" placeholder="/app/share-cache">
-                                        <span class="text-sm opacity-70">Empty uses <code>&lt;config dir&gt;/share-cache</code>. Keep it off ZFS and btrfs where possible: the cache reclaims space inside open files by punching holes, which those filesystems refuse, so the size limit becomes advisory.</span>
-                                    </div>
-                                    <div>
-                                        <label class="label" for="share_cache.max_size">
-                                            <span class="font-medium">Max Size</span>
-                                        </label>
-                                        <input type="text" class="input w-full" name="share_cache.max_size"
-                                               id="share_cache.max_size" placeholder="10GB">
-                                        <span class="text-sm opacity-70">Default 10GB. The cache holds headers and the recently played part of a file, not whole files.</span>
-                                    </div>
-                                    <div>
-                                        <label class="label" for="share_cache.max_age">
-                                            <span class="font-medium">Max Age</span>
-                                        </label>
-                                        <input type="text" class="input w-full" name="share_cache.max_age"
-                                               id="share_cache.max_age" placeholder="24h">
-                                        <span class="text-sm opacity-70">Drops content nothing has read for this long.</span>
-                                    </div>
-                                    <div>
-                                        <label class="label" for="share_cache.chunk_size">
-                                            <span class="font-medium">Chunk Size</span>
-                                        </label>
-                                        <input type="text" class="input w-full" name="share_cache.chunk_size"
-                                               id="share_cache.chunk_size" placeholder="4MB">
-                                        <span class="text-sm opacity-70">Base fetch size, doubling up to 16x while a stream stays sequential.</span>
-                                    </div>
-                                    <div>
-                                        <label class="label" for="share_cache.read_ahead">
-                                            <span class="font-medium">Read Ahead</span>
-                                        </label>
-                                        <input type="text" class="input w-full" name="share_cache.read_ahead"
-                                               id="share_cache.read_ahead" placeholder="16MB">
-                                        <span class="text-sm opacity-70">Fetched beyond each read so a sequential stream never stalls at the cache edge.</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
                     <div class="subtab-panel hidden" data-subtab-group="shares" data-subtab-panel="webdav">
                             <div class="space-y-6">
                                 <div class="space-y-4">
@@ -1636,6 +1576,67 @@ fe80::/10</textarea>
                                         shares — set it under General.</p>
                                 </div>
                             </div>
+                    </div>
+
+                    <div class="card bg-base-200">
+                        <div class="card-body">
+                            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                    <h3 class="text-xl font-semibold flex items-center">
+                                        <i class="bi bi-database mr-2 text-info"></i>Share Read Cache
+                                    </h3>
+                                    <p class="text-sm opacity-70">On-disk cache shared by the NFS and SMB servers. It turns client seeks and repeated scanner reads into disk hits instead of new debrid sessions. Does not apply to WebDAV or the mount.</p>
+                                </div>
+                                <label class="label cursor-pointer justify-start gap-3">
+                                    <input type="checkbox" class="checkbox checkbox-primary" name="share_cache.enabled"
+                                           id="share_cache.enabled">
+                                    <span class="font-medium">Enabled</span>
+                                </label>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                                <div class="lg:col-span-3">
+                                    <label class="label" for="share_cache.dir">
+                                        <span class="font-medium">Cache Directory</span>
+                                    </label>
+                                    <input type="text" class="input w-full" name="share_cache.dir"
+                                           id="share_cache.dir" placeholder="/app/share-cache">
+                                    <span class="text-sm opacity-70">Empty uses <code>&lt;config dir&gt;/share-cache</code>. Keep it off ZFS and btrfs where possible: the cache reclaims space inside open files by punching holes, which those filesystems refuse, so the size limit becomes advisory.</span>
+                                </div>
+                                <div>
+                                    <label class="label" for="share_cache.max_size">
+                                        <span class="font-medium">Max Size</span>
+                                    </label>
+                                    <input type="text" class="input w-full" name="share_cache.max_size"
+                                           id="share_cache.max_size" placeholder="10GB">
+                                    <span class="text-sm opacity-70">Default 10GB. The cache holds headers and the recently played part of a file, not whole files.</span>
+                                </div>
+                                <div>
+                                    <label class="label" for="share_cache.max_age">
+                                        <span class="font-medium">Max Age</span>
+                                    </label>
+                                    <input type="text" class="input w-full" name="share_cache.max_age"
+                                           id="share_cache.max_age" placeholder="24h">
+                                    <span class="text-sm opacity-70">Drops content nothing has read for this long.</span>
+                                </div>
+                                <div>
+                                    <label class="label" for="share_cache.chunk_size">
+                                        <span class="font-medium">Chunk Size</span>
+                                    </label>
+                                    <input type="text" class="input w-full" name="share_cache.chunk_size"
+                                           id="share_cache.chunk_size" placeholder="4MB">
+                                    <span class="text-sm opacity-70">Base fetch size, doubling up to 16x while a stream stays sequential.</span>
+                                </div>
+                                <div>
+                                    <label class="label" for="share_cache.read_ahead">
+                                        <span class="font-medium">Read Ahead</span>
+                                    </label>
+                                    <input type="text" class="input w-full" name="share_cache.read_ahead"
+                                           id="share_cache.read_ahead" placeholder="16MB">
+                                    <span class="text-sm opacity-70">Fetched beyond each read so a sequential stream never stalls at the cache edge.</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     </div>
@@ -1668,15 +1669,19 @@ fe80::/10</textarea>
                                 </select>
                             </div>
 
-                            <div>
-                                <label class="label" for="repair.arrs">
-                                    <span class="font-medium">Arrs to include
-                                        <span class="opacity-60 font-normal">(empty = all eligible)</span>
-                                    </span>
-                                </label>
-                                <select class="select w-full" name="repair.arrs" id="repair.arrs" multiple
-                                        size="3"></select>
-                            </div>
+                            <fieldset>
+                                <legend class="label" id="repair-arrs-label">
+                                    <span class="font-medium">Arrs to include</span>
+                                </legend>
+                                <div class="max-h-36 min-h-12 overflow-y-auto rounded-box border border-base-300 bg-base-100 p-2"
+                                     id="repair.arrs" role="group" aria-labelledby="repair-arrs-label"
+                                     aria-describedby="repair-arrs-help">
+                                    <p class="px-3 py-2 text-sm opacity-60">No eligible Arrs configured.</p>
+                                </div>
+                                <p class="label-text-alt mt-1 opacity-70" id="repair-arrs-help">
+                                    Leave every Arr unchecked to include all eligible Arrs.
+                                </p>
+                            </fieldset>
 
                             <div>
                                 <label class="label" for="repair.schedule">
@@ -1735,16 +1740,11 @@ fe80::/10</textarea>
                             </div>
                         </div>
 
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <label class="label cursor-pointer justify-start gap-3">
                                 <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
                                        id="repair.auto_repair" name="repair.auto_repair">
-                                <span class="label-text font-medium">Auto-repair when broken</span>
-                            </label>
-                            <label class="label cursor-pointer justify-start gap-3">
-                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
-                                       id="repair.skip_nzb_repair" name="repair.skip_nzb_repair">
-                                <span class="label-text font-medium">Skip NZB repair</span>
+                                <span class="label-text font-medium" title="Delete broken files through Arr and trigger a replacement search.">Auto-repair when broken</span>
                             </label>
                             <label class="label cursor-pointer justify-start gap-3"
                                    title="Read each media file's head and check for a valid container signature during NZB probes. Finds files whose articles exist but were assembled wrong. Downloads one article per file probed.">
@@ -1752,6 +1752,145 @@ fe80::/10</textarea>
                                        id="repair.verify_content" name="repair.verify_content">
                                 <span class="label-text font-medium">Verify NZB content</span>
                             </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-content hidden" data-tab-content="hearsay">
+                    <div class="space-y-6">
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle text-lg"></i>
+                            <div class="text-sm">
+                                Hearsay records outcome hints locally, joins the public network, and shares learned
+                                outcomes by default. Shared records use content hashes, but reveal that the hash was
+                                attempted. Clear either network option below to opt out.
+                                <a href="https://docs.decypharr.com/guides/hearsay" target="_blank" rel="noopener"
+                                   class="link link-primary font-medium">Learn more</a>.
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="label cursor-pointer justify-start gap-3">
+                                <input type="checkbox" class="checkbox checkbox-lg checkbox-primary"
+                                       id="hearsay.enabled" name="hearsay.enabled" checked>
+                                <div>
+                                    <span class="label-text font-medium text-lg">Enable local Hearsay</span>
+                                    <div class="label-text-alt">Keep local observations and advice metrics. Disabling
+                                        this also stops network participation.
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <label class="label cursor-pointer justify-start gap-3">
+                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
+                                       id="hearsay.participate" name="hearsay.participate" checked>
+                                <div>
+                                    <span class="label-text font-medium">Join the public network</span>
+                                    <div class="label-text-alt">Discover and receive signed observations from other
+                                        operators. This exposes your IP on public DHT topics.
+                                    </div>
+                                </div>
+                            </label>
+                            <label class="label cursor-pointer justify-start gap-3">
+                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
+                                       id="hearsay.publish" name="hearsay.publish" checked>
+                                <div>
+                                    <span class="label-text font-medium">Share observations</span>
+                                    <div class="label-text-alt">Publish outcomes learned from real work. Joining the
+                                        network is also required.
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+
+                        <div class="divider text-sm opacity-60">Advice policy</div>
+
+                        <div class="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                            <div>
+                                <label class="label" for="hearsay.advice_mode">
+                                    <span class="font-medium">Mode</span>
+                                </label>
+                                <select class="select w-full" id="hearsay.advice_mode" name="hearsay.advice_mode">
+                                    <option value="shadow">Shadow — measure only</option>
+                                    <option value="active">Active — skip strongly denied adds</option>
+                                </select>
+                                <span class="label-text-alt opacity-70">Start in shadow mode, review accuracy on the Stats
+                                page, then opt into active decisions.</span>
+                            </div>
+                            <div>
+                                <label class="label" for="hearsay.min_support"><span class="font-medium">Minimum support</span></label>
+                                <input type="number" min="0" max="1" step="0.05" class="input w-full"
+                                       id="hearsay.min_support" name="hearsay.min_support" placeholder="0.5">
+                            </div>
+                            <div>
+                                <label class="label" for="hearsay.min_evidence"><span class="font-medium">Minimum evidence</span></label>
+                                <input type="number" min="0" step="0.05" class="input w-full"
+                                       id="hearsay.min_evidence" name="hearsay.min_evidence" placeholder="0.3">
+                            </div>
+                            <div>
+                                <label class="label" for="hearsay.min_sources"><span class="font-medium">Minimum sources</span></label>
+                                <input type="number" min="1" step="1" class="input w-full"
+                                       id="hearsay.min_sources" name="hearsay.min_sources" placeholder="1">
+                            </div>
+                            <div>
+                                <label class="label" for="hearsay.port">
+                                    <span class="font-medium">Sharing port</span>
+                                </label>
+                                <input type="number" min="0" max="65535" class="input w-full" name="hearsay.port"
+                                       id="hearsay.port" placeholder="automatic">
+                                <span class="label-text-alt opacity-70">Leave empty. Set a fixed port only if you
+                                    forward ports in your router or firewall.</span>
+                            </div>
+                            <div>
+                                <label class="label" for="hearsay.gossip_port">
+                                    <span class="font-medium">Discovery port</span>
+                                </label>
+                                <input type="number" min="0" max="65535" class="input w-full"
+                                       name="hearsay.gossip_port" id="hearsay.gossip_port" placeholder="automatic">
+                                <span class="label-text-alt opacity-70">Leave empty. Same rule as the sharing
+                                    port.</span>
+                            </div>
+                            <div>
+                                <label class="label" for="hearsay.interval">
+                                    <span class="font-medium">Update every</span>
+                                </label>
+                                <input type="text" class="input w-full" name="hearsay.interval"
+                                       id="hearsay.interval" placeholder="30m">
+                                <span class="label-text-alt opacity-70">How often Decypharr sends and receives
+                                    updates.</span>
+                            </div>
+                            <div>
+                                <label class="label" for="hearsay.max_storage_bytes">
+                                    <span class="font-medium">Maximum relay storage</span>
+                                </label>
+                                <input type="number" min="0" class="input w-full" name="hearsay.max_storage_bytes"
+                                       id="hearsay.max_storage_bytes" placeholder="1073741824">
+                                <span class="label-text-alt opacity-70">Bytes retained for relaying generations.</span>
+                            </div>
+                            <div>
+                                <label class="label" for="hearsay.max_feeds_per_namespace">
+                                    <span class="font-medium">Maximum sources per namespace</span>
+                                </label>
+                                <input type="number" min="1" class="input w-full"
+                                       name="hearsay.max_feeds_per_namespace" id="hearsay.max_feeds_per_namespace"
+                                       placeholder="256">
+                                <span class="label-text-alt opacity-70">Bounds discovered publisher metadata.</span>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="label" for="hearsay.follow">
+                                <span class="font-medium">Trusted users
+                                    <span class="opacity-60 font-normal">(optional)</span>
+                                </span>
+                            </label>
+                            <textarea class="textarea w-full font-mono text-sm" rows="3" name="hearsay.follow"
+                                      id="hearsay.follow" placeholder="ed25519:a3f9..."></textarea>
+                            <span class="label-text-alt opacity-70">Paste keys from users you trust, one per line.
+                                Leave empty and Decypharr finds users by itself. Add keys and Decypharr uses
+                                only those users, and deletes snapshots from any user it found earlier.</span>
                         </div>
                     </div>
                 </div>
@@ -1775,6 +1914,14 @@ fe80::/10</textarea>
 </div>
 
 <script>
+    function revealSettingsTab(button) {
+        const scroller = button?.closest('nav')?.parentElement;
+        if (!scroller || scroller.scrollWidth <= scroller.clientWidth) return;
+
+        const targetLeft = button.offsetLeft - ((scroller.clientWidth - button.offsetWidth) / 2);
+        scroller.scrollTo({left: Math.max(0, targetLeft), behavior: 'auto'});
+    }
+
     // Tab Navigation Handler
     document.addEventListener('DOMContentLoaded', function () {
         window.configManager = new ConfigManager();
@@ -1795,8 +1942,16 @@ fe80::/10</textarea>
             webdav: ['shares', 'webdav'],
         };
 
+        // Providers used to be the parent tab for Debrid and Usenet. Keep its
+        // old bookmark pointing to the first promoted provider tab.
+        const tabAliases = {
+            providers: 'debrid',
+        };
+
         // Tab switching function
         function switchTab(targetTab) {
+            targetTab = tabAliases[targetTab] || targetTab;
+
             const moved = movedTabs[targetTab];
             if (moved) {
                 const [parent, subTab] = moved;
@@ -1814,6 +1969,7 @@ fe80::/10</textarea>
             const activeButton = document.querySelector(`[data-tab="${targetTab}"]`);
             if (activeButton) {
                 activeButton.classList.add('active');
+                revealSettingsTab(activeButton);
             }
 
             // Hide all tab contents
@@ -1904,6 +2060,7 @@ fe80::/10</textarea>
             if (activeButton) {
                 activeButton.classList.add('active', 'border-primary', 'text-primary');
                 activeButton.classList.remove('border-transparent', 'text-base-content/70');
+                revealSettingsTab(activeButton);
             }
 
             // Hide all mount sub-tab contents
@@ -1947,8 +2104,7 @@ fe80::/10</textarea>
     });
 
     // Generic sub-tab navigation. Each group is independent and identified by
-    // data-subtab-group, so nesting needs no extra code: Providers > Usenet is
-    // just the "usenet" group living inside the "providers" group's panel.
+    // data-subtab-group.
     //
     //   <nav class="subtab-nav" data-subtab-group="G" data-subtab-accent="primary">
     //       <button class="subtab-button" data-subtab="K">
@@ -1966,6 +2122,8 @@ fe80::/10</textarea>
             btn.classList.toggle('border-transparent', !on);
             btn.classList.toggle('text-base-content/70', !on);
         });
+
+        revealSettingsTab(nav.querySelector(`.subtab-button[data-subtab="${key}"]`));
 
         document.querySelectorAll(`.subtab-panel[data-subtab-group="${group}"]`).forEach(panel => {
             panel.classList.toggle('hidden', panel.dataset.subtabPanel !== key);
@@ -2030,13 +2188,27 @@ fe80::/10</textarea>
         }
     }
 
+    function toggleTokenOnly() {
+        const tokenOnly = document.getElementById('auth-token-only').checked;
+        ['auth-username', 'auth-password', 'auth-password-confirm'].forEach((id) => {
+            const field = document.getElementById(id);
+            if (field) {
+                field.disabled = tokenOnly;
+                if (tokenOnly) {
+                    field.value = '';
+                }
+            }
+        });
+    }
+
     async function updateAuthSettings() {
+        const tokenOnly = document.getElementById('auth-token-only').checked;
         const username = document.getElementById('auth-username').value;
         const password = document.getElementById('auth-password').value;
         const confirmPassword = document.getElementById('auth-password-confirm').value;
         const updateBtn = document.getElementById('update-auth-btn');
 
-        if (password !== confirmPassword) {
+        if (!tokenOnly && password !== confirmPassword) {
             window.decypharrUtils.createToast('Passwords do not match', 'error');
             return false;
         }
@@ -2050,7 +2222,8 @@ fe80::/10</textarea>
                 body: JSON.stringify({
                     username: username,
                     password: password,
-                    confirm_password: confirmPassword
+                    confirm_password: confirmPassword,
+                    token_only: tokenOnly
                 })
             });
 
@@ -2061,6 +2234,10 @@ fe80::/10</textarea>
 
             const data = await response.json();
             window.decypharrUtils.createToast(data.message, 'success');
+
+            if (data.token) {
+                document.getElementById('api-token-display').value = data.token;
+            }
 
             // Clear password fields for security
             document.getElementById('auth-password').value = '';

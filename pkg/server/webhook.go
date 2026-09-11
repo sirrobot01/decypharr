@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	json "github.com/bytedance/sonic"
-	"github.com/sirrobot01/decypharr/pkg/manager"
+	"github.com/sirrobot01/decypharr/pkg/repair"
 )
 
 // handleTautulli handles webhooks from Tautulli. When the payload includes a
@@ -15,11 +15,6 @@ import (
 // "media-id-scoped repair job". When no media id is supplied the webhook
 // falls back to a full manual sweep.
 func (s *Server) handleTautulli(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var payload struct {
 		Topic   string `json:"topic"`
 		Arr     string `json:"arr,omitempty"`
@@ -47,7 +42,7 @@ func (s *Server) handleTautulli(w http.ResponseWriter, r *http.Request) {
 	mediaID := strings.TrimSpace(cmp.Or(payload.MediaID, payload.TmdbID, payload.TvdbID))
 	if mediaID == "" {
 		// No targeting → fall back to a full sweep.
-		if _, err := svc.RunNow(manager.RepairRunOptions{}); err != nil {
+		if _, err := svc.RunNow(repair.RunOptions{}); err != nil {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}

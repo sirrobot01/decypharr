@@ -2,6 +2,7 @@ package reader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -121,6 +122,7 @@ func (sr *StreamingReader) OpenCursor() ReadCursor {
 }
 
 func (sr *StreamingReader) newCursor() *Cursor {
+	sr.cache.ActivateDelivery()
 	sr.cursorMu.Lock()
 	defer sr.cursorMu.Unlock()
 	return sr.registerCursorLocked()
@@ -153,6 +155,12 @@ func (c *Cursor) ReadAtContext(ctx context.Context, p []byte, off int64) (int, e
 
 func (c *Cursor) Prefetch(ctx context.Context, off, length int64) {
 	c.sr.Prefetch(ctx, off, length)
+}
+
+// ReleaseCachedRange acknowledges that a persistent downstream cache owns an
+// independent copy of the range. It is intentionally optional on ReadCursor.
+func (c *Cursor) ReleaseCachedRange(off, length int64) {
+	c.sr.cache.ReleaseCachedRange(off, length)
 }
 
 // Close unregisters the cursor so its consume mark stops holding the
@@ -347,10 +355,19 @@ func (sr *StreamingReader) readAtPlain(ctx context.Context, cur *Cursor, p []byt
 		sr.fetcher.CancelPendingPrefetch()
 		cur.queuedThrough.Store(-1)
 	}
+	if prevEnd < 0 && startSeg == 0 && endSeg < sr.segCount-1 {
+		sr.fetcher.QueueProbeRange(max(sr.segCount-2, 0), sr.segCount-1)
+	}
+
+	waitRequired := sr.fetcher.PrepareSegments(ctx, startSeg, endSeg)
 
 	// Queue read-ahead hints for the part of the window this cursor hasn't
-	// already hinted (non-blocking).
-	prefetchEnd := min(endSeg+sr.config.PrefetchAhead, sr.segCount-1)
+	// already hinted (non-blocking). The depth is clamped to what the cache
+	// can actually hold: reading further ahead than the RAM budget allows
+	// only downloads segments that get dropped before the player reaches
+	// them.
+	ahead := min(sr.config.PrefetchAhead, sr.cache.MaxPrefetchSegments())
+	prefetchEnd := min(endSeg+ahead, sr.segCount-1)
 	if prefetchEnd > endSeg {
 		qStart := max(endSeg+1, int(cur.queuedThrough.Load())+1)
 		if qStart <= prefetchEnd {
@@ -358,9 +375,7 @@ func (sr *StreamingReader) readAtPlain(ctx context.Context, cur *Cursor, p []byt
 			cur.queuedThrough.Store(int64(prefetchEnd))
 		}
 	}
-
-	// Ensure all required segments are available (may block for downloads)
-	if err := sr.fetcher.EnsureSegments(ctx, startSeg, endSeg); err != nil {
+	if err := waitRequired(); err != nil {
 		sr.stats.ReadErrors.Add(1)
 		return 0, err
 	}
@@ -374,9 +389,7 @@ func (sr *StreamingReader) readAtPlain(ctx context.Context, cur *Cursor, p []byt
 
 	sr.stats.BytesRead.Add(int64(n))
 
-	// Record delivery so the sliding-window sweeper can advance its cutoff.
-	// Skip zero-byte reads (probe, short EOF) to avoid moving the mark
-	// spuriously.
+	// Publish actual delivery so eviction follows the consumer, not prefetch.
 	if n > 0 {
 		cur.markConsumed(off + int64(n))
 	}
@@ -387,13 +400,30 @@ func (sr *StreamingReader) readAtPlain(ctx context.Context, cur *Cursor, p []byt
 	return n, err
 }
 
-// readFromCache reads data from the cache, handling segment boundaries.
-//
-// Uses ReadRangeInto so each pread fetches only the bytes the caller actually
-// needs from that segment — no scratch buffer, no read amplification.
-// Previously the code read entire segments (~750 KB) even for 4 KB reads,
-// which filled the kernel page cache with mostly-unused data and caused
-// progressive performance degradation on large files.
+// segmentReadyAttempts bounds the fetch/wait retry in ensureSegmentReady. A
+// segment is pinned for the duration of the read, so eviction should not be
+// able to take it twice; the bound is there so a pathological pressure loop
+// surfaces as a read error instead of spinning on the network forever.
+const segmentReadyAttempts = 4
+
+// ensureSegmentReady blocks until segIdx is readable, re-fetching it if it
+// was evicted out from under this read.
+func (sr *StreamingReader) ensureSegmentReady(ctx context.Context, segIdx int) error {
+	for attempt := 0; ; attempt++ {
+		err := sr.cache.WaitForSegment(ctx, segIdx)
+		if !errors.Is(err, ErrSegmentEvicted) {
+			return err
+		}
+		if attempt >= segmentReadyAttempts {
+			return fmt.Errorf("segment %d evicted %d times before it could be read", segIdx, attempt)
+		}
+		if err := sr.fetcher.Fetch(ctx, segIdx); err != nil {
+			return err
+		}
+	}
+}
+
+// readFromCache reads only the requested slices across segment boundaries.
 func (sr *StreamingReader) readFromCache(ctx context.Context, p []byte, off int64, startSeg, endSeg int) (int, error) {
 	totalRead := 0
 	// filled is the absolute offset this read has delivered through. Segments
@@ -401,8 +431,13 @@ func (sr *StreamingReader) readFromCache(ctx context.Context, p []byte, off int6
 	filled := off
 
 	for segIdx := startSeg; segIdx <= endSeg; segIdx++ {
-		// Wait for segment to be ready
-		if err := sr.cache.WaitForSegment(ctx, segIdx); err != nil {
+		// Wait for the segment to be ready. A memory-mode block drop can
+		// take a segment back to Empty after EnsureSegments cleared it, in
+		// which case nobody is fetching it any more and WaitForSegment says
+		// so instead of blocking — re-issue the fetch ourselves. Fetch
+		// dedups against any in-flight download, so a lost race costs a
+		// map lookup, not a second BODY.
+		if err := sr.ensureSegmentReady(ctx, segIdx); err != nil {
 			return totalRead, err
 		}
 
@@ -584,6 +619,16 @@ func (sr *StreamingReader) Prefetch(ctx context.Context, off, length int64) {
 	sr.fetcher.QueuePrefetchRange(startSeg, endSeg)
 }
 
+// ReleaseIdleDelivery sheds duplicate downstream extents while retaining the
+// reader metadata and shared NNTP connection pool for a fast reopen.
+func (sr *StreamingReader) ReleaseIdleDelivery() {
+	if sr.closed.Load() {
+		return
+	}
+	sr.cache.ReleaseIdleDelivery()
+	sr.fetcher.CancelPendingPrefetch()
+}
+
 // Read implements io.Reader using ReadAt with tracked position.
 func (sr *StreamingReader) Read(p []byte) (int, error) {
 	if sr.closed.Load() {
@@ -686,16 +731,20 @@ func (rp *Pool) GetReader(
 	if encryption.Enabled {
 		reader, err = NewStreamingReaderWithEncryption(
 			ctx, rp.client, segments, encryption,
-			WithMaxDisk(rp.config.MaxDisk),
 			WithMaxConnections(rp.config.MaxConnections),
 			WithPrefetchAhead(rp.config.PrefetchAhead),
+			WithDiskPath(rp.config.DiskPath),
+			WithRetention(rp.config.Retention),
+			WithFetchScheduler(rp.config.Scheduler),
 		)
 	} else {
 		reader, err = NewStreamingReader(
 			ctx, rp.client, segments,
-			WithMaxDisk(rp.config.MaxDisk),
 			WithMaxConnections(rp.config.MaxConnections),
 			WithPrefetchAhead(rp.config.PrefetchAhead),
+			WithDiskPath(rp.config.DiskPath),
+			WithRetention(rp.config.Retention),
+			WithFetchScheduler(rp.config.Scheduler),
 		)
 	}
 	if err != nil {

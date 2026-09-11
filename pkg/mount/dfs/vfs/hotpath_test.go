@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/sirrobot01/decypharr/internal/buffer"
 	"github.com/sirrobot01/decypharr/pkg/mount/dfs/vfs/ranges"
 )
 
@@ -18,6 +20,7 @@ import (
 func TestMetadataFlushDebounce(t *testing.T) {
 	item, _ := newBenchItem(t, 64<<20)
 
+	payload := make([]byte, 32<<10)
 	stop := make(chan struct{})
 	writerDone := make(chan struct{})
 	go func() {
@@ -29,10 +32,9 @@ func TestMetadataFlushDebounce(t *testing.T) {
 				return
 			default:
 			}
-			item.metaMu.Lock()
-			item.info.Rs.Insert(ranges.Range{Pos: off, Size: 32 << 10})
-			item.metaMu.Unlock()
-			item.markMetadataDirty()
+			if _, _, err := item.WriteAtNoOverwrite(payload, off); err != nil {
+				return
+			}
 			off += 64 << 10 // discontiguous so Rs keeps growing (content changes)
 			time.Sleep(200 * time.Microsecond)
 		}
@@ -61,9 +63,7 @@ func TestMetadataFlushDebounce(t *testing.T) {
 	}
 
 	// The final mutation must be durable after the writer stops.
-	item.metaMu.RLock()
-	want := len(item.info.Rs)
-	item.metaMu.RUnlock()
+	want := len(item.buf.PersistedRanges(0, item.info.Size))
 	item.stopMetaWriter()
 	data, err := os.ReadFile(item.metaPath)
 	if err != nil {
@@ -75,6 +75,99 @@ func TestMetadataFlushDebounce(t *testing.T) {
 	}
 	if len(info.Rs) != want {
 		t.Fatalf("final flush lost state: %d ranges on disk, want %d", len(info.Rs), want)
+	}
+}
+
+func TestMetadataSnapshotReplacesLoadedRanges(t *testing.T) {
+	item, _ := newBenchItem(t, 8<<20)
+	data := make([]byte, 256<<10)
+	if _, _, err := item.WriteAtNoOverwrite(data, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := item.buf.Flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	item.metaMu.Lock()
+	item.info.Rs = ranges.Ranges{
+		{Pos: 0, Size: int64(len(data))},
+		{Pos: 4 << 20, Size: 1 << 20},
+	}
+	item.metaMu.Unlock()
+	item.flushMetadata(true)
+
+	var info ItemInfo
+	if err := decodeJSONFile(item.metaPath, &info); err != nil {
+		t.Fatal(err)
+	}
+	want := ranges.Ranges{{Pos: 0, Size: int64(len(data))}}
+	if !info.Rs.Equal(want) {
+		t.Fatalf("metadata retained stale or duplicate ranges: got %+v want %+v", info.Rs, want)
+	}
+}
+
+func TestCloseFlushesResidentBytesBeforeMetadata(t *testing.T) {
+	item := &CacheItem{
+		cache:    &Cache{},
+		buf:      newTestBuffer(t, 8<<20),
+		metaPath: filepath.Join(t.TempDir(), "data.json"),
+		info:     ItemInfo{Size: 8 << 20},
+	}
+	item.startMetaWriter()
+	data := make([]byte, 256<<10)
+	for i := range data {
+		data[i] = byte(i % 251)
+	}
+	if _, _, err := item.WriteAtNoOverwrite(data, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := item.buf.PersistedRanges(0, int64(len(data))); len(got) != 0 {
+		t.Fatalf("test setup unexpectedly reached disk: %+v", got)
+	}
+	if err := item.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var info ItemInfo
+	if err := decodeJSONFile(item.metaPath, &info); err != nil {
+		t.Fatal(err)
+	}
+	if !info.Rs.Present(ranges.Range{Pos: 0, Size: int64(len(data))}) {
+		t.Fatalf("resident bytes missing from close metadata: %+v", info.Rs)
+	}
+
+}
+
+func TestDiskPersistenceChangeMarksMetadataDirty(t *testing.T) {
+	const fileSize = 8 << 20
+	pool := buffer.NewPool(buffer.PoolConfig{Name: "test"})
+	t.Cleanup(func() { _ = pool.Close() })
+
+	var item *CacheItem
+	buf, err := pool.NewBuffer(buffer.Config{
+		DiskPath:  filepath.Join(t.TempDir(), "data.bin"),
+		TotalSize: fileSize,
+		OnPersistChange: func() {
+			if item != nil {
+				item.markMetadataDirty()
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = buf.Close() })
+	item = &CacheItem{buf: buf, info: ItemInfo{Size: fileSize}}
+
+	if _, _, err := item.WriteAtNoOverwrite(make([]byte, 128<<10), 0); err != nil {
+		t.Fatal(err)
+	}
+	item.metaDirty.Store(false)
+	if err := item.buf.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if !item.metaDirty.Load() {
+		t.Fatal("disk persistence change did not dirty metadata")
 	}
 }
 

@@ -13,10 +13,10 @@ import (
 
 func newAcquireTestClient(pp *ProviderPool) *Client {
 	return &Client{
-		pools:          map[string]*ProviderPool{"test": pp},
-		providers:      []config.UsenetProvider{{Host: "test"}},
+		pools:          map[string]*ProviderPool{pp.config.ID(): pp},
+		orderedPools:   []*ProviderPool{pp},
+		providers:      []config.UsenetProvider{pp.config},
 		logger:         zerolog.Nop(),
-		slotFreed:      make(chan struct{}, 1),
 		idleTimeout:    5 * time.Minute,
 		staleThreshold: 60 * time.Second,
 		pingInterval:   30 * time.Second,

@@ -32,14 +32,11 @@ type RepairPool struct {
 	once    sync.Once
 }
 
-// repairTask describes one chunk of work the pool will execute. done is
-// invoked exactly once — either with the per-chunk results (on success or
-// connection error from batchStatAcrossProviders) or with a non-nil err
-// when the caller's context expires before a worker picks the task up.
+// repairTask describes one bounded STAT batch.
 type repairTask struct {
-	ctx    context.Context
-	msgIDs []string
-	done   func(results []StatResult, err error)
+	ctx        context.Context
+	messageIDs []string
+	done       func(results []StatResult, err error)
 }
 
 // errRepairPoolClosed is returned by Submit after Stop has been called.
@@ -142,7 +139,7 @@ func (p *RepairPool) Submit(ctx context.Context, msgIDs []string, done func([]St
 	if p == nil {
 		return errRepairPoolClosed
 	}
-	task := repairTask{ctx: ctx, msgIDs: msgIDs, done: done}
+	task := repairTask{ctx: ctx, messageIDs: msgIDs, done: done}
 	// quit takes priority: once Stop closes it, refuse new work even if
 	// the buffered tasks channel still has room.
 	select {
@@ -173,9 +170,8 @@ func (p *RepairPool) Stop() {
 	p.wg.Wait()
 }
 
-// worker pulls chunks until the pool stops. Each task is processed by
-// calling batchStatAcrossProviders directly; bank-token accounting is no
-// longer needed because the pool's worker count IS the concurrency cap.
+// worker runs queued STAT batches until the pool stops. Its worker count is the
+// shared connection cap for availability scans.
 func (p *RepairPool) worker(c *Client) {
 	defer p.wg.Done()
 	for {
@@ -192,7 +188,7 @@ func (p *RepairPool) worker(c *Client) {
 				t.done(nil, err)
 				continue
 			}
-			results, err := c.batchStatAcrossProviders(t.ctx, t.msgIDs)
+			results, err := c.batchStatAcrossProviders(t.ctx, t.messageIDs)
 			t.done(results, err)
 		}
 	}

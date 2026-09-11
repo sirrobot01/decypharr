@@ -3,8 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 type UsenetProvider struct {
@@ -27,11 +27,20 @@ type UsenetProvider struct {
 	Backup bool `json:"backup,omitempty"`
 }
 
+// ID returns the canonical identity of a provider: host, port, and account.
+// Host alone is NOT unique — a dual-account setup (e.g. an unlimited and a
+// block account on the same server) legitimately lists the same host twice —
+// so anything that keys provider state (connection pools, speed-test
+// results, API lookups) must use this, never Host.
+func (u UsenetProvider) ID() string {
+	return fmt.Sprintf("%s:%d/%s", u.Host, u.Port, u.Username)
+}
+
 // Usenet configuration for usenet streaming and downloading
 type Usenet struct {
 	Providers []UsenetProvider `json:"providers,omitempty"` // Usenet provider configurations
-	// Per-stream/file configuration
-	MaxConnections           int `json:"max_connections,omitempty"`            // Maximum concurrent connections per streaming file (default: 15)
+	// Streaming and processing concurrency.
+	MaxConnections           int `json:"max_connections,omitempty"`            // Provider-wide streaming fetch limit (default: 15)
 	ProcessingMaxConnections int `json:"processing_max_connections,omitempty"` // Maximum concurrent connections per file for parsing and NZB downloads (default: max_connections)
 	// Read-ahead configuration
 	ReadAhead string `json:"read_ahead,omitempty"` // Bytes to prefetch ahead of streaming reads e.g. "16MB", "32MB" (default: 16MB)
@@ -52,14 +61,14 @@ type Usenet struct {
 	// TCP+TLS+AUTH reconnect storm on every resume. Default: 5m.
 	ConnIdleTimeout string `json:"conn_idle_timeout,omitempty"`
 	// Availability check sampling
-	AvailabilitySamplePercent       int    `json:"availability_sample_percent,omitempty"`        // Percentage of segments to check during repair (1-100, default: 10)
-	ImportAvailabilitySamplePercent int    `json:"import_availability_sample_percent,omitempty"` // Percentage of segments to check when adding an NZB (1-100, default: 1)
-	DiskBufferPath                  string `json:"disk_buffer_path,omitempty"`                   // Path for disk buffer storage (empty = main_path/usenet/streams)
+	AvailabilitySamplePercent       int `json:"availability_sample_percent,omitempty"`        // Percentage of segments to check during repair (1-100, default: 10)
+	ImportAvailabilitySamplePercent int `json:"import_availability_sample_percent,omitempty"` // Percentage of segments to check when adding an NZB (1-100, default: 1)
+	// DiskPath enables disk-backed rewind buffering when non-empty. Empty keeps
+	// the bounded streaming window in memory.
+	DiskPath string `json:"disk_path,omitempty"`
 
-	// BufferMemory caps the total RAM the usenet streaming buffers hold across
-	// all open streams, e.g. "512MB". Per-stream buffers stay generous for
-	// smooth playback; this bounds the aggregate so many concurrent streams
-	// can't OOM. Empty = default (512MB); "0" disables the cap.
+	// BufferMemory caps resident Usenet extents across open window-mode streams.
+	// Empty defaults to 512MB; "0" disables the cap.
 	BufferMemory string `json:"buffer_memory,omitempty"`
 }
 
@@ -76,14 +85,19 @@ func (u Usenet) BufferMemoryBytes() int64 {
 	return n
 }
 
+// UsesDiskBuffer reports whether Usenet streams should retain rewind data on disk.
+func (u Usenet) UsesDiskBuffer() bool {
+	return strings.TrimSpace(u.DiskPath) != ""
+}
+
 func (u Usenet) IsZero() bool {
-	return len(u.Providers) == 0 && u.MaxConnections == 0 && u.ProcessingMaxConnections == 0 && u.ReadAhead == "" && u.ProcessingTimeout == ""
+	return len(u.Providers) == 0 && u.MaxConnections == 0 && u.ProcessingMaxConnections == 0 && u.ReadAhead == "" && u.ProcessingTimeout == "" && !u.UsesDiskBuffer()
 }
 
 func (c *Config) updateUsenetConfig() {
-	// Per-stream configuration defaults
+	// Provider-wide streaming scheduler width.
 	if c.Usenet.MaxConnections == 0 {
-		c.Usenet.MaxConnections = 15 // Default: 15 connections per file
+		c.Usenet.MaxConnections = 15
 	}
 	if c.Usenet.ProcessingMaxConnections <= 0 {
 		c.Usenet.ProcessingMaxConnections = c.Usenet.MaxConnections
@@ -108,7 +122,7 @@ func (c *Config) updateUsenetConfig() {
 		c.Usenet.ProcessingTimeout = "10m" // Default: 10 minutes for NZB processing
 	}
 
-	// CacheDir: empty = system temp folder (no default needed)
+	// DiskPath intentionally remains empty so memory buffering is the default.
 
 	// Availability sample percent default - clamp to valid range
 	if c.Usenet.AvailabilitySamplePercent <= 0 {
@@ -120,10 +134,6 @@ func (c *Config) updateUsenetConfig() {
 		c.Usenet.ImportAvailabilitySamplePercent = 1
 	} else if c.Usenet.ImportAvailabilitySamplePercent > 100 {
 		c.Usenet.ImportAvailabilitySamplePercent = 100
-	}
-
-	if c.Usenet.DiskBufferPath == "" {
-		c.Usenet.DiskBufferPath = filepath.Join(GetMainPath(), "usenet", "streams")
 	}
 
 	for i, provider := range c.Usenet.Providers {
@@ -155,6 +165,7 @@ func validateUsenet(providers []UsenetProvider) error {
 	if len(providers) == 0 {
 		return nil
 	}
+	seen := make(map[string]struct{}, len(providers))
 	for _, usenet := range providers {
 		// Basic field validation
 		if usenet.Host == "" {
@@ -166,6 +177,13 @@ func validateUsenet(providers []UsenetProvider) error {
 		if usenet.Password == "" {
 			return errors.New("usenet provider password is required")
 		}
+		// Same host+port+account twice is a config mistake: it would double
+		// the intended connection cap against the provider's account limit.
+		id := usenet.ID()
+		if _, dup := seen[id]; dup {
+			return fmt.Errorf("duplicate usenet provider %s: same host, port, and username listed twice", id)
+		}
+		seen[id] = struct{}{}
 	}
 
 	return nil
@@ -213,6 +231,9 @@ func (c *Config) applyUsenetEnvVars() {
 		if v, err := strconv.Atoi(availabilitySample); err == nil {
 			c.Usenet.ImportAvailabilitySamplePercent = v
 		}
+	}
+	if diskPath := getEnv("USENET__DISK_PATH"); diskPath != "" {
+		c.Usenet.DiskPath = diskPath
 	}
 
 	// Usenet providers array

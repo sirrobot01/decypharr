@@ -1,0 +1,12 @@
+{{ define "repair_tabs" }}
+<div role="tablist" class="tabs tabs-box w-full sm:w-fit">
+    <a role="tab" href="{{.URLBase}}repair"
+       class="tab {{if eq .Page "repair"}}tab-active{{end}}">
+        <i class="bi bi-heart-pulse mr-2"></i>Health checker
+    </a>
+    <a role="tab" href="{{.URLBase}}repair/reacquire"
+       class="tab {{if eq .Page "reacquire"}}tab-active{{end}}">
+        <i class="bi bi-arrow-repeat mr-2"></i>Arr Reacquisition
+    </a>
+</div>
+{{ end }}

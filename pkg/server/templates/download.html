@@ -14,11 +14,11 @@
 
     <div class="card bg-base-100 shadow-xl">
         <div class="card-body">
-            <form id="downloadForm" enctype="multipart/form-data" class="space-y-6">
+            <form id="downloadForm" enctype="multipart/form-data" class="min-w-0 space-y-6">
                 <div class="flex flex-col gap-4">
-                    <div class="flex gap-4">
-                        <div class="fieldset flex-1">
-                            <label class="label">
+                    <div class="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-stretch">
+                        <div class="fieldset min-w-0 flex-1">
+                            <label class="label flex-col items-start gap-1 sm:flex-row sm:items-center">
                                 <span class="label-text font-semibold">
                                     <i class="bi bi-file-earmark-arrow-up mr-2 text-secondary"></i>Magnet Links or Torrent Files
                                 </span>
@@ -36,10 +36,10 @@
                                    accept=".torrent">
                         </div>
 
-                        <div class="divider divider-horizontal">OR</div>
+                        <div class="divider lg:divider-horizontal">OR</div>
 
-                        <div class="fieldset flex-1">
-                            <label class="label">
+                        <div class="fieldset min-w-0 flex-1">
+                            <label class="label flex-col items-start gap-1 sm:flex-row sm:items-center">
                                 <span class="label-text font-semibold">
                                     <i class="bi bi-newspaper mr-2 text-accent"></i>NZB URLs or Upload
                                 </span>
@@ -62,7 +62,7 @@
 
                 <div class="divider">Download Settings</div>
 
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 space-y-4">
+                <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
                     <div>
                         <label class="label" for="downloadAction">
                             <span>Post Download Action</span>
@@ -117,7 +117,7 @@
                     {{ end }}
                 </div>
 
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 space-y-4">
+                <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
                     <div>
                         <label class="label cursor-pointer justify-start gap-3">
                             <input type="checkbox" class="checkbox checkbox-primary" name="downloadUncached"
@@ -154,7 +154,7 @@
                 </div>
 
                 <div>
-                    <button type="submit" class="btn btn-primary btn-lg" id="submitDownload">
+                    <button type="submit" class="btn btn-primary btn-lg w-full sm:w-auto" id="submitDownload">
                         <i class="bi bi-cloud-upload mr-2"></i>Add to Download Queue
                     </button>
                 </div>

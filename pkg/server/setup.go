@@ -8,7 +8,6 @@ import (
 	json "github.com/bytedance/sonic"
 
 	"github.com/sirrobot01/decypharr/internal/config"
-	"golang.org/x/crypto/bcrypt"
 )
 
 // SetupState tracks the current setup wizard state
@@ -41,6 +40,7 @@ type SetupWizardResponse struct {
 	Validation   any         `json:"validation,omitempty"`
 	SetupNeeded  bool        `json:"setup_needed,omitempty"`
 	RedirectTo   string      `json:"redirect_to,omitempty"`
+	APIToken     string      `json:"api_token,omitempty"`
 	ConfigLoaded bool        `json:"config_loaded,omitempty"`
 }
 
@@ -81,9 +81,10 @@ func (s *Server) sendSetupError(w http.ResponseWriter, message string, err error
 // SetupCompleteRequest represents the complete setup data from frontend
 type SetupCompleteRequest struct {
 	Auth struct {
-		Username string `json:"username,omitempty"`
-		Password string `json:"password,omitempty"`
-		SkipAuth bool   `json:"skip_auth,omitempty"`
+		Username  string `json:"username,omitempty"`
+		Password  string `json:"password,omitempty"`
+		SkipAuth  bool   `json:"skip_auth,omitempty"`
+		TokenOnly bool   `json:"token_only,omitempty"`
 	} `json:"auth"`
 	Debrid struct {
 		Provider string `json:"provider,omitempty"`
@@ -137,23 +138,16 @@ func (s *Server) setupCompleteHandler(w http.ResponseWriter, r *http.Request) {
 	// Step 1: Handle Authentication
 	if req.Auth.SkipAuth {
 		cfg.UseAuth = false
-	} else if req.Auth.Username != "" && req.Auth.Password != "" {
-		auth := cfg.GetAuth()
-		if auth == nil {
-			auth = &config.Auth{}
-		}
-		auth.Username = req.Auth.Username
-
-		// Hash password using bcrypt
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Auth.Password), bcrypt.DefaultCost)
-		if err != nil {
-			s.sendSetupError(w, "Failed to hash password", err)
+	} else if req.Auth.TokenOnly {
+		// No username or password. cfg.Save below mints the API token, which
+		// the response hands back — it is the only credential the user gets.
+		cfg.UseAuth = true
+		if err := cfg.SaveAuth(&config.Auth{TokenOnly: true}); err != nil {
+			s.sendSetupError(w, "Failed to save authentication", err)
 			return
 		}
-		auth.Password = string(hashedPassword)
-
-		cfg.UseAuth = true
-		if err := cfg.SaveAuth(auth); err != nil {
+	} else if req.Auth.Username != "" && req.Auth.Password != "" {
+		if err := cfg.SetCredentials(req.Auth.Username, req.Auth.Password); err != nil {
 			s.sendSetupError(w, "Failed to save authentication", err)
 			return
 		}
@@ -302,6 +296,9 @@ func (s *Server) setupCompleteHandler(w http.ResponseWriter, r *http.Request) {
 		Success:    true,
 		Message:    "Setup completed successfully! Restarting services...",
 		RedirectTo: "/",
+	}
+	if auth := cfg.GetAuth(); auth != nil && auth.TokenOnly {
+		response.APIToken = auth.APIToken
 	}
 
 	w.Header().Set("Content-Type", "application/json")

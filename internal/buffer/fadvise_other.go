@@ -11,5 +11,4 @@ import "os"
 func adviseSequential(_ *os.File)             {}
 func adviseDontNeed(_ *os.File, _, _ int64)   {}
 func adviseDontNeedAll(_ *os.File)            {}
-func adviseWillNeed(_ *os.File, _, _ int64)   {}
 func adviseDropBehind(_ *os.File, _, _ int64) {}

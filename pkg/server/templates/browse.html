@@ -3,7 +3,7 @@
     <!-- Breadcrumb Navigation -->
     <div class="card bg-base-100 shadow-xl">
         <div class="card-header">
-            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 p-6 border-b border-base-200">
+            <div class="flex flex-col items-start justify-between gap-4 border-b border-base-200 p-4 sm:flex-row sm:items-center sm:p-6">
                 <h5 class="card-title">
                     <div class="breadcrumbs text-sm">
                         <ul id="breadcrumbNav">
@@ -13,11 +13,11 @@
                         </ul>
                     </div>
                 </h5>
-                <div class="flex flex-wrap gap-2">
-                    <div>
+                <div class="flex w-full flex-wrap gap-2 sm:w-auto">
+                    <div class="w-full sm:w-auto">
                         <label class="sr-only" for="searchInput">Search the current folder</label>
                         <input type="search" placeholder="Search this folder…" aria-label="Search the current folder"
-                               class="input input-sm flex-1 min-w-48"
+                               class="input input-sm w-full sm:min-w-48"
                                id="searchInput">
                     </div>
                     <div>
@@ -39,25 +39,25 @@
         </div>
     </div>
 
-    <div id="currentViewNotice" class="alert alert-info hidden items-start" role="note">
+    <div id="currentViewNotice" class="alert alert-info hidden flex-col items-start sm:flex-row" role="note">
         <i class="bi bi-folder-symlink mt-0.5" aria-hidden="true"></i>
         <div class="flex-1">
             <p class="font-medium">You are browsing a virtual folder</p>
             <p class="text-sm">This is a filtered view. Deleting an item here deletes the original from every view and removes its provider placement.</p>
         </div>
-        <a href="{{.URLBase}}settings#tab-virtual-folders" class="btn btn-sm btn-outline">Edit virtual folders</a>
+        <a href="{{.URLBase}}settings#tab-virtual-folders" class="btn btn-sm btn-outline w-full sm:w-auto">Edit virtual folders</a>
     </div>
 
     <!-- Bulk Actions Bar -->
     <div id="bulkActionsBar" class="card bg-base-100 shadow-xl hidden">
-        <div class="card-body py-3 px-6">
-            <div class="flex items-center justify-between">
+        <div class="card-body px-4 py-3 sm:px-6">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div class="flex items-center gap-3">
                     <span class="text-sm font-medium">
                         <span id="selectedCount">0</span> items selected
                     </span>
                 </div>
-                <div class="flex gap-2">
+                <div class="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto">
                     <button class="btn btn-sm btn-primary" id="bulkDownloadBtn">
                         <i class="bi bi-download"></i>
                         <span class="hidden sm:inline">Download</span>
@@ -134,11 +134,11 @@
             </table>
             </div>
 
-            <div class="flex flex-col sm:flex-row justify-between items-center p-6 border-t border-base-200 gap-4">
+            <div class="flex flex-col items-center justify-between gap-4 border-t border-base-200 p-4 sm:flex-row sm:p-6">
                 <div class="text-sm text-base-content/70">
                     <span id="paginationInfo">Loading...</span>
                 </div>
-                <div class="join" id="paginationControls"></div>
+                <div class="join max-w-full overflow-x-auto" id="paginationControls"></div>
             </div>
         </div>
     </div>

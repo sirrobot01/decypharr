@@ -10,13 +10,18 @@ import (
 )
 
 // The benchmarks model the streaming workload: a downloader appending
-// chunk-sized writes at the frontier, readers following behind, RAM budget
-// small enough that block admission/eviction/write-through are all exercised.
-// They are the A/B gate for buffer-engine changes (lock scope, write policy).
+// chunk-sized writes at the frontier, readers following behind, a discard
+// window bounding the footprint. They are the A/B gate for buffer-engine
+// changes (lock scope, mode internals).
 
 const (
 	benchChunk  = 128 << 10
-	benchWindow = int64(64 << 20) // sliding window kept on disk during streams
+	benchWindow = int64(64 << 20) // sliding window kept during streams
+
+	// benchMemBudget is a memory-mode budget above benchWindow plus slack,
+	// so every block of the sliding window stays resident until Discard
+	// frees it and drop-oldest never fires mid-stream.
+	benchMemBudget = int64(96 << 20)
 )
 
 func quantile(sorted []time.Duration, q float64) time.Duration {
@@ -27,21 +32,37 @@ func quantile(sorted []time.Duration, q float64) time.Duration {
 	return sorted[i]
 }
 
-// BenchmarkStreamSequential: single writer streams 128KB appends with a
-// reader following 4MB behind; disk bounded by discarding a lagging window.
-func BenchmarkStreamSequential(b *testing.B) {
-	b.Run("auto", func(b *testing.B) { benchStreamSequential(b, WriteAuto) })
-	b.Run("writethrough", func(b *testing.B) { benchStreamSequential(b, WriteThrough) })
+// reportPathStats emits which storage tier a bench variant actually used:
+// for the "memory" variant diskwrites/op must be 0 and ram-hit-ratio 1; for
+// "disk" the reverse.
+func reportPathStats(b *testing.B, buf *Buffer) {
+	st := buf.Stats()
+	b.ReportMetric(float64(st.DiskWrites)/float64(b.N), "diskwrites/op")
+	b.ReportMetric(float64(st.Evictions)/float64(b.N), "evictions/op")
+	if total := st.Hits + st.Misses; total > 0 {
+		b.ReportMetric(float64(st.Hits)/float64(total), "ram-hit-ratio")
+	}
 }
 
-func benchStreamSequential(b *testing.B, policy WritePolicy) {
+// BenchmarkStreamSequential: single writer streams 128KB appends with a
+// reader following 4MB behind; footprint bounded by discarding a lagging
+// window. Variants pin the two modes:
+//   - disk: every write pwrites to the file; reads pread (page cache)
+//   - memory: all data lives in resident blocks until Discard frees it;
+//     no file exists
+func BenchmarkStreamSequential(b *testing.B) {
+	b.Run("disk", func(b *testing.B) { benchStreamSequential(b, Config{DiskPath: tempDisk(b)}) })
+	b.Run("memory", func(b *testing.B) { benchStreamSequential(b, Config{MemorySize: benchMemBudget}) })
+}
+
+func benchStreamSequential(b *testing.B, cfg Config) {
 	p := NewPool(PoolConfig{Name: "bench"})
 	defer p.Close()
-	buf, err := p.NewBuffer(Config{
-		DiskPath:    filepath.Join(b.TempDir(), "buf.bin"),
-		TotalSize:   1 << 40, // sparse; real usage bounded by the discard window
-		WritePolicy: policy,
-	})
+	if cfg.DiskPath != "" {
+		cfg.DiskPath = filepath.Join(b.TempDir(), "buf.bin")
+		cfg.TotalSize = 1 << 40 // sparse; real usage bounded by the discard window
+	}
+	buf, err := p.NewBuffer(cfg)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -52,6 +73,7 @@ func benchStreamSequential(b *testing.B, policy WritePolicy) {
 	rbuf := make([]byte, benchChunk)
 
 	b.ReportAllocs()
+	b.SetBytes(benchChunk)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		off := int64(i) * benchChunk
@@ -64,30 +86,36 @@ func benchStreamSequential(b *testing.B, policy WritePolicy) {
 				b.Fatal(err)
 			}
 		}
+		// Sub-block trailing discards, like production's segment-granular
+		// sweep. Relies on discard() dropping a resident block once trims
+		// cumulatively cover it — without that the memory variant would pin
+		// its whole budget and start dropping live data.
 		if off > benchWindow {
 			if err := buf.Discard(off-benchWindow, benchChunk); err != nil {
 				b.Fatal(err)
 			}
 		}
 	}
+	b.StopTimer()
+	reportPathStats(b, buf)
 }
 
 // BenchmarkStreamContendedReads: the timed loop is the writer; 4 reader
 // goroutines hammer random already-written offsets. Reports reader p50/p99/max
 // latency — the number the under-lock flush/mmap/pread work inflates.
 func BenchmarkStreamContendedReads(b *testing.B) {
-	b.Run("auto", func(b *testing.B) { benchStreamContendedReads(b, WriteAuto) })
-	b.Run("writethrough", func(b *testing.B) { benchStreamContendedReads(b, WriteThrough) })
+	b.Run("disk", func(b *testing.B) { benchStreamContendedReads(b, Config{DiskPath: tempDisk(b)}) })
+	b.Run("memory", func(b *testing.B) { benchStreamContendedReads(b, Config{MemorySize: benchMemBudget}) })
 }
 
-func benchStreamContendedReads(b *testing.B, policy WritePolicy) {
+func benchStreamContendedReads(b *testing.B, cfg Config) {
 	p := NewPool(PoolConfig{Name: "bench"})
 	defer p.Close()
-	buf, err := p.NewBuffer(Config{
-		DiskPath:    filepath.Join(b.TempDir(), "buf.bin"),
-		TotalSize:   1 << 40,
-		WritePolicy: policy,
-	})
+	if cfg.DiskPath != "" {
+		cfg.DiskPath = filepath.Join(b.TempDir(), "buf.bin")
+		cfg.TotalSize = 1 << 40
+	}
+	buf, err := p.NewBuffer(cfg)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -145,6 +173,7 @@ func benchStreamContendedReads(b *testing.B, policy WritePolicy) {
 	}
 
 	b.ReportAllocs()
+	b.SetBytes(benchChunk)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		off := frontier.Load()
@@ -160,6 +189,7 @@ func benchStreamContendedReads(b *testing.B, policy WritePolicy) {
 	b.StopTimer()
 	close(stop)
 	wg.Wait()
+	reportPathStats(b, buf)
 
 	var all []time.Duration
 	for _, l := range lats {
@@ -174,8 +204,7 @@ func benchStreamContendedReads(b *testing.B, policy WritePolicy) {
 	}
 }
 
-// BenchmarkReadWarmDisk: pure lock-free fast-path reads (reopened buffer,
-// everything on disk, no resident blocks). Baseline for read-path overhead.
+// BenchmarkReadWarmDisk measures reopened, non-resident reads.
 func BenchmarkReadWarmDisk(b *testing.B) {
 	path := filepath.Join(b.TempDir(), "buf.bin")
 	p := NewPool(PoolConfig{Name: "bench"})
@@ -194,9 +223,6 @@ func BenchmarkReadWarmDisk(b *testing.B) {
 				b.Fatal(err)
 			}
 		}
-		if err := w.Sync(); err != nil {
-			b.Fatal(err)
-		}
 		if err := w.Close(); err != nil {
 			b.Fatal(err)
 		}
@@ -212,6 +238,7 @@ func BenchmarkReadWarmDisk(b *testing.B) {
 	defer buf.Close()
 
 	b.ReportAllocs()
+	b.SetBytes(benchChunk)
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		rbuf := make([]byte, benchChunk)
@@ -225,4 +252,49 @@ func BenchmarkReadWarmDisk(b *testing.B) {
 			}
 		}
 	})
+}
+
+// BenchmarkReadWarmRAM measures the resident counterpart to ReadWarmDisk.
+func BenchmarkReadWarmRAM(b *testing.B) {
+	p := NewPool(PoolConfig{Name: "bench"})
+	defer p.Close()
+
+	const size = int64(64 << 20)
+	buf, err := p.NewBuffer(Config{
+		MemorySize: 2 * size,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer buf.Close()
+	chunk := make([]byte, 1<<20)
+	fillPattern(chunk, 0)
+	for off := int64(0); off < size; off += 1 << 20 {
+		if _, err := buf.WriteAt(chunk, off); err != nil {
+			b.Fatal(err)
+		}
+	}
+	if st := buf.Stats(); st.BytesInRAM < size {
+		b.Fatalf("expected fully resident buffer, got %d/%d bytes in RAM", st.BytesInRAM, size)
+	}
+
+	b.ReportAllocs()
+	b.SetBytes(benchChunk)
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		rbuf := make([]byte, benchChunk)
+		var i int64
+		for pb.Next() {
+			off := (i * benchChunk) % (size - benchChunk)
+			i++
+			if _, err := buf.ReadAt(rbuf, off); err != nil {
+				b.Error(err)
+				return
+			}
+		}
+	})
+	b.StopTimer()
+	if st := buf.Stats(); st.Hits == 0 || st.Misses > 0 {
+		b.Fatalf("expected pure RAM hits, got %+v", st)
+	}
 }

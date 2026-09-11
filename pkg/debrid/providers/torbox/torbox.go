@@ -42,6 +42,7 @@ type Torbox struct {
 	accountsManager       *account.Manager
 	autoExpiresLinksAfter time.Duration
 	client                *request.Client
+	submitClient          *request.Client
 	logger                zerolog.Logger
 	Profile               *types.Profile
 	config                config.Debrid
@@ -69,16 +70,23 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Torbox, er
 	if mainRL == nil {
 		mainRL = ratelimit.New(300, ratelimit.Per(time.Minute), ratelimit.WithSlack(30))
 	}
-
-	opts := []request.ClientOption{
-		request.WithHeaders(headers),
-		request.WithRateLimiter(mainRL),
-		request.WithMaxRetries(cfg.Retries),
-		request.WithRetryableStatus(http.StatusTooManyRequests, http.StatusBadGateway),
-		request.WithLogger(_log),
+	submitRL := ratelimits["download"]
+	if submitRL == nil {
+		submitRL = ratelimit.New(300, ratelimit.Per(time.Minute), ratelimit.WithSlack(30))
 	}
-	if dc.Proxy != "" {
-		opts = append(opts, request.WithProxy(dc.Proxy))
+
+	newClient := func(rateLimiter ratelimit.Limiter) *request.Client {
+		opts := []request.ClientOption{
+			request.WithHeaders(headers),
+			request.WithRateLimiter(rateLimiter),
+			request.WithMaxRetries(cfg.Retries),
+			request.WithRetryableStatus(http.StatusTooManyRequests, http.StatusBadGateway),
+			request.WithLogger(_log),
+		}
+		if dc.Proxy != "" {
+			opts = append(opts, request.WithProxy(dc.Proxy))
+		}
+		return request.New(opts...)
 	}
 
 	autoExpiresLinksAfter, err := utils.ParseDuration(dc.AutoExpireLinksAfter)
@@ -89,10 +97,11 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Torbox, er
 	tb := &Torbox{
 		Host:                  "https://api.torbox.app/v1",
 		APIKey:                dc.APIKey,
-		accountsManager:       account.NewManager(dc, ratelimits["download"], _log),
+		accountsManager:       account.NewManager(dc, submitRL, _log),
 		config:                dc,
 		autoExpiresLinksAfter: autoExpiresLinksAfter,
-		client:                request.New(opts...),
+		client:                newClient(mainRL),
+		submitClient:          newClient(submitRL),
 		logger:                _log,
 	}
 	return tb, nil
@@ -106,8 +115,19 @@ func (tb *Torbox) Logger() zerolog.Logger {
 	return tb.logger
 }
 
+func (tb *Torbox) submissionClient() *request.Client {
+	if tb.submitClient != nil {
+		return tb.submitClient
+	}
+	return tb.client
+}
+
 // doGet performs a GET request and unmarshals the response
 func (tb *Torbox) doGet(endpoint string, queryParams map[string]string, result any) (*http.Response, error) {
+	return tb.doGetWithClient(tb.client, endpoint, queryParams, result)
+}
+
+func (tb *Torbox) doGetWithClient(client *request.Client, endpoint string, queryParams map[string]string, result any) (*http.Response, error) {
 	u, err := url.Parse(tb.Host + endpoint)
 	if err != nil {
 		return nil, err
@@ -126,14 +146,14 @@ func (tb *Torbox) doGet(endpoint string, queryParams map[string]string, result a
 		return nil, err
 	}
 
-	resp, err := tb.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer request.DrainAndClose(resp.Body)
 
 	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
-		if err := json.ConfigDefault.NewDecoder(resp.Body).Decode(result); err != nil {
+		if err := request.DecodeJSON(resp, result); err != nil {
 			return resp, err
 		}
 	}
@@ -143,6 +163,10 @@ func (tb *Torbox) doGet(endpoint string, queryParams map[string]string, result a
 
 // doPostForm performs a POST request with form data
 func (tb *Torbox) doPostForm(endpoint string, formData map[string]string, result any) (*http.Response, error) {
+	return tb.doPostFormWithClient(tb.client, endpoint, formData, result)
+}
+
+func (tb *Torbox) doPostFormWithClient(client *request.Client, endpoint string, formData map[string]string, result any) (*http.Response, error) {
 	form := url.Values{}
 	for k, v := range formData {
 		form.Set(k, v)
@@ -154,14 +178,14 @@ func (tb *Torbox) doPostForm(endpoint string, formData map[string]string, result
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := tb.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer request.DrainAndClose(resp.Body)
 
 	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
-		if err := json.ConfigDefault.NewDecoder(resp.Body).Decode(result); err != nil {
+		if err := request.DecodeJSON(resp, result); err != nil {
 			return resp, err
 		}
 	}
@@ -169,8 +193,8 @@ func (tb *Torbox) doPostForm(endpoint string, formData map[string]string, result
 	return resp, nil
 }
 
-// doDelete performs a DELETE request
-func (tb *Torbox) doDelete(endpoint string, payload any) (*http.Response, error) {
+// doPostJSON performs a POST request with a JSON body.
+func (tb *Torbox) doPostJSON(endpoint string, payload any, result any) (*http.Response, error) {
 	var body io.Reader
 	if payload != nil {
 		data, err := json.Marshal(payload)
@@ -180,7 +204,7 @@ func (tb *Torbox) doDelete(endpoint string, payload any) (*http.Response, error)
 		body = bytes.NewReader(data)
 	}
 
-	req, err := http.NewRequest(http.MethodDelete, tb.Host+endpoint, body)
+	req, err := http.NewRequest(http.MethodPost, tb.Host+endpoint, body)
 	if err != nil {
 		return nil, err
 	}
@@ -191,6 +215,12 @@ func (tb *Torbox) doDelete(endpoint string, payload any) (*http.Response, error)
 		return nil, err
 	}
 	defer request.DrainAndClose(resp.Body)
+
+	if result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && resp.ContentLength != 0 {
+		if err := request.DecodeJSON(resp, result); err != nil {
+			return resp, err
+		}
+	}
 
 	return resp, nil
 }
@@ -242,7 +272,7 @@ func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
 		formData["add_only_if_cached"] = "true"
 	}
 
-	resp, err := tb.doPostForm("/api/torrents/createtorrent", formData, &data)
+	resp, err := tb.doPostFormWithClient(tb.submissionClient(), "/api/torrents/createtorrent", formData, &data)
 	if err != nil {
 		return nil, err
 	}
@@ -306,6 +336,7 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 	}
 	t := &types.Torrent{
 		Id:               strconv.Itoa(data.Id),
+		InfoHash:         data.Hash,
 		Name:             data.Name,
 		Bytes:            data.Size,
 		Progress:         data.Progress * 100,
@@ -379,9 +410,13 @@ func (tb *Torbox) loadDownloadPresent() error {
 }
 
 func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
+	return tb.updateTorrentWithClient(tb.client, t)
+}
+
+func (tb *Torbox) updateTorrentWithClient(client *request.Client, t *types.Torrent) error {
 	var res InfoResponse
 
-	resp, err := tb.doGet("/api/torrents/mylist", map[string]string{"id": t.Id}, &res)
+	resp, err := tb.doGetWithClient(client, "/api/torrents/mylist", map[string]string{"id": t.Id}, &res)
 	if err != nil {
 		return err
 	}
@@ -445,7 +480,7 @@ func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
 
 func (tb *Torbox) CheckStatus(torrent *types.Torrent) (*types.Torrent, error) {
 	for {
-		err := tb.UpdateTorrent(torrent)
+		err := tb.updateTorrentWithClient(tb.submissionClient(), torrent)
 
 		if err != nil || torrent == nil {
 			return torrent, err
@@ -457,7 +492,7 @@ func (tb *Torbox) CheckStatus(torrent *types.Torrent) (*types.Torrent, error) {
 			return torrent, nil
 		case types.TorrentStatusDownloading:
 			if !torrent.DownloadUncached {
-				return torrent, fmt.Errorf("torrent: %s not cached", torrent.Name)
+				return torrent, fmt.Errorf("torrent %s: %w", torrent.Name, customerror.TorrentNotCachedError)
 			}
 			return torrent, nil
 		default:
@@ -467,9 +502,20 @@ func (tb *Torbox) CheckStatus(torrent *types.Torrent) (*types.Torrent, error) {
 }
 
 func (tb *Torbox) DeleteTorrent(torrentId string) error {
-	payload := map[string]string{"torrent_id": torrentId, "action": "Delete"}
+	id, err := strconv.Atoi(torrentId)
+	if err != nil {
+		return fmt.Errorf("invalid TorBox torrent id %q: %w", torrentId, err)
+	}
+	payload := struct {
+		TorrentID int    `json:"torrent_id"`
+		Operation string `json:"operation"`
+		All       bool   `json:"all"`
+	}{
+		TorrentID: id,
+		Operation: "delete",
+	}
 
-	resp, err := tb.doDelete(fmt.Sprintf("/api/torrents/controltorrent/%s", torrentId), payload)
+	resp, err := tb.doPostJSON("/api/torrents/controltorrent", payload, nil)
 	if err != nil {
 		return err
 	}

@@ -35,11 +35,9 @@ func getHashes(ctx context.Context) []string {
 	return nil
 }
 
-func getArrFromContext(ctx context.Context) *arr.Arr {
-	if a, ok := ctx.Value(arrKey).(*arr.Arr); ok {
-		return a
-	}
-	return nil
+func getArrFromContext(ctx context.Context) arr.Arr {
+	instance, _ := ctx.Value(arrKey).(arr.Arr)
+	return instance
 }
 
 func decodeAuthHeader(header string) (string, string, error) {
@@ -111,7 +109,7 @@ func (q *QBit) authContext(next http.Handler) http.Handler {
 			return
 		}
 		category := getCategory(r.Context())
-		a, err := q.authenticate(category, username, password)
+		a, err := q.authenticate(r.Context(), category, username, password)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
@@ -142,46 +140,53 @@ func getUsernameAndPassword(r *http.Request) (string, string, error) {
 	return username, password, nil
 }
 
-func (q *QBit) authenticate(category, username, password string) (*arr.Arr, error) {
+func (q *QBit) authenticate(ctx context.Context, category, username, password string) (arr.Arr, error) {
 	cfg := config.Get()
-	a := q.manager.Arr().Get(category)
-	if a == nil {
-		// Arr is not yet in runtime storage — look for a matching config entry
-		// so we inherit its download_uncached setting. If no config match,
-		// leave nil so SendToDebrid falls back to the debrid provider's setting.
-		var downloadUncached *bool
-		for _, cfgArr := range config.Get().Arrs {
-			if cfgArr.Name == category {
-				downloadUncached = cfgArr.DownloadUncached
+	instance, known := q.manager.Arr().Get(category)
+	if !known {
+		// Not in the registry yet: inherit download_uncached from a matching
+		// config entry so SendToDebrid does not fall back to the provider.
+		instance = arr.Arr{Name: category, Source: arr.SourceAuto}
+		for _, configured := range cfg.Arrs {
+			if configured.Name == category {
+				instance.DownloadUncached = configured.DownloadUncached
 				break
 			}
 		}
-		a = arr.New(category, username, password, false, downloadUncached, "", "auto")
 	}
-	arrValidated := false // This is a flag to indicate if arr validation was successful
-	if (username == "" || password == "") && cfg.UseAuth {
-		return nil, fmt.Errorf("unauthorized: Host and token are required for authentication(you've enabled authentication)")
-	}
-	if a.Source == "auto" {
-		a.Host = username
-		a.Token = password
-	}
-	if err := a.Validate(); err == nil {
-		arrValidated = true
+	// In token-only mode the arr sends the API token as the password and may
+	// leave the username empty.
+	if (username == "" || password == "") && cfg.UseAuth && !config.VerifyToken(password) {
+		return arr.Arr{}, fmt.Errorf("unauthorized: Host and token are required for authentication(you've enabled authentication)")
 	}
 
-	if !arrValidated && cfg.UseAuth {
-		// If arr validation failed, try to use user auth validation
-		if !config.VerifyAuth(username, password) {
-			return nil, fmt.Errorf("unauthorized: invalid credentials")
+	validated := false
+	kind := instance.Type
+	if username != "" && password != "" {
+		candidate := instance
+		candidate.Host = username
+		candidate.Token = password
+		candidate.Source = arr.SourceAuto
+		probed, err := q.manager.Arr().Probe(ctx, candidate)
+		validated = err == nil
+		if validated {
+			kind = probed
 		}
 	}
 
-	if username != "" && password != "" {
-		// Then add or update arr in manager
-		q.manager.Arr().AddOrUpdate(a)
+	if !validated && cfg.UseAuth {
+		if !config.VerifyAuth(username, password) && !config.VerifyToken(password) {
+			return arr.Arr{}, fmt.Errorf("unauthorized: invalid credentials")
+		}
 	}
-	return a, nil
+
+	if validated && instance.Source == arr.SourceAuto {
+		instance.Host = username
+		instance.Token = password
+		instance.Type = kind
+		q.manager.Arr().AddOrUpdate(instance)
+	}
+	return instance, nil
 }
 
 func createSID(username, password string) string {

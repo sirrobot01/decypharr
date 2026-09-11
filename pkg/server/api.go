@@ -17,10 +17,10 @@ import (
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/arr"
 	"github.com/sirrobot01/decypharr/pkg/manager"
+	"github.com/sirrobot01/decypharr/pkg/repair"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sirrobot01/decypharr/pkg/version"
 	"github.com/sourcegraph/conc/iter"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type mountCacheCleaner interface {
@@ -32,7 +32,7 @@ type mountCachePurger interface {
 }
 
 func (s *Server) handleGetArrs(w http.ResponseWriter, r *http.Request) {
-	utils.JSONResponse(w, s.manager.Arr().GetAll(), http.StatusOK)
+	utils.JSONResponse(w, s.manager.Arr().All(), http.StatusOK)
 }
 
 func (s *Server) handleAddContent(w http.ResponseWriter, r *http.Request) {
@@ -65,10 +65,11 @@ func (s *Server) handleAddContent(w http.ResponseWriter, r *http.Request) {
 		rmTrackerUrls = true
 	}
 
-	_arr := s.manager.Arr().Get(arrName)
-	if _arr == nil {
-		// These are not found in the config. They are throwaway arrs.
-		_arr = arr.New(arrName, "", "", false, downloadUncached, "", "")
+	// A category with no configured Arr is a throwaway that only routes the
+	// download.
+	instance, known := s.manager.Arr().Get(arrName)
+	if !known {
+		instance = arr.Arr{Name: arrName}
 	}
 
 	// Unified task type for all content types
@@ -170,7 +171,7 @@ func (s *Server) handleAddContent(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case "torrent":
-			importReq := manager.NewTorrentRequest(debridName, downloadFolder, task.magnet, _arr, config.DownloadAction(action), downloadUncached, callbackUrl, manager.ImportTypeAPI, skipMultiSeason)
+			importReq := manager.NewTorrentRequest(debridName, downloadFolder, task.magnet, instance, config.DownloadAction(action), downloadUncached, callbackUrl, manager.ImportTypeAPI, skipMultiSeason)
 			if err := s.manager.AddNewTorrent(ctx, importReq); err != nil {
 				s.logger.Error().Err(err).Str("source", task.source).Msg("Failed to add torrent")
 				importReq.Error = err.Error()
@@ -179,7 +180,7 @@ func (s *Server) handleAddContent(w http.ResponseWriter, r *http.Request) {
 			return importReq
 
 		case "nzb":
-			importReq := manager.NewNZBRequest(task.name, downloadFolder, task.nzbContent, _arr, config.DownloadAction(action), callbackUrl, manager.ImportTypeAPI, skipMultiSeason)
+			importReq := manager.NewNZBRequest(task.name, downloadFolder, task.nzbContent, instance, config.DownloadAction(action), callbackUrl, manager.ImportTypeAPI, skipMultiSeason)
 			nzoID, err := s.manager.AddNewNZB(ctx, importReq)
 			if err != nil {
 				s.logger.Error().Err(err).Str("source", task.source).Msg("Failed to add NZB")
@@ -437,7 +438,7 @@ func (s *Server) handleDeleteTorrent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.manager.Queue().Delete(hash, cleanup); err != nil {
+	if err := s.manager.Queue().Delete(hash, true, cleanup); err != nil {
 		s.logger.Error().Err(err).Str("hash", hash).Msg("Failed to delete entry from queue")
 		http.Error(w, "Failed to delete entry from queue", http.StatusInternalServerError)
 		return
@@ -483,8 +484,9 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	// Create response with API token info
 	type ConfigResponse struct {
 		*config.Config
-		APIToken     string `json:"api_token,omitempty"`
-		AuthUsername string `json:"auth_username,omitempty"`
+		APIToken      string `json:"api_token,omitempty"`
+		AuthUsername  string `json:"auth_username,omitempty"`
+		AuthTokenOnly bool   `json:"auth_token_only"`
 	}
 
 	response := &ConfigResponse{Config: cfg}
@@ -496,15 +498,18 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 			response.APIToken = auth.APIToken
 		}
 		response.AuthUsername = auth.Username
+		response.AuthTokenOnly = auth.TokenOnly
 	}
 
 	utils.JSONResponse(w, response, http.StatusOK)
 }
 
 func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
-	// Decode the incoming config update
-	var newConfig config.Config
-	if err := json.ConfigDefault.NewDecoder(r.Body).Decode(&newConfig); err != nil {
+	// Decode the incoming update over the live config so API clients can send
+	// partial documents without clearing every omitted field.
+	currentConfig := config.Get()
+	newConfig, err := mergeConfigUpdate(currentConfig, r.Body)
+	if err != nil {
 		s.logger.Error().Err(err).Msg("Failed to decode config update request")
 		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
@@ -524,7 +529,6 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Preserve fields that shouldn't be overwritten by frontend
-	currentConfig := config.Get()
 	newConfig.Auth = currentConfig.GetAuth()
 	// The frontend config form doesn't include use_auth or enable_webdav_auth,
 	// so they would be zero-valued (false) in the decoded payload. Preserve
@@ -588,6 +592,26 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.JSONResponse(w, map[string]any{"status": "success", "restarted": restarted}, http.StatusOK)
+}
+
+func mergeConfigUpdate(current *config.Config, update io.Reader) (config.Config, error) {
+	if current == nil {
+		return config.Config{}, fmt.Errorf("current config is unavailable")
+	}
+
+	snapshot, err := json.Marshal(current)
+	if err != nil {
+		return config.Config{}, fmt.Errorf("copy current config: %w", err)
+	}
+
+	var merged config.Config
+	if err := json.Unmarshal(snapshot, &merged); err != nil {
+		return config.Config{}, fmt.Errorf("copy current config: %w", err)
+	}
+	if err := json.ConfigDefault.NewDecoder(update).Decode(&merged); err != nil {
+		return config.Config{}, err
+	}
+	return merged, nil
 }
 
 func (s *Server) handlePreviewVirtualFolder(w http.ResponseWriter, r *http.Request) {
@@ -684,7 +708,7 @@ func (s *Server) handleUpdateRepairConfig(w http.ResponseWriter, r *http.Request
 func (s *Server) handleRepairStatus(w http.ResponseWriter, r *http.Request) {
 	svc := s.manager.Repair()
 	if svc == nil {
-		utils.JSONResponse(w, manager.RepairStatus{}, http.StatusOK)
+		utils.JSONResponse(w, repair.Status{}, http.StatusOK)
 		return
 	}
 	utils.JSONResponse(w, svc.Status(), http.StatusOK)
@@ -717,11 +741,9 @@ func (s *Server) handleRunRepair(w http.ResponseWriter, r *http.Request) {
 	autoRepair := req.AutoRepair
 	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("auto_repair"))) {
 	case "1", "true", "yes", "on":
-		v := true
-		autoRepair = &v
+		autoRepair = new(true)
 	case "0", "false", "no", "off":
-		v := false
-		autoRepair = &v
+		autoRepair = new(false)
 	}
 	unrestrictLink := req.UnrestrictLink
 	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("unrestrict_link"))) {
@@ -733,11 +755,9 @@ func (s *Server) handleRunRepair(w http.ResponseWriter, r *http.Request) {
 	verifyContent := req.VerifyContent
 	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("verify_content"))) {
 	case "1", "true", "yes", "on":
-		v := true
-		verifyContent = &v
+		verifyContent = new(true)
 	case "0", "false", "no", "off":
-		v := false
-		verifyContent = &v
+		verifyContent = new(false)
 	}
 	protocolScope := strings.ToLower(strings.TrimSpace(req.Protocol))
 	if queryProtocol := strings.TrimSpace(r.URL.Query().Get("protocol")); queryProtocol != "" {
@@ -758,7 +778,7 @@ func (s *Server) handleRunRepair(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Repair service not available", http.StatusServiceUnavailable)
 		return
 	}
-	id, err := svc.RunNow(manager.RepairRunOptions{
+	id, err := svc.RunNow(repair.RunOptions{
 		IgnoreLastChecked: ignoreLastChecked,
 		AutoRepair:        autoRepair,
 		UnrestrictLink:    unrestrictLink,
@@ -1045,6 +1065,7 @@ func (s *Server) handleUpdateAuth(w http.ResponseWriter, r *http.Request) {
 		Username        string `json:"username"`
 		Password        string `json:"password"`
 		ConfirmPassword string `json:"confirm_password"`
+		TokenOnly       bool   `json:"token_only"`
 	}
 	if err := json.ConfigDefault.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1057,12 +1078,52 @@ func (s *Server) handleUpdateAuth(w http.ResponseWriter, r *http.Request) {
 		auth = &config.Auth{}
 	}
 
+	// Token-only: the API token becomes the sole credential. Any stored
+	// username and password are dropped so nothing else can authenticate.
+	if req.TokenOnly {
+		cfg.UseAuth = true
+		auth.Username = ""
+		auth.Password = ""
+		auth.TokenOnly = true
+		if err := cfg.SaveAuth(auth); err != nil {
+			s.logger.Error().Err(err).Msg("Failed to save auth config")
+			http.Error(w, "Failed to save authentication settings", http.StatusInternalServerError)
+			return
+		}
+		// Save mints an API token when none exists yet.
+		if err := cfg.Save(); err != nil {
+			s.logger.Error().Err(err).Msg("Failed to save config")
+			http.Error(w, "Failed to save configuration", http.StatusInternalServerError)
+			return
+		}
+
+		token := ""
+		if saved := cfg.GetAuth(); saved != nil {
+			token = saved.APIToken
+		}
+		message := "Token-only authentication enabled"
+		if cfg.EnableWebdavAuth {
+			// WebDAV authenticates with the username and password only; it never
+			// accepts the API token, so it now has no credential to check.
+			s.logger.Warn().Msg("token-only auth enabled while WebDAV auth is on; WebDAV will reject every client")
+			message += ". WebDAV auth is still enabled but has no credential to accept — turn it off, or WebDAV clients will be rejected"
+		}
+		utils.JSONResponse(w, map[string]string{
+			"message": message,
+			"token":   token,
+		}, http.StatusOK)
+		return
+	}
+
 	// Check if trying to disable authentication (both empty)
 	if req.Username == "" && req.Password == "" {
-		// Disable authentication
+		// Disable authentication. The API token is cleared with the credentials
+		// so re-enabling auth later does not silently restore the old token.
 		cfg.UseAuth = false
 		auth.Username = ""
 		auth.Password = ""
+		auth.APIToken = ""
+		auth.TokenOnly = false
 		if err := cfg.SaveAuth(auth); err != nil {
 			s.logger.Error().Err(err).Msg("Failed to save auth config")
 			http.Error(w, "Failed to save authentication settings", http.StatusInternalServerError)
@@ -1094,23 +1155,9 @@ func (s *Server) handleUpdateAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Hash the password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		s.logger.Error().Err(err).Msg("Failed to hash password")
-		http.Error(w, "Failed to process password", http.StatusInternalServerError)
-		return
-	}
-
-	// Update auth settings
-	auth.Username = req.Username
-	auth.Password = string(hashedPassword)
-	cfg.UseAuth = true
-
-	// Save auth config
-	if err := cfg.SaveAuth(auth); err != nil {
+	if err := cfg.SetCredentials(req.Username, req.Password); err != nil {
 		s.logger.Error().Err(err).Msg("Failed to save auth config")
-		http.Error(w, "Failed to save authentication settings", http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 

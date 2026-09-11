@@ -204,7 +204,7 @@ type File struct {
 	Bytes    string `json:"bytes"`         // Total file size in bytes (as string)
 	Filename string `json:"filename"`      // Filename
 	NzfId    string `json:"nzf_id"`        // Unique file ID
-	Set      string `json:"set,omitempty"` // Set name (for par2 files)
+	Set      string `json:"set,omitempty"` // Optional set name
 }
 
 // convertToSABnzbdNZB converts a storage.Entry to SABnzbd NZB format

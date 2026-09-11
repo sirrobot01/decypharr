@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -18,10 +19,13 @@ import (
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/arr"
+	"github.com/sirrobot01/decypharr/pkg/arr/reacquire"
 	debrid "github.com/sirrobot01/decypharr/pkg/debrid/common"
 	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"github.com/sirrobot01/decypharr/pkg/hearsay"
 	"github.com/sirrobot01/decypharr/pkg/manager/link"
 	"github.com/sirrobot01/decypharr/pkg/notifications"
+	"github.com/sirrobot01/decypharr/pkg/repair"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sirrobot01/decypharr/pkg/usenet"
 	"github.com/sirrobot01/decypharr/pkg/version"
@@ -32,13 +36,19 @@ import (
 type Manager struct {
 	storage      *storage.Storage
 	migrator     *Migrator
-	repair       *Repair
+	repair       *repair.Service
 	clients      *xsync.Map[string, debrid.Client]
-	arr          *arr.Storage
+	arr          *arr.Service
+	arrService   *reacquire.Service
+	arrIndexer   *reacquire.Indexer
 	logger       zerolog.Logger
 	ready        chan struct{}
 	readyOnce    sync.Once
 	streamClient *http.Client
+
+	arrRecoveryMu          sync.RWMutex
+	arrRecovery            ArrRecovery
+	reacquireNotifications sync.Map
 
 	// Migration jobs tracking
 	migrationJobs   *xsync.Map[string, *storage.SwitcherJob]
@@ -85,13 +95,23 @@ type Manager struct {
 	// re-fires before the previous pass has updated the queue row.
 	processingEntries *xsync.Map[string, struct{}]
 
+	// Suppresses repeated provider submissions for the same torrent after an
+	// Arr import/re-grab loop. The queue itself handles duplicates while an
+	// entry is present; this gate covers the short window after Arr deletes it.
+	torrentSubmissions *torrentSubmissionGate
+
 	// Unified active-download queue for torrent and NZB imports.
 	jobQueue  *JobQueue
 	nzbSyncMu sync.Mutex
 
 	// Notifications service
 	Notifications *notifications.Service
+
+	// Hearsay network participation; nil when disabled.
+	hearsay *hearsay.Service
 }
+
+var _ repair.Backend = (*Manager)(nil)
 
 // New creates a new Manager instance
 func New() *Manager {
@@ -148,7 +168,7 @@ func New() *Manager {
 		logger:                 _logger,
 		migrationJobs:          xsync.NewMap[string, *storage.SwitcherJob](),
 		config:                 cfg,
-		arr:                    arr.NewStorage(),
+		arr:                    arr.New(),
 		queue:                  newQueue(strg, cfg.RemoveStalledAfter),
 		ctx:                    ctx,
 		ready:                  make(chan struct{}),
@@ -157,6 +177,7 @@ func New() *Manager {
 		debridSpeedTestResults: xsync.NewMap[string, debridTypes.SpeedTestResult](),
 		activeStreams:          xsync.NewMap[string, *ActiveStream](),
 		processingEntries:      xsync.NewMap[string, struct{}](),
+		torrentSubmissions:     newTorrentSubmissionGate(torrentSubmissionDedupWindow),
 	}
 
 	instance.init()
@@ -233,15 +254,49 @@ func (m *Manager) init() {
 	m.setMountPaths()
 
 	m.initEntryCache()
+	m.initArrServices()
 
 	// Initialize notifications service
 	m.Notifications = notifications.New(&m.config.Notifications, m.logger)
 
-	// Initialize repair service. It registers with the scheduler in StartWorker.
-	m.repair = NewRepair(m)
+	// Initialize Hearsay state and its default network participation.
+	if hs, err := hearsay.New(m.config, m.logger); err != nil {
+		m.logger.Warn().Err(err).Msg("Hearsay disabled: failed to initialize")
+	} else {
+		m.hearsay = hs
+	}
+
+	m.repair = repair.New(repair.Dependencies{
+		Scheduler:     m.scheduler,
+		Backend:       m,
+		Storage:       m.storage,
+		Arrs:          m.arr,
+		Reacquirer:    m.arrService,
+		Usenet:        m.usenet,
+		Notifications: m.Notifications,
+		Hearsay:       m.hearsay,
+	})
 
 	// Initialize the unified active-download queue after all processors exist.
 	m.initJobQueue()
+}
+
+func (m *Manager) initArrServices() {
+	service, err := reacquire.NewService(reacquire.ServiceOptions{
+		Directory: filepath.Join(config.GetMainPath(), "db"),
+		Handler:   reacquire.NewHandler(m.arr, m),
+	})
+	if err != nil {
+		m.logger.Error().Err(err).Msg("Failed to initialize Arr reacquisition service")
+		m.arrService = nil
+		m.arrIndexer = nil
+		m.SetArrRecovery(nil)
+		return
+	}
+	m.arrService = service
+	m.arrIndexer = reacquire.NewIndexer(m.arr, managedArrCatalog{storage: m.storage, logger: m.logger}, service,
+		filepath.Join(m.config.Mount.MountPath, EntryAllFolder))
+	m.SetArrRecovery(service)
 }
 
 func (m *Manager) initUsenet() {
@@ -323,14 +378,25 @@ func (m *Manager) processJob(ctx context.Context, job *Job) {
 		}
 		return
 	}
-
-	m.waitForDownloadCompletion(ctx, job.Entry)
+	// The worker slot is released as soon as the job is handed off. Waiting
+	// here until the entry left the downloading state parked a worker for the
+	// whole post-download lifecycle - including the 30 minute mount wait of the
+	// symlink action - so a handful of slow imports stalled every job the arrs
+	// submitted. processQueuedEntries drives the entry from here.
 }
+
+// activeDownloadWaitTimeout bounds how long a job may hold a worker slot while
+// it waits on an entry it does not drive itself. Without a bound, an entry the
+// queue scheduler never picks up parked its worker forever, and enough of them
+// drained the pool to zero.
+const activeDownloadWaitTimeout = 35 * time.Minute
 
 func (m *Manager) waitForDownloadCompletion(ctx context.Context, entry *storage.Entry) {
 	if entry == nil {
 		return
 	}
+	ctx, cancel := context.WithTimeout(ctx, activeDownloadWaitTimeout)
+	defer cancel()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -340,6 +406,13 @@ func (m *Manager) waitForDownloadCompletion(ctx context.Context, entry *storage.
 		}
 		select {
 		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				m.logger.Warn().
+					Str("name", entry.Name).
+					Str("infohash", entry.InfoHash).
+					Dur("waited", activeDownloadWaitTimeout).
+					Msg("Stopped waiting for download completion, releasing worker slot")
+			}
 			return
 		case <-ticker.C:
 		}
@@ -401,6 +474,17 @@ func (m *Manager) Start(ctx context.Context) error {
 	// run the migration process
 	m.migrate()
 
+	if m.arrService != nil {
+		if err := m.arrService.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start Arr reacquisition service: %w", err)
+		}
+	}
+	if m.arrIndexer != nil {
+		if err := m.arrIndexer.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start Arr indexer: %w", err)
+		}
+	}
+
 	go func() {
 		m.syncTorrents(ctx)
 		// Sync NZBs
@@ -418,6 +502,13 @@ func (m *Manager) Start(ctx context.Context) error {
 	// Start workers
 	if err := m.StartWorker(ctx); err != nil {
 		return fmt.Errorf("failed to start manager worker: %w", err)
+	}
+
+	// Start network participation when the operator opted in.
+	if m.hearsay != nil {
+		if err := m.hearsay.Start(ctx); err != nil {
+			m.logger.Warn().Err(err).Msg("Failed to start hearsay network participation")
+		}
 	}
 
 	// Close ready channel once, safe for multiple calls
@@ -449,6 +540,18 @@ func (m *Manager) Stop() error {
 			m.logger.Warn().Err(err).Msg("Failed to stop mount manager")
 		}
 	}
+	if m.repair != nil {
+		m.repair.Stop()
+	}
+	if m.arrIndexer != nil {
+		m.arrIndexer.Close()
+	}
+	if m.arrService != nil {
+		if err := m.arrService.Close(); err != nil {
+			m.logger.Warn().Err(err).Msg("Failed to close Arr reacquisition service")
+		}
+	}
+	m.SetArrRecovery(nil)
 
 	// Stop schedulers
 	if m.scheduler != nil {
@@ -475,9 +578,7 @@ func (m *Manager) Stop() error {
 		}
 	}
 
-	if m.repair != nil {
-		m.repair.Stop()
-	}
+	m.hearsay.Close()
 
 	// Close storage
 	if m.storage != nil {

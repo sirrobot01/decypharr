@@ -23,94 +23,86 @@ import (
 // Note: Timeout values are defined in TimeoutConfig (client.go).
 // Use timeouts.StreamBodyTimeout for read deadlines.
 
-// bodyCopyBufPool provides reusable 128KB buffers for idle-deadline body
-// copies, keeping the streaming hot path allocation-free.
-var bodyCopyBufPool = sync.Pool{
+// bodyBufPool reuses storage for decoded articles not retained by a caller.
+var bodyBufPool = sync.Pool{
 	New: func() any {
-		b := make([]byte, 128*1024)
+		b := make([]byte, 0, 1<<20)
 		return &b
 	},
 }
 
-// copyBodyWithIdleDeadline copies src to dst with an idle deadline: a stall
-// (no bytes arriving for `idle`) closes the connection so the in-flight Read
-// unblocks with an error.
-//
-// History: the first design called SetReadDeadline per Read (pollSetDeadline
-// ~41% CPU in profile). The replacement used a time.AfterFunc + Timer.Reset
-// per Read, which also dominated CPU (Timer.Reset ~27% of total, scheduler
-// timer-heap scans another ~13%; see production profile 2026-05-31). Both
-// shared the same root cause: a runtime-managed timer entry per active body
-// copy, hammered with ops on every bufio Read across 100+ concurrent streams.
-//
-// Current design: one process-wide janitor goroutine sweeps active body copies
-// every few seconds and closes anything past its deadline. The copy loop
-// periodically refreshes an atomic monotonic timestamp rather than touching a
-// runtime timer on every read. Stall detection latency becomes
-// "idle + janitor interval"; for a 60s idle that is acceptable.
-func (c *Connection) copyBodyWithIdleDeadline(dst io.Writer, src io.Reader, idle time.Duration) (int64, error) {
+func getBodyBuf() []byte { return *bodyBufPool.Get().(*[]byte) }
+
+func putBodyBuf(b []byte) {
+	if cap(b) == 0 {
+		return
+	}
+	b = b[:0]
+	bodyBufPool.Put(&b)
+}
+
+// DecodedBodyCapacity matches the decoder's initial growth policy. Supplying
+// this capacity lets DecodeBodyInto keep the caller's allocation.
+func DecodedBodyCapacity(decodedSize int64) int {
+	const chunk = int64(32 * 1024)
+	const maxPart = int64(10 * 1024 * 1024)
+	if decodedSize < 0 {
+		decodedSize = 0
+	}
+	n := ((decodedSize + 64 + chunk - 1) / chunk * chunk) + chunk
+	n = max(n, 1024)
+	n = min(n, maxPart)
+	return int(n)
+}
+
+// bodyReader is the stable reader identity the yEnc decoder holds for the
+// life of a connection: it follows c.reader (which is replaced on a STARTTLS
+// upgrade) and records read progress for the body idle janitor.
+type bodyReader struct {
+	c     *Connection
+	reads uint8
+}
+
+// progressUpdateStride amortizes the monotonic-clock update across body reads.
+const progressUpdateStride = 4
+
+func (b *bodyReader) Read(p []byte) (int, error) {
+	n, err := b.c.reader.Read(p)
+	if n > 0 {
+		b.reads++
+		if b.reads >= progressUpdateStride {
+			b.c.lastProgressNS.Store(nanotimeNow())
+			b.reads = 0
+		}
+	}
+	return n, err
+}
+
+// nextBodyWithIdleDeadline uses the shared janitor to break a stalled decode.
+func (c *Connection) nextBodyWithIdleDeadline(idle time.Duration) (nntpyenc.BodyResult, error) {
 	if idle <= 0 {
 		idle = 60 * time.Second
 	}
-	bufPtr := bodyCopyBufPool.Get().(*[]byte)
-	buf := *bufPtr
-	defer bodyCopyBufPool.Put(bufPtr)
-
 	// Disable any deadline carried in from earlier on this connection.
 	_ = c.conn.SetReadDeadline(time.Time{})
 
-	// Arm the janitor for this body copy; the connection itself is
-	// registered for its whole lifetime (see createConnection/Close).
-	// idleNS=0 on exit disarms.
+	// Arm the janitor for this decode; the connection itself is registered
+	// for its whole lifetime (see createConnection/Close). idleNS=0 on exit
+	// disarms.
 	c.lastProgressNS.Store(nanotimeNow())
 	c.idleNS.Store(int64(idle))
 	defer c.idleNS.Store(0)
 
-	// progressUpdateStride throttles the per-Read nanotime cost.
-	// Calling time.Since on every successful Read showed up as 19% of
-	// process CPU in the production profile (one nanotime syscall per
-	// Read across many concurrent body copies). The janitor only needs
-	// approximate liveness; staleness up to stride*readDuration is
-	// bounded by single-digit milliseconds vs the 60s idle deadline,
-	// well within tolerance. Pick 16 to cut nanotime CPU by about 16x while
-	// keeping the worst-case stale window comfortably below 1s for
-	// extremely slow connections.
-	const progressUpdateStride = 16
-
-	var total int64
-	var readsSinceProgress uint8
-	for {
-		nr, er := src.Read(buf)
-		if nr > 0 {
-			// Hot path: bump a tiny counter and only touch nanotime +
-			// the atomic every stride'th Read. No timer ops anywhere.
-			readsSinceProgress++
-			if readsSinceProgress >= progressUpdateStride {
-				c.lastProgressNS.Store(nanotimeNow())
-				readsSinceProgress = 0
-			}
-			nw, ew := dst.Write(buf[:nr])
-			total += int64(nw)
-			if ew != nil {
-				return total, ew
-			}
-			if nw != nr {
-				return total, io.ErrShortWrite
-			}
-		}
-		if er != nil {
-			if er == io.EOF {
-				return total, nil
-			}
-			// The janitor sets idleNS to 0 after closing a stalled conn,
-			// but the race-free signal is "did we make progress within
-			// the deadline?". If not, format as a stall error.
-			if nanotimeNow()-c.lastProgressNS.Load() > int64(idle) {
-				return total, fmt.Errorf("stream idle for %s: %w", idle, er)
-			}
-			return total, er
+	res, err := c.bodyDec.Next()
+	if err != nil {
+		// The janitor sets idleNS to 0 after closing a stalled conn, but
+		// the race-free signal is "did we make progress within the
+		// deadline?". If not, format as a stall error.
+		if nanotimeNow()-c.lastProgressNS.Load() > int64(idle) {
+			return res, fmt.Errorf("stream idle for %s: %w", idle, err)
 		}
 	}
+	return res, err
 }
 
 // nanotimeNow returns the monotonic clock in nanoseconds. Uses time.Now's
@@ -122,7 +114,7 @@ func nanotimeNow() int64 {
 	return int64(time.Since(nanotimeEpoch))
 }
 
-// bodyIdleJanitor sweeps connections currently in copyBodyWithIdleDeadline
+// bodyIdleJanitor sweeps connections currently in nextBodyWithIdleDeadline
 // and closes any whose last-progress timestamp is older than their idle
 // deadline. One goroutine per process, started lazily on first add().
 var bodyIdleJanitor = newBodyJanitor()
@@ -210,22 +202,46 @@ func (c *Connection) readResponseCodeWithDeadline(timeout time.Duration) (int, [
 // Connection represents an NNTP connection
 type Connection struct {
 	username, password, address string
-	port                        int
-	conn                        net.Conn
-	text                        *textproto.Reader
-	reader                      *bufio.Reader
-	writer                      *bufio.Writer
-	logger                      zerolog.Logger
-	closed                      atomic.Bool
+	// pool is the ProviderPool this connection belongs to, set at checkout
+	// creation. address alone cannot identify it: two accounts on the same
+	// host have distinct pools. Carrying the pointer keeps put/release free
+	// of map lookups (and of the allocation an ID string would cost).
+	// Every dial goes through getOrCreateFromPool, so this is always set;
+	// put and release still nil-check defensively.
+	pool   *ProviderPool
+	port   int
+	conn   net.Conn
+	text   *textproto.Reader
+	reader *bufio.Reader
+	writer *bufio.Writer
+	logger zerolog.Logger
+	closed atomic.Bool
 
-	// Body-copy idle tracking. Written by copyBodyWithIdleDeadline on
-	// copyBodyWithIdleDeadline periodically while reads make progress;
-	// read by the shared janitor goroutine when sweeping for stalls.
-	// Stored in monotonic nanoseconds (nanotimeNow). idleNS is the active
-	// deadline; 0 means this connection isn't currently in a body copy
-	// and the janitor should skip it.
+	// bodyDec decodes complete BODY responses, reading through bodyReader.
+	// Created once per connection; it retains a reusable 32KB read buffer.
+	// Safe only because the protocol is strictly request/response — the
+	// decoder never over-reads past the current response's terminator.
+	bodyDec       *nntpyenc.BodyDecoder
+	bodyTarget    []byte
+	bodyTargetSet bool
+
+	// Body-decode idle tracking. lastProgressNS is refreshed by bodyReader
+	// while source reads make progress; idleNS is armed by
+	// nextBodyWithIdleDeadline and read by the shared janitor goroutine
+	// when sweeping for stalls. Stored in monotonic nanoseconds
+	// (nanotimeNow). idleNS 0 means this connection isn't currently in a
+	// body decode and the janitor should skip it.
 	lastProgressNS atomic.Int64
 	idleNS         atomic.Int64
+
+	// writeTimeout bounds the next command write instead of the default
+	// HandshakeTimeout. ping sets it for the length of its DATE so a health
+	// check gets one budget for the whole round trip: without it the write
+	// keeps the 10s handshake deadline and a peer that stopped reading
+	// blocks the ping far past its own timeout. Only ever touched by the
+	// single goroutine that owns the connection (it holds a pool slot and
+	// the entry is out of the pool), so no synchronisation is needed.
+	writeTimeout time.Duration
 }
 
 func (c *Connection) Close() error {
@@ -303,13 +319,23 @@ func (c *Connection) startTLS() error {
 	return nil
 }
 
-// ping sends a simple command to test the connection
-func (c *Connection) ping() error {
+// ping sends a simple command to test the connection. timeout bounds the
+// whole DATE round trip; <=0 uses PingTimeout. The budget differs by caller:
+// a checkout verify-ping is user-visible latency and stays tight, while the
+// reaper's background keepalive can afford to wait out congestion.
+func (c *Connection) ping(timeout time.Duration) error {
 	if c.conn == nil {
 		return NewConnectionError(errors.New("connection is nil"))
 	}
-	_ = c.conn.SetDeadline(utils.Now().Add(timeouts.PingTimeout))
-	defer func() { _ = c.conn.SetDeadline(time.Time{}) }()
+	if timeout <= 0 {
+		timeout = timeouts.PingTimeout
+	}
+	_ = c.conn.SetDeadline(utils.Now().Add(timeout))
+	c.writeTimeout = timeout
+	defer func() {
+		c.writeTimeout = 0
+		_ = c.conn.SetDeadline(time.Time{})
+	}()
 
 	if err := c.sendCommand("DATE"); err != nil {
 		return NewConnectionError(err)
@@ -330,7 +356,11 @@ func (c *Connection) sendCommand(command string) error {
 }
 
 func (c *Connection) sendCommandArg(command, arg string) error {
-	_ = c.conn.SetWriteDeadline(utils.Now().Add(timeouts.HandshakeTimeout))
+	writeTimeout := c.writeTimeout
+	if writeTimeout <= 0 {
+		writeTimeout = timeouts.HandshakeTimeout
+	}
+	_ = c.conn.SetWriteDeadline(utils.Now().Add(writeTimeout))
 	defer func() { _ = c.conn.SetWriteDeadline(time.Time{}) }()
 
 	if _, err := c.writer.WriteString(command); err != nil {
@@ -428,110 +458,96 @@ func (c *Connection) GetArticle(messageID string) (*Article, error) {
 	return c.parseArticle(messageID, resp.Lines)
 }
 
-func (c *Connection) GetHeader(messageID string, maxSnippet int) (*YencMetadata, error) {
-	messageID = FormatMessageID(messageID)
-	// Send BODY command to start streaming
-	if err := c.sendCommandArg("BODY", messageID); err != nil {
-		return nil, NewConnectionError(fmt.Errorf("failed to send BODY command: %w", err))
-	}
-
-	code, message, err := c.readResponseCodeWithDeadline(timeouts.StreamBodyTimeout)
-	if err != nil {
-		return nil, NewConnectionError(fmt.Errorf("failed to read body response: %w", err))
-	}
-
-	if code != 222 {
-		return nil, classifyNNTPError(code, string(message))
-	}
-
-	// Set read deadline to prevent hanging on stalled servers
-	_ = c.conn.SetReadDeadline(utils.Now().Add(timeouts.StreamBodyTimeout))
-	defer func() { _ = c.conn.SetReadDeadline(time.Time{}) }()
-
-	dec := nntpyenc.AcquireDecoder(c.reader)
-	defer nntpyenc.ReleaseDecoder(dec)
-
-	// Read snippet to trigger header parsing and capture metadata.
-	snippet := make([]byte, maxSnippet)
-	n, err := io.ReadFull(dec, snippet)
-	if err != nil && err != io.EOF && !errors.Is(err, io.ErrUnexpectedEOF) {
-		_ = c.conn.Close()
-		return nil, classifyTransferError("failed to read snippet", err)
-	}
-	// Truncate snippet to actual read size
-	snippet = snippet[:n]
-	meta := &YencMetadata{
-		Name:     dec.Meta.FileName,
-		Size:     dec.Meta.FileSize,
-		Part:     dec.Meta.PartNumber,
-		Total:    dec.Meta.TotalParts,
-		Offset:   dec.Meta.Offset,
-		PartSize: dec.Meta.PartSize,
-		Begin:    dec.Meta.Begin(),
-		End:      dec.Meta.End(),
-		Snippet:  snippet,
-	}
-
-	// Close connection to stop stream
-	_ = c.Close()
-
-	return meta, nil
+// requestBody sends BODY and decodes the complete response through the
+// per-connection decoder: status line, yEnc payload, and ".\r\n" terminator
+// in one pass, with size and CRC verification. The returned Data buffer
+// comes from bodyBufPool and the caller owns it. On error the connection may
+// be mid-response and unusable; callers rely on the pool layer to discard
+// errored connections.
+func (c *Connection) requestBody(messageID string) (nntpyenc.BodyResult, error) {
+	return c.requestBodyBuffered(messageID, nil, true)
 }
 
-func metadataFromDecoder(dec *nntpyenc.Decoder, snippet []byte) *YencMetadata {
+func (c *Connection) requestBodyBuffered(messageID string, dst []byte, pooled bool) (nntpyenc.BodyResult, error) {
+	messageID = FormatMessageID(messageID)
+	if err := c.sendCommandArg("BODY", messageID); err != nil {
+		return nntpyenc.BodyResult{}, NewConnectionError(fmt.Errorf("failed to send BODY command: %w", err))
+	}
+
+	if !pooled {
+		c.bodyTarget = dst[:0]
+		c.bodyTargetSet = true
+		defer func() {
+			c.bodyTarget = nil
+			c.bodyTargetSet = false
+		}()
+	}
+	res, err := c.nextBodyWithIdleDeadline(timeouts.StreamBodyTimeout)
+	if err != nil {
+		if pooled {
+			putBodyBuf(res.Data)
+		}
+		res.Data = nil
+		if res.StatusCode == 0 {
+			return res, NewConnectionError(fmt.Errorf("failed to read body response: %w", err))
+		}
+		if errors.Is(err, nntpyenc.ErrDataMissing) {
+			// The article exists but its body holds no yEnc data — same
+			// taxonomy the segment fetcher applies to zero-byte bodies.
+			return res, &Error{Type: ErrorTypeArticleNotFound, Code: res.StatusCode, Message: err.Error()}
+		}
+		return res, classifyTransferError("streaming yenc decode failed", err)
+	}
+	if res.StatusCode != 222 {
+		if pooled {
+			putBodyBuf(res.Data)
+		}
+		res.Data = nil
+		return res, classifyNNTPError(res.StatusCode, res.Message)
+	}
+	return res, nil
+}
+
+func (c *Connection) nextBodyBuffer() []byte {
+	if c.bodyTargetSet {
+		c.bodyTargetSet = false
+		return c.bodyTarget[:0]
+	}
+	return getBodyBuf()
+}
+
+func metadataFromResult(meta nntpyenc.DecoderMeta, snippet []byte) *YencMetadata {
 	return &YencMetadata{
-		Name:     dec.Meta.FileName,
-		Size:     dec.Meta.FileSize,
-		Part:     dec.Meta.PartNumber,
-		Total:    dec.Meta.TotalParts,
-		Offset:   dec.Meta.Offset,
-		PartSize: dec.Meta.PartSize,
-		Begin:    dec.Meta.Begin(),
-		End:      dec.Meta.End(),
+		Name:     meta.FileName,
+		Size:     meta.FileSize,
+		Part:     meta.PartNumber,
+		Total:    meta.TotalParts,
+		Offset:   meta.Offset,
+		PartSize: meta.PartSize,
+		Begin:    meta.Begin(),
+		End:      meta.End(),
 		Snippet:  snippet,
 	}
 }
 
 // GetHeaderPrefix retrieves exact yEnc metadata plus a small decoded prefix
-// while keeping the NNTP connection reusable by draining the decoder to EOF.
+// while keeping the NNTP connection reusable (the whole response is consumed).
 func (c *Connection) GetHeaderPrefix(messageID string, maxSnippet int) (*YencMetadata, error) {
-	messageID = FormatMessageID(messageID)
-	if err := c.sendCommandArg("BODY", messageID); err != nil {
-		return nil, NewConnectionError(fmt.Errorf("failed to send BODY command: %w", err))
-	}
-
-	code, message, err := c.readResponseCodeWithDeadline(timeouts.StreamBodyTimeout)
+	res, err := c.requestBody(messageID)
 	if err != nil {
-		return nil, NewConnectionError(fmt.Errorf("failed to read body response: %w", err))
+		// A parsed non-222 status leaves the connection at a clean response
+		// boundary; anything else may leave part of the article on the wire.
+		if res.StatusCode == 0 || res.StatusCode == 222 {
+			_ = c.conn.Close()
+		}
+		return nil, err
 	}
-
-	if code != 222 {
-		return nil, classifyNNTPError(code, string(message))
-	}
-
-	_ = c.conn.SetReadDeadline(utils.Now().Add(timeouts.StreamBodyTimeout))
-	defer func() { _ = c.conn.SetReadDeadline(time.Time{}) }()
-
-	dec := nntpyenc.AcquireDecoder(c.reader)
-	defer nntpyenc.ReleaseDecoder(dec)
-
 	var snippet []byte
 	if maxSnippet > 0 {
-		snippet = make([]byte, maxSnippet)
-		n, readErr := io.ReadFull(dec, snippet)
-		if readErr != nil && readErr != io.EOF && !errors.Is(readErr, io.ErrUnexpectedEOF) {
-			_ = c.conn.Close()
-			return nil, classifyTransferError("failed to read snippet", readErr)
-		}
-		snippet = snippet[:n]
+		snippet = bytes.Clone(res.Data[:min(maxSnippet, len(res.Data))])
 	}
-
-	if _, err := c.copyBodyWithIdleDeadline(io.Discard, dec, timeouts.StreamBodyTimeout); err != nil {
-		_ = c.conn.Close()
-		return nil, classifyTransferError("failed to drain article body", err)
-	}
-
-	return metadataFromDecoder(dec, snippet), nil
+	putBodyBuf(res.Data)
+	return metadataFromResult(res.Meta, snippet), nil
 }
 
 // GetBody retrieves article body by message ID as raw bytes (used by GetHeader)
@@ -561,70 +577,49 @@ func (c *Connection) GetBody(messageID string) ([]byte, error) {
 	return body, nil
 }
 
-// GetDecodedBody retrieves and decodes article body using streaming yEnc decode.
-// Uses textproto.DotReader + rapidyenc streaming decoder to decode while reading
-// from the network - no intermediate buffering of the full body.
+// GetDecodedBody retrieves and decodes an article body in one batch pass.
 func (c *Connection) GetDecodedBody(messageID string) ([]byte, error) {
 	decoded, _, err := c.GetDecodedBodyWithMetadata(messageID)
 	return decoded, err
 }
 
 // GetDecodedBodyWithMetadata retrieves and decodes the article body while also
-// returning the parsed yEnc metadata from the same pass.
+// returning the parsed yEnc metadata from the same pass. The returned slice
+// escapes to the caller and is not recycled.
 func (c *Connection) GetDecodedBodyWithMetadata(messageID string) ([]byte, *YencMetadata, error) {
-	messageID = FormatMessageID(messageID)
-	if err := c.sendCommandArg("BODY", messageID); err != nil {
-		return nil, nil, NewConnectionError(fmt.Errorf("failed to send BODY command: %w", err))
-	}
-
-	code, message, err := c.readResponseCodeWithDeadline(timeouts.StreamBodyTimeout)
+	// The result escapes to a long-lived caller, so it must not take a 1 MiB
+	// scratch buffer out of bodyBufPool permanently. Let rapidyenc allocate
+	// storage sized for this article, just as DecodeBodyInto does when called
+	// with an empty destination.
+	res, err := c.requestBodyBuffered(messageID, nil, false)
 	if err != nil {
-		return nil, nil, NewConnectionError(fmt.Errorf("failed to read body response: %w", err))
+		return nil, nil, err
 	}
-
-	if code != 222 {
-		return nil, nil, classifyNNTPError(code, string(message))
-	}
-
-	dec := nntpyenc.AcquireDecoder(c.reader)
-	// Always release decoder back to pool, even on panic
-	defer nntpyenc.ReleaseDecoder(dec)
-
-	// Pre-allocate output buffer for decoded data (~700KB typical)
-	output := bytes.NewBuffer(make([]byte, 0, 750*1024))
-	_, err = c.copyBodyWithIdleDeadline(output, dec, timeouts.StreamBodyTimeout)
-
-	if err != nil {
-		return nil, nil, classifyTransferError("streaming yenc decode failed", err)
-	}
-	decoded := output.Bytes()
-
-	return decoded, metadataFromDecoder(dec, nil), nil
+	return res.Data, metadataFromResult(res.Meta, nil), nil
 }
 
+// StreamBody decodes one article body and writes it to w in a single Write.
+// On the streaming path w is the segment cache, where every Write costs a
+// pwrite plus an exclusive buffer-lock acquisition; segment readers only see
+// bytes after Finalize, so whole-article batching adds no visible latency.
 func (c *Connection) StreamBody(messageID string, w io.Writer) (int64, error) {
-	messageID = FormatMessageID(messageID)
-	if err := c.sendCommandArg("BODY", messageID); err != nil {
-		return 0, NewConnectionError(fmt.Errorf("failed to send BODY command: %w", err))
-	}
-
-	code, message, err := c.readResponseCodeWithDeadline(timeouts.StreamBodyTimeout)
+	res, err := c.requestBody(messageID)
 	if err != nil {
-		return 0, NewConnectionError(fmt.Errorf("failed to read body response: %w", err))
+		return 0, err
 	}
+	n, err := w.Write(res.Data)
+	putBodyBuf(res.Data)
+	return int64(n), err
+}
 
-	if code != 222 {
-		return 0, classifyNNTPError(code, string(message))
-	}
-
-	dec := nntpyenc.AcquireDecoder(c.reader)
-	// Always release decoder back to pool, even on panic
-	defer nntpyenc.ReleaseDecoder(dec)
-	n, err := c.copyBodyWithIdleDeadline(w, dec, timeouts.StreamBodyTimeout)
+// DecodeBodyInto verifies one yEnc article into storage supplied by the
+// caller. The returned slice belongs to the caller and may be retained.
+func (c *Connection) DecodeBodyInto(messageID string, dst []byte) ([]byte, error) {
+	res, err := c.requestBodyBuffered(messageID, dst, false)
 	if err != nil {
-		return n, classifyTransferError("streaming yenc decode failed", err)
+		return nil, err
 	}
-	return n, nil
+	return res.Data, nil
 }
 
 // readDotBytes reads dot-terminated NNTP data using textproto.DotReader

@@ -3,19 +3,21 @@ package parser
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
-	"github.com/Tensai75/nzbparser"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/customerror"
 	"github.com/sirrobot01/decypharr/internal/nntp"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/sirrobot01/decypharr/pkg/usenet/manifest"
 	"github.com/sourcegraph/conc/iter"
 )
 
@@ -33,24 +35,26 @@ var (
 // NZBParser provides a simplified, robust NZB parser
 type NZBParser struct {
 	logger        zerolog.Logger
-	manager       *nntp.Client // Connection manager for parsing operations
-	maxConcurrent int          // Max concurrent connections
+	source        ArticleSource
+	maxConcurrent int // Max concurrent connections
 }
 
 type fileAnalysisResult struct {
 	fileSize     int64 // Total decoded size of the NZB file entry.
 	lastFileSize int64 // Total decoded size of the last NZB file entry in the group.
 	segmentSize  int64 // Decoded size of a single yEnc part/segment.
+	lastFileKey  string
 }
 
 type contentResult struct {
-	file           nzbparser.NzbFile
-	fileType       storage.NZBFileType
-	actualFilename string
-	fileSize       int64 // decoded size of the part (from yEnc), if available
-	segmentSize    int64 // decoded size of a segment (from yEnc), if available
-	partNumber     int64 // yEnc part number, if available
-	partBegin      int64 // yEnc begin offset, if available
+	file            manifest.File
+	fileType        storage.NZBFileType
+	actualFilename  string
+	articleObserved bool
+	fileSize        int64 // decoded size of the part (from yEnc), if available
+	segmentSize     int64 // decoded size of a segment (from yEnc), if available
+	partNumber      int64 // yEnc part number, if available
+	partBegin       int64 // yEnc begin offset, if available
 }
 
 type filePartMeta struct {
@@ -61,13 +65,14 @@ type filePartMeta struct {
 }
 
 type FileGroup struct {
-	BaseName       string
-	ActualFilename string
-	Type           storage.NZBFileType
-	Files          []nzbparser.NzbFile
-	metadata       *fileAnalysisResult
-	fileMeta       map[string]filePartMeta
-	Groups         map[string]struct{}
+	BaseName        string
+	ActualFilename  string
+	Type            storage.NZBFileType
+	Files           []manifest.File
+	metadata        *fileAnalysisResult
+	fileMeta        map[string]filePartMeta
+	Groups          map[string]struct{}
+	articleObserved bool
 }
 
 func (f *FileGroup) getMetadata() *fileAnalysisResult {
@@ -97,23 +102,58 @@ func (f *FileGroup) getMetadata() *fileAnalysisResult {
 
 // NewParser creates a new simplified NZB parser with a connection manager
 func NewParser(manager *nntp.Client, maxConcurrent int, logger zerolog.Logger) *NZBParser {
+	return NewParserWithSource(
+		NewArticleBroker(manager, maxConcurrent, defaultArticleBodyCacheBytes),
+		maxConcurrent,
+		logger,
+	)
+}
+
+// NewParserWithSource creates a parser with an explicit article source.
+func NewParserWithSource(source ArticleSource, maxConcurrent int, logger zerolog.Logger) *NZBParser {
+	if maxConcurrent <= 0 {
+		maxConcurrent = 1
+	}
 	return &NZBParser{
 		logger:        logger,
-		manager:       manager,
+		source:        source,
 		maxConcurrent: maxConcurrent,
 	}
+}
+
+// Metrics returns cumulative article observation metrics for this analyzer.
+func (p *NZBParser) Metrics() ArticleMetrics {
+	if p == nil || p.source == nil {
+		return ArticleMetrics{}
+	}
+	return p.source.Metrics()
+}
+
+// FilterUnobserved returns message IDs whose availability has not already
+// been proven by parser BODY or STAT observations.
+func (p *NZBParser) FilterUnobserved(messageIDs []string) []string {
+	if p == nil || p.source == nil || len(messageIDs) == 0 {
+		return messageIDs
+	}
+	result := make([]string, 0, len(messageIDs))
+	for _, messageID := range messageIDs {
+		if !p.source.IsAvailable(messageID) {
+			result = append(result, messageID)
+		}
+	}
+	return result
 }
 
 var (
 	// RAR file patterns - simplified and more accurate
 	rarMainPattern       = regexp.MustCompile(`\.rar$`)
-	rarPartPattern       = regexp.MustCompile(`\.r\d{2}$`) // .r00, .r01, etc.
+	rarPartPattern       = regexp.MustCompile(`(?:\.r\d{2,3}|\.[s-y]\d{2})$`) // .r00..r999, then .s00 etc.; .zNN is ZIP
 	rarVolumePattern     = regexp.MustCompile(`\.part\d+\.rar$`)
-	ignoreExtensions     = []string{".sfv", ".nfo", ".jpg", ".png", ".txt", ".srt", ".idx", ".sub"}
+	ignoreExtensions     = []string{".sfv", ".nfo", ".jpg", ".png", ".txt", ".srt", ".idx", ".sub", ".par2"}
 	sevenZMainPattern    = regexp.MustCompile(`\.7z$`)
 	sevenZPartPattern    = regexp.MustCompile(`\.7z\.\d{3}$`)
+	zipPartPattern       = regexp.MustCompile(`\.z\d{2,3}$`)
 	extWithNumberPattern = regexp.MustCompile(`\.[^ "\.]*\.\d+$`)
-	volPar2Pattern       = regexp.MustCompile(`(?i)\.vol\d+\+\d+\.par2?$`)
 	partPattern          = regexp.MustCompile(`(?i)\.part\d+\.[^ "\.]*$`)
 	regularExtPattern    = regexp.MustCompile(`\.[^ "\.]*$`)
 )
@@ -127,19 +167,19 @@ func (p *NZBParser) Parse(ctx context.Context, filename string, content []byte) 
 		}
 	}()
 
-	// Parse raw XML
-	raw, err := nzbparser.Parse(bytes.NewReader(content))
+	raw, err := manifest.Decode(bytes.NewReader(content))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse NZB content: %w", err)
 	}
 
 	// Create base NZB structure
 	nzb = &storage.NZB{
+		ID:       uuid.New().String(),
 		Files:    []storage.NZBFile{},
 		Status:   "parsed",
-		Name:     determineNZBName(filename, raw.Meta),
-		Title:    raw.Meta["title"],
-		Password: raw.Meta["password"],
+		Name:     determineNZBName(filename, raw.Metadata),
+		Title:    raw.Metadata["title"],
+		Password: raw.Metadata["password"],
 	}
 	// Group files by base Name and type
 	fileGroups := p.groupFiles(ctx, raw.Files)
@@ -148,29 +188,61 @@ func (p *NZBParser) Parse(ctx context.Context, filename string, content []byte) 
 		return nil, nil, fmt.Errorf("no valid file groups found in NZB")
 	}
 
-	// Stat the first segment to confirm connectivity
-	checked := false
-	for _, group := range fileGroups {
-		if len(group.Files) == 0 || len(group.Files[0].Segments) == 0 {
-			continue
-		}
-		segment := group.Files[0].Segments[0]
-		err = p.manager.ExecuteWithFailover(ctx, func(conn *nntp.Connection) error {
-			_, _, statErr := conn.Stat(segment.Id)
-			return statErr
-		})
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to stat segment %s <%s>: %w", group.ActualFilename, segment.Id, err)
-		}
-		checked = true
-		break
-	}
-	if !checked {
-		return nil, nil, fmt.Errorf("no segments available to stat in NZB")
+	err = p.probeContentAvailability(ctx, fileGroups, p.source.Stat)
+	if err != nil {
+		return nil, fileGroups, err
 	}
 
-	nzb.ID = uuid.New().String()
 	return nzb, fileGroups, nil
+}
+
+type statArticleFunc func(context.Context, string) error
+
+// probeContentAvailability tries one representative article from each content
+// group. Operational failures stop immediately; definitively missing articles
+// are accumulated so another group can still prove the post is available.
+func (p *NZBParser) probeContentAvailability(
+	ctx context.Context,
+	groups map[string]*FileGroup,
+	stat statArticleFunc,
+) error {
+	groupNames := make([]string, 0, len(groups))
+	for name := range groups {
+		groupNames = append(groupNames, name)
+	}
+	sort.Strings(groupNames)
+
+	var missing []error
+	probed := 0
+	for _, name := range groupNames {
+		group := groups[name]
+		if group == nil || len(group.Files) == 0 || len(group.Files[0].Segments) == 0 {
+			continue
+		}
+		if group.articleObserved {
+			return nil
+		}
+		segment := group.Files[0].Segments[0]
+		probed++
+		if err := stat(ctx, segment.MessageID); err != nil {
+			filename := group.ActualFilename
+			if filename == "" {
+				filename = group.BaseName
+			}
+			detail := fmt.Errorf("failed to stat segment %s <%s>: %w", filename, segment.MessageID, err)
+			if nntp.IsArticleNotFoundError(err) {
+				missing = append(missing, detail)
+				continue
+			}
+			return detail
+		}
+		return nil
+	}
+
+	if probed == 0 {
+		return fmt.Errorf("no segments available to stat in NZB")
+	}
+	return fmt.Errorf("%w: no sampled content article is available: %w", customerror.UsenetSegmentMissingError, errors.Join(missing...))
 }
 
 func (p *NZBParser) Process(ctx context.Context, nzb *storage.NZB, groups map[string]*FileGroup) (result *storage.NZB, err error) {
@@ -183,7 +255,10 @@ func (p *NZBParser) Process(ctx context.Context, nzb *storage.NZB, groups map[st
 	}()
 
 	// Parse each group (with deferred archive option)
-	files := p.processFileGroups(ctx, groups, nzb.Password)
+	files, groupErr := p.processFileGroups(ctx, groups, nzb.Password)
+	if groupErr != nil {
+		return nil, groupErr
+	}
 
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no valid files found in NZB")
@@ -228,7 +303,7 @@ func (p *NZBParser) Process(ctx context.Context, nzb *storage.NZB, groups map[st
 	return nzb, nil
 }
 
-func (p *NZBParser) groupFiles(ctx context.Context, files nzbparser.NzbFiles) map[string]*FileGroup {
+func (p *NZBParser) groupFiles(ctx context.Context, files []manifest.File) map[string]*FileGroup {
 	// Assign XML document order as Number for files with uniform Number values.
 	// This preserves upload order for obfuscated archives where the subject
 	// line doesn't contain file number patterns like [X/Y].
@@ -248,7 +323,7 @@ func (p *NZBParser) groupFiles(ctx context.Context, files nzbparser.NzbFiles) ma
 		}
 	}
 
-	var unknownFiles []nzbparser.NzbFile
+	var unknownFiles []manifest.File
 	var allFiles []contentResult
 
 	for _, file := range files {
@@ -257,8 +332,7 @@ func (p *NZBParser) groupFiles(ctx context.Context, files nzbparser.NzbFiles) ma
 		}
 
 		fileType := p.detectFileType(file.Filename)
-		if fileType == storage.NZBFileTypePar2 {
-			// ignore PAR2 files for now
+		if fileType == storage.NZBFileTypeIgnore {
 			continue
 		}
 
@@ -275,8 +349,12 @@ func (p *NZBParser) groupFiles(ctx context.Context, files nzbparser.NzbFiles) ma
 
 	unknownResults := p.batchDetectContentTypes(ctx, unknownFiles)
 
-	// Add unknown results
-	allFiles = append(allFiles, unknownResults...)
+	// Only detected, supported content proceeds to logical grouping.
+	for _, result := range unknownResults {
+		if result.fileType != storage.NZBFileTypeUnknown && result.fileType != storage.NZBFileTypeIgnore {
+			allFiles = append(allFiles, result)
+		}
+	}
 
 	groups := p.groupProcessedFiles(allFiles)
 
@@ -306,26 +384,37 @@ func (p *NZBParser) mergeObfuscatedRarGroups(groups map[string]*FileGroup) map[s
 			otherGroups = append(otherGroups, group)
 		}
 	}
+	sortFileGroups(singleFileRarGroups)
+	sortFileGroups(otherGroups)
 
 	// If we have multiple single-file RAR groups, this is likely obfuscation
 	// Merge them into a single group
 	if len(singleFileRarGroups) > 1 {
+		if p.hasDeterminableDistinctRARGroups(singleFileRarGroups) {
+			return groups
+		}
 		p.logger.Debug().
 			Int("single_file_rar_groups", len(singleFileRarGroups)).
 			Msg("Detected potential obfuscated RAR archive, merging groups")
 
 		// Create a merged group using the first group as base
 		mergedGroup := &FileGroup{
-			BaseName:       singleFileRarGroups[0].BaseName,
-			ActualFilename: singleFileRarGroups[0].ActualFilename,
-			Type:           storage.NZBFileTypeRar,
-			Files:          make([]nzbparser.NzbFile, 0, len(singleFileRarGroups)),
-			Groups:         make(map[string]struct{}),
+			BaseName:        singleFileRarGroups[0].BaseName,
+			ActualFilename:  singleFileRarGroups[0].ActualFilename,
+			Type:            storage.NZBFileTypeRar,
+			Files:           make([]manifest.File, 0, len(singleFileRarGroups)),
+			fileMeta:        make(map[string]filePartMeta),
+			Groups:          make(map[string]struct{}),
+			articleObserved: singleFileRarGroups[0].articleObserved,
 		}
 
 		// Merge all files from single-file RAR groups
 		for _, group := range singleFileRarGroups {
+			mergedGroup.articleObserved = mergedGroup.articleObserved || group.articleObserved
 			mergedGroup.Files = append(mergedGroup.Files, group.Files...)
+			for key, meta := range group.fileMeta {
+				mergedGroup.fileMeta[key] = meta
+			}
 			for g := range group.Groups {
 				mergedGroup.Groups[g] = struct{}{}
 			}
@@ -358,8 +447,54 @@ func (p *NZBParser) mergeObfuscatedRarGroups(groups map[string]*FileGroup) map[s
 	return groups
 }
 
+// hasDeterminableDistinctRARGroups prevents the obfuscation fallback from
+// combining clearly named standalone archives. Truly obfuscated names remain
+// mergeable because their family cannot be determined from the NZB/yEnc name.
+func (p *NZBParser) hasDeterminableDistinctRARGroups(groups []*FileGroup) bool {
+	families := make(map[string]struct{})
+	reliable := 0
+	for _, group := range groups {
+		name := group.ActualFilename
+		if name == "" && len(group.Files) > 0 {
+			name = group.Files[0].Filename
+		}
+		family := p.getBaseFilename(name)
+		if family == "" || likelyObfuscatedBase(family) {
+			continue
+		}
+		reliable++
+		families[strings.ToLower(family)] = struct{}{}
+	}
+	// More than one readable family is definitely unrelated. A mixture of a
+	// readable archive and opaque names is also insufficient evidence to join.
+	return len(families) > 1 || (reliable > 0 && reliable < len(groups))
+}
+
+func likelyObfuscatedBase(name string) bool {
+	name = strings.Trim(name, `" -`)
+	if len(name) < 12 || strings.ContainsAny(name, " ._[](){}") {
+		return false
+	}
+	letters, digits, upper, lower := 0, 0, 0, 0
+	for _, r := range name {
+		switch {
+		case r >= '0' && r <= '9':
+			digits++
+		case r >= 'A' && r <= 'Z':
+			letters++
+			upper++
+		case r >= 'a' && r <= 'z':
+			letters++
+			lower++
+		default:
+			return false
+		}
+	}
+	return letters+digits == len(name) && (digits > 0 || (upper > 0 && lower > 0))
+}
+
 // Batch process unknown files in parallel
-func (p *NZBParser) batchDetectContentTypes(ctx context.Context, unknownFiles []nzbparser.NzbFile) []contentResult {
+func (p *NZBParser) batchDetectContentTypes(ctx context.Context, unknownFiles []manifest.File) []contentResult {
 	if len(unknownFiles) == 0 {
 		return nil
 	}
@@ -367,13 +502,12 @@ func (p *NZBParser) batchDetectContentTypes(ctx context.Context, unknownFiles []
 	// Use up to maxConcurrent workers — same budget as the rest of the parser.
 	workers := min(len(unknownFiles), p.maxConcurrent)
 
-	mapper := iter.Mapper[nzbparser.NzbFile, contentResult]{
+	mapper := iter.Mapper[manifest.File, contentResult]{
 		MaxGoroutines: workers, // limit concurrency
 	}
 
-	mapped := mapper.Map(unknownFiles, func(f *nzbparser.NzbFile) contentResult {
-		// You can still pass ctx through to your inner function.
-		detectedType, actualFilename, err := p.detectFileTypeByContent(ctx, *f)
+	mapped := mapper.Map(unknownFiles, func(f *manifest.File) contentResult {
+		result, err := p.inspectFileByContent(ctx, *f)
 		if err != nil {
 			p.logger.Trace().
 				Err(err).
@@ -381,20 +515,10 @@ func (p *NZBParser) batchDetectContentTypes(ctx context.Context, unknownFiles []
 				Msg("Failed to detect file type by content")
 		}
 
-		return contentResult{
-			file:           *f,
-			fileType:       detectedType,
-			actualFilename: actualFilename,
-		}
+		return result
 	})
 
-	processed := make([]contentResult, 0, len(mapped))
-	for _, r := range mapped {
-		if r.fileType != storage.NZBFileTypeUnknown {
-			processed = append(processed, r)
-		}
-	}
-	return processed
+	return mapped
 }
 
 // Group already processed files (fast)
@@ -418,7 +542,7 @@ func (p *NZBParser) groupProcessedFiles(allFiles []contentResult) map[string]*Fi
 		if item.actualFilename != "" && item.actualFilename != item.file.Filename {
 			groupKey = p.getBaseFilename(item.actualFilename)
 		} else {
-			groupKey = item.file.Basefilename
+			groupKey = item.file.BaseFilename
 		}
 
 		group, exists := groups[groupKey]
@@ -427,7 +551,7 @@ func (p *NZBParser) groupProcessedFiles(allFiles []contentResult) map[string]*Fi
 				ActualFilename: item.actualFilename,
 				BaseName:       groupKey,
 				Type:           item.fileType,
-				Files:          []nzbparser.NzbFile{},
+				Files:          []manifest.File{},
 				fileMeta:       make(map[string]filePartMeta),
 				Groups:         make(map[string]struct{}),
 			}
@@ -438,6 +562,7 @@ func (p *NZBParser) groupProcessedFiles(allFiles []contentResult) map[string]*Fi
 		if group.ActualFilename == "" && item.actualFilename != "" {
 			group.ActualFilename = item.actualFilename
 		}
+		group.articleObserved = group.articleObserved || item.articleObserved
 
 		// Update the filename only when content detection produced one; a
 		// content-detected file whose yEnc header carried no name must keep
@@ -486,11 +611,6 @@ func (p *NZBParser) getBaseFilename(filename string) string {
 	// First remove any quotes and trim spaces
 	cleaned := strings.Trim(filename, `" -`)
 
-	// Check for vol\d+\+\d+\.par2? (PAR2 Volume files)
-	if volPar2Pattern.MatchString(cleaned) {
-		return volPar2Pattern.ReplaceAllString(cleaned, "")
-	}
-
 	// Check for part\d+\.[^ "\.]* (part files like .part01.rar)
 
 	if partPattern.MatchString(cleaned) {
@@ -525,18 +645,14 @@ func (p *NZBParser) detectFileType(filename string) storage.NZBFileType {
 		return storage.NZBFileTypeRar
 	}
 
-	if strings.HasSuffix(lower, ".par2") {
-		return storage.NZBFileTypePar2
-	}
-
 	// Check for 7z files
 	if sevenZMainPattern.MatchString(lower) || sevenZPartPattern.MatchString(lower) {
 		return storage.NZBFileTypeSevenZip
 	}
 
-	if strings.HasSuffix(lower, ".zip") || strings.HasSuffix(lower, ".tar") ||
+	if strings.HasSuffix(lower, ".zip") || zipPartPattern.MatchString(lower) || strings.HasSuffix(lower, ".tar") ||
 		strings.HasSuffix(lower, ".gz") || strings.HasSuffix(lower, ".bz2") {
-		if strings.HasSuffix(lower, ".zip") {
+		if strings.HasSuffix(lower, ".zip") || zipPartPattern.MatchString(lower) {
 			return storage.NZBFileTypeZip
 		}
 		return storage.NZBFileTypeUnknown
@@ -559,9 +675,9 @@ func (p *NZBParser) isRarFile(filename string) bool {
 		rarVolumePattern.MatchString(filename)
 }
 
-func (p *NZBParser) processFileGroups(ctx context.Context, groups map[string]*FileGroup, password string) []storage.NZBFile {
+func (p *NZBParser) processFileGroups(ctx context.Context, groups map[string]*FileGroup, password string) ([]storage.NZBFile, error) {
 	if len(groups) == 0 {
-		return nil
+		return nil, nil
 	}
 	rarCounts, sevenZCounts, zipCounts, mediaCounts, deferredCounts := 0, 0, 0, 0, 0
 
@@ -573,26 +689,44 @@ func (p *NZBParser) processFileGroups(ctx context.Context, groups map[string]*Fi
 		}
 		fileGroups = append(fileGroups, *g)
 	}
+	sort.Slice(fileGroups, func(i, j int) bool {
+		left, right := fileGroupOrder(&fileGroups[i]), fileGroupOrder(&fileGroups[j])
+		if left != right {
+			return left < right
+		}
+		return fileGroups[i].BaseName < fileGroups[j].BaseName
+	})
 
 	// Use a Mapper with limited concurrency to prevent goroutine explosion
 	// when nested with RAR/archive parsers that also use parallel processing
-	mapper := iter.Mapper[FileGroup, []*storage.NZBFile]{
+	type groupProcessResult struct {
+		files []*storage.NZBFile
+		err   error
+		group string
+	}
+	mapper := iter.Mapper[FileGroup, groupProcessResult]{
 		MaxGoroutines: p.maxConcurrent,
 	}
 
-	results := mapper.Map(fileGroups, func(g *FileGroup) []*storage.NZBFile {
+	results := mapper.Map(fileGroups, func(g *FileGroup) groupProcessResult {
 		files, err := p.processFileGroup(ctx, g, password)
 		if err != nil {
 			p.logger.Warn().Err(err).Str("group", g.BaseName).Msg("Failed to process file group")
-			return nil
+			return groupProcessResult{err: err, group: g.BaseName}
 		}
-		return files
+		return groupProcessResult{files: files, group: g.BaseName}
 	})
 
-	// Filter nils
+	// Never silently omit a supported group: an invalid volume map or missing
+	// archive input must remain visible to the caller (and later repair path).
 	var files []storage.NZBFile
-	for _, groupFiles := range results {
-		for _, f := range groupFiles {
+	var groupErrors []error
+	for _, result := range results {
+		if result.err != nil {
+			groupErrors = append(groupErrors, fmt.Errorf("process file group %q: %w", result.group, result.err))
+			continue
+		}
+		for _, f := range result.files {
 			if f != nil {
 				files = append(files, *f)
 				// Count types
@@ -618,7 +752,31 @@ func (p *NZBParser) processFileGroups(ctx context.Context, groups map[string]*Fi
 		}
 	}
 
-	return files
+	if len(groupErrors) > 0 {
+		return nil, errors.Join(groupErrors...)
+	}
+	return files, nil
+}
+
+func sortFileGroups(groups []*FileGroup) {
+	sort.Slice(groups, func(i, j int) bool {
+		left, right := fileGroupOrder(groups[i]), fileGroupOrder(groups[j])
+		if left != right {
+			return left < right
+		}
+		return groups[i].BaseName < groups[j].BaseName
+	})
+}
+
+func fileGroupOrder(group *FileGroup) int {
+	if group == nil || len(group.Files) == 0 {
+		return int(^uint(0) >> 1)
+	}
+	order := group.Files[0].Order
+	for _, file := range group.Files[1:] {
+		order = min(order, file.Order)
+	}
+	return order
 }
 
 // Simplified individual group processing
@@ -631,13 +789,13 @@ func (p *NZBParser) processFileGroup(ctx context.Context, group *FileGroup, pass
 	case storage.NZBFileTypeMedia:
 		return wrapNZBFile(p.processMediaFile(group, password))
 	case storage.NZBFileTypeRar:
-		rarParser := NewRARParser(p.manager, p.maxConcurrent, p.logger)
+		rarParser := NewRARParser(p.source, p.maxConcurrent, p.logger)
 		return rarParser.Process(ctx, group, password)
 	case storage.NZBFileTypeSevenZip:
-		zipParser := NewSevenZParser(p.manager, p.maxConcurrent, p.logger)
-		return zipParser.Process(ctx, group, password)
+		sevenZParser := NewSevenZParser(p.source, p.maxConcurrent, p.logger)
+		return sevenZParser.Process(ctx, group, password)
 	case storage.NZBFileTypeZip:
-		zipParser := NewZIPParser(p.manager, p.maxConcurrent, p.logger)
+		zipParser := NewZIPParser(p.source, p.maxConcurrent, p.logger)
 		return zipParser.Process(ctx, group, password)
 	default:
 		return nil, fmt.Errorf("unsupported file type: %v", group.Type)
@@ -666,10 +824,7 @@ func (p *NZBParser) enrichGroupWithFileInfo(ctx context.Context, group *FileGrou
 	if len(firstFile.Segments) == 0 {
 		return fmt.Errorf("no Segments in reference file of group %s", group.BaseName)
 	}
-	firstSegment := firstFile.Segments[0]
-
 	lastFile := group.Files[len(group.Files)-1]
-	lastSegment := lastFile.Segments[0]
 
 	// If first and last are the same file, only need one fetch
 	sameFile := len(group.Files) == 1
@@ -684,25 +839,13 @@ func (p *NZBParser) enrichGroupWithFileInfo(ctx context.Context, group *FileGrou
 	lastCh := make(chan headerResult, 1)
 
 	go func() {
-		var data *nntp.YencMetadata
-		// GetHeaderPrefix drains the body and returns the connection to the pool;
-		// we only need yEnc metadata (name/size/offsets), not a decoded snippet.
-		err := p.manager.ExecuteWithFailover(ctx, func(conn *nntp.Connection) error {
-			d, e := conn.GetHeaderPrefix(firstSegment.Id, metadataOnly)
-			data = d
-			return e
-		})
+		data, err := fetchFileHeader(ctx, p.source, firstFile)
 		firstCh <- headerResult{data, err}
 	}()
 
 	if !sameFile {
 		go func() {
-			var data *nntp.YencMetadata
-			err := p.manager.ExecuteWithFailover(ctx, func(conn *nntp.Connection) error {
-				d, e := conn.GetHeaderPrefix(lastSegment.Id, metadataOnly)
-				data = d
-				return e
-			})
+			data, err := fetchFileHeader(ctx, p.source, lastFile)
 			lastCh <- headerResult{data, err}
 		}()
 	}
@@ -719,6 +862,10 @@ func (p *NZBParser) enrichGroupWithFileInfo(ctx context.Context, group *FileGrou
 		return fmt.Errorf("failed to fetch first segment header: %w", firstResult.err)
 	}
 	yencData := firstResult.data
+	if yencData == nil {
+		return fmt.Errorf("first segment header for group %s contained no yEnc metadata", group.BaseName)
+	}
+	p.recordFileMetadata(group, firstFile, yencData)
 
 	// Update the group's filename if the header provides a better one
 	// This fixes issues where the group name is based on a small .nzb file or similar
@@ -730,7 +877,7 @@ func (p *NZBParser) enrichGroupWithFileInfo(ctx context.Context, group *FileGrou
 		}
 	}
 
-	segmentSize := yencData.End - yencData.Begin + 1
+	segmentSize := decodedPartSize(yencData)
 	fileSize := yencData.Size
 
 	// get last file size
@@ -748,6 +895,10 @@ func (p *NZBParser) enrichGroupWithFileInfo(ctx context.Context, group *FileGrou
 		if lastResult.err != nil {
 			return fmt.Errorf("failed to fetch last segment header: %w", lastResult.err)
 		}
+		if lastResult.data == nil {
+			return fmt.Errorf("last segment header for group %s contained no yEnc metadata", group.BaseName)
+		}
+		p.recordFileMetadata(group, lastFile, lastResult.data)
 		lastFileSize = lastResult.data.Size
 	}
 
@@ -755,8 +906,36 @@ func (p *NZBParser) enrichGroupWithFileInfo(ctx context.Context, group *FileGrou
 		fileSize:     fileSize,
 		lastFileSize: lastFileSize,
 		segmentSize:  segmentSize,
+		lastFileKey:  fileMetaKey(lastFile),
 	}
 	return nil
+}
+
+func (p *NZBParser) recordFileMetadata(group *FileGroup, file manifest.File, data *nntp.YencMetadata) {
+	if group == nil || data == nil {
+		return
+	}
+	segmentSize := decodedPartSize(data)
+	key := fileMetaKey(file)
+	if key != "" {
+		if group.fileMeta == nil {
+			group.fileMeta = make(map[string]filePartMeta)
+		}
+		meta := group.fileMeta[key]
+		if data.Size > 0 {
+			meta.fileSize = data.Size
+		}
+		if segmentSize > 0 {
+			meta.segmentSize = segmentSize
+		}
+		if data.Part > 0 {
+			meta.partNumber = data.Part
+		}
+		if data.Begin > 0 {
+			meta.partBegin = data.Begin
+		}
+		group.fileMeta[key] = meta
+	}
 }
 
 // Process regular media files
@@ -802,6 +981,13 @@ func (p *NZBParser) processMediaFile(group *FileGroup, password string) *storage
 				Msg("Incomplete or inconsistent segment numbering; rejecting media file")
 			return nil
 		}
+		// getNZBSegments describes offsets within one raw posted file. A
+		// logical media group can concatenate multiple posted files, so rebase
+		// the logical output offsets for each appended file.
+		for i := range segments {
+			segments[i].StartOffset += currentOffset
+			segments[i].EndOffset += currentOffset
+		}
 		file.Segments = append(file.Segments, segments...)
 		currentOffset += totalSize
 	}
@@ -809,80 +995,124 @@ func (p *NZBParser) processMediaFile(group *FileGroup, password string) *storage
 	return file
 }
 
-func (p *NZBParser) detectFileTypeByContent(ctx context.Context, file nzbparser.NzbFile) (storage.NZBFileType, string, error) {
+func (p *NZBParser) detectFileTypeByContent(ctx context.Context, file manifest.File) (storage.NZBFileType, string, error) {
+	result, err := p.inspectFileByContent(ctx, file)
+	return result.fileType, result.actualFilename, err
+}
+
+func (p *NZBParser) inspectFileByContent(ctx context.Context, file manifest.File) (contentResult, error) {
+	result := contentResult{file: file, fileType: storage.NZBFileTypeUnknown}
 	if len(file.Segments) == 0 {
-		return storage.NZBFileTypeUnknown, "", fmt.Errorf("no segments in file %s", file.Filename)
+		return result, fmt.Errorf("no segments in file %s", file.Filename)
 	}
 
-	// Download first segment to check file signature
-	firstSegment := file.Segments[0]
-	var data *nntp.YencMetadata
-	// GetHeaderPrefix returns the connection to the pool after draining;
-	// only a small snippet is needed for magic-byte / filename detection.
-	err := p.manager.ExecuteWithFailover(ctx, func(conn *nntp.Connection) error {
-		d, e := conn.GetHeaderPrefix(firstSegment.Id, defaultMaxSnippetSize)
-		data = d
-		return e
-	})
+	// Prefer the first/header-shaped articles, but keep searching when an
+	// early part is definitively missing. Only one healthy article body is
+	// needed for yEnc filename and magic-byte detection.
+	data, err := fetchFileHeaderPrefix(ctx, p.source, file, defaultMaxSnippetSize)
 	if err != nil {
-		return storage.NZBFileTypeUnknown, "", fmt.Errorf("failed to fetch segment header for file %s: %w", file.Filename, err)
+		return result, fmt.Errorf("failed to fetch segment header for file %s: %w", file.Filename, err)
 	}
+	if data == nil {
+		return result, fmt.Errorf("segment header for file %s contained no yEnc metadata", file.Filename)
+	}
+	result.actualFilename = data.Name
+	result.articleObserved = true
+	result.fileSize = data.Size
+	result.segmentSize = decodedPartSize(data)
+	result.partNumber = data.Part
+	result.partBegin = data.Begin
 
 	if data.Name != "" {
 		fileType := p.detectFileType(data.Name)
 		if fileType != storage.NZBFileTypeUnknown {
-			return fileType, data.Name, nil
+			result.fileType = fileType
+			return result, nil
 		}
 	}
 
-	return p.detectFileTypeFromContent(data.Snippet), data.Name, nil
+	fileType, inferredExtension := p.detectFileTypeAndExtensionFromContent(data.Snippet)
+	result.fileType = fileType
+	if result.fileType == storage.NZBFileTypeMedia && inferredExtension != "" &&
+		p.detectFileType(result.actualFilename) == storage.NZBFileTypeUnknown {
+		if result.actualFilename == "" {
+			result.actualFilename = file.Filename
+		}
+		result.actualFilename += inferredExtension
+	}
+	return result, nil
 }
 
-func (p *NZBParser) detectFileTypeFromContent(data []byte) storage.NZBFileType {
+func decodedPartSize(data *nntp.YencMetadata) int64 {
+	if data == nil {
+		return 0
+	}
+	if data.PartSize > 0 {
+		return data.PartSize
+	}
+	// Begin/End are one-based yEnc positions. An all-zero pair means the
+	// metadata did not provide a range; treating it as one byte poisons every
+	// subsequent segment offset.
+	if data.Begin > 0 && data.End >= data.Begin {
+		return data.End - data.Begin + 1
+	}
+	return 0
+}
+
+// detectFileTypeAndExtensionFromContent classifies an extensionless post from
+// its leading bytes and returns a canonical extension when the signature is
+// specific enough to build a streamable filename.
+func (p *NZBParser) detectFileTypeAndExtensionFromContent(data []byte) (storage.NZBFileType, string) {
 	if len(data) == 0 {
-		return storage.NZBFileTypeUnknown
+		return storage.NZBFileTypeUnknown, ""
+	}
+
+	// Parity data is not playable content, including when the filename is
+	// obfuscated, so never surface it as a streamable file.
+	if len(data) >= 8 && bytes.Equal(data[:8], []byte{'P', 'A', 'R', '2', 0, 'P', 'K', 'T'}) {
+		return storage.NZBFileTypeIgnore, ""
 	}
 
 	// Check for RAR signatures (both RAR 4.x and 5.x)
 	if len(data) >= 7 {
 		// RAR 4.x signature
 		if bytes.Equal(data[:7], []byte("Rar!\x1A\x07\x00")) {
-			return storage.NZBFileTypeRar
+			return storage.NZBFileTypeRar, ""
 		}
 	}
 	if len(data) >= 8 {
 		// RAR 5.x signature
 		if bytes.Equal(data[:8], []byte("Rar!\x1A\x07\x01\x00")) {
-			return storage.NZBFileTypeRar
+			return storage.NZBFileTypeRar, ""
 		}
 	}
 
 	// Check for ZIP signature
 	if len(data) >= 4 && bytes.Equal(data[:4], []byte{0x50, 0x4B, 0x03, 0x04}) {
-		return storage.NZBFileTypeZip
+		return storage.NZBFileTypeZip, ""
 	}
 
 	// Check for 7z signature
 	if len(data) >= 6 && bytes.Equal(data[:6], []byte{0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C}) {
-		return storage.NZBFileTypeSevenZip
+		return storage.NZBFileTypeSevenZip, ""
 	}
 
 	// Check for common media file signatures
 	if len(data) >= 4 {
 		// Matroska (MKV/WebM)
 		if bytes.Equal(data[:4], []byte{0x1A, 0x45, 0xDF, 0xA3}) {
-			return storage.NZBFileTypeMedia
+			return storage.NZBFileTypeMedia, ".mkv"
 		}
 
 		// MP4/MOV (check for 'ftyp' at offset 4)
 		if len(data) >= 8 && bytes.Equal(data[4:8], []byte("ftyp")) {
-			return storage.NZBFileTypeMedia
+			return storage.NZBFileTypeMedia, ".mp4"
 		}
 
 		// AVI
 		if len(data) >= 12 && bytes.Equal(data[:4], []byte("RIFF")) &&
 			bytes.Equal(data[8:12], []byte("AVI ")) {
-			return storage.NZBFileTypeMedia
+			return storage.NZBFileTypeMedia, ".avi"
 		}
 	}
 
@@ -890,12 +1120,12 @@ func (p *NZBParser) detectFileTypeFromContent(data []byte) storage.NZBFileType {
 	if len(data) >= 4 {
 		// MPEG-1/2 Program Stream
 		if bytes.Equal(data[:4], []byte{0x00, 0x00, 0x01, 0xBA}) {
-			return storage.NZBFileTypeMedia
+			return storage.NZBFileTypeMedia, ".mpg"
 		}
 
 		// MPEG-1/2 Video Stream
 		if bytes.Equal(data[:4], []byte{0x00, 0x00, 0x01, 0xB3}) {
-			return storage.NZBFileTypeMedia
+			return storage.NZBFileTypeMedia, ".mpg"
 		}
 	}
 
@@ -904,9 +1134,9 @@ func (p *NZBParser) detectFileTypeFromContent(data []byte) storage.NZBFileType {
 		// Additional validation: TS packets are 188 bytes, so the next
 		// sync byte sits at index 188 (requires at least 189 bytes).
 		if len(data) > 188 && data[188] == 0x47 {
-			return storage.NZBFileTypeMedia
+			return storage.NZBFileTypeMedia, ".ts"
 		}
 	}
 
-	return storage.NZBFileTypeUnknown
+	return storage.NZBFileTypeUnknown, ""
 }

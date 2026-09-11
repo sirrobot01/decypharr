@@ -2,11 +2,13 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/customerror"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/storage"
@@ -57,6 +59,21 @@ func NewFixer(manager *Manager) *Fixer {
 		providerOrder:      debridOrder,
 		maxReinsertRetries: 2, // retry each debrid up to 2 times
 	}
+}
+
+// ReinsertEntry retries a torrent through the configured debrid providers.
+func (m *Manager) ReinsertEntry(ctx context.Context, entry *storage.Entry) error {
+	if m.fixer == nil {
+		return fmt.Errorf("fixer not initialized")
+	}
+	result, err := m.fixer.FixTorrent(ctx, entry, false)
+	if err != nil {
+		return err
+	}
+	if !result.Success {
+		return errors.New("failed to re-insert torrent")
+	}
+	return nil
 }
 
 // FixTorrent attempts to fix a broken torrent by re-inserting across debrids
@@ -262,6 +279,9 @@ func (f *Fixer) MoveTorrent(entry *storage.Entry, debridName string, reinsert bo
 	// Check status
 	newDebridTorrent.DownloadUncached = false
 	newDebridTorrent, err = client.CheckStatus(newDebridTorrent)
+	if errors.Is(err, customerror.TorrentNotCachedError) {
+		f.manager.hearsay.ReportAdd(client.Config().Provider, entry.InfoHash, false)
+	}
 	if err != nil {
 		// Delete the failed entry
 		if newDebridTorrent != nil && newDebridTorrent.Id != "" {
@@ -269,6 +289,7 @@ func (f *Fixer) MoveTorrent(entry *storage.Entry, debridName string, reinsert bo
 		}
 		return false, fmt.Errorf("failed to check status: %w", err)
 	}
+	f.manager.hearsay.ReportAdd(client.Config().Provider, entry.InfoHash, newDebridTorrent.Status == types.TorrentStatusDownloaded)
 
 	// Verify files have links
 	if len(newDebridTorrent.Files) == 0 {
