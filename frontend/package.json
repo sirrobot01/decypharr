@@ -2,8 +2,9 @@
   "name": "decypharr",
   "version": "1.0.0",
   "description": "Media management tool",
+  "type": "module",
   "scripts": {
-    "build-css": "npx @tailwindcss/cli --input pkg/server/assets/styles.css --output ./pkg/server/assets/build/css/styles.css --minify",
+    "build-css": "npx @tailwindcss/cli --input ../frontend/assets/styles.css --output ../frontend/assets/build/css/styles.css --minify",
     "minify-js": "node scripts/minify-js.js",
     "download-assets": "node scripts/download-assets.js",
     "build": "npm run build-css && npm run minify-js",
