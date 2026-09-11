@@ -1,6 +1,13 @@
 package webdav
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/customerror"
+)
 
 func TestResolveRange(t *testing.T) {
 	const size = int64(1 << 20)
@@ -29,5 +36,18 @@ func TestResolveRange(t *testing.T) {
 					tc.header, start, end, tc.start, tc.end)
 			}
 		})
+	}
+}
+
+func TestWriteStreamErrorPreservesTypedStatus(t *testing.T) {
+	config.Reset()
+	config.SetConfigPath(t.TempDir())
+	t.Cleanup(config.Reset)
+
+	recorder := httptest.NewRecorder()
+	NewHandler(nil).writeStreamError("missing/article", customerror.NewArticleNotFoundError(nil), recorder)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("stream error status = %d, want %d", recorder.Code, http.StatusNotFound)
 	}
 }

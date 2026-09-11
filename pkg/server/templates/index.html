@@ -16,7 +16,7 @@
     <div class="card bg-base-100 shadow-xl">
         <div class="card-body">
             <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
-                <div class="flex items-center gap-2">
+                <div class="flex w-full flex-wrap items-center gap-2 lg:w-auto">
                     <button class="btn btn-secondary btn-sm hidden" id="batchDeleteBtn">
                         <i class="bi bi-trash"></i>
                         <span class="hidden sm:inline">Delete Selected</span>
@@ -31,27 +31,27 @@
                     </button>
                 </div>
 
-                <div class="flex flex-wrap gap-2">
-                    <div>
+                <div class="grid w-full grid-cols-2 gap-2 sm:flex sm:flex-wrap lg:w-auto">
+                    <div class="col-span-2 sm:w-48">
                         <input type="text" placeholder="Search queues..."
-                               class="input input-sm"
+                               class="input input-sm w-full"
                                id="searchInput">
                     </div>
-                    <div>
-                        <select class="select select-sm" id="stateFilter">
+                    <div class="min-w-0 sm:w-40">
+                        <select class="select select-sm w-full" id="stateFilter">
                             <option value="">All States</option>
                             <option value="pausedUP">Completed</option>
                             <option value="downloading">Downloading</option>
                             <option value="error">Error</option>
                         </select>
                     </div>
-                    <div>
-                        <select class="select select-sm" id="categoryFilter">
+                    <div class="min-w-0 sm:w-40">
+                        <select class="select select-sm w-full" id="categoryFilter">
                             <option value="">All Categories</option>
                         </select>
                     </div>
-                    <div>
-                        <select class="select select-sm" id="sortSelector">
+                    <div class="col-span-2 sm:w-56">
+                        <select class="select select-sm w-full" id="sortSelector">
                             <option value="added_on" selected>Date Added (Newest First)</option>
                             <option value="added_on_asc">Date Added (Oldest First)</option>
                             <option value="name_asc">Name (A-Z)</option>
@@ -113,24 +113,24 @@
                 </table>
             </div>
 
-            <div class="flex flex-col sm:flex-row justify-between items-center p-6 border-t border-base-200 gap-4">
+            <div class="flex flex-col items-center justify-between gap-4 border-t border-base-200 p-4 sm:flex-row sm:p-6">
                 <div class="text-sm text-base-content/70">
                     <span id="paginationInfo">Loading queues...</span>
                 </div>
-                <div class="join" id="paginationControls"></div>
+                <div class="join max-w-full overflow-x-auto" id="paginationControls"></div>
             </div>
         </div>
     </div>
 
     <div class="card bg-base-100 shadow-xl hidden" id="emptyState">
-        <div class="card-body text-center py-16">
+        <div class="card-body py-10 text-center sm:py-16">
             <div class="text-6xl text-base-content/30 mb-4">
                 <i class="bi bi-inbox"></i>
             </div>
             <h3 class="text-2xl font-bold mb-2">No Queues Found</h3>
             <p class="text-base-content/70 mb-6">You haven't added any items yet. Start by adding your first
                 download!</p>
-            <a href="{{.URLBase}}download" class="btn btn-primary">
+            <a href="{{.URLBase}}download" class="btn btn-primary w-full sm:w-auto">
                 <i class="bi bi-plus-circle mr-2"></i>Add New Download
             </a>
         </div>

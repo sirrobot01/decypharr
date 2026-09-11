@@ -17,6 +17,7 @@ import (
 
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/manager/link"
+	"github.com/sirrobot01/decypharr/pkg/usenet"
 )
 
 func testPattern(n int) []byte {
@@ -390,13 +391,15 @@ func TestSessionPrimeFailsFast(t *testing.T) {
 	}
 }
 
-// fakeUsenetHandle is a usenetFileHandle over an in-memory byte slice.
+// fakeUsenetHandle is a DirectReader over an in-memory byte slice.
 // If failAt >= 0, reads at or beyond that offset fail (the handle "loses"
 // the tail) — a reopened handle without failAt serves it.
 type fakeUsenetHandle struct {
-	data   []byte
-	failAt int64
-	closed atomic.Bool
+	data           []byte
+	failAt         int64
+	closed         atomic.Bool
+	releasedOff    atomic.Int64
+	releasedLength atomic.Int64
 }
 
 func (h *fakeUsenetHandle) ReadAtContext(_ context.Context, p []byte, off int64) (int, error) {
@@ -417,6 +420,11 @@ func (h *fakeUsenetHandle) ReadAtContext(_ context.Context, p []byte, off int64)
 
 func (h *fakeUsenetHandle) Prefetch(context.Context, int64, int64) {}
 
+func (h *fakeUsenetHandle) ReleaseCachedRange(off, length int64) {
+	h.releasedOff.Store(off)
+	h.releasedLength.Store(length)
+}
+
 func (h *fakeUsenetHandle) Close() error {
 	h.closed.Store(true)
 	return nil
@@ -428,7 +436,7 @@ func TestUsenetTransportResumesMidStream(t *testing.T) {
 	var handles []*fakeUsenetHandle
 	tr := &usenetTransport{
 		size: int64(len(data)),
-		openFile: func(context.Context) (usenetFileHandle, error) {
+		openFile: func(context.Context) (DirectReader, error) {
 			failAt := int64(-1)
 			if opens.Add(1) == 1 {
 				failAt = 500 // first handle dies after 500 bytes
@@ -458,6 +466,43 @@ func TestUsenetTransportResumesMidStream(t *testing.T) {
 	}
 	if !handles[1].closed.Load() {
 		t.Fatal("live handle was not closed with the session")
+	}
+}
+
+func TestSessionForwardsDownstreamCacheAcknowledgement(t *testing.T) {
+	h := &fakeUsenetHandle{data: testPattern(4 << 10), failAt: -1}
+	tr := &usenetTransport{
+		size: int64(len(h.data)),
+		openFile: func(context.Context) (DirectReader, error) {
+			return h, nil
+		},
+	}
+	s := newTestSession(t, tr, int64(len(h.data)))
+	if err := s.Prime(); err != nil {
+		t.Fatal(err)
+	}
+
+	s.AcknowledgeCachedRange(123, 456)
+	if off, length := h.releasedOff.Load(), h.releasedLength.Load(); off != 123 || length != 456 {
+		t.Fatalf("forwarded acknowledgement=%d+%d, want 123+456", off, length)
+	}
+}
+
+func TestRetentionForOwner(t *testing.T) {
+	tests := []struct {
+		name  string
+		owner RewindOwner
+		want  usenet.Retention
+	}{
+		{name: "application", owner: RewindOwnerApplication, want: usenet.RetentionRewind},
+		{name: "downstream cache", owner: RewindOwnerDownstream, want: usenet.RetentionDelivery},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := retentionForOwner(test.owner); got != test.want {
+				t.Fatalf("retentionForOwner(%d)=%d, want %d", test.owner, got, test.want)
+			}
+		})
 	}
 }
 

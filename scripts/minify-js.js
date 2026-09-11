@@ -29,7 +29,8 @@ const minifyOptions = {
         toplevel: false,
         reserved: [
             '$', 'jQuery', 'decypharrUtils', 'configManager', 'repairManager',
-            'RepairManager', 'RepairUtils', 'ConfigManager', 'window', 'document'
+            'RepairManager', 'RepairUtils', 'ConfigManager', 'window', 'document',
+            'reacquireManager', 'ReacquireManager'
         ]
     },
     format: {

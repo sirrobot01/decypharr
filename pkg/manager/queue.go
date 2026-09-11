@@ -34,7 +34,7 @@ type ImportRequest struct {
 	DownloadFolder   string                `json:"downloadFolder"`
 	SelectedDebrid   string                `json:"debrid"`
 	Magnet           *utils.Magnet         `json:"magnet"`
-	Arr              *arr.Arr              `json:"arr"`
+	Arr              arr.Arr               `json:"arr"`
 	Action           config.DownloadAction `json:"action"`
 	DownloadUncached *bool                 `json:"downloadUncached"`
 	CallBackUrl      string                `json:"callBackUrl"`
@@ -48,7 +48,7 @@ type ImportRequest struct {
 	Async bool       `json:"async"`
 }
 
-func NewTorrentRequest(debrid string, downloadFolder string, magnet *utils.Magnet, arr *arr.Arr, action config.DownloadAction, downloadUncached *bool, callBackUrl string, importType ImportType, skipMultiSeason bool) *ImportRequest {
+func NewTorrentRequest(debrid string, downloadFolder string, magnet *utils.Magnet, arr arr.Arr, action config.DownloadAction, downloadUncached *bool, callBackUrl string, importType ImportType, skipMultiSeason bool) *ImportRequest {
 
 	return &ImportRequest{
 		Id:               uuid.New().String(),
@@ -65,7 +65,7 @@ func NewTorrentRequest(debrid string, downloadFolder string, magnet *utils.Magne
 	}
 }
 
-func NewNZBRequest(name, downloadFolder string, nzbContent []byte, arr *arr.Arr, action config.DownloadAction, callBackUrl string, importType ImportType, skipMultiSeason bool) *ImportRequest {
+func NewNZBRequest(name, downloadFolder string, nzbContent []byte, arr arr.Arr, action config.DownloadAction, callBackUrl string, importType ImportType, skipMultiSeason bool) *ImportRequest {
 	return &ImportRequest{
 		Name:            name,
 		Id:              uuid.New().String(),
@@ -134,8 +134,11 @@ func (q *Queue) wrapCleanupWithFileDelete(cleanup func(t *storage.Entry) error) 
 	}
 }
 
-func (q *Queue) Delete(infohash string, cleanup func(t *storage.Entry) error) error {
-	return q.storage.DeleteQueued(infohash, q.wrapCleanupWithFileDelete(cleanup))
+func (q *Queue) Delete(infohash string, deleteFiles bool, cleanup func(t *storage.Entry) error) error {
+	if deleteFiles {
+		cleanup = q.wrapCleanupWithFileDelete(cleanup)
+	}
+	return q.storage.DeleteQueued(infohash, cleanup)
 }
 
 func (q *Queue) DeleteWhere(category string, protocol config.Protocol, state storage.TorrentState, hashes []string, cleanup func(t *storage.Entry) error) error {

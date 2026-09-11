@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"sync/atomic"
+	"time"
 
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/rs/zerolog"
@@ -22,11 +23,14 @@ type LinksFetcher func(account *Account) ([]types.DownloadLink, error)
 type SyncFunc func(account *Account) error
 
 type Manager struct {
-	debrid   string
-	current  atomic.Pointer[Account]
-	accounts *xsync.Map[string, *Account]
-	logger   zerolog.Logger
+	debrid              string
+	current             atomic.Pointer[Account]
+	accounts            *xsync.Map[string, *Account]
+	logger              zerolog.Logger
+	lastNoActiveWarning atomic.Int64
 }
+
+const noActiveWarningInterval = time.Minute
 
 func NewManager(debridConf config.Debrid, downloadRL ratelimit.Limiter, logger zerolog.Logger) *Manager {
 	m := &Manager{
@@ -111,7 +115,7 @@ func (m *Manager) Current() *Account {
 	activeAccounts := m.Active()
 	if len(activeAccounts) == 0 {
 		// No active accounts left, try to use disabled ones
-		m.logger.Warn().Str("debrid", m.debrid).Msg("No active accounts available, all accounts are disabled, falling back to disabled accounts")
+		m.warnNoActiveAccounts("No active accounts available, all accounts are disabled, falling back to disabled accounts")
 		allAccounts := m.All()
 		if len(allAccounts) == 0 {
 			m.logger.Error().Str("debrid", m.debrid).Msg("Cannot set current account, no accounts available")
@@ -137,7 +141,7 @@ func (m *Manager) Disable(account *Account) {
 	// If the disabled account is currently in use, refresh the current account to switch to a new active one
 	activeAccounts := m.Active()
 	if len(activeAccounts) == 0 {
-		m.logger.Warn().Str("debrid", m.debrid).Msg("No active accounts available after disabling, all accounts are disabled, falling back to disabled accounts")
+		m.warnNoActiveAccounts("No active accounts available after disabling, all accounts are disabled, falling back to disabled accounts")
 		allAccounts := m.All()
 		if len(allAccounts) == 0 {
 			m.logger.Error().Str("debrid", m.debrid).Msg("Cannot set current account, no accounts available")
@@ -161,9 +165,22 @@ func (m *Manager) Reset() {
 	activeAccounts := m.Active()
 	if len(activeAccounts) > 0 {
 		m.current.Store(activeAccounts[0])
+		m.lastNoActiveWarning.Store(0)
 	} else {
 		m.current.Store(nil)
 	}
+}
+
+func (m *Manager) warnNoActiveAccounts(message string) {
+	now := utils.Now().UnixNano()
+	lastWarning := m.lastNoActiveWarning.Load()
+	if lastWarning != 0 && time.Duration(now-lastWarning) < noActiveWarningInterval {
+		return
+	}
+	if !m.lastNoActiveWarning.CompareAndSwap(lastWarning, now) {
+		return
+	}
+	m.logger.Warn().Str("debrid", m.debrid).Msg(message)
 }
 
 func (m *Manager) GetAccount(token string) (*Account, error) {
@@ -279,6 +296,13 @@ func (m *Manager) Sync(syncer SyncFunc) {
 			if !acc.Expiration.IsZero() && utils.Now().After(acc.Expiration) {
 				m.logger.Warn().Str("debrid", m.debrid).Str("account_token", utils.Mask(acc.Token)).Msg("Account has expired, disabling")
 				m.Disable(acc)
+				m.UpdateAccount(acc)
+				return
+			}
+			if acc.Disabled.Load() {
+				acc.Reset()
+				m.lastNoActiveWarning.Store(0)
+				m.logger.Info().Str("debrid", m.debrid).Str("account_token", utils.Mask(acc.Token)).Msg("Re-enabled account after successful sync")
 			}
 			m.UpdateAccount(acc)
 		})

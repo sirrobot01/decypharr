@@ -1,9 +1,19 @@
 {{ define "login" }}
-<div class="flex min-h-screen items-center justify-center bg-base-200">
+<div class="flex w-full items-center justify-center bg-base-200">
     <div class="card w-full max-w-sm bg-base-100 shadow-xl">
         <div class="card-body">
             <h2 class="card-title justify-center mb-6">Login</h2>
             <form id="loginForm" class="space-y-4">
+                {{ if .TokenOnly }}
+                <div>
+                    <label class="label" for="password">
+                        <span>API Token</span>
+                    </label>
+                    <input type="password" class="input w-full" id="password" name="password" required>
+                    <span class="text-sm opacity-70">This instance uses token-only authentication. Paste the API
+                        token from your config file (data/auth.json) or the API_TOKEN environment variable.</span>
+                </div>
+                {{ else }}
                 <div>
                     <label class="label" for="username">
                         <span>Username</span>
@@ -16,6 +26,7 @@
                     </label>
                     <input type="password" class="input w-full" id="password" name="password" required>
                 </div>
+                {{ end }}
                 <div class="mt-6">
                     <button type="submit" class="btn btn-primary w-full">Login</button>
                 </div>
@@ -29,8 +40,9 @@
         e.preventDefault();
         let loginBtn = document.querySelector('#loginForm button[type="submit"]');
 
+        const usernameField = document.getElementById('username');
         const formData = {
-            username: document.getElementById('username').value,
+            username: usernameField ? usernameField.value : '',
             password: document.getElementById('password').value
         };
 

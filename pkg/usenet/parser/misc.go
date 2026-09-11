@@ -9,15 +9,15 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Tensai75/nzbparser"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/sirrobot01/decypharr/pkg/usenet/manifest"
 	"github.com/sirrobot01/decypharr/pkg/usenet/types"
 )
 
 // getRARVolumeOrder returns a sort key for RAR volume ordering.
 // .rar or .part01.rar = 0 (first volume)
-// .r00 = 1, .r01 = 2, etc.
+// .r00 = 1, .r01 = 2, etc.; legacy sequences may continue at .s00.
 // .part02.rar = 2, .part03.rar = 3, etc.
 func getRARVolumeOrder(filename string) int {
 	lower := strings.ToLower(filename)
@@ -36,16 +36,39 @@ func getRARVolumeOrder(filename string) int {
 		return 0
 	}
 
-	// .rXX pattern (old style continuation)
-	if len(ext) == 4 && ext[0:2] == ".r" {
+	// .rXX/.rXXX pattern (old style continuation)
+	if (len(ext) == 4 || len(ext) == 5) && strings.HasPrefix(ext, ".r") {
 		numStr := ext[2:]
 		if num, err := strconv.Atoi(numStr); err == nil {
 			return num + 1 // .r00 = 1, .r01 = 2, etc.
 		}
 	}
 
+	// After .r99, classic RAR naming continues with .s00, .t00, ... .z99.
+	if len(ext) == 4 && ext[0] == '.' && ext[1] >= 's' && ext[1] <= 'z' {
+		if num, err := strconv.Atoi(ext[2:]); err == nil {
+			return 101 + int(ext[1]-'s')*100 + num
+		}
+	}
+
 	// Unknown pattern, put at end
 	return 999999
+}
+
+// getZIPVolumeOrder puts split volumes (.z01, .z02, ..., .z100) before the
+// terminal .zip file. Numeric comparison avoids lexicographic z100/z99 bugs.
+func getZIPVolumeOrder(filename string) int {
+	lower := strings.ToLower(filename)
+	if strings.HasSuffix(lower, ".zip") {
+		return int(^uint(0) >> 1)
+	}
+	ext := filepath.Ext(lower)
+	if zipPartPattern.MatchString(ext) {
+		if num, err := strconv.Atoi(strings.TrimPrefix(ext, ".z")); err == nil {
+			return num
+		}
+	}
+	return int(^uint(0)>>1) - 1
 }
 
 func wrapNZBFile(f *storage.NZBFile) ([]*storage.NZBFile, error) {
@@ -56,15 +79,15 @@ func wrapNZBFile(f *storage.NZBFile) ([]*storage.NZBFile, error) {
 }
 
 // fileMetaKey returns a stable key for associating per-file metadata.
-func fileMetaKey(file nzbparser.NzbFile) string {
-	if file.Number > 0 {
-		return fmt.Sprintf("n:%d", file.Number)
+func fileMetaKey(file manifest.File) string {
+	if len(file.Segments) > 0 {
+		return "m:" + file.Segments[0].MessageID
 	}
 	if file.Subject != "" {
 		return "s:" + file.Subject
 	}
-	if len(file.Segments) > 0 {
-		return "m:" + file.Segments[0].Id
+	if file.Number > 0 {
+		return fmt.Sprintf("n:%d", file.Number)
 	}
 	return ""
 }
@@ -74,6 +97,7 @@ func getGroupsList(groups map[string]struct{}) []string {
 	for g := range groups {
 		result = append(result, g)
 	}
+	sort.Strings(result)
 	return result
 }
 
@@ -100,7 +124,7 @@ func determineExtension(group *FileGroup) string {
 	return ""
 }
 
-func getNZBSegments(index int, file nzbparser.NzbFile, group *FileGroup) (int64, []storage.NZBSegment) {
+func getNZBSegments(index int, file manifest.File, group *FileGroup) (int64, []storage.NZBSegment) {
 	if len(file.Segments) == 0 {
 		return 0, nil
 	}
@@ -131,20 +155,36 @@ func getNZBSegments(index int, file nzbparser.NzbFile, group *FileGroup) (int64,
 	nzbSegments := make([]storage.NZBSegment, len(file.Segments))
 
 	currentOffset := int64(0)
-	metadata := group.getMetadata()
+	metadata := *group.getMetadata()
+	partMeta := group.fileMeta[fileMetaKey(file)]
+	if partMeta.fileSize > 0 {
+		metadata.fileSize = partMeta.fileSize
+	}
+	if partMeta.segmentSize > 0 {
+		metadata.segmentSize = partMeta.segmentSize
+	}
 
 	fileSize := metadata.fileSize
-	if index == len(group.Files)-1 {
+	isLegacyPositionalLast := metadata.lastFileKey == "" && index == len(group.Files)-1
+	isRecordedLast := metadata.lastFileKey != "" && metadata.lastFileKey == fileMetaKey(file)
+	if partMeta.fileSize <= 0 && (isLegacyPositionalLast || isRecordedLast) {
 		fileSize = metadata.lastFileSize
+	}
+	segmentGroup := ""
+	if len(file.Groups) > 0 {
+		segmentGroup = file.Groups[0]
 	}
 
 	for idx, segment := range file.Segments {
 		// A segment without a message id can never be fetched; it would also
 		// defeat the empty-slot duplicate check below.
-		if segment.Id == "" {
+		if segment.MessageID == "" {
 			return 0, nil
 		}
 		segSize := metadata.segmentSize
+		if segSize <= 0 {
+			segSize = int64(float64(segment.Bytes) * 0.97)
+		}
 		if idx == len(file.Segments)-1 {
 			// Last segment may be smaller
 			// Last segment calculation
@@ -172,13 +212,20 @@ func getNZBSegments(index int, file nzbparser.NzbFile, group *FileGroup) (int64,
 				segSize = fileSize - fullSegsSize
 			}
 		}
+		if segSize <= 0 {
+			segSize = int64(float64(segment.Bytes) * 0.97)
+		}
+		if segSize <= 0 {
+			return 0, nil
+		}
+
 		seg := storage.NZBSegment{
 			Number:      segment.Number,
-			MessageID:   segment.Id,
+			MessageID:   segment.MessageID,
 			Bytes:       segSize,
 			StartOffset: currentOffset,
 			EndOffset:   currentOffset + segSize - 1,
-			Group:       group.BaseName,
+			Group:       segmentGroup,
 		}
 
 		// Normalize to the range base so 0- and 1-indexed numbering both map
@@ -194,9 +241,9 @@ func getNZBSegments(index int, file nzbparser.NzbFile, group *FileGroup) (int64,
 	return currentOffset, nzbSegments
 }
 
-func buildBaseSegments(group *FileGroup) ([]storage.NZBSegment, []storage.ArchiveVolumeInfo, int64) {
+func buildBaseSegments(group *FileGroup) ([]storage.NZBSegment, []storage.ArchiveVolumeInfo, int64, error) {
 	if len(group.Files) == 0 {
-		return nil, nil, 0
+		return nil, nil, 0, fmt.Errorf("archive group %s has no raw files", group.BaseName)
 	}
 
 	baseSegments := make([]storage.NZBSegment, 0)
@@ -206,7 +253,7 @@ func buildBaseSegments(group *FileGroup) ([]storage.NZBSegment, []storage.Archiv
 	for idx, nzbFile := range group.Files {
 		totalSize, segments := getNZBSegments(idx, nzbFile, group)
 		if totalSize == 0 || len(segments) == 0 {
-			continue
+			return nil, nil, 0, fmt.Errorf("archive volume %q has incomplete or inconsistent segments", nzbFile.Filename)
 		}
 		start := len(baseSegments)
 		baseSegments = append(baseSegments, segments...)
@@ -219,24 +266,24 @@ func buildBaseSegments(group *FileGroup) ([]storage.NZBSegment, []storage.Archiv
 		currentOffset += totalSize
 	}
 
-	return baseSegments, volumeInfos, currentOffset
+	return baseSegments, volumeInfos, currentOffset, nil
 }
 
-func buildArchiveVolumeDescriptors(group *FileGroup) []*types.Volume {
+func buildArchiveVolumeDescriptors(group *FileGroup) ([]*types.Volume, error) {
 	var volumes []*types.Volume
 
 	if len(group.Files) == 0 {
-		return volumes
+		return nil, fmt.Errorf("archive group %s has no raw files", group.BaseName)
 	}
 
 	for idx, nzbFile := range group.Files {
 		if len(nzbFile.Segments) == 0 {
-			continue
+			return nil, fmt.Errorf("archive volume %q has no segments", nzbFile.Filename)
 		}
 
 		totalSize, volumeSegments := getNZBSegments(idx, nzbFile, group)
 		if totalSize == 0 || len(volumeSegments) == 0 {
-			continue
+			return nil, fmt.Errorf("archive volume %q has incomplete or inconsistent segments", nzbFile.Filename)
 		}
 
 		volumeName := nzbFile.Filename
@@ -252,7 +299,7 @@ func buildArchiveVolumeDescriptors(group *FileGroup) []*types.Volume {
 		})
 	}
 
-	return volumes
+	return volumes, nil
 }
 
 func buildExtractedArchiveFiles(
@@ -262,9 +309,16 @@ func buildExtractedArchiveFiles(
 	baseSegments []storage.NZBSegment,
 	volumeInfos []storage.ArchiveVolumeInfo,
 	infos []*storage.ExtractedFileInfo,
-) []*storage.NZBFile {
+) ([]*storage.NZBFile, error) {
 	if len(baseSegments) == 0 {
-		return nil
+		return nil, fmt.Errorf("archive has no base segments")
+	}
+	segmentIndex, err := newSegmentLayout(baseSegments)
+	if err != nil {
+		return nil, fmt.Errorf("index archive source segments: %w", err)
+	}
+	if err := segmentIndex.validateVolumes(volumeInfos); err != nil {
+		return nil, fmt.Errorf("validate archive volume layout: %w", err)
 	}
 	files := make([]*storage.NZBFile, 0, len(infos))
 
@@ -288,18 +342,17 @@ func buildExtractedArchiveFiles(
 			segments = info.Segments
 		} else if info.DataOffset > 0 || info.FileSize > 0 {
 			// Slice segments for this file's byte range
-			sliced, err := sliceSegmentsForRangeSimple(baseSegments, info.DataOffset, info.FileSize)
+			sliced, err := segmentIndex.slice(info.DataOffset, info.FileSize, true)
 			if err != nil || len(sliced) == 0 {
-				// Fallback to all segments if slicing fails
-				segments = make([]storage.NZBSegment, len(baseSegments))
-				copy(segments, baseSegments)
+				if err == nil {
+					err = fmt.Errorf("no source segments overlap the file range")
+				}
+				return nil, fmt.Errorf("map archived file %q to raw source: %w", info.InternalPath, err)
 			} else {
 				segments = sliced
 			}
 		} else {
-			// No offset info, use all segments
-			segments = make([]storage.NZBSegment, len(baseSegments))
-			copy(segments, baseSegments)
+			return nil, fmt.Errorf("archived file %q has no source offset", info.InternalPath)
 		}
 
 		files = append(files, &storage.NZBFile{
@@ -314,7 +367,7 @@ func buildExtractedArchiveFiles(
 		})
 	}
 
-	return files
+	return files, nil
 }
 
 func NormalizeArchivePath(name string) string {

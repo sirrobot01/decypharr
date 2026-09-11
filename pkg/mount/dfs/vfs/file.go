@@ -2,8 +2,8 @@ package vfs
 
 import (
 	"context"
-	"errors"
 	"io"
+	"io/fs"
 	"sync/atomic"
 )
 
@@ -38,27 +38,29 @@ func (f *StreamingFile) ReadAt(p []byte, off int64) (int, error) {
 // the operation can be interrupted by a read timeout or client disconnect.
 func (f *StreamingFile) ReadAtContext(ctx context.Context, p []byte, off int64) (int, error) {
 	if f.closed.Load() {
-		return 0, errors.New("file closed")
+		return 0, fs.ErrClosed
 	}
-
+	if off < 0 {
+		return 0, fs.ErrInvalid
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
 	if off >= f.fileSize {
 		return 0, io.EOF
 	}
 
-	// Clamp read size
 	readSize := int64(len(p))
-	if off+readSize > f.fileSize {
+	if readSize > f.fileSize-off {
 		readSize = f.fileSize - off
 		p = p[:readSize]
 	}
 
 	n, err := f.item.ReadAtContext(ctx, p, off)
 
-	// Handle partial read at EOF
 	if n < int(readSize) && err == nil {
 		err = io.EOF
 	}
-
 	return n, err
 }
 
@@ -72,7 +74,6 @@ func (f *StreamingFile) Close() error {
 	if f.closed.Swap(true) {
 		return nil
 	}
-	f.item.Release() // Decrement opens count
-
+	f.item.Release()
 	return nil
 }

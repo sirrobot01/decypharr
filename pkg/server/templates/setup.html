@@ -1,14 +1,21 @@
 {{ define "setup" }}
-<div class="flex min-h-screen items-center justify-center bg-base-200 p-4">
-    <div class="card w-full max-w-4xl bg-base-100 shadow-xl">
-        <div class="card-body">
+<div class="flex min-h-screen items-center justify-center bg-base-200 p-2 sm:p-4">
+    <div class="card w-full min-w-0 max-w-4xl overflow-hidden bg-base-100 shadow-xl">
+        <div class="card-body min-w-0 p-4 sm:p-8">
             <div class="flex justify-between items-center mb-4">
                 <h2 class="card-title">Setup Wizard</h2>
             </div>
 
             <!-- Progress indicator -->
-            <div class="mb-8">
-                <ul class="steps w-full">
+            <div class="mb-6 sm:mb-8">
+                <div class="md:hidden">
+                    <div class="mb-2 flex items-center justify-between gap-3 text-sm">
+                        <span id="setup-progress-name" class="min-w-0 truncate font-medium">Authentication</span>
+                        <span id="setup-progress-label" class="shrink-0 text-base-content/60">Step 1 of 6</span>
+                    </div>
+                    <progress id="setup-progress" class="progress progress-primary w-full" value="1" max="6"></progress>
+                </div>
+                <ul class="steps hidden w-full md:grid">
                     <li class="step" data-step="1" id="step-indicator-1">Authentication</li>
                     <li class="step" data-step="2" id="step-indicator-2">Debrid Account</li>
                     <li class="step" data-step="3" id="step-indicator-3">Usenet Provider</li>
@@ -63,9 +70,10 @@
                     </div>
                 </form>
 
-                <div class="flex justify-between mt-6">
-                    <button type="button" class="btn btn-ghost" id="skip-auth-btn">Skip Authentication</button>
-                    <button type="button" class="btn btn-primary" id="auth-next-btn">Next</button>
+                <div class="mt-6 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <button type="button" class="btn btn-ghost w-full" id="token-only-btn">Use API Token Only</button>
+                    <button type="button" class="btn btn-ghost w-full" id="skip-auth-btn">Skip Authentication</button>
+                    <button type="button" class="btn btn-primary w-full" id="auth-next-btn">Next</button>
                 </div>
             </div>
 
@@ -102,11 +110,11 @@
                     </div>
                 </form>
 
-                <div class="flex justify-between mt-6">
-                    <button type="button" class="btn btn-ghost" id="debrid-back-btn">Back</button>
-                    <div class="flex gap-2">
-                        <button type="button" class="btn btn-ghost" id="skip-debrid-btn">Skip Debrid</button>
-                        <button type="button" class="btn btn-primary" id="debrid-next-btn">Next</button>
+                <div class="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-between">
+                    <button type="button" class="btn btn-ghost w-full sm:w-auto" id="debrid-back-btn">Back</button>
+                    <div class="grid grid-cols-2 gap-2 sm:flex">
+                        <button type="button" class="btn btn-ghost w-full sm:w-auto" id="skip-debrid-btn">Skip Debrid</button>
+                        <button type="button" class="btn btn-primary w-full sm:w-auto" id="debrid-next-btn">Next</button>
                     </div>
                 </div>
             </div>
@@ -120,7 +128,7 @@
 
                 <form id="usenet-form" class="space-y-4">
                     <div id="usenet-config" class="space-y-4">
-                        <div class="grid grid-cols-2 gap-4">
+                        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div>
                                 <label class="label" for="usenet-host">
                                     <span>Server Host</span>
@@ -136,7 +144,7 @@
                                        placeholder="563">
                             </div>
                         </div>
-                        <div class="grid grid-cols-2 gap-4">
+                        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div>
                                 <label class="label" for="usenet-username">
                                     <span>Username</span>
@@ -153,7 +161,7 @@
                             </div>
                         </div>
 
-                        <div class="grid grid-cols-2 gap-4">
+                        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div>
                                 <label class="label" for="usenet-max-connections">
                                     <span>Max Connections</span>
@@ -186,11 +194,11 @@
                     </div>
                 </form>
 
-                <div class="flex justify-between mt-6">
-                    <button type="button" class="btn btn-ghost" id="usenet-back-btn">Back</button>
-                    <div class="flex gap-2">
-                        <button type="button" class="btn btn-ghost" id="skip-usenet-btn">Skip Usenet</button>
-                        <button type="button" class="btn btn-primary" id="usenet-next-btn">Next</button>
+                <div class="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-between">
+                    <button type="button" class="btn btn-ghost w-full sm:w-auto" id="usenet-back-btn">Back</button>
+                    <div class="grid grid-cols-2 gap-2 sm:flex">
+                        <button type="button" class="btn btn-ghost w-full sm:w-auto" id="skip-usenet-btn">Skip Usenet</button>
+                        <button type="button" class="btn btn-primary w-full sm:w-auto" id="usenet-next-btn">Next</button>
                     </div>
                 </div>
             </div>
@@ -214,9 +222,9 @@
                     </div>
                 </form>
 
-                <div class="flex justify-between mt-6">
-                    <button type="button" class="btn btn-ghost" id="download-back-btn">Back</button>
-                    <button type="button" class="btn btn-primary" id="download-next-btn">Next</button>
+                <div class="mt-6 grid grid-cols-2 gap-2">
+                    <button type="button" class="btn btn-ghost w-full" id="download-back-btn">Back</button>
+                    <button type="button" class="btn btn-primary w-full" id="download-next-btn">Next</button>
                 </div>
             </div>
 
@@ -231,7 +239,7 @@
                         <label class="label">
                             <span>Mount Type</span>
                         </label>
-                        <div class="flex gap-4">
+                        <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
                             <label class="label cursor-pointer gap-2">
                                 <input type="radio" name="mount_type" value="dfs" class="radio" id="mount-type-dfs"
                                        checked>
@@ -289,9 +297,9 @@
                     </div>
                 </form>
 
-                <div class="flex justify-between mt-6">
-                    <button type="button" class="btn btn-ghost" id="mount-back-btn">Back</button>
-                    <button type="button" class="btn btn-primary" id="mount-next-btn">Next</button>
+                <div class="mt-6 grid grid-cols-2 gap-2">
+                    <button type="button" class="btn btn-ghost w-full" id="mount-back-btn">Back</button>
+                    <button type="button" class="btn btn-primary w-full" id="mount-next-btn">Next</button>
                 </div>
             </div>
 
@@ -351,9 +359,9 @@
                     <span>The application will restart after you click finish to apply these changes.</span>
                 </div>
 
-                <div class="flex justify-between mt-6">
-                    <button type="button" class="btn btn-ghost" id="overview-back-btn">Back</button>
-                    <button type="button" class="btn btn-primary" id="finish-btn">
+                <div class="mt-6 grid grid-cols-2 gap-2">
+                    <button type="button" class="btn btn-ghost w-full" id="overview-back-btn">Back</button>
+                    <button type="button" class="btn btn-primary w-full" id="finish-btn">
                         <span id="finish-btn-text">Finish Setup</span>
                         <span id="finish-btn-loading" class="loading loading-spinner loading-sm hidden"></span>
                     </button>

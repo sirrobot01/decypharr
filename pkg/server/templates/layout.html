@@ -33,31 +33,31 @@
     </script>
 </head>
 <body class="min-h-screen bg-base-200 flex flex-col">
-<div class="toast-container fixed bottom-4 right-4 z-50 space-y-2">
+<div class="toast-container fixed inset-x-3 bottom-3 z-50 space-y-2 sm:left-auto sm:right-4 sm:w-auto">
 </div>
 
-<header class="navbar bg-base-100 shadow-lg sticky top-0 z-40 backdrop-blur-sm">
-    <div class="navbar-start">
+<header class="navbar min-h-16 bg-base-100 px-2 shadow-lg sticky top-0 z-40 backdrop-blur-sm sm:px-4">
+    <div class="navbar-start min-w-0">
         <div class="dropdown">
-            <div tabindex="0" role="button" class="btn btn-ghost lg:hidden">
+            <div tabindex="0" role="button" class="btn btn-ghost btn-square lg:hidden">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h8m-8 6h16"/>
                 </svg>
             </div>
             <ul class="menu menu-sm dropdown-content mt-3 z-[1] p-2 shadow-lg bg-base-100 rounded-box w-52 border border-base-300">
-                <li><a href="{{.URLBase}}" class="{{if eq .Page " index"}}menu-active{{end}}">
+                <li><a href="{{.URLBase}}" class="{{if eq .Page "index"}}menu-active{{end}}">
                     <i class="bi bi-grid-3x3-gap text-primary"></i>Dashboard
                     </a></li>
-                <li><a href="{{.URLBase}}download" class="{{if eq .Page " download"}}menu-active{{end}}">
+                <li><a href="{{.URLBase}}download" class="{{if eq .Page "download"}}menu-active{{end}}">
                     <i class="bi bi-cloud-download text-secondary"></i>Download
                     </a></li>
-                <li><a href="{{.URLBase}}browse" class="{{if eq .Page " browse"}}menu-active{{end}}">
+                <li><a href="{{.URLBase}}browse" class="{{if eq .Page "browse"}}menu-active{{end}}">
                     <i class="bi bi-folder2-open text-primary"></i>Browse
                     </a></li>
-                <li><a href="{{.URLBase}}repair" class="{{if eq .Page " repair"}}menu-active{{end}}">
+                <li><a href="{{.URLBase}}repair" class="{{if or (eq .Page "repair") (eq .Page "reacquire")}}menu-active{{end}}">
                     <i class="bi bi-wrench-adjustable text-accent"></i>Repair
                     </a></li>
-                <li><a href="{{.URLBase}}settings" class="{{if eq .Page " config"}}menu-active{{end}}">
+                <li><a href="{{.URLBase}}settings" class="{{if eq .Page "config"}}menu-active{{end}}">
                     <i class="bi bi-gear text-info"></i>Settings
                     </a></li>
                 <li><a href="{{.URLBase}}logs" target="_blank">
@@ -65,35 +65,35 @@
                 </a></li>
             </ul>
         </div>
-        <a class="btn btn-ghost text-xl font-bold text-primary group" href="{{.URLBase}}">
-            <img src="{{.URLBase}}images/logo.png" alt="Decypharr Logo" class="w-8 h-8 inline-block mr-2">
+        <a class="btn btn-ghost px-1 text-xl font-bold text-primary group sm:px-4" href="{{.URLBase}}">
+            <img src="{{.URLBase}}images/logo.png" alt="Decypharr Logo" class="w-8 h-8 inline-block sm:mr-2">
             <span class="hidden sm:inline bg-clip-text">Decypharr</span>
         </a>
     </div>
 
     <div class="navbar-center hidden lg:flex">
         <ul class="menu menu-horizontal px-1 gap-1">
-            <li><a href="{{.URLBase}}" class="{{if eq .Page " index"}}menu-active{{end}} tooltip tooltip-bottom"
+            <li><a href="{{.URLBase}}" class="{{if eq .Page "index"}}menu-active{{end}} tooltip tooltip-bottom"
                 data-tip="Dashboard">
                 <i class="bi bi-grid-3x3-gap"></i>
                 <span class="hidden xl:inline">Dashboard</span>
                 </a></li>
-            <li><a href="{{.URLBase}}download" class="{{if eq .Page " download"}}menu-active{{end}} tooltip
+            <li><a href="{{.URLBase}}download" class="{{if eq .Page "download"}}menu-active{{end}} tooltip
                 tooltip-bottom" data-tip="Add Downloads">
                 <i class="bi bi-cloud-download"></i>
                 <span class="hidden xl:inline">Download</span>
                 </a></li>
-            <li><a href="{{.URLBase}}browse" class="{{if eq .Page " browse"}}menu-active{{end}} tooltip tooltip-bottom"
+            <li><a href="{{.URLBase}}browse" class="{{if eq .Page "browse"}}menu-active{{end}} tooltip tooltip-bottom"
                 data-tip="Browse Torrents">
                 <i class="bi bi-folder2-open"></i>
                 <span class="hidden xl:inline">Browse</span>
                 </a></li>
-            <li><a href="{{.URLBase}}repair" class="{{if eq .Page " repair"}}menu-active{{end}} tooltip tooltip-bottom"
+            <li><a href="{{.URLBase}}repair" class="{{if or (eq .Page "repair") (eq .Page "reacquire")}}menu-active{{end}} tooltip tooltip-bottom"
                 data-tip="Repair Media">
                 <i class="bi bi-wrench-adjustable"></i>
                 <span class="hidden xl:inline">Repair</span>
                 </a></li>
-            <li><a href="{{.URLBase}}settings" class="{{if eq .Page " config"}}menu-active{{end}} tooltip
+            <li><a href="{{.URLBase}}settings" class="{{if eq .Page "config"}}menu-active{{end}} tooltip
                 tooltip-bottom" data-tip="Settings">
                 <i class="bi bi-gear"></i>
                 <span class="hidden xl:inline">Settings</span>
@@ -105,8 +105,8 @@
         </ul>
     </div>
 
-    <div class="navbar-end">
-        <div class="flex items-center gap-3">
+    <div class="navbar-end flex-none">
+        <div class="flex items-center gap-0 sm:gap-2 lg:gap-3">
             <div class="tooltip tooltip-left">
                 <label class="swap swap-rotate btn btn-ghost btn-circle hover:bg-base-300 transition-colors">
                     <input type="checkbox" id="themeToggle" class="theme-controller"/>
@@ -116,13 +116,13 @@
             </div>
 
             <div class="tooltip tooltip-left" data-tip="System Statistics">
-                <a href="{{.URLBase}}stats" class="btn btn-ghost btn-sm hover:bg-base-300 transition-colors">
+                <a href="{{.URLBase}}stats" class="btn btn-ghost btn-square btn-sm hover:bg-base-300 transition-colors md:w-auto md:px-3">
                     <i class="bi bi-graph-up text-lg"></i>
                     <span class="hidden md:inline ml-1">Stats</span>
                 </a>
             </div>
 
-            <div class="tooltip tooltip-left" data-tip="Current Version">
+            <div class="tooltip tooltip-left hidden md:block" data-tip="Current Version">
                 <div class="badge badge-primary font-mono text-xs hover:badge-primary-focus transition-colors cursor-pointer"
                      id="version-badge">
                     Loading...
@@ -132,7 +132,7 @@
     </div>
 </header>
 
-<main class="flex-1 container mx-auto px-4 py-6">
+<main class="flex-1 container mx-auto px-3 py-4 sm:px-4 sm:py-6 {{if or (eq .Page "login") (eq .Page "register")}}flex items-center{{end}}">
     {{ if eq .Page "index" }}
     {{ template "index" . }}
     {{ else if eq .Page "browse" }}
@@ -141,6 +141,8 @@
     {{ template "download" . }}
     {{ else if eq .Page "repair" }}
     {{ template "repair" . }}
+    {{ else if eq .Page "reacquire" }}
+    {{ template "reacquire" . }}
     {{ else if eq .Page "stats" }}
     {{ template "stats" . }}
     {{ else if eq .Page "config" }}
@@ -164,8 +166,8 @@
     {{ end }}
 </main>
 
-<footer class="footer footer-center p-6 bg-base-300 text-base-content border-t border-base-200 md:footer-horizontal">
-    <aside class="grid-flow-col gap-4">
+<footer class="footer footer-center p-4 bg-base-300 text-base-content border-t border-base-200 sm:p-6 md:footer-horizontal">
+    <aside class="flex flex-wrap justify-center gap-x-4 gap-y-2">
         <a href="https://github.com/sirrobot01/decypharr" target="_blank"
            class="link link-hover flex items-center gap-2 hover:text-primary transition-colors">
             <i class="bi bi-github text-lg"></i>
@@ -195,6 +197,8 @@
 <script src="{{.URLBase}}assets/js/download.js"></script>
 {{ else if eq .Page "repair" }}
 <script src="{{.URLBase}}assets/js/repair.js"></script>
+{{ else if eq .Page "reacquire" }}
+<script src="{{.URLBase}}assets/js/reacquire.js"></script>
 {{ else if eq .Page "config" }}
 <script src="{{.URLBase}}assets/js/config.js"></script>
 {{ else if eq .Page "setup" }}

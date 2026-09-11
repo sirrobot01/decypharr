@@ -573,7 +573,7 @@ type CachedTorrent struct {
 	MountPath        string                       `json:"mount_path"`        // Mount path
 	DeletedFiles     []string                     `json:"deleted_files"`     // Deleted files
 	Debrid           string                       `json:"debrid"`            // Debrid name
-	Arr              *arr.Arr                     `json:"arr"`               // Arr association
+	Arr              arr.Arr                      `json:"arr"`               // Arr association
 	AddedOn          string                       `json:"added_on"`          // Added on timestamp
 	IsComplete       bool                         `json:"is_complete"`       // Is complete
 	Bad              bool                         `json:"bad"`               // Is bad
@@ -594,11 +594,7 @@ func (ct *CachedTorrent) ToManagedTorrent() *Entry {
 		addedOn = now
 	}
 	createdAt = addedOn
-	// GetReader category from arr
-	var category string
-	if ct.Arr != nil {
-		category = ct.Arr.Name
-	}
+	category := ct.Arr.Name
 
 	mt := &Entry{
 		Protocol:         config.ProtocolTorrent,

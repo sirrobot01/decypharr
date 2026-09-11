@@ -220,6 +220,14 @@ func IsArticleNotFoundError(err error) bool {
 	return false
 }
 
+// IsYencDecodeError reports definitive article corruption after decoding
+// (including CRC mismatch). Callers should try other backbones, but should
+// not multiply retries against the same exhausted provider set.
+func IsYencDecodeError(err error) bool {
+	var nntpErr *Error
+	return errors.As(err, &nntpErr) && nntpErr.Type == ErrorTypeYencDecode
+}
+
 func IsAuthenticationError(err error) bool {
 	var nntpErr *Error
 	if errors.As(err, &nntpErr) {

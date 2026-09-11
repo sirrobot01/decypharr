@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,9 +13,11 @@ import (
 	"time"
 
 	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/customerror"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/manager/link"
 	"github.com/sirrobot01/decypharr/pkg/storage"
+	"github.com/sirrobot01/decypharr/pkg/usenet"
 )
 
 const (
@@ -40,7 +43,8 @@ const (
 // StreamReader is a resilient, seekable byte stream over one remote file.
 // All recovery (link refresh, backoff, reconnect-at-offset) happens inside
 // Read; consumers see either bytes or a typed error once recovery is
-// exhausted. A failed session is never poisoned: a later Read retries.
+// exhausted. Transient failures do not poison the session; confirmed
+// permanent content failures remain terminal.
 type StreamReader interface {
 	io.ReadCloser
 	io.Seeker
@@ -49,6 +53,17 @@ type StreamReader interface {
 	// Prime opens the transport eagerly so open failures surface before any
 	// bytes are consumed (e.g. before writing HTTP response headers).
 	Prime() error
+}
+
+// CacheRangeAcknowledger is an optional capability implemented by protocol
+// sessions whose source maintains a disposable delivery cache. DFS calls it
+// only after its own cache has accepted an independent copy of the range.
+type CacheRangeAcknowledger interface {
+	AcknowledgeCachedRange(off, length int64)
+}
+
+type cachedRangeReleaser interface {
+	ReleaseCachedRange(off, length int64)
 }
 
 // transport supplies protocol-specific connect and recovery for a session.
@@ -75,6 +90,10 @@ type session struct {
 	body       io.ReadCloser
 	bodyCancel context.CancelFunc
 	closed     bool
+	// cacheReleaser follows the most recently opened body. It deliberately
+	// survives a body EOF until the caller has published bytes returned by
+	// that final Read into its downstream cache.
+	cacheReleaser cachedRangeReleaser
 
 	// idle is a persistent timer, created on first arm and Reset thereafter.
 	// idleGen/idleArmGen invalidate stale firings: Read bumps idleGen on
@@ -113,6 +132,20 @@ func newSession(ctx context.Context, t transport, size, offset int64) *session {
 }
 
 func (s *session) Size() int64 { return s.size }
+
+// AcknowledgeCachedRange forwards downstream ownership only for transports
+// that expose the capability. HTTP/debrid sessions are a no-op.
+func (s *session) AcknowledgeCachedRange(off, length int64) {
+	if length <= 0 || off < 0 {
+		return
+	}
+	s.mu.Lock()
+	releaser := s.cacheReleaser
+	s.mu.Unlock()
+	if releaser != nil {
+		releaser.ReleaseCachedRange(off, length)
+	}
+}
 
 func (s *session) Read(p []byte) (int, error) {
 	s.mu.Lock()
@@ -155,6 +188,13 @@ func (s *session) Read(p []byte) (int, error) {
 		n, err := s.body.Read(p)
 		s.stall.Stop()
 		s.stallCancel.Store(noopCancel)
+		if n > len(p) {
+			// Every consumer copies through a buffer sized to len(p); a body
+			// that over-reports makes them slice past it. Drop the body and
+			// report the violation rather than hand back a bogus count.
+			s.closeBodyLocked()
+			return 0, fmt.Errorf("stream body returned %d bytes for a %d-byte read", n, len(p))
+		}
 		s.pos += int64(n)
 
 		if n > 0 {
@@ -280,6 +320,7 @@ func (s *session) Close() error {
 	}
 	s.closed = true
 	s.closeBodyLocked()
+	s.cacheReleaser = nil
 	if s.idle != nil {
 		s.idle.Stop()
 	}
@@ -301,6 +342,9 @@ func (s *session) connectLocked() error {
 		return err
 	}
 	s.body = body
+	if releaser, ok := body.(cachedRangeReleaser); ok {
+		s.cacheReleaser = releaser
+	}
 	s.bodyCancel = cancel
 	return nil
 }
@@ -450,26 +494,38 @@ func (t *httpTransport) recover(ctx context.Context, err error, attempt int) err
 }
 
 // usenetTransport serves a session body by pulling directly from a usenet
-// FileHandle. Per-segment failover, zero-fill, and PAR2 handling live inside
-// the usenet client; recovery here only reopens the handle at the current
-// offset.
+// FileHandle. Per-segment backbone failover lives inside the usenet client;
+// retries here only reopen recoverable handles at the current offset.
 type usenetTransport struct {
-	size     int64
-	openFile func(ctx context.Context) (usenetFileHandle, error)
+	size              int64
+	openFile          func(ctx context.Context) (DirectReader, error)
+	onArticleNotFound func()
+	irrecoverable     atomic.Bool
+	notifyOnce        sync.Once
 }
 
-// usenetFileHandle abstracts *usenet.FileHandle for tests.
-type usenetFileHandle interface {
+// DirectReader is a protocol-native random-access reader. The opener selects
+// whether it owns rewind persistence or sits beneath a downstream cache.
+type DirectReader interface {
 	ReadAtContext(ctx context.Context, p []byte, off int64) (int, error)
 	Prefetch(ctx context.Context, off, length int64)
 	Close() error
 }
 
+// RewindOwner identifies the layer that retains already-delivered bytes.
+type RewindOwner uint8
+
+const (
+	RewindOwnerApplication RewindOwner = iota
+	RewindOwnerDownstream
+)
+
 type usenetBody struct {
-	h    usenetFileHandle
-	ctx  context.Context
-	pos  int64
-	size int64
+	h       DirectReader
+	ctx     context.Context
+	pos     int64
+	size    int64
+	onError func(error)
 }
 
 func (b *usenetBody) Read(p []byte) (int, error) {
@@ -481,6 +537,9 @@ func (b *usenetBody) Read(p []byte) (int, error) {
 	}
 	n, err := b.h.ReadAtContext(b.ctx, p, b.pos)
 	b.pos += int64(n)
+	if err != nil && b.onError != nil {
+		b.onError(err)
+	}
 	if err == nil && n == 0 {
 		err = io.ErrNoProgress
 	}
@@ -489,43 +548,136 @@ func (b *usenetBody) Read(p []byte) (int, error) {
 
 func (b *usenetBody) Close() error { return b.h.Close() }
 
+func (b *usenetBody) ReleaseCachedRange(off, length int64) {
+	if releaser, ok := b.h.(cachedRangeReleaser); ok {
+		releaser.ReleaseCachedRange(off, length)
+	}
+}
+
 func (t *usenetTransport) open(ctx context.Context, pos int64) (io.ReadCloser, error) {
+	if t.irrecoverable.Load() {
+		return nil, customerror.NewArticleNotFoundError(nil)
+	}
 	h, err := t.openFile(ctx)
 	if err != nil {
+		t.markArticleNotFound(err)
 		return nil, err
+	}
+	// Unlike an HTTP transport, opening a Usenet handle performs no upstream
+	// I/O. Demand-read one byte so Session.Prime can reject a missing article
+	// before an HTTP/WebDAV handler commits successful response headers. The
+	// reader caches the containing segment, so the subsequent body read does
+	// not download it again and still starts at pos.
+	var probe [1]byte
+	n, err := h.ReadAtContext(ctx, probe[:], pos)
+	if err != nil && (!errors.Is(err, io.EOF) || n != len(probe)) {
+		_ = h.Close()
+		t.markArticleNotFound(err)
+		return nil, err
+	}
+	if n != len(probe) {
+		_ = h.Close()
+		return nil, fmt.Errorf("usenet stream prime at offset %d read %d bytes, want %d: %w", pos, n, len(probe), io.ErrUnexpectedEOF)
 	}
 	// Warm the read-ahead window from the starting offset (bounded inside).
 	h.Prefetch(ctx, pos, t.size-pos)
-	return &usenetBody{h: h, ctx: ctx, pos: pos, size: t.size}, nil
+	return &usenetBody{
+		h:    h,
+		ctx:  ctx,
+		pos:  pos,
+		size: t.size,
+		onError: func(err error) {
+			t.markArticleNotFound(err)
+		},
+	}, nil
 }
 
 func (t *usenetTransport) recover(ctx context.Context, err error, attempt int) error {
+	if t.markArticleNotFound(err) {
+		return err
+	}
+	if customErr, ok := errors.AsType[*customerror.Error](err); ok && customErr.IsPermanent() {
+		return err
+	}
 	if lerr := link.GetLinkError(err); lerr != nil && lerr.IsPermanent() {
 		return err
 	}
 	return sleepCtx(ctx, sessionBackoff(attempt))
 }
 
+func (t *usenetTransport) markArticleNotFound(err error) bool {
+	if !customerror.IsArticleNotFoundError(err) {
+		return false
+	}
+	t.irrecoverable.Store(true)
+	t.notifyOnce.Do(func() {
+		if t.onArticleNotFound != nil {
+			t.onArticleNotFound()
+		}
+	})
+	return true
+}
+
 // OpenStream opens a resilient, seekable session over one file of an entry and
 // registers it in the active-streams view. client identifies the consumer
 // (e.g. a User-Agent, "NFS"). Connecting is lazy — use Prime to fast-fail.
 func (m *Manager) OpenStream(ctx context.Context, entry *storage.Entry, filename string, offset int64, client string) (StreamReader, error) {
-	s, source, debrid, err := m.openSession(ctx, entry, filename, offset)
+	return m.OpenStreamWithRewindOwner(ctx, entry, filename, offset, client, RewindOwnerApplication)
+}
+
+// OpenStreamWithRewindOwner opens a stream with an explicit retention owner.
+func (m *Manager) OpenStreamWithRewindOwner(ctx context.Context, entry *storage.Entry, filename string, offset int64, client string, owner RewindOwner) (StreamReader, error) {
+	s, source, debrid, err := m.openSession(ctx, entry, filename, offset, owner)
 	if err != nil {
 		return nil, err
 	}
-	streamID := m.registerStream(entry.Name, filename, s.size, source, debrid, client)
+	streamID := m.registerStream(entry, filename, entry.Files[filename], source, debrid, client)
 	s.onRead = func(resumes int64) { m.touchStream(streamID, resumes) }
 	s.onClose = func() { m.unregisterStream(streamID) }
 	return s, nil
 }
 
+// SupportsDirectRead reports whether an entry has a protocol-native
+// random-access reader. It does not imply that a downstream persistent cache
+// should be bypassed; cache owners should use OpenStreamUntrackedForCache.
+func SupportsDirectRead(entry *storage.Entry) bool {
+	return entry != nil && entry.Protocol == config.ProtocolNZB
+}
+
+// OpenDirect opens an application-owned protocol reader without active-stream
+// tracking. It is retained for non-cache consumers that explicitly need native
+// random access. Persistent cache layers should use
+// OpenStreamUntrackedForCache so cache ownership and observability stay intact.
+func (m *Manager) OpenDirect(ctx context.Context, entry *storage.Entry, filename string) (DirectReader, error) {
+	if !SupportsDirectRead(entry) {
+		return nil, nil
+	}
+	if m.usenet == nil {
+		return nil, fmt.Errorf("usenet client not configured")
+	}
+	return m.usenet.OpenFileWithRetention(ctx, entry.InfoHash, filename, usenet.RetentionRewind)
+}
+
 // OpenStreamUntracked opens a session without registering it in the
 // active-streams view. It is for consumers that do their own stream tracking —
-// notably the vfs downloader, where several downloaders share one file and a
-// single registration is kept at the Downloaders level.
+// for example a background sidecar download.
 func (m *Manager) OpenStreamUntracked(ctx context.Context, entry *storage.Entry, filename string, offset int64) (StreamReader, error) {
-	s, _, _, err := m.openSession(ctx, entry, filename, offset)
+	s, _, _, err := m.openSession(ctx, entry, filename, offset, RewindOwnerApplication)
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// OpenStreamUntrackedForCache opens an untracked session for a downstream
+// cache. The downstream owns rewind persistence, so protocol transports keep
+// only their active delivery window. DFS uses this to avoid writing every NZB
+// byte into both the Usenet session cache and the persistent DFS cache.
+//
+// The caller is responsible for aggregate stream tracking. DFS tracks once at
+// the shared Downloaders level rather than once per read-ahead worker.
+func (m *Manager) OpenStreamUntrackedForCache(ctx context.Context, entry *storage.Entry, filename string, offset int64) (StreamReader, error) {
+	s, _, _, err := m.openSession(ctx, entry, filename, offset, RewindOwnerDownstream)
 	if err != nil {
 		return nil, err
 	}
@@ -543,7 +695,7 @@ func (m *Manager) OpenStreamForFile(ctx context.Context, info *FileInfo, offset 
 	return m.OpenStream(ctx, entry, info.Name(), offset, client)
 }
 
-func (m *Manager) openSession(ctx context.Context, entry *storage.Entry, filename string, offset int64) (*session, string, string, error) {
+func (m *Manager) openSession(ctx context.Context, entry *storage.Entry, filename string, offset int64, owner RewindOwner) (*session, string, string, error) {
 	file, ok := entry.Files[filename]
 	if !ok {
 		return nil, "", "", fmt.Errorf("file %s not found in entry %s", filename, entry.Name)
@@ -563,10 +715,14 @@ func (m *Manager) openSession(ctx context.Context, entry *storage.Entry, filenam
 		}
 		source, debrid = "nzb", ""
 		nzoID := entry.InfoHash
+		retention := retentionForOwner(owner)
 		t = &usenetTransport{
 			size: file.Size,
-			openFile: func(ctx context.Context) (usenetFileHandle, error) {
-				return m.usenet.OpenFile(ctx, nzoID, filename)
+			openFile: func(ctx context.Context) (DirectReader, error) {
+				return m.usenet.OpenFileWithRetention(ctx, nzoID, filename, retention)
+			},
+			onArticleNotFound: func() {
+				m.submitStreamReacquire(entry.InfoHash, file.ID)
 			},
 		}
 	} else {
@@ -587,6 +743,13 @@ func (m *Manager) openSession(ctx context.Context, entry *storage.Entry, filenam
 	}
 
 	return newSession(ctx, t, file.Size, offset), source, debrid, nil
+}
+
+func retentionForOwner(owner RewindOwner) usenet.Retention {
+	if owner == RewindOwnerDownstream {
+		return usenet.RetentionDelivery
+	}
+	return usenet.RetentionRewind
 }
 
 func sessionBackoff(attempt int) time.Duration {

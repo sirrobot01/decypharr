@@ -3,7 +3,11 @@ package vfs
 import (
 	"context"
 	"path/filepath"
+	"runtime"
+	"sort"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/buffer"
@@ -17,6 +21,12 @@ import (
 // real, and the Downloaders coordinator is real but pre-tracked and never
 // asked to download (callers pre-fill the item or write directly).
 func newBenchItem(tb testing.TB, fileSize int64) (*CacheItem, *Downloaders) {
+	return newBenchItemWindow(tb, fileSize, fileSize+(1<<20))
+}
+
+// newBenchItemWindow sizes the RAM window explicitly: pass more than fileSize
+// to measure reads served from memory, less to force the disk tier.
+func newBenchItemWindow(tb testing.TB, fileSize, window int64) (*CacheItem, *Downloaders) {
 	tb.Helper()
 	dir := tb.TempDir()
 
@@ -24,7 +34,7 @@ func newBenchItem(tb testing.TB, fileSize int64) (*CacheItem, *Downloaders) {
 	tb.Cleanup(func() { _ = pool.Close() })
 
 	buf, err := pool.NewBuffer(buffer.Config{
-		MemorySize: 32 << 20,
+		MemorySize: window,
 		DiskPath:   filepath.Join(dir, "data.bin"),
 		TotalSize:  fileSize,
 	})
@@ -109,6 +119,28 @@ func BenchmarkReadAtContextWarm(b *testing.B) {
 	}
 }
 
+// BenchmarkReadAtContextFromDisk is the same read with a RAM window too small
+// to hold the file, so every read falls through to the disk tier — the cost
+// the old write-through design paid on every read.
+func BenchmarkReadAtContextFromDisk(b *testing.B) {
+	const fileSize = int64(64 << 20)
+	item, _ := newBenchItemWindow(b, fileSize, 4<<20)
+	prefillItem(b, item, fileSize)
+
+	const readSize = 128 << 10
+	p := make([]byte, readSize)
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		off := (int64(i) * readSize) % (fileSize - readSize)
+		if _, err := item.ReadAtContext(ctx, p, off); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // BenchmarkReadAtContextWarmParallel is the same with concurrent readers —
 // what go-fuse actually does with kernel readahead in flight.
 func BenchmarkReadAtContextWarmParallel(b *testing.B) {
@@ -159,6 +191,85 @@ func BenchmarkCacheWriterWrite(b *testing.B) {
 		if _, err := w.Write(chunk); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// BenchmarkColdReadWakeLatency measures the coordination floor of a cache
+// miss: ReadAtContext parks as a waiter, the (simulated) downloader delivers
+// the exact 128KB range through cacheWriter, kickWaiters scans and wakes the
+// reader, and the read completes from the buffer. total ns/op is the full
+// park→deliver→wake→pread cycle; wake-ns isolates the gap between the
+// delivery write returning and the parked read returning. Every byte a
+// player waits for on a cold range pays this on top of the network time.
+func BenchmarkColdReadWakeLatency(b *testing.B) {
+	const fileSize = int64(1 << 40) // sparse: only what the bench writes exists
+	const readSize = 128 << 10
+	item, dls := newBenchItem(b, fileSize)
+
+	// A fake in-flight downloader already covering every position, so the
+	// read path extends it instead of spawning a real one against the nil
+	// manager.
+	fakeCtx, fakeCancel := context.WithCancel(context.Background())
+	b.Cleanup(fakeCancel)
+	fake := &downloader{
+		dls:              dls,
+		quit:             make(chan struct{}),
+		kick:             make(chan struct{}, 1),
+		ctx:              fakeCtx,
+		cancel:           fakeCancel,
+		start:            0,
+		offset:           fileSize,
+		maxOffset:        fileSize,
+		baseChunkSize:    4 << 20,
+		currentChunkSize: 4 << 20,
+	}
+	dls.mu.Lock()
+	dls.dls = append(dls.dls, fake)
+	dls.mu.Unlock()
+
+	offs := make(chan int64)
+	var writeDone atomic.Int64 // UnixNano of the delivery write returning
+	go func() {
+		chunk := make([]byte, readSize)
+		for off := range offs {
+			// Wait until the reader has parked so the write cannot win the
+			// HasRange fast path.
+			for dls.waiterCount.Load() == 0 {
+				runtime.Gosched()
+			}
+			w := &cacheWriter{dl: fake, item: item, offset: off}
+			if _, err := w.Write(chunk); err != nil {
+				b.Error(err)
+				return
+			}
+			writeDone.Store(time.Now().UnixNano())
+		}
+	}()
+
+	p := make([]byte, readSize)
+	ctx := context.Background()
+	var wakes []time.Duration
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		off := int64(i) * readSize
+		offs <- off
+		if _, err := item.ReadAtContext(ctx, p, off); err != nil {
+			b.Fatal(err)
+		}
+		if wd := writeDone.Load(); wd != 0 {
+			wakes = append(wakes, time.Duration(time.Now().UnixNano()-wd))
+		}
+	}
+	b.StopTimer()
+	close(offs)
+
+	sort.Slice(wakes, func(i, j int) bool { return wakes[i] < wakes[j] })
+	if len(wakes) > 0 {
+		b.ReportMetric(float64(wakes[len(wakes)/2].Nanoseconds()), "wake-p50-ns")
+		b.ReportMetric(float64(wakes[len(wakes)*99/100].Nanoseconds()), "wake-p99-ns")
+		b.ReportMetric(float64(wakes[len(wakes)-1].Nanoseconds()), "wake-max-ns")
 	}
 }
 

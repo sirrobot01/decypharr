@@ -39,6 +39,7 @@ func (s *Server) WebRoutes() http.Handler {
 		r.Get("/browse", s.BrowseHandler)
 		r.Get("/download", s.DownloadHandler)
 		r.Get("/repair", s.RepairHandler)
+		r.Get("/repair/reacquire", s.ReacquireHandler)
 		r.Get("/stats", s.StatsHandler)
 		r.Get("/settings", s.ConfigHandler)
 
@@ -47,6 +48,13 @@ func (s *Server) WebRoutes() http.Handler {
 			// Arr management
 			r.Get("/arrs", s.handleGetArrs)
 			r.Post("/add", s.handleAddContent)
+			r.Get("/arr/reacquire/jobs", s.handleListArrReacquireJobs)
+			r.Get("/arr/reacquire/jobs/{id}", s.handleGetArrReacquireJob)
+			r.Delete("/arr/reacquire/jobs", s.handleDeleteArrReacquireJobs)
+			r.Post("/arr/reacquire", s.handleArrReacquire)
+			r.Post("/arr/index/refresh", s.handleRefreshArrIndex)
+			r.Get("/arr/index", s.handleGetArrIndex)
+			r.Get("/arr/bindings", s.handleSearchArrBindings)
 
 			// Repair / health-checker operations
 			r.Get("/repair/config", s.handleGetRepairConfig)

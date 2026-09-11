@@ -40,6 +40,28 @@ func (c *Config) applyEnvOverrides() {
 	if val := getEnv("USE_AUTH"); val != "" {
 		c.UseAuth = parseBool(val)
 	}
+	// Token-only auth, for headless deployments that never open the web UI.
+	// Both apply to the in-memory auth only; they must run after USE_AUTH
+	// because GetAuth returns nil while auth is disabled.
+	if val := getEnv("AUTH_TOKEN_ONLY"); val != "" {
+		if auth := c.GetAuth(); auth != nil {
+			auth.TokenOnly = parseBool(val)
+		}
+	}
+	if val := getEnv("API_TOKEN"); val != "" {
+		if auth := c.GetAuth(); auth != nil {
+			auth.APIToken = val
+		}
+	}
+	// setDefaults mints the token, but it ran before these overrides. Mint one
+	// here when the environment turned on token-only auth, or the mode would
+	// have no credential and would fall back to open registration.
+	if auth := c.GetAuth(); auth != nil && auth.TokenOnly && auth.APIToken == "" {
+		if token, err := GenerateAPIToken(); err == nil {
+			auth.APIToken = token
+			_ = c.SaveAuth(auth)
+		}
+	}
 
 	// Manager settings
 	if val := getEnv("DOWNLOAD_FOLDER"); val != "" {
@@ -120,6 +142,8 @@ func (c *Config) applyEnvOverrides() {
 	c.applyDebridEnvVars()
 
 	c.applyUsenetEnvVars()
+
+	c.applyHearsayEnvVars()
 
 	// Arr applications array
 	for i := range 20 { // Support up to 20 arr applications

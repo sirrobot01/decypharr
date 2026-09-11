@@ -56,8 +56,9 @@ type DFS struct {
 	CacheCleanupInterval string `json:"cache_cleanup_interval,omitempty"` // 10m, 1h etc
 
 	// BufferMemory caps the total RAM the DFS streaming buffers hold across all
-	// open files, e.g. "512MB". Per-file buffers stay generous for smooth
-	// playback; this bounds the aggregate so many concurrent streams can't OOM.
+	// open files, e.g. "512MB". Reads are served from this window, so it is
+	// what keeps playback off the disk; per-file windows are sized from
+	// read_ahead_size and share this budget when several streams are open.
 	// Empty = default (512MB); "0" disables the cap.
 	BufferMemory string `json:"buffer_memory,omitempty"`
 
@@ -67,15 +68,10 @@ type DFS struct {
 
 	// DropBehindMargin, e.g "256MB", makes the read path drop the page cache for
 	// streamed data more than this far behind the read head (bytes stay on disk).
-	// Empty/0 = disabled. Only useful under a tight memory cap.
+	// Empty/0 = disabled. Linux only; only useful under a tight memory cap.
 	DropBehindMargin string `json:"drop_behind_margin,omitempty"`
 
 	DaemonTimeout string `json:"daemon_timeout,omitempty"` // Time after which the FUSE daemon will exit if idle
-
-	// BufferWritePolicy selects how downloaded bytes go through the streaming
-	// buffer: "write_through" (default — straight to disk outside the lock,
-	// kernel page cache serves re-reads) or "auto" (legacy RAM block caching).
-	BufferWritePolicy string `json:"buffer_write_policy,omitempty"`
 
 	// FuseMaxBackground caps how many background FUSE requests (readahead,
 	// async reads) the kernel keeps in flight. Kernel default is 12, which

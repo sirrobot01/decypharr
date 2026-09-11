@@ -2,13 +2,18 @@ package yenc
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
-// yencEncode encodes raw bytes into yEnc format for testing.
+// yencEncode encodes raw bytes into a yEnc article body for testing. The
+// =yend trailer carries a correct pcrc32, so every decode also exercises the
+// decoder's CRC verification.
 func yencEncode(data []byte, name string, partNum int, begin, end int64) string {
 	var buf bytes.Buffer
 
@@ -43,165 +48,211 @@ func yencEncode(data []byte, name string, partNum int, begin, end int64) string 
 	}
 
 	// =yend trailer
-	buf.WriteString(fmt.Sprintf("=yend size=%d\r\n", len(data)))
+	buf.WriteString(fmt.Sprintf("=yend size=%d pcrc32=%08x\r\n", len(data), crc32.ChecksumIEEE(data)))
 
 	return buf.String()
 }
 
-func TestDecoder_SimpleFile(t *testing.T) {
+// bodyResponse wraps an encoded body in a complete BODY response: status
+// line plus the ".\r\n" terminator, as the decoder sees it on the wire.
+func bodyResponse(encoded string) string {
+	return "222 0 <test@example> body\r\n" + encoded + ".\r\n"
+}
+
+func decodeResponse(t *testing.T, response string) (BodyResult, error) {
+	t.Helper()
+	return NewBodyDecoder(strings.NewReader(response), nil).Next()
+}
+
+func TestBodyDecoder_SimpleFile(t *testing.T) {
 	original := []byte("Hello, this is a test of yEnc decoding!")
-	encoded := yencEncode(original, "test.txt", 0, 0, 0)
-
-	dec := AcquireDecoder(strings.NewReader(encoded))
-	defer ReleaseDecoder(dec)
-
-	decoded, err := io.ReadAll(dec)
+	res, err := decodeResponse(t, bodyResponse(yencEncode(original, "test.txt", 0, 0, 0)))
 	if err != nil {
-		t.Fatalf("Read failed: %v", err)
+		t.Fatalf("Next failed: %v", err)
 	}
 
-	if !bytes.Equal(decoded, original) {
-		t.Errorf("Decoded data mismatch\n  got:  %q\n  want: %q", decoded, original)
+	if res.StatusCode != 222 {
+		t.Errorf("StatusCode = %d, want 222", res.StatusCode)
 	}
-
-	if dec.Meta.FileName != "test.txt" {
-		t.Errorf("FileName = %q, want %q", dec.Meta.FileName, "test.txt")
+	if !bytes.Equal(res.Data, original) {
+		t.Errorf("Decoded data mismatch\n  got:  %q\n  want: %q", res.Data, original)
+	}
+	if res.Meta.FileName != "test.txt" {
+		t.Errorf("FileName = %q, want %q", res.Meta.FileName, "test.txt")
 	}
 }
 
-func TestDecoder_BinaryData(t *testing.T) {
+func TestBodyDecoder_BinaryData(t *testing.T) {
 	// Test with all byte values 0-255
 	original := make([]byte, 256)
 	for i := range original {
 		original[i] = byte(i)
 	}
-	encoded := yencEncode(original, "binary.bin", 0, 0, 0)
-
-	dec := AcquireDecoder(strings.NewReader(encoded))
-	defer ReleaseDecoder(dec)
-
-	decoded, err := io.ReadAll(dec)
+	res, err := decodeResponse(t, bodyResponse(yencEncode(original, "binary.bin", 0, 0, 0)))
 	if err != nil {
-		t.Fatalf("Read failed: %v", err)
+		t.Fatalf("Next failed: %v", err)
 	}
 
-	if !bytes.Equal(decoded, original) {
-		t.Errorf("Binary decode mismatch: got %d bytes, want %d bytes", len(decoded), len(original))
-		// Show first difference
-		for i := 0; i < len(decoded) && i < len(original); i++ {
-			if decoded[i] != original[i] {
-				t.Errorf("  first diff at byte %d: got 0x%02x, want 0x%02x", i, decoded[i], original[i])
+	if !bytes.Equal(res.Data, original) {
+		t.Errorf("Binary decode mismatch: got %d bytes, want %d bytes", len(res.Data), len(original))
+		for i := 0; i < len(res.Data) && i < len(original); i++ {
+			if res.Data[i] != original[i] {
+				t.Errorf("  first diff at byte %d: got 0x%02x, want 0x%02x", i, res.Data[i], original[i])
 				break
 			}
 		}
 	}
 }
 
-func TestDecoder_MultipartMeta(t *testing.T) {
+func TestBodyDecoder_MultipartMeta(t *testing.T) {
 	original := []byte("Part one data here")
-	encoded := yencEncode(original, "multipart.bin", 1, 1, int64(len(original)))
-
-	dec := AcquireDecoder(strings.NewReader(encoded))
-	defer ReleaseDecoder(dec)
-
-	decoded, err := io.ReadAll(dec)
+	res, err := decodeResponse(t, bodyResponse(yencEncode(original, "multipart.bin", 1, 1, int64(len(original)))))
 	if err != nil {
-		t.Fatalf("Read failed: %v", err)
+		t.Fatalf("Next failed: %v", err)
 	}
 
-	if !bytes.Equal(decoded, original) {
-		t.Errorf("Decoded data mismatch\n  got:  %q\n  want: %q", decoded, original)
+	if !bytes.Equal(res.Data, original) {
+		t.Errorf("Decoded data mismatch\n  got:  %q\n  want: %q", res.Data, original)
 	}
-
-	if dec.Meta.FileName != "multipart.bin" {
-		t.Errorf("FileName = %q, want %q", dec.Meta.FileName, "multipart.bin")
+	if res.Meta.FileName != "multipart.bin" {
+		t.Errorf("FileName = %q, want %q", res.Meta.FileName, "multipart.bin")
 	}
-	if dec.Meta.PartNumber != 1 {
-		t.Errorf("PartNumber = %d, want 1", dec.Meta.PartNumber)
+	if res.Meta.PartNumber != 1 {
+		t.Errorf("PartNumber = %d, want 1", res.Meta.PartNumber)
 	}
-	if dec.Meta.Offset != 0 {
-		t.Errorf("Offset = %d, want 0", dec.Meta.Offset)
+	if res.Meta.Offset != 0 {
+		t.Errorf("Offset = %d, want 0", res.Meta.Offset)
 	}
-	if dec.Meta.PartSize != int64(len(original)) {
-		t.Errorf("PartSize = %d, want %d", dec.Meta.PartSize, len(original))
+	if res.Meta.PartSize != int64(len(original)) {
+		t.Errorf("PartSize = %d, want %d", res.Meta.PartSize, len(original))
 	}
 }
 
-func TestDecoder_LargePayload(t *testing.T) {
+func TestBodyDecoder_LargePayload(t *testing.T) {
 	// Simulate a typical usenet segment (~750KB)
 	original := make([]byte, 750*1024)
 	for i := range original {
 		original[i] = byte(i % 251) // prime to avoid patterns
 	}
-	encoded := yencEncode(original, "large.bin", 1, 1, int64(len(original)))
-
-	dec := AcquireDecoder(strings.NewReader(encoded))
-	defer ReleaseDecoder(dec)
-
-	decoded, err := io.ReadAll(dec)
+	res, err := decodeResponse(t, bodyResponse(yencEncode(original, "large.bin", 1, 1, int64(len(original)))))
 	if err != nil {
-		t.Fatalf("Read failed: %v", err)
+		t.Fatalf("Next failed: %v", err)
 	}
 
-	if !bytes.Equal(decoded, original) {
-		t.Errorf("Large payload mismatch: got %d bytes, want %d bytes", len(decoded), len(original))
+	if !bytes.Equal(res.Data, original) {
+		t.Errorf("Large payload mismatch: got %d bytes, want %d bytes", len(res.Data), len(original))
 	}
 }
 
-func TestDecoder_SmallReads(t *testing.T) {
-	original := []byte("Testing small buffer reads with yEnc decoder")
-	encoded := yencEncode(original, "small.txt", 0, 0, 0)
+func TestBodyDecoder_SmallReads(t *testing.T) {
+	original := []byte("Testing small source reads with yEnc decoder")
+	response := bodyResponse(yencEncode(original, "small.txt", 0, 0, 0))
 
-	dec := AcquireDecoder(strings.NewReader(encoded))
-	defer ReleaseDecoder(dec)
+	// One byte per source Read exercises every buffer-boundary path.
+	dec := NewBodyDecoder(iotest.OneByteReader(strings.NewReader(response)), nil)
+	res, err := dec.Next()
+	if err != nil {
+		t.Fatalf("Next failed: %v", err)
+	}
+	if !bytes.Equal(res.Data, original) {
+		t.Errorf("Small reads mismatch\n  got:  %q\n  want: %q", res.Data, original)
+	}
+}
 
-	// Read one byte at a time
-	var result []byte
-	buf := make([]byte, 1)
-	for {
-		n, err := dec.Read(buf)
-		if n > 0 {
-			result = append(result, buf[:n]...)
-		}
-		if err == io.EOF {
-			break
-		}
+func TestBodyDecoder_CrcMismatch(t *testing.T) {
+	original := []byte("payload whose checksum will be broken")
+	encoded := yencEncode(original, "crc.bin", 0, 0, 0)
+	good := fmt.Sprintf("pcrc32=%08x", crc32.ChecksumIEEE(original))
+	bad := "pcrc32=deadbeef"
+	if !strings.Contains(encoded, good) {
+		t.Fatal("encoded article missing expected pcrc32 trailer")
+	}
+
+	res, err := decodeResponse(t, bodyResponse(strings.Replace(encoded, good, bad, 1)))
+	if !errors.Is(err, ErrCrcMismatch) {
+		t.Fatalf("err = %v, want ErrCrcMismatch", err)
+	}
+	// Decoded bytes survive the CRC failure for inspection/repair.
+	if !bytes.Equal(res.Data, original) {
+		t.Errorf("data not preserved on CRC mismatch: got %d bytes, want %d", len(res.Data), len(original))
+	}
+}
+
+func TestBodyDecoder_NonYencBody(t *testing.T) {
+	res, err := decodeResponse(t, "222 0 <plain@example> body\r\njust some text\r\n.\r\n")
+	if !errors.Is(err, ErrDataMissing) {
+		t.Fatalf("err = %v, want ErrDataMissing", err)
+	}
+	if len(res.Data) != 0 {
+		t.Errorf("Data = %d bytes, want none", len(res.Data))
+	}
+}
+
+func TestBodyDecoder_ErrorStatus(t *testing.T) {
+	res, err := decodeResponse(t, "430 no such article\r\n")
+	if err != nil {
+		t.Fatalf("Next failed: %v", err)
+	}
+	if res.StatusCode != 430 {
+		t.Errorf("StatusCode = %d, want 430", res.StatusCode)
+	}
+	if res.Message != "430 no such article" {
+		t.Errorf("Message = %q", res.Message)
+	}
+	if res.Data != nil {
+		t.Errorf("Data = %d bytes, want nil", len(res.Data))
+	}
+}
+
+func TestBodyDecoder_TruncatedStream(t *testing.T) {
+	response := bodyResponse(yencEncode([]byte("cut short"), "trunc.bin", 0, 0, 0))
+	// Drop the ".\r\n" terminator and the trailer.
+	response = response[:len(response)-20]
+
+	_, err := decodeResponse(t, response)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("err = %v, want io.ErrUnexpectedEOF", err)
+	}
+}
+
+func TestBodyDecoder_Reuse(t *testing.T) {
+	first := []byte("first article payload")
+	second := []byte("second article with different content entirely")
+	stream := bodyResponse(yencEncode(first, "one.bin", 1, 1, int64(len(first)))) +
+		bodyResponse(yencEncode(second, "two.bin", 2, 1, int64(len(second))))
+
+	dec := NewBodyDecoder(strings.NewReader(stream), nil)
+	for i, want := range [][]byte{first, second} {
+		res, err := dec.Next()
 		if err != nil {
-			t.Fatalf("Read failed: %v", err)
+			t.Fatalf("Next %d failed: %v", i+1, err)
+		}
+		if !bytes.Equal(res.Data, want) {
+			t.Errorf("article %d mismatch: got %q, want %q", i+1, res.Data, want)
+		}
+		if wantPart := int64(i + 1); res.Meta.PartNumber != wantPart {
+			t.Errorf("article %d PartNumber = %d, want %d", i+1, res.Meta.PartNumber, wantPart)
 		}
 	}
-
-	if !bytes.Equal(result, original) {
-		t.Errorf("Small reads mismatch\n  got:  %q\n  want: %q", result, original)
-	}
 }
 
-func TestDecoder_ForcePureGo(t *testing.T) {
-	original := UsePureGo
-	UsePureGo = true
-	defer func() { UsePureGo = original }()
-
-	encoded := yencEncode([]byte("force pure go"), "force.txt", 0, 0, 0)
-	dec := AcquireDecoder(strings.NewReader(encoded))
-	defer ReleaseDecoder(dec)
-
-	if _, ok := dec.Reader.(*pureGoYencDecoder); !ok {
-		t.Fatalf("expected pure-Go yEnc decoder, got %T", dec.Reader)
+func TestBodyDecoder_DataFunc(t *testing.T) {
+	original := make([]byte, 64*1024)
+	for i := range original {
+		original[i] = byte(i % 253)
 	}
-}
+	response := bodyResponse(yencEncode(original, "pooled.bin", 1, 1, int64(len(original))))
 
-func TestDecoder_NNTPTerminator(t *testing.T) {
-	original := []byte("NNTP terminator test")
-	encoded := yencEncode(original, "nntp.txt", 0, 0, 0) + ".\r\n"
-
-	dec := AcquireDecoder(strings.NewReader(encoded))
-	defer ReleaseDecoder(dec)
-
-	decoded, err := io.ReadAll(dec)
+	supplied := make([]byte, 0, 1<<20)
+	dec := NewBodyDecoder(strings.NewReader(response), func() []byte { return supplied })
+	res, err := dec.Next()
 	if err != nil {
-		t.Fatalf("Read failed: %v", err)
+		t.Fatalf("Next failed: %v", err)
 	}
-	if !bytes.Equal(decoded, original) {
-		t.Errorf("Decoded data mismatch\n  got:  %q\n  want: %q", decoded, original)
+	if !bytes.Equal(res.Data, original) {
+		t.Fatal("decoded data mismatch")
+	}
+	if &res.Data[0] != &supplied[:1][0] {
+		t.Error("decoder did not decode into the supplied buffer")
 	}
 }

@@ -53,9 +53,14 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// isAPIRequest checks if the request is for an API endpoint
+// isAPIRequest reports whether an authentication failure should be returned as
+// JSON instead of redirecting the caller to the login page.
 func (s *Server) isAPIRequest(r *http.Request) bool {
-	return strings.HasPrefix(r.URL.Path, "/api/")
+	path := r.URL.Path
+	if urlBase := strings.TrimSuffix(s.urlBase, "/"); urlBase != "" {
+		path = strings.TrimPrefix(path, urlBase)
+	}
+	return strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/webhooks/")
 }
 
 // sendJSONError sends a JSON error response

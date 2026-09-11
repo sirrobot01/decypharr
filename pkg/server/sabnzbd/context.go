@@ -44,11 +44,9 @@ func (s *SABnzbd) categoryContext(next http.Handler) http.Handler {
 	})
 }
 
-func getArrFromContext(ctx context.Context) *arr.Arr {
-	if a, ok := ctx.Value(arrKey).(*arr.Arr); ok {
-		return a
-	}
-	return nil
+func getArrFromContext(ctx context.Context) arr.Arr {
+	instance, _ := ctx.Value(arrKey).(arr.Arr)
+	return instance
 }
 
 func getCategory(ctx context.Context) string {
@@ -74,9 +72,8 @@ func (s *SABnzbd) modeContext(next http.Handler) http.Handler {
 			category = r.Form.Get("cat")
 		}
 
-		// Create a default Arr instance for the category
 		downloadUncached := false
-		a := arr.New(category, "", "", false, &downloadUncached, "", "auto")
+		a := arr.Arr{Name: category, DownloadUncached: &downloadUncached, Source: arr.SourceAuto}
 
 		ctx := context.WithValue(r.Context(), modeKey, strings.TrimSpace(mode))
 		ctx = context.WithValue(ctx, arrKey, a)
@@ -93,7 +90,7 @@ func (s *SABnzbd) authContext(next http.Handler) http.Handler {
 		host := r.URL.Query().Get("ma_username")
 		token := r.URL.Query().Get("ma_password")
 		category := getCategory(r.Context())
-		a, err := s.authenticate(category, host, token)
+		a, err := s.authenticate(r.Context(), category, host, token)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
@@ -103,42 +100,42 @@ func (s *SABnzbd) authContext(next http.Handler) http.Handler {
 	})
 }
 
-func (s *SABnzbd) authenticate(category, username, password string) (*arr.Arr, error) {
+func (s *SABnzbd) authenticate(ctx context.Context, category, username, password string) (arr.Arr, error) {
 	cfg := config.Get()
-	a := s.manager.Arr().Get(category)
-	if a == nil {
-		// Arr is not yet in runtime storage — look for a matching config entry
-		// so we inherit its download_uncached setting. If no config match,
-		// leave nil so SendToDebrid falls back to the debrid provider's setting.
-		var downloadUncached *bool
-		for _, cfgArr := range config.Get().Arrs {
-			if cfgArr.Name == category {
-				downloadUncached = cfgArr.DownloadUncached
+	instance, known := s.manager.Arr().Get(category)
+	if !known {
+		// Not in the registry yet: inherit download_uncached from a matching
+		// config entry so SendToDebrid does not fall back to the provider.
+		instance = arr.Arr{Name: category, Host: username, Token: password, Source: arr.SourceAuto}
+		for _, configured := range cfg.Arrs {
+			if configured.Name == category {
+				instance.DownloadUncached = configured.DownloadUncached
 				break
 			}
 		}
-		a = arr.New(category, username, password, false, downloadUncached, "", "auto")
 	}
-	arrValidated := false // This is a flag to indicate if arr validation was successful
-	if (username == "" || password == "") && cfg.UseAuth {
-		return nil, fmt.Errorf("unauthorized: Host and token are required for authentication(you've enabled authentication)")
+	// In token-only mode the arr sends the API token as the password and may
+	// leave the username empty.
+	if (username == "" || password == "") && cfg.UseAuth && !config.VerifyToken(password) {
+		return arr.Arr{}, fmt.Errorf("unauthorized: Host and token are required for authentication(you've enabled authentication)")
 	}
-	if a.Source == "auto" {
-		a.Host = username
-		a.Token = password
-	}
-	if err := a.Validate(); err == nil {
-		arrValidated = true
+	if instance.Source == arr.SourceAuto {
+		instance.Host = username
+		instance.Token = password
 	}
 
-	if !arrValidated && cfg.UseAuth {
-		// If arr validation failed, try to use user auth validation
-		if !config.VerifyAuth(username, password) {
-			return nil, fmt.Errorf("unauthorized: invalid credentials")
+	kind, err := s.manager.Arr().Probe(ctx, instance)
+	validated := err == nil
+	if validated {
+		instance.Type = kind
+	}
+	if !validated && cfg.UseAuth {
+		if !config.VerifyAuth(username, password) && !config.VerifyToken(password) {
+			return arr.Arr{}, fmt.Errorf("unauthorized: invalid credentials")
 		}
 	}
 	if username != "" && password != "" {
-		s.manager.Arr().AddOrUpdate(a)
+		s.manager.Arr().AddOrUpdate(instance)
 	}
-	return a, nil
+	return instance, nil
 }

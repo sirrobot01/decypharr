@@ -87,6 +87,16 @@
 .card {
 }
 
+.card-body {
+    min-width: 0;
+}
+
+@media (max-width: 639px) {
+    .card-body {
+        --card-p: 1rem;
+    }
+}
+
 .card:hover {
     box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
 }
@@ -165,6 +175,13 @@
 .textarea,
 .select {
     width: 100%;
+}
+
+.label,
+.label-text,
+.label-text-alt {
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 /* Tailwind 4 flex improvements - Critical for proper flex layouts */

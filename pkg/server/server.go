@@ -85,6 +85,8 @@ func New(mgr *manager.Manager) *Server {
 		"templates/index.html",
 		"templates/download.html",
 		"templates/repair.html",
+		"templates/reacquire.html",
+		"templates/repair_tabs.html",
 		"templates/stats.html",
 		"templates/config.html",
 		"templates/browse.html",
@@ -140,7 +142,7 @@ func New(mgr *manager.Manager) *Server {
 		r.Group(func(r chi.Router) {
 			r.Use(s.authMiddleware)
 
-			//logs
+			// logs
 			r.Get("/logs", s.getLogs) // deprecated, use /debug/logs
 
 			r.Route("/debug", func(r chi.Router) {
@@ -151,10 +153,10 @@ func New(mgr *manager.Manager) *Server {
 				r.Get("/ingests", s.handleIngests)
 				r.Get("/ingests/{debrid}", s.handleIngestsByDebrid)
 			})
-		})
 
-		//webhooks
-		r.Post("/webhooks/tautulli", s.handleTautulli)
+			// Webhooks
+			r.Post("/webhooks/tautulli", s.handleTautulli)
+		})
 	})
 	s.router = r
 	return s

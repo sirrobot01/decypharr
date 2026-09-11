@@ -1,31 +1,12 @@
 package server
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/sirrobot01/decypharr/internal/config"
-	"golang.org/x/crypto/bcrypt"
 )
-
-func (s *Server) verifyAuth(username, password string) bool {
-	// If you're storing hashed password, use bcrypt to compare
-	if username == "" {
-		return false
-	}
-	auth := config.Get().GetAuth()
-	if auth == nil {
-		return false
-	}
-	if username != auth.Username {
-		return false
-	}
-	err := bcrypt.CompareHashAndPassword([]byte(auth.Password), []byte(password))
-	return err == nil
-}
 
 func (s *Server) skipAuthHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := config.Get()
@@ -65,23 +46,7 @@ func (s *Server) isValidAPIToken(r *http.Request) bool {
 		return false
 	}
 
-	// GetReader auth config and check if token exists
-	auth := config.Get().GetAuth()
-	if auth == nil || auth.APIToken == "" {
-		return false
-	}
-
-	// Check if the provided token matches the configured token
-	return token == auth.APIToken
-}
-
-// generateAPIToken creates a new random API token
-func (s *Server) generateAPIToken() (string, error) {
-	bytes := make([]byte, 32) // 256-bit token
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(bytes), nil
+	return config.VerifyToken(token)
 }
 
 // refreshAPIToken generates a new API token and saves it
@@ -92,7 +57,7 @@ func (s *Server) refreshAPIToken() (string, error) {
 	}
 
 	// Generate new token
-	token, err := s.generateAPIToken()
+	token, err := config.GenerateAPIToken()
 	if err != nil {
 		return "", err
 	}

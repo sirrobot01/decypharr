@@ -39,11 +39,7 @@ func TestEnsureDownloaderLocked_ExtendsMissByReadAhead(t *testing.T) {
 		readAhead = 16 * testMiB
 	)
 
-	item := &CacheItem{
-		info: ItemInfo{
-			Size: 64 * testMiB,
-		},
-	}
+	item := newTestItem(t, 64*testMiB)
 
 	dl := &downloader{
 		start:     reqPos,
@@ -77,14 +73,8 @@ func TestEnsureDownloaderLocked_CachedRequestPrefetchesGap(t *testing.T) {
 		readAhead = 16 * testMiB
 	)
 
-	item := &CacheItem{
-		info: ItemInfo{
-			Size: 64 * testMiB,
-			Rs: ranges.Ranges{
-				{Pos: 0, Size: 1 * testMiB}, // request is cached, look-ahead has a gap after 1 MiB
-			},
-		},
-	}
+	// request is cached, look-ahead has a gap after 1 MiB
+	item := newTestItem(t, 64*testMiB, ranges.Range{Pos: 0, Size: 1 * testMiB})
 
 	dl := &downloader{
 		start:     512 * testKiB,
@@ -118,14 +108,8 @@ func TestEnsureDownloaderLocked_CachedWindowFullDoesNotExtend(t *testing.T) {
 		readAhead = 16 * testMiB
 	)
 
-	item := &CacheItem{
-		info: ItemInfo{
-			Size: 64 * testMiB,
-			Rs: ranges.Ranges{
-				{Pos: 0, Size: 32 * testMiB}, // request + look-ahead fully cached
-			},
-		},
-	}
+	// request + look-ahead fully cached
+	item := newTestItem(t, 64*testMiB, ranges.Range{Pos: 0, Size: 32 * testMiB})
 
 	dl := &downloader{
 		start:     0,

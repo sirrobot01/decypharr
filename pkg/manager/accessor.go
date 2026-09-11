@@ -6,8 +6,11 @@ import (
 	"github.com/go-co-op/gocron/v2"
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/sirrobot01/decypharr/pkg/arr"
+	"github.com/sirrobot01/decypharr/pkg/arr/reacquire"
 	debrid "github.com/sirrobot01/decypharr/pkg/debrid/common"
 	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
+	"github.com/sirrobot01/decypharr/pkg/hearsay"
+	"github.com/sirrobot01/decypharr/pkg/repair"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sirrobot01/decypharr/pkg/usenet"
 )
@@ -18,8 +21,14 @@ func (m *Manager) SetMountManager(mountMgr MountManager) {
 
 // Repair returns the repair service. It is created during init() so callers
 // can rely on a non-nil value once the manager has been constructed.
-func (m *Manager) Repair() *Repair {
+func (m *Manager) Repair() *repair.Service {
 	return m.repair
+}
+
+// Hearsay returns the hearsay service, or nil when disabled. A nil
+// service is safe to call.
+func (m *Manager) Hearsay() *hearsay.Service {
+	return m.hearsay
 }
 
 func (m *Manager) Scheduler() gocron.Scheduler {
@@ -38,8 +47,20 @@ func (m *Manager) Strm() *Strm {
 }
 
 // Arr returns the Arr storage instance
-func (m *Manager) Arr() *arr.Storage {
+func (m *Manager) Arr() *arr.Service {
 	return m.arr
+}
+
+func (m *Manager) ArrService() *reacquire.Service {
+	return m.arrService
+}
+
+func (m *Manager) RefreshArrIndex() bool {
+	return m.arrIndexer != nil && m.arrIndexer.Refresh()
+}
+
+func (m *Manager) ReindexArrEntry(arrName, entryID string) bool {
+	return m.arrIndexer != nil && m.arrIndexer.ReindexEntry(arrName, entryID)
 }
 
 func (m *Manager) Queue() *Queue {

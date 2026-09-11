@@ -93,28 +93,3 @@ func adviseDropBehind(f *os.File, start, end int64) {
 	}
 	_ = unix.Fadvise(fd, start, end-start, unix.FADV_DONTNEED)
 }
-
-// adviseWillNeed asks the kernel to start populating the given range in
-// its page cache asynchronously. Callers use this when they've queued a
-// download that will land at this offset shortly — the kernel can prefetch
-// the on-disk bytes (if any), and after the write completes the same
-// pages stay hot for the reader that will arrive moments later.
-func adviseWillNeed(f *os.File, offset, length int64) {
-	if f == nil || length <= 0 {
-		return
-	}
-	fd := int(f.Fd())
-	if fd < 0 {
-		return
-	}
-	page := int64(os.Getpagesize())
-	start := offset - (offset % page)
-	end := offset + length
-	if rem := end % page; rem != 0 {
-		end += page - rem
-	}
-	if end <= start {
-		return
-	}
-	_ = unix.Fadvise(fd, start, end-start, unix.FADV_WILLNEED)
-}

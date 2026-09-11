@@ -48,6 +48,14 @@ type TorrentInfoResponse struct {
 	Error *errorResponse `json:"error"`
 }
 
+type restartMagnetResponse struct {
+	Status string         `json:"status"`
+	Error  *errorResponse `json:"error"`
+	Data   struct {
+		Message string `json:"message"`
+	} `json:"data"`
+}
+
 type TorrentsListResponse struct {
 	Status string `json:"status"`
 	Data   struct {

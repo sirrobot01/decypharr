@@ -388,6 +388,21 @@ func (s *Storage) FilterQueued(filter func(*Entry) bool) ([]*Entry, error) {
 	return entries, nil
 }
 
+// CountQueuedByState counts queued entries in a state. The stats collector
+// polls this every 5 seconds, so it decodes the stored records in place rather
+// than materializing every entry the way FilterQueued does.
+func (s *Storage) CountQueuedByState(state TorrentState) int {
+	count := 0
+	_ = s.queue.ForEach(func(key string, value []byte) error {
+		var pb EntryProto
+		if proto.Unmarshal(value, &pb) == nil && pb.GetState() == string(state) {
+			count++
+		}
+		return nil
+	})
+	return count
+}
+
 // DeleteWhereQueued deletes matching queued entries
 func (s *Storage) DeleteWhereQueued(predicate func(*Entry) bool, cleanup func(*Entry) error) error {
 	var keysToDelete []string
