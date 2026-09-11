@@ -1,6 +1,6 @@
 export default {
     content: [
-        "../frontend/templates/**/*.html",
-        "../frontend/assets/**/*.js"
+        "../pkg/server/templates/**/*.html",
+        "../pkg/server/assets/**/*.js"
     ],
 };
