@@ -304,6 +304,7 @@ func (m *Manager) processQueuedTorrent(entry *storage.Entry) {
 	}
 
 	// Update entry progress
+	applyDebridTorrentToEntry(entry, debridTorrent)
 	entry.Progress = debridTorrent.Progress / 100.0
 	entry.Speed = debridTorrent.Speed
 	entry.Size = debridTorrent.GetSize()

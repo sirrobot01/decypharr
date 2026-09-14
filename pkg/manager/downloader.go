@@ -41,6 +41,8 @@ const (
 	symlinkLogSampleSize        = 8
 	localDownloadMaxAttempts    = 4
 	defaultFileDownloadWorkers  = 5
+	symlinkFileCheckMaxRetries  = 6
+	symlinkFileCheckRetryDelay  = 10 * time.Second
 )
 
 type downloadLogMeta struct {
@@ -173,9 +175,53 @@ func (d *Downloader) markAsError(entry *storage.Entry, err error) {
 
 // processSymlink creates symlinks for torrent files
 func (d *Downloader) processSymlink(entry *storage.Entry, mountPath string) error {
-	files := entry.GetActiveFiles()
+	var files []*storage.File
+
+	for attempt := 1; attempt <= symlinkFileCheckMaxRetries; attempt++ {
+		files = entry.GetActiveFiles()
+
+		// If entry has no active files in memory, try to refresh from provider
+		if len(files) == 0 && d.manager != nil {
+			if placement := entry.GetActiveProvider(); placement != nil && entry.ActiveProvider != "" {
+				if client := d.manager.ProviderClient(entry.ActiveProvider); client != nil {
+					if t, err := client.GetTorrent(placement.ID); err == nil && t != nil && len(t.Files) > 0 {
+						applyDebridTorrentToEntry(entry, t)
+						if d.manager.queue != nil {
+							_ = d.manager.queue.Update(entry)
+						}
+						files = entry.GetActiveFiles()
+					}
+				}
+			}
+		}
+
+		// If still 0 files, check if files exist in the mount directory
+		if len(files) == 0 {
+			d.populateFilesFromMount(entry, mountPath)
+			files = entry.GetActiveFiles()
+		}
+
+		if len(files) > 0 {
+			break
+		}
+
+		if attempt < symlinkFileCheckMaxRetries {
+			d.logger.Warn().
+				Str("entry", entry.Name).
+				Str("mount_path", mountPath).
+				Int("attempt", attempt).
+				Int("max_attempts", symlinkFileCheckMaxRetries).
+				Msg("0 files found, waiting before retry...")
+			time.Sleep(symlinkFileCheckRetryDelay)
+		}
+	}
+
 	torrentSymlinkPath := entry.DownloadPath()
 	d.logger.Info().Str("mount_path", mountPath).Msgf("Creating symlinks for %d files in %s", len(files), torrentSymlinkPath)
+
+	if len(files) == 0 {
+		return fmt.Errorf("failed to create symlinks: 0 files found for %s in %s after %d attempts", entry.Name, mountPath, symlinkFileCheckMaxRetries)
+	}
 
 	// Create symlink directory
 	err := os.MkdirAll(torrentSymlinkPath, os.ModePerm)
@@ -189,7 +235,9 @@ func (d *Downloader) processSymlink(entry *storage.Entry, mountPath string) erro
 	}
 
 	entry.IsDownloading = true
-	_ = d.manager.queue.Update(entry)
+	if d.manager != nil && d.manager.queue != nil {
+		_ = d.manager.queue.Update(entry)
+	}
 
 	if err := d.waitForSymlinkFilesReady(filePaths, symlinkReadyTimeout); err != nil {
 		return err
@@ -215,6 +263,49 @@ func (d *Downloader) processSymlink(entry *storage.Entry, mountPath string) erro
 	d.completeEntry(entry)
 
 	return nil
+}
+
+func (d *Downloader) populateFilesFromMount(entry *storage.Entry, mountPath string) {
+	entries, err := os.ReadDir(mountPath)
+	if err != nil {
+		return
+	}
+
+	var scanDir func(string)
+	scanDir = func(dirPath string) {
+		items, err := os.ReadDir(dirPath)
+		if err != nil {
+			return
+		}
+		for _, item := range items {
+			entryName := item.Name()
+			fullPath := filepath.Join(dirPath, entryName)
+			if item.IsDir() {
+				scanDir(fullPath)
+				continue
+			}
+			if entry.Files == nil {
+				entry.Files = make(map[string]*storage.File)
+			}
+			if _, exists := entry.Files[entryName]; !exists {
+				info, err := item.Info()
+				var size int64
+				if err == nil {
+					size = info.Size()
+				}
+				entry.Files[entryName] = &storage.File{
+					Name:     entryName,
+					Size:     size,
+					InfoHash: entry.InfoHash,
+					AddedOn:  entry.AddedOn,
+				}
+			}
+		}
+	}
+
+	if len(entries) > 0 {
+		scanDir(mountPath)
+	}
 }
 
 func (d *Downloader) createSymlinksWhenMountFilesAppear(entry *storage.Entry, files []*storage.File, mountPath string, symlinkDir string) ([]string, error) {
