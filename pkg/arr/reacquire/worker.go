@@ -215,7 +215,7 @@ func (s *Service) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.reconcileLibraryJobs(ctx)
+			s.reconcileImportedJobs(ctx)
 			s.maintainJobs()
 			s.signal()
 		case <-s.wake:
