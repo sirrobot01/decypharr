@@ -992,6 +992,13 @@ func (c *Cache) GetStats() map[string]any {
 		"download_speed":    c.downloadSpeed.Load(),
 		"circuit_breakers":  c.circuitBreakers.Load(),
 	}
+	if c.pool != nil {
+		memory := c.pool.Stats()
+		stats["buffer_memory_in_use"] = memory.MemoryInUse
+		stats["buffer_memory_allocated"] = memory.MemoryAllocated
+		stats["buffer_memory_budget"] = memory.MemoryBudget
+		stats["buffer_count"] = memory.Buffers
+	}
 
 	return stats
 }

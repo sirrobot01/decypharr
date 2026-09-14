@@ -28,6 +28,9 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/usenet/parser"
 )
 
+// Transport statistics can be up to 30 seconds old.
+const transportStatsTTL = 30 * time.Second
+
 type Service struct {
 	engine      *hearsaylib.Hearsay
 	log         zerolog.Logger
@@ -44,11 +47,14 @@ type Service struct {
 	gossip      int
 	maxStorage  int64
 	maxFeeds    int
+	maxSeeded   int
 	follow      []string
 
-	mu        sync.Mutex
-	node      *transport.Node
-	closeOnce sync.Once
+	mu               sync.Mutex
+	node             *transport.Node
+	transportStats   *transport.Stats
+	transportStatsAt time.Time
+	closeOnce        sync.Once
 }
 
 // New builds the service from configuration. It returns (nil, nil)
@@ -58,7 +64,7 @@ func New(cfg *config.Config, log zerolog.Logger) (*Service, error) {
 	if cfg.Hearsay.Disabled {
 		return nil, nil
 	}
-	if cfg.Hearsay.MaxStorageBytes < 0 || cfg.Hearsay.MaxFeedsPerNamespace < 0 {
+	if cfg.Hearsay.MaxStorageBytes < 0 || cfg.Hearsay.MaxFeedsPerNamespace < 0 || cfg.Hearsay.MaxSeededTorrents < 0 {
 		return nil, fmt.Errorf("hearsay: transport limits must not be negative")
 	}
 	mode, err := parseAdviceMode(cfg.Hearsay.AdviceMode)
@@ -83,6 +89,7 @@ func New(cfg *config.Config, log zerolog.Logger) (*Service, error) {
 		gossip:      cfg.Hearsay.GossipPort,
 		maxStorage:  cfg.Hearsay.MaxStorageBytes,
 		maxFeeds:    cfg.Hearsay.MaxFeedsPerNamespace,
+		maxSeeded:   cfg.Hearsay.MaxSeededTorrents,
 	}
 	var domains []hearsaylib.Domain
 	for _, d := range cfg.Debrids {
@@ -213,12 +220,14 @@ func (s *Service) Start(ctx context.Context) error {
 		GossipPort:           s.gossip,
 		MaxStorage:           s.maxStorage,
 		MaxFeedsPerNamespace: s.maxFeeds,
+		MaxSeededTorrents:    s.maxSeeded,
 	})
 	if err != nil {
 		return fmt.Errorf("hearsay transport: %w", err)
 	}
 	s.mu.Lock()
 	s.node = node
+	s.transportStats = nil
 	s.mu.Unlock()
 	// With a follow list the node accepts nothing else: no DHT
 	// announce, and no keys from the gossip handshake. Own key included,
@@ -265,6 +274,8 @@ func (s *Service) Close() {
 	s.closeOnce.Do(func() {
 		s.mu.Lock()
 		node := s.node
+		s.node = nil
+		s.transportStats = nil
 		s.mu.Unlock()
 		if node != nil {
 			node.Close()
@@ -311,12 +322,22 @@ func (s *Service) Status() Status {
 		st.Advice[vendor] = advisor.Snapshot()
 	}
 	s.mu.Lock()
-	node := s.node
-	s.mu.Unlock()
-	if node != nil {
-		stats := node.Stats()
+	if s.node != nil {
+		// Serialize refreshes. Close must wait for a refresh to finish.
+		if s.transportStats == nil || time.Since(s.transportStatsAt) >= transportStatsTTL {
+			stats := s.node.Stats()
+			s.transportStats = &stats
+			s.transportStatsAt = time.Now()
+		}
+		// Each caller owns its snapshot. Keep the cached maps and slice private.
+		stats := *s.transportStats
+		stats.Torrents = slices.Clone(stats.Torrents)
+		stats.Feeds = maps.Clone(stats.Feeds)
+		stats.RetryingFeeds = maps.Clone(stats.RetryingFeeds)
+		stats.QuarantinedFeeds = maps.Clone(stats.QuarantinedFeeds)
 		st.Transport = &stats
 	}
+	s.mu.Unlock()
 	return st
 }
 

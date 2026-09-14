@@ -2,10 +2,12 @@ package hearsay
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 
 	hearsaylib "github.com/sirrobot01/hearsay"
 	hsdebrid "github.com/sirrobot01/hearsay/debrid"
+	"github.com/sirrobot01/hearsay/transport"
 
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/pkg/storage"
@@ -127,6 +130,88 @@ func TestExplicitNetworkOptOut(t *testing.T) {
 	}
 }
 
+func TestSeededTorrentLimit(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		limit int
+		want  int
+	}{
+		{name: "default", want: transport.DefaultMaxSeededTorrents},
+		{name: "configured", limit: 64, want: 64},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config.SetConfigPath(t.TempDir())
+			cfg := &config.Config{
+				Debrids: []config.Debrid{{Provider: "realdebrid"}},
+				Hearsay: config.Hearsay{MaxSeededTorrents: test.limit, Publish: new(false)},
+			}
+			s, err := New(cfg, zerolog.Nop())
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer func() {
+				cancel()
+				s.Close()
+			}()
+			// Restrict discovery to this identity during the test.
+			s.follow = []string{hex.EncodeToString(s.engine.Identity())}
+			if err := s.Start(ctx); err != nil {
+				t.Fatal(err)
+			}
+			stats := s.Status().Transport
+			if stats == nil || stats.MaxSeededTorrents != test.want {
+				t.Fatalf("transport statistics = %+v, want seeded torrent limit %d", stats, test.want)
+			}
+		})
+	}
+}
+
+func TestTransportStatsCache(t *testing.T) {
+	s := testService(t)
+	node, err := transport.Listen(t.TempDir(), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.node = node
+	node.Track("ns.first")
+	first := s.Status()
+	if first.Transport == nil {
+		t.Fatal("missing transport statistics")
+	}
+	first.Transport.Feeds["ns.first"] = 99
+	node.Track("ns.second")
+	second := s.Status()
+	if second.Transport.Feeds["ns.first"] != 0 {
+		t.Fatal("caller changed the cached statistics")
+	}
+	if _, exists := second.Transport.Feeds["ns.second"]; exists {
+		t.Fatal("transport statistics refreshed before expiry")
+	}
+
+	s.mu.Lock()
+	s.transportStatsAt = time.Now().Add(-transportStatsTTL)
+	s.mu.Unlock()
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			status := s.Status()
+			if _, exists := status.Transport.Feeds["ns.second"]; !exists {
+				t.Error("expired transport statistics were not refreshed")
+			}
+			status.Transport.Feeds["ns.first"] = 100
+		})
+	}
+	wg.Wait()
+	if s.Status().Transport.Feeds["ns.first"] != 0 {
+		t.Fatal("concurrent caller changed the cached statistics")
+	}
+	s.Close()
+	if s.node != nil || s.transportStats != nil {
+		t.Fatal("close retained the node or its statistics")
+	}
+}
+
 func TestInvalidConfigurationDisablesHearsay(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -135,6 +220,7 @@ func TestInvalidConfigurationDisablesHearsay(t *testing.T) {
 		{name: "mode", mutate: func(cfg *config.Hearsay) { cfg.AdviceMode = "automatic" }},
 		{name: "support", mutate: func(cfg *config.Hearsay) { cfg.MinSupport = 1.1 }},
 		{name: "storage", mutate: func(cfg *config.Hearsay) { cfg.MaxStorageBytes = -1 }},
+		{name: "seeded torrents", mutate: func(cfg *config.Hearsay) { cfg.MaxSeededTorrents = -1 }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

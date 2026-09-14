@@ -380,8 +380,8 @@ github.com/sirrobot01/appendstore v0.6.0 h1:XLEFABBJJy0GZg3H5QLeT+f2z7XVkzrZq5SG
 github.com/sirrobot01/appendstore v0.6.0/go.mod h1:u2mV2yFSLRfURkDXNnlG9HzeSTTxzV9TfR7QEpaFmt4=
 github.com/sirrobot01/facetfs v0.7.0 h1:YxkRfafFfgoio2ZMBa59Jfy3XD9x86Q6VR7TPs8/Omg=
 github.com/sirrobot01/facetfs v0.7.0/go.mod h1:w2cHQQTa1mFQYnpiHwGwfxooNwOVzXaT5y4IY/ES8/I=
-github.com/sirrobot01/hearsay v0.6.2 h1:fN3rRQjT+Gi7Efqi8zm8OlKuDtgMS+BAZOoYTV+nVNM=
-github.com/sirrobot01/hearsay v0.6.2/go.mod h1:1WEtiVuWOgjxeI1BPM4moPdUKy1EoH0rVNIOKW/Ij+M=
+github.com/sirrobot01/hearsay v0.6.3 h1:rY0/jTX6GJ418JFoisyDSpG/RI8BrKg02ZeAa498SGA=
+github.com/sirrobot01/hearsay v0.6.3/go.mod h1:1WEtiVuWOgjxeI1BPM4moPdUKy1EoH0rVNIOKW/Ij+M=
 github.com/sirupsen/logrus v1.2.0/go.mod h1:LxeOpSwHxABJmUn/MG1IvRgCAasNZTLOkJPxbbu5VWo=
 github.com/sirupsen/logrus v1.4.2/go.mod h1:tLMulIdttU9McNUspp0xgXVQah82FyeX6MwdIuYE2rE=
 github.com/smartystreets/assertions v0.0.0-20180927180507-b2de0cb4f26d/go.mod h1:OnSkiWE9lh6wB0YB77sQom3nweQdgAjqCqsofrRNTgc=

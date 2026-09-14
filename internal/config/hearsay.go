@@ -18,6 +18,7 @@ type Hearsay struct {
 	Interval             string   `json:"interval,omitempty"`
 	MaxStorageBytes      int64    `json:"max_storage_bytes,omitzero"`
 	MaxFeedsPerNamespace int      `json:"max_feeds_per_namespace,omitzero"`
+	MaxSeededTorrents    int      `json:"max_seeded_torrents,omitzero"`
 	Follow               []string `json:"follow,omitempty"`
 }
 
@@ -33,7 +34,7 @@ func (h Hearsay) IsZero() bool {
 	return !h.Disabled && h.Participate == nil && h.Publish == nil && h.AdviceMode == "" &&
 		h.MinSupport == 0 && h.MinEvidence == 0 && h.MinSources == 0 &&
 		h.Port == 0 && h.GossipPort == 0 && h.Interval == "" &&
-		h.MaxStorageBytes == 0 && h.MaxFeedsPerNamespace == 0 && len(h.Follow) == 0
+		h.MaxStorageBytes == 0 && h.MaxFeedsPerNamespace == 0 && h.MaxSeededTorrents == 0 && len(h.Follow) == 0
 }
 
 func (c *Config) applyHearsayEnvVars() {
@@ -85,6 +86,11 @@ func (c *Config) applyHearsayEnvVars() {
 	if v := getEnv("HEARSAY__MAX_FEEDS_PER_NAMESPACE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			c.Hearsay.MaxFeedsPerNamespace = n
+		}
+	}
+	if v := getEnv("HEARSAY__MAX_SEEDED_TORRENTS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Hearsay.MaxSeededTorrents = n
 		}
 	}
 	if v := getEnv("HEARSAY__FOLLOW"); v != "" {

@@ -22,6 +22,20 @@ func NewPools(memoryBudget int64) *Pools {
 	}
 }
 
+// Stats reports allocated buffer bytes. These are not process RSS values.
+func (p *Pools) Stats() map[string]any {
+	blocks := p.buffers.Stats()
+	extents := p.extents.stats()
+	return map[string]any{
+		"memory_in_use":    blocks.MemoryInUse + extents.MemoryInUse,
+		"memory_allocated": blocks.MemoryAllocated + extents.MemoryInUse,
+		"block_budget":     blocks.MemoryBudget,
+		"extent_budget":    extents.MemoryBudget,
+		"buffers":          blocks.Buffers,
+		"extent_caches":    extents.Caches,
+	}
+}
+
 // Close releases the pools after the service stops its readers.
 func (p *Pools) Close() error {
 	p.mu.Lock()

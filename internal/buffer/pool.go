@@ -8,14 +8,16 @@ import (
 // Pool enforces shared RAM and sparse-disk budgets across its Buffers.
 type Pool struct {
 	name        string
-	memBudget   atomic.Int64 // RAM ceiling across Buffers; 0 = unlimited
+	memBudget   atomic.Int64 // allocated block byte target; 0 = unlimited
 	diskLimit   atomic.Int64 // on-disk present bytes ceiling; 0 = unlimited
 	backWindow  int64        // bytes retained behind a read head before punching
 	reclaimDisk func(int64) int64
 
-	memInUse  atomic.Int64 // sum of resident block RAM across Buffers
-	memDemand atomic.Int64 // sum of MemorySize across Buffers
-	diskInUse atomic.Int64 // sum of on-disk present bytes across Buffers
+	memInUse     atomic.Int64 // active block bytes across Buffers
+	memAllocated atomic.Int64 // all owned blocks, including reuse and pending release
+	memReusable  atomic.Int64 // allocated bytes held on allocator free lists
+	memDemand    atomic.Int64 // sum of MemorySize across Buffers
+	diskInUse    atomic.Int64 // sum of on-disk present bytes across Buffers
 
 	mu      sync.RWMutex
 	buffers map[*Buffer]struct{}
@@ -40,8 +42,9 @@ type PoolConfig struct {
 	// Name labels the pool for logging/metrics ("dfs", "usenet").
 	Name string
 
-	// MemoryBudget caps the sum of resident block RAM across all Buffers in
-	// this pool. 0 = unlimited.
+	// MemoryBudget sets the target for allocated block bytes in this pool.
+	// It includes reuse and pending release. 0 = unlimited.
+	// Concurrent writes and pending releases can cause temporary excess.
 	MemoryBudget int64
 
 	// DiskLimit caps the sum of on-disk present bytes across all Buffers. When
@@ -66,13 +69,18 @@ type PoolConfig struct {
 
 // PoolStats reports pool-wide counters.
 type PoolStats struct {
-	MemoryInUse    int64
-	MemoryBudget   int64
-	DiskInUse      int64
-	DiskLimit      int64
-	Buffers        int
-	DiskPunches    int64
-	BytesReclaimed int64
+	// MemoryInUse counts blocks that hold active data.
+	MemoryInUse int64
+	// MemoryAllocated includes active blocks, reuse, and pending release.
+	// It measures allocation size, not RSS. Heap fallback blocks remain
+	// subject to GC after release.
+	MemoryAllocated int64
+	MemoryBudget    int64
+	DiskInUse       int64
+	DiskLimit       int64
+	Buffers         int
+	DiskPunches     int64
+	BytesReclaimed  int64
 }
 
 // NewPool creates a Pool. If DiskLimit > 0 it starts a background worker that
@@ -155,13 +163,14 @@ func (p *Pool) Stats() PoolStats {
 	n := len(p.buffers)
 	p.mu.RUnlock()
 	return PoolStats{
-		MemoryInUse:    p.memInUse.Load(),
-		MemoryBudget:   p.memBudget.Load(),
-		DiskInUse:      p.diskInUse.Load(),
-		DiskLimit:      p.diskLimit.Load(),
-		Buffers:        n,
-		DiskPunches:    p.statsPunches.Load(),
-		BytesReclaimed: p.statsReclaimed.Load(),
+		MemoryInUse:     p.memInUse.Load(),
+		MemoryAllocated: p.memAllocated.Load(),
+		MemoryBudget:    p.memBudget.Load(),
+		DiskInUse:       p.diskInUse.Load(),
+		DiskLimit:       p.diskLimit.Load(),
+		Buffers:         n,
+		DiskPunches:     p.statsPunches.Load(),
+		BytesReclaimed:  p.statsReclaimed.Load(),
 	}
 }
 
@@ -193,11 +202,37 @@ func (p *Pool) Close() error {
 
 // --- RAM admission ----------------------------------------------------------
 
-// wouldExceedMemory reports whether caching one more block would push the
-// pool's resident total past the budget.
-func (p *Pool) wouldExceedMemory() bool {
-	b := p.memBudget.Load()
-	return b > 0 && p.memInUse.Load()+int64(blockSize) > b
+// prepareAllocation releases reuse blocks before active data is removed.
+// It reports whether another block would still exceed the pool budget.
+func (p *Pool) prepareAllocation(b *Buffer) bool {
+	budget := p.memBudget.Load()
+	if budget <= 0 || p.memAllocated.Load()+blockSize <= budget {
+		return false
+	}
+	if p.memReusable.Load() == 0 {
+		return p.memAllocated.Load()+blockSize > budget
+	}
+	b.alloc.mu.Lock()
+	reusable := len(b.alloc.free) > 0
+	b.alloc.mu.Unlock()
+	if reusable && !p.overMemBudget(p.memAllocated.Load()) {
+		return false
+	}
+
+	// The caller holds one Buffer lock. Only allocator locks are taken here.
+	p.mu.RLock()
+	bufs := make([]*Buffer, 0, len(p.buffers))
+	for buf := range p.buffers {
+		bufs = append(bufs, buf)
+	}
+	p.mu.RUnlock()
+	for _, buf := range bufs {
+		buf.alloc.drain()
+		if p.memAllocated.Load()+blockSize <= budget {
+			return false
+		}
+	}
+	return p.memAllocated.Load()+blockSize > budget
 }
 
 // shareFor divides a constrained budget in proportion to each Buffer's ask.
@@ -218,7 +253,8 @@ func (p *Pool) shareFor(b *Buffer) int64 {
 }
 
 func (p *Pool) addBlock() {
-	if v := p.memInUse.Add(int64(blockSize)); p.overMemBudget(v) {
+	p.memInUse.Add(int64(blockSize))
+	if p.overMemBudget(p.memAllocated.Load()) {
 		p.signalMemEvict()
 	}
 }
@@ -254,13 +290,21 @@ func (p *Pool) memEvictLoop() {
 // played-out RAR volume gives its window back and the stream still feeding a
 // player keeps its own.
 func (p *Pool) reclaimMemory() {
-	for pass := 0; pass < 4 && p.overMemBudget(p.memInUse.Load()); pass++ {
+	for pass := 0; pass < 4 && p.overMemBudget(p.memAllocated.Load()); pass++ {
 		p.mu.RLock()
 		bufs := make([]*Buffer, 0, len(p.buffers))
 		for b := range p.buffers {
 			bufs = append(bufs, b)
 		}
 		p.mu.RUnlock()
+
+		// Release unused blocks before removing active data.
+		for _, b := range bufs {
+			b.alloc.drain()
+			if !p.overMemBudget(p.memAllocated.Load()) {
+				return
+			}
+		}
 
 		var reclaimed int64
 		for _, b := range bufs {
@@ -269,11 +313,12 @@ func (p *Pool) reclaimMemory() {
 				continue
 			}
 			reclaimed += b.trimTo(share)
-			if !p.overMemBudget(p.memInUse.Load()) {
+			if !p.overMemBudget(p.memAllocated.Load()) {
 				return
 			}
 		}
 		if reclaimed == 0 {
+			// Pending releases finish on the unmap worker. Do not wait here.
 			// Everyone is already at or under their share (or every block
 			// is pinned by an in-flight read). Accept the bounded overshoot
 			// rather than evicting bytes a reader is about to copy out.

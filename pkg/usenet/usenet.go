@@ -1146,6 +1146,7 @@ func (u *Usenet) Stats() map[string]any {
 	stats["readers"] = u.fs.Size()
 	stats["nzb_storage"] = u.nzbStorage.Stats()
 	stats["analyzer"] = u.analyzer.Metrics()
+	stats["buffers"] = u.bufferPools.Stats()
 	return stats
 }
 

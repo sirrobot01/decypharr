@@ -13,6 +13,34 @@ func TestHearsayIsZero(t *testing.T) {
 	if (Hearsay{Participate: new(false)}).IsZero() {
 		t.Fatal("explicit participation should not be zero")
 	}
+	if (Hearsay{MaxSeededTorrents: 64}).IsZero() {
+		t.Fatal("explicit seeded torrent limit should not be zero")
+	}
+}
+
+func TestHearsaySeededTorrentLimitRoundTrip(t *testing.T) {
+	for _, limit := range []int{0, 64} {
+		cfg := Config{Hearsay: Hearsay{MaxSeededTorrents: limit}}
+		raw, err := json.Marshal(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded Config
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if decoded.Hearsay.MaxSeededTorrents != limit {
+			t.Fatalf("seeded torrent limit = %d, want %d: %s", decoded.Hearsay.MaxSeededTorrents, limit, raw)
+		}
+	}
+}
+
+func TestHearsaySeededTorrentLimitRequiresRestart(t *testing.T) {
+	before := &Config{}
+	after := &Config{Hearsay: Hearsay{MaxSeededTorrents: 64}}
+	if !before.RequiresRestart(after) {
+		t.Fatal("seeded torrent limit change did not require restart")
+	}
 }
 
 func TestHearsayNetworkDefaults(t *testing.T) {
@@ -55,6 +83,7 @@ func TestHearsayEnvironment(t *testing.T) {
 	t.Setenv("DECYPHARR_HEARSAY__MIN_SOURCES", "3")
 	t.Setenv("DECYPHARR_HEARSAY__MAX_STORAGE_BYTES", "2048")
 	t.Setenv("DECYPHARR_HEARSAY__MAX_FEEDS_PER_NAMESPACE", "32")
+	t.Setenv("DECYPHARR_HEARSAY__MAX_SEEDED_TORRENTS", "64")
 	t.Setenv("DECYPHARR_HEARSAY__FOLLOW", "ed25519:aa, ed25519:bb")
 
 	var cfg Config
@@ -66,10 +95,30 @@ func TestHearsayEnvironment(t *testing.T) {
 	if h.MinSupport != 0.7 || h.MinEvidence != 0.4 || h.MinSources != 3 {
 		t.Fatalf("policy = %+v", h)
 	}
-	if h.MaxStorageBytes != 2048 || h.MaxFeedsPerNamespace != 32 {
+	if h.MaxStorageBytes != 2048 || h.MaxFeedsPerNamespace != 32 || h.MaxSeededTorrents != 64 {
 		t.Fatalf("limits = %+v", h)
 	}
 	if len(h.Follow) != 2 || h.Follow[1] != "ed25519:bb" {
 		t.Fatalf("follow = %v", h.Follow)
+	}
+}
+
+func TestHearsaySeededTorrentLimitEnvironment(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  int
+	}{
+		{value: "0", want: 0},
+		{value: "-1", want: -1},
+		{value: "invalid", want: 64},
+	} {
+		t.Run(test.value, func(t *testing.T) {
+			t.Setenv("DECYPHARR_HEARSAY__MAX_SEEDED_TORRENTS", test.value)
+			cfg := Config{Hearsay: Hearsay{MaxSeededTorrents: 64}}
+			cfg.applyHearsayEnvVars()
+			if cfg.Hearsay.MaxSeededTorrents != test.want {
+				t.Fatalf("seeded torrent limit = %d, want %d", cfg.Hearsay.MaxSeededTorrents, test.want)
+			}
+		})
 	}
 }

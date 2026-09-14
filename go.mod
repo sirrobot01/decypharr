@@ -22,7 +22,7 @@ require (
 	github.com/rs/zerolog v1.35.1
 	github.com/sirrobot01/appendstore v0.6.0
 	github.com/sirrobot01/facetfs v0.7.0
-	github.com/sirrobot01/hearsay v0.6.2
+	github.com/sirrobot01/hearsay v0.6.3
 	github.com/sourcegraph/conc v0.3.0
 	github.com/stanNthe5/stringbuf v0.0.3
 	github.com/winfsp/cgofuse v1.6.0

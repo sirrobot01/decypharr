@@ -117,8 +117,7 @@ func (c *Collector) collect() *Snapshot {
 	// --- System ---
 	mb := func(b uint64) string { return fmt.Sprintf("%.2fMB", float64(b)/1024/1024) }
 	snap.System = SystemStats{
-		// Sys - HeapReleased is the heap actually held from the OS; HeapReleased
-		// has been handed back (MADV_DONTNEED on Linux) so it does not count.
+		// This is Go runtime memory. Direct mmap allocations are excluded.
 		MemoryUsed:     mb(memStats.Sys - memStats.HeapReleased),
 		HeapAllocMB:    mb(memStats.HeapAlloc),
 		HeapInuseMB:    mb(memStats.HeapInuse),
@@ -133,6 +132,9 @@ func (c *Collector) collect() *Snapshot {
 		UptimeSeconds:  int64(uptime.Seconds()),
 		Uptime:         uptime.String(),
 		StartTime:      startTime.Format("2006-01-02 15:04:05"),
+	}
+	if rss, err := processRSS(); err == nil {
+		snap.System.ProcessRSSMB = mb(rss)
 	}
 
 	// --- Debrids ---

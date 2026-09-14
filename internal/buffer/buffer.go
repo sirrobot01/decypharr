@@ -166,6 +166,7 @@ func newBuffer(p *Pool, cfg Config) (*Buffer, error) {
 		maxBytes:        cfg.MemorySize,
 	}
 	b.alloc.maxFree = min(max(int(b.maxBytes/blockSize), 1), maxReuseBlocks)
+	b.alloc.pool = p
 
 	if cfg.DiskPath == "" {
 		return b, nil
@@ -740,7 +741,7 @@ func (b *Buffer) Close() error {
 				flushErr = err
 			}
 		}
-		munmapBlock(blk.bufPtr)
+		blockRelease{data: blk.bufPtr, pool: b.pool}.release()
 		delete(b.blocks, off)
 	}
 	b.pool.dropBytes(b.bytesInRAM)
@@ -825,7 +826,7 @@ func (b *Buffer) overBudgetLocked() bool {
 	// The pool share only binds while the pool is actually short, so a Buffer
 	// at or under its share keeps its window and the hoarders give memory back
 	// (see Pool.reclaimMemory).
-	return b.pool.wouldExceedMemory() && b.bytesInRAM+blockSize > b.pool.shareFor(b)
+	return b.pool.prepareAllocation(b) && b.bytesInRAM+blockSize > b.pool.shareFor(b)
 }
 
 // evictLocked removes one block from RAM, flushing dirty bytes first when a

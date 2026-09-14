@@ -47,6 +47,7 @@ The Hearsay settings page exposes these options:
 | Discovery port | `gossip_port` | automatic |
 | Update interval | `interval` | `30m` |
 | Maximum relay storage | `max_storage_bytes` | 1 GiB |
+| Maximum seeded torrents | `max_seeded_torrents` | `256` |
 | Maximum sources per namespace | `max_feeds_per_namespace` | `256` |
 | Trusted publishers | `follow` | discover automatically |
 
@@ -65,6 +66,7 @@ Example:
     "gossip_port": 0,
     "interval": "30m",
     "max_storage_bytes": 1073741824,
+    "max_seeded_torrents": 256,
     "max_feeds_per_namespace": 256,
     "follow": []
   }
@@ -72,6 +74,8 @@ Example:
 ```
 
 `publish` has no effect unless `participate` is also true. With `participate: true` and `publish: false`, Decypharr receives and relays evidence but keeps its observations local.
+
+`max_seeded_torrents` limits the number of retained swarms. This limit is separate from `max_storage_bytes`. Each swarm uses memory for peers and network state, even when its generation file is small. An omitted value or `0` uses the default of `256`. Negative values are invalid. Active transfers can temporarily exceed this limit. Restart Decypharr after you change this setting.
 
 `follow` is an allowlist. When it is non-empty, Decypharr accepts only those publisher identities, disables open discovery for other identities, and removes retained feeds outside the list.
 
@@ -88,6 +92,7 @@ environment:
   - DECYPHARR_HEARSAY__MIN_EVIDENCE=0.3
   - DECYPHARR_HEARSAY__MIN_SOURCES=1
   - DECYPHARR_HEARSAY__MAX_STORAGE_BYTES=1073741824
+  - DECYPHARR_HEARSAY__MAX_SEEDED_TORRENTS=256
   - DECYPHARR_HEARSAY__MAX_FEEDS_PER_NAMESPACE=256
   - DECYPHARR_HEARSAY__FOLLOW=ed25519:a3f9...,ed25519:b101...
 ```
@@ -98,7 +103,7 @@ The identity, observations, metrics, and retained generations live in the `hears
 
 ## Upgrading from the older integration
 
-The current integration uses Hearsay `v0.6.2` and the HSY2 protocol. HSY1 remote generations are incompatible and are discarded on startup; local observations and the long-term identity remain usable. Hearsay `v0.6.2` also waits for a valid generation pointer before advertising a feed.
+The current integration uses Hearsay `v0.6.3` and the HSY2 protocol. It removes incompatible HSY1 remote generations at startup. It keeps local observations and the long-term identity. Hearsay waits for a valid generation pointer before it advertises a feed.
 
 The old `no_publish` setting is replaced by `publish`. Missing `participate` and `publish` values now default to `true`, matching the standalone daemon. Explicit `false` values remain respected. Set both to `false` for local-only operation, and move from shadow to active mode only after checking measured accuracy.
 

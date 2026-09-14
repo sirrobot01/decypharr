@@ -1885,6 +1885,17 @@ fe80::/10</textarea>
                                 <span class="label-text-alt opacity-70">Bytes retained for relaying generations.</span>
                             </div>
                             <div>
+                                <label class="label" for="hearsay.max_seeded_torrents">
+                                    <span class="font-medium">Maximum seeded torrents</span>
+                                </label>
+                                <input type="number" min="0" step="1" class="input w-full"
+                                       name="hearsay.max_seeded_torrents" id="hearsay.max_seeded_torrents"
+                                       placeholder="256">
+                                <span class="label-text-alt opacity-70">Limits retained swarms independently of relay
+                                    storage bytes. Empty or 0 uses 256. Active transfers can temporarily exceed this
+                                    limit. Requires a restart.</span>
+                            </div>
+                            <div>
                                 <label class="label" for="hearsay.max_feeds_per_namespace">
                                     <span class="font-medium">Maximum sources per namespace</span>
                                 </label>
