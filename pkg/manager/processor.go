@@ -182,12 +182,16 @@ func (m *Manager) processQueuedEntries() {
 		}
 		if entry.IsTorrent() {
 			if entry.ActiveProvider != "" {
-				go m.processQueuedTorrent(entry)
+				if !m.startDownloadTask(func() { m.processQueuedTorrent(entry) }) {
+					m.processingEntries.Delete(entry.InfoHash)
+				}
 			} else {
 				m.processingEntries.Delete(entry.InfoHash)
 			}
 		} else if entry.IsNZB() {
-			go m.processQueuedNZB(entry)
+			if !m.startDownloadTask(func() { m.processQueuedNZB(entry) }) {
+				m.processingEntries.Delete(entry.InfoHash)
+			}
 		} else {
 			m.processingEntries.Delete(entry.InfoHash)
 		}
@@ -221,7 +225,7 @@ func (m *Manager) processQueuedNZB(entry *storage.Entry) {
 		// Still processing, skip for now
 		return
 	case usenet.NZBStatusCompleted:
-		if err := m.processNZB(context.Background(), entry, metadata); err != nil {
+		if err := m.processNZB(m.ctx, entry, metadata); err != nil {
 			m.logger.Error().Err(err).Str("name", entry.Name).Msg("Error processing queued NZB")
 			entry.MarkAsError(err)
 			_ = m.queue.Update(entry)
@@ -318,7 +322,7 @@ func (m *Manager) processQueuedTorrent(entry *storage.Entry) {
 	_ = m.queue.Update(entry)
 	// Check if done or failed
 	if debridTorrent.Status == debridTypes.TorrentStatusDownloaded {
-		go m.processAction(entry)
+		m.processAction(entry)
 	}
 }
 
@@ -339,19 +343,25 @@ func (m *Manager) processAction(entry *storage.Entry) {
 	}
 
 	// Now add entry to the main storage
-	if err := m.AddOrUpdate(entry, func(t *storage.Entry) {
-		m.InvalidateEntryCache()
-		if err := m.RefreshMount(); err != nil {
-			m.logger.Error().Err(err).Msg("Mount refresh failed")
-		}
-	}); err != nil {
+	if err := m.AddOrUpdate(entry, nil); err != nil {
 		m.logger.Error().Err(err).Str("name", entry.Name).Msg("Failed to persist completed download")
 		entry.MarkAsError(err)
 		_ = m.queue.Update(entry)
 		return
 	}
+	m.InvalidateEntryCache()
+	if err := m.RefreshMount(); err != nil {
+		m.logger.Error().Err(err).Msg("Mount refresh failed")
+	}
 	err := m.downloader.download(entry)
 	if err != nil {
+		if errors.Is(err, context.Canceled) && m.ctx.Err() != nil {
+			entry.IsDownloading = false
+			if err := m.queue.Update(entry); err != nil {
+				m.logger.Error().Err(err).Str("name", entry.Name).Msg("Failed to save interrupted download")
+			}
+			return
+		}
 		m.logger.Error().
 			Err(err).
 			Str("name", entry.Name).
@@ -378,7 +388,7 @@ func (m *Manager) processNewTorrent(torrent *storage.Entry, debridTorrent *debri
 	}
 
 	// Parse post-download action
-	go m.processAction(torrent)
+	m.startDownloadTask(func() { m.processAction(torrent) })
 }
 
 func applyDebridTorrentToEntry(torrent *storage.Entry, debridTorrent *debridTypes.Torrent) {

@@ -64,6 +64,9 @@ func NewDownloadManager(manager *Manager) *Downloader {
 }
 
 func (d *Downloader) download(torrent *storage.Entry) error {
+	if err := d.operationContext().Err(); err != nil {
+		return err
+	}
 	// Mark as in-flight up front so the queue scheduler skips this entry while
 	// we're iterating seasons / creating symlinks (processSymlink only flips
 	// this flag after its own directory scan, which is too late for the parent
@@ -82,11 +85,17 @@ func (d *Downloader) download(torrent *storage.Entry) error {
 	if isMultiSeason {
 		seasonResults := convertToMultiSeason(torrent, seasons)
 		for _, result := range seasonResults {
+			if saved, err := d.manager.queue.GetTorrent(result.InfoHash); err == nil && saved.IsComplete {
+				continue
+			}
 			if err := d.manager.queue.Add(result); err != nil {
 				d.logger.Error().Err(err).Msgf("Failed to save season torrent")
 				continue
 			}
 			if err := d.process(result, torrentMountPath); err != nil {
+				if errors.Is(err, context.Canceled) && d.operationContext().Err() != nil {
+					return err
+				}
 				d.markAsError(result, err)
 			}
 		}
@@ -645,8 +654,6 @@ func (d *Downloader) processUsenetDownload(entry *storage.Entry) error {
 	err := p.Wait()
 
 	if err != nil {
-		entry.MarkAsError(err)
-		_ = d.manager.queue.Update(entry)
 		return fmt.Errorf("NZB download failed: %w", err)
 	}
 

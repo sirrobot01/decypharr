@@ -107,6 +107,11 @@ type Manager struct {
 	jobQueue  *JobQueue
 	nzbSyncMu sync.Mutex
 
+	downloadMu       sync.Mutex
+	downloadTasks    sync.WaitGroup
+	downloadsStopped bool
+	cancelDownloads  context.CancelFunc
+
 	// Notifications service
 	Notifications *notifications.Service
 
@@ -190,6 +195,10 @@ func New() *Manager {
 }
 
 func (m *Manager) init() {
+	m.downloadMu.Lock()
+	m.ctx, m.cancelDownloads = context.WithCancel(context.Background())
+	m.downloadsStopped = false
+	m.downloadMu.Unlock()
 	cfg := config.Get()
 	scheduler, err := gocron.NewScheduler(gocron.WithLocation(time.Local), gocron.WithGlobalJobOptions(gocron.WithTags("decypharr-manager")))
 	if err != nil {
@@ -336,14 +345,26 @@ func (m *Manager) initJobQueue() {
 	// for 60-90 minutes on big libraries, during which every arr reported
 	// "download client unavailable". Backgrounding lets the API serve and the
 	// worker pool drain immediately while the restore catches up.
-	go func() {
+	m.startDownloadTask(func() {
 		defer func() {
 			if r := recover(); r != nil {
 				m.logger.Error().Interface("panic", r).Msg("Recovered from panic while restoring active downloads")
 			}
 		}()
 		m.restoreActiveDownloadJobs()
-	}()
+	})
+}
+
+// startDownloadTask registers work before shutdown can wait for it.
+// Once shutdown starts, queued entries stay in storage for the next start.
+func (m *Manager) startDownloadTask(task func()) bool {
+	m.downloadMu.Lock()
+	defer m.downloadMu.Unlock()
+	if m.downloadsStopped {
+		return false
+	}
+	m.downloadTasks.Go(task)
+	return true
 }
 
 func (m *Manager) processJob(ctx context.Context, job *Job) {
@@ -499,8 +520,33 @@ func (m *Manager) Start(ctx context.Context) error {
 // Stop stops the manager and cleans up all resources
 func (m *Manager) Stop() error {
 	m.logger.Info().Msg("Stopping manager")
+	m.downloadMu.Lock()
+	m.downloadsStopped = true
+	if m.cancelDownloads != nil {
+		m.cancelDownloads()
+	}
+	m.downloadMu.Unlock()
 
-	// Stop mount manager first
+	// Stop schedulers
+	if m.scheduler != nil {
+		if err := m.scheduler.Shutdown(); err != nil {
+			m.logger.Warn().Err(err).Msg("Failed to shutdown scheduler")
+		}
+	}
+	if m.cetScheduler != nil {
+		if err := m.cetScheduler.Shutdown(); err != nil {
+			m.logger.Warn().Err(err).Msg("Failed to shutdown CET scheduler")
+		}
+	}
+
+	if m.jobQueue != nil {
+		m.logger.Info().Msg("Closing active download queue")
+		m.jobQueue.Close()
+	}
+
+	m.downloadTasks.Wait()
+
+	// Downloads have saved their final or resumable state.
 	if m.mountManager != nil {
 		m.logger.Info().Msg("Stopping mount manager")
 		if err := m.mountManager.Stop(); err != nil {
@@ -519,23 +565,6 @@ func (m *Manager) Stop() error {
 		}
 	}
 	m.SetArrRecovery(nil)
-
-	// Stop schedulers
-	if m.scheduler != nil {
-		if err := m.scheduler.Shutdown(); err != nil {
-			m.logger.Warn().Err(err).Msg("Failed to shutdown scheduler")
-		}
-	}
-	if m.cetScheduler != nil {
-		if err := m.cetScheduler.Shutdown(); err != nil {
-			m.logger.Warn().Err(err).Msg("Failed to shutdown CET scheduler")
-		}
-	}
-
-	if m.jobQueue != nil {
-		m.logger.Info().Msg("Closing active download queue")
-		m.jobQueue.Close()
-	}
 
 	// Close usenet connection manager if active
 	if m.usenet != nil {

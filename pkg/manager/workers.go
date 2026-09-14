@@ -13,7 +13,7 @@ import (
 // for example, call the processQueuedEntries function once
 func (m *Manager) runInitialCalls(ctx context.Context) {
 	go m.refreshDownloadLinks(ctx)
-	go m.processQueuedEntries()
+	m.startDownloadTask(m.processQueuedEntries)
 	go m.syncAccounts()
 }
 
