@@ -241,9 +241,9 @@ func (f *Fixer) MoveTorrent(entry *storage.Entry, debridName string, reinsert bo
 		}
 	}
 
-	// Capture the source provider's torrent ID for post-migration cleanup.
+	// Only replace the old torrent on the same provider. Other placements stay valid.
 	var oldID string
-	if source, ok := entry.Providers[entry.ActiveProvider]; ok && source != nil {
+	if source, ok := entry.Providers[debridName]; ok && source != nil && debridName == entry.ActiveProvider {
 		oldID = source.ID
 	}
 

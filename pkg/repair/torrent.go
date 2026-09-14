@@ -16,6 +16,7 @@ import (
 func (r *Service) probeTorrentFile(ctx context.Context, entry *storage.Entry, file *storage.File, name string, result fileResult, opts RunOptions) fileResult {
 	client := r.backend.ProviderClient(entry.ActiveProvider)
 	if client == nil {
+		result.broken = true
 		result.reason = "provider_client_not_found"
 		return result
 	}
