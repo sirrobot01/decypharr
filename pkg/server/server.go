@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -57,6 +59,27 @@ type ContentResponse struct {
 	ArrID string `json:"arr"`
 }
 
+// shutdownGrace is how long Start waits for in-flight requests to finish
+// before it forces the remaining connections closed. It has to be long enough
+// for ordinary API requests to complete and short enough that a restart does
+// not read as an outage to whoever triggered it.
+const shutdownGrace = 5 * time.Second
+
+// handlerGrace is how long Start waits, after cutting the connections, for
+// the handlers on them to unwind before it lets the caller tear down what
+// they were using.
+//
+// Generous on purpose. Handlers that touch their connection die on the next
+// read or write, so the ones this is really about - a WebDAV read - are gone
+// in milliseconds and never come near this. What is left is a handler off
+// doing something that ignores its connection entirely: utils.DownloadFile,
+// say, which takes neither a timeout nor the request context. Returning while
+// one of those is still running lets the caller reset the manager out from
+// under it, so prefer to wait. The cap is only here so such a handler cannot
+// hold the restart open indefinitely - which is the bug this whole change is
+// about - and reaching it is reported rather than passed over.
+const handlerGrace = 30 * time.Second
+
 type Server struct {
 	router       *chi.Mux
 	logger       zerolog.Logger
@@ -67,6 +90,27 @@ type Server struct {
 	nzbUserAgent string
 	urlBase      string
 	restartFunc  func()
+
+	// instanceID identifies this Server, and so the run of the service it
+	// belongs to. A restart builds a fresh Server, so a client that watched
+	// the value change knows the new listener is up rather than guessing
+	// from a timer. See handleGetVersion.
+	instanceID string
+
+	// inflight counts handlers that have been entered and not yet returned.
+	// http.Server.Close does not wait for those, so Start uses this to wait
+	// for them itself before the caller tears down what they are using.
+	inflight sync.WaitGroup
+}
+
+// trackInflight records a handler for the duration of its run, so that a
+// forced shutdown can still wait for handlers to unwind.
+func (s *Server) trackInflight(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.inflight.Add(1)
+		defer s.inflight.Done()
+		next.ServeHTTP(w, r)
+	})
 }
 
 func New(mgr *manager.Manager) *Server {
@@ -105,12 +149,13 @@ func New(mgr *manager.Manager) *Server {
 	statsCollector := stats.New(mgr)
 
 	s := &Server{
-		logger:    l,
-		manager:   mgr,
-		stats:     statsCollector,
-		cookie:    cookieStore,
-		templates: templates,
-		urlBase:   cfg.URLBase,
+		logger:     l,
+		manager:    mgr,
+		stats:      statsCollector,
+		cookie:     cookieStore,
+		templates:  templates,
+		urlBase:    cfg.URLBase,
+		instanceID: strconv.FormatInt(time.Now().UnixNano(), 36),
 	}
 
 	qb := qbit.New(mgr)
@@ -186,7 +231,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.logger.Info().Msgf("Starting server on %s%s", addr, cfg.URLBase)
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: s.router,
+		Handler: s.trackInflight(s.router),
 	}
 
 	go func() {
@@ -197,7 +242,50 @@ func (s *Server) Start(ctx context.Context) error {
 
 	<-ctx.Done()
 	s.logger.Info().Msg("Shutting down gracefully...")
-	return srv.Shutdown(context.Background())
+
+	// Bound the drain. Shutdown closes the listeners straight away but then
+	// waits for every in-flight request to finish, and a WebDAV read is in
+	// flight for as long as the player is streaming the file. On a config
+	// save the caller blocks on this before it can bind the next listener,
+	// so an unbounded drain leaves the UI answering nothing (a bad gateway
+	// behind a reverse proxy) for the length of somebody's movie. The
+	// restart tears down the debrid clients those reads depend on anyway,
+	// so cut them once ordinary requests have had time to land.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		s.logger.Warn().Err(err).Dur("grace", shutdownGrace).
+			Msg("Requests still in flight after the shutdown grace period; closing them")
+		closeErr := srv.Close()
+		// Close cuts the connections but returns without waiting for the
+		// handlers behind them, and the caller goes on to tear down the
+		// manager those handlers are still reading and writing. Most unwind
+		// as soon as their connection goes (the next read or write fails),
+		// so wait for them, bounded: a handler stuck somewhere other than
+		// its connection must not hold the restart open again.
+		if !s.waitForHandlers(handlerGrace) {
+			s.logger.Warn().Dur("grace", handlerGrace).
+				Msg("Handlers still running after their connections were closed; continuing")
+		}
+		return closeErr
+	}
+	return nil
+}
+
+// waitForHandlers blocks until every tracked handler has returned, or until
+// grace expires. It reports whether they all returned.
+func (s *Server) waitForHandlers(grace time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		s.inflight.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(grace):
+		return false
+	}
 }
 
 func (s *Server) getLogs(w http.ResponseWriter, r *http.Request) {
