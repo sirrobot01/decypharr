@@ -497,7 +497,14 @@ func (pm *Premiumize) fetchDownloadLink(ctx context.Context, acc *account.Accoun
 	link := file.Link
 	size := file.Size
 	filename := file.Name
-	if link == "" && file.Id != "" {
+	// Premiumize mints a CDN link once, when the item is added, and that URL
+	// starts returning 403 roughly 24h later. It is never re-minted on its
+	// own: the refresher is a no-op for this provider, so the stored
+	// file.Link is an identity rather than a usable URL. Re-mint through
+	// item/details whenever there is an id to do it with; the account cache
+	// holds the result, so this costs one call per file until a 403 evicts
+	// the entry and the link service re-fetches.
+	if file.Id != "" {
 		item, err := pm.itemDetails(ctx, file.Id)
 		if err != nil {
 			return types.DownloadLink{}, err
@@ -509,13 +516,21 @@ func (pm *Premiumize) fetchDownloadLink(ctx context.Context, acc *account.Accoun
 	if link == "" {
 		return types.DownloadLink{}, customerror.HosterUnavailableError
 	}
+	// The account cache reads under file.Link and writes under dl.Link, so
+	// Link must stay the stored URL. Putting the re-minted URL there would
+	// key every entry under something no lookup uses, making the cache a
+	// permanent miss and costing an item/details call on every read.
+	cacheKey := file.Link
+	if cacheKey == "" {
+		cacheKey = link
+	}
 	now := time.Now()
 	return types.DownloadLink{
 		Debrid:       pm.config.Name,
 		Token:        acc.Token,
 		Filename:     filename,
 		Size:         size,
-		Link:         link,
+		Link:         cacheKey,
 		DownloadLink: link,
 		Generated:    now,
 		ExpiresAt:    now.Add(pm.autoExpiresLinksAfter),
