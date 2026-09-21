@@ -107,8 +107,14 @@ func (s *SABnzbd) handleDelete(w http.ResponseWriter, r *http.Request) {
 			continue // Skip empty IDs
 		}
 
-		// Use atomic delete operation
+		// Use atomic delete operation.
+		// Missing / already-gone ids are a successful no-op (matches SABnzbd and
+		// our qBittorrent delete handler). Sonarr retries forever on HTTP 500.
 		if err := s.manager.Queue().Delete(nzoID, nil); err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "not found") {
+				successCount++
+				continue
+			}
 			errors = append(errors, fmt.Sprintf("Failed to delete %s: %v", nzoID, err))
 		} else {
 			successCount++
