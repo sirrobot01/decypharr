@@ -334,7 +334,7 @@ func (s *SABnzbd) handleAddURL(w http.ResponseWriter, r *http.Request) {
 		if len(errors) > 0 {
 			errMsg = strings.Join(errors, "; ")
 		}
-		s.writeError(w, errMsg, http.StatusInternalServerError)
+		s.writeEnqueueFailure(w, errMsg)
 		return
 	}
 
@@ -437,7 +437,7 @@ func (s *SABnzbd) handleAddFile(w http.ResponseWriter, r *http.Request) {
 		// Parse NZB file
 		nzbID, err := s.addNZBFile(ctx, content, header.Filename, _arr, action)
 		if err != nil {
-			s.writeError(w, fmt.Sprintf("Failed to add NZB file: %s", err.Error()), http.StatusInternalServerError)
+			s.writeEnqueueFailure(w, fmt.Sprintf("Failed to add NZB file: %s", err.Error()))
 			return
 		}
 		if nzbID != "" {
@@ -450,7 +450,7 @@ func (s *SABnzbd) handleAddFile(w http.ResponseWriter, r *http.Request) {
 		if len(errors) > 0 {
 			errMsg = strings.Join(errors, "; ")
 		}
-		s.writeError(w, errMsg, http.StatusInternalServerError)
+		s.writeEnqueueFailure(w, errMsg)
 		return
 	}
 
@@ -570,6 +570,14 @@ func (s *SABnzbd) getHistory(ctx context.Context, limit int, nzoIDs []string) (H
 	}
 	history.Slots = slots
 	return history, nil
+}
+
+// writeEnqueueFailure reports an NZB that could not be queued (dead NZB,
+// missing articles, unreachable URL). Real SABnzbd answers these with HTTP 200
+// and {"status": false, "error": ...}; a 5xx makes Sonarr/Radarr report a
+// generic "unable to connect" and treat a normal rejection as an outage.
+func (s *SABnzbd) writeEnqueueFailure(w http.ResponseWriter, message string) {
+	s.writeError(w, message, http.StatusOK)
 }
 
 func (s *SABnzbd) writeError(w http.ResponseWriter, message string, status int) {
