@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sirrobot01/decypharr/internal/config"
 )
@@ -141,6 +142,11 @@ func (s *Service) CleanupQueue(ctx context.Context, name string) error {
 		}
 	}
 	for _, downloadID := range manualImports {
+		if ok, wait := s.manualImports.reserve(name, downloadID, time.Now()); !ok {
+			s.logger.Debug().Str("arr", name).Str("download_id", downloadID).
+				Dur("retry_in", wait).Msg("Queue cleanup: manual import deferred by cooldown")
+			continue
+		}
 		if err := s.ManualImport(ctx, name, downloadID); err != nil {
 			s.logger.Error().Err(err).Str("arr", name).Msg("Queue cleanup: manual import failed")
 		}

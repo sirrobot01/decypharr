@@ -95,7 +95,9 @@ func (s *Service) ManualImport(ctx context.Context, name, downloadID string) err
 
 	var candidates []ImportResponseSchema
 	query := url.Values{"downloadId": {downloadID}}
-	resp, err := s.get(ctx, instance, "api/v3/manualimport?"+query.Encode(), &candidates)
+	// The lookup makes the Arr probe every file in the download. On a network
+	// mount that can outlast the client's response timeout, so it is sent once.
+	resp, err := s.getOnce(ctx, instance, "api/v3/manualimport?"+query.Encode(), &candidates)
 	if err != nil {
 		return fmt.Errorf("manual import lookup: %w", err)
 	}

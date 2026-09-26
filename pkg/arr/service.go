@@ -25,6 +25,8 @@ type Service struct {
 	mutation *request.Client
 	logger   zerolog.Logger
 	cleanups singleflight.Group
+
+	manualImports manualImportGuard
 }
 
 func New() *Service {
