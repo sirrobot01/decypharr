@@ -81,6 +81,16 @@ func requireJSONEOF(decoder *json.Decoder) error {
 // for provider errors. Use Do when the caller must read an error response body.
 func (c *Client) DoJSON(req *http.Request, out any) (*http.Response, error) {
 	resp, err := c.Do(req)
+	return finishJSON(resp, err, out)
+}
+
+// DoJSONOnce is DoJSON without retries. See DoOnce.
+func (c *Client) DoJSONOnce(req *http.Request, out any) (*http.Response, error) {
+	resp, err := c.DoOnce(req)
+	return finishJSON(resp, err, out)
+}
+
+func finishJSON(resp *http.Response, err error, out any) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
