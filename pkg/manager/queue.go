@@ -180,14 +180,18 @@ func (q *Queue) Update(torrent *storage.Entry) error {
 
 func (q *Queue) ListFilterFunc(category string, protocol config.Protocol, state storage.TorrentState, hashes []string) func(*storage.Entry) bool {
 	hashSet := make(map[string]struct{}, len(hashes))
-	if len(hashes) > 0 {
+	// qBittorrent uses "all" as a sentinel for "every torrent", so `hashes=all`
+	// must not be matched as a literal infohash -- doing so filters for a
+	// torrent whose hash is the string "all" and returns nothing.
+	allHashes := len(hashes) == 1 && strings.EqualFold(strings.TrimSpace(hashes[0]), "all")
+	if len(hashes) > 0 && !allHashes {
 		for _, h := range hashes {
 			hashSet[strings.ToLower(h)] = struct{}{}
 		}
 	}
 
 	var filterFunc func(*storage.Entry) bool
-	if category != "" || len(hashes) != 0 || state != "" || protocol != config.ProtocolAll {
+	if category != "" || (len(hashes) != 0 && !allHashes) || state != "" || protocol != config.ProtocolAll {
 		filterFunc = func(t *storage.Entry) bool {
 			if category != "" && t.Category != category {
 				return false
