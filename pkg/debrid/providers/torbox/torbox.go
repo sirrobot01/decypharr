@@ -49,7 +49,20 @@ type Torbox struct {
 	downloadPresentCache  sync.Map
 	downloadPresentMu     sync.Mutex
 	downloadPresentLoaded bool
+
+	// createtorrent has its own TorBox limit (60/hour at the time of writing),
+	// separate from the 300/min API cap. Once TorBox refuses an add, further
+	// adds are rejected locally until this time instead of each one waiting
+	// ~30s for another 429.
+	addPauseMu    sync.Mutex
+	addPauseUntil time.Time
 }
+
+// defaultAddLimitPause is used when TorBox refuses an add without Retry-After.
+const defaultAddLimitPause = 5 * time.Minute
+
+// maxAddLimitPause caps an unusually large Retry-After from TorBox.
+const maxAddLimitPause = time.Hour
 
 func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Torbox, error) {
 	cfg := config.Get()
@@ -169,6 +182,24 @@ func (tb *Torbox) doGetWithClient(ctx context.Context, client *request.Client, e
 }
 
 func (tb *Torbox) doPostFormWithClient(client *request.Client, endpoint string, formData map[string]string, result any) (*http.Response, error) {
+	req, err := tb.formRequest(endpoint, formData)
+	if err != nil {
+		return nil, err
+	}
+	return client.DoJSON(req, result)
+}
+
+// doPostFormOnce is doPostFormWithClient without retries. Use it for endpoints
+// with their own tight TorBox limit, where a retry only burns more of it.
+func (tb *Torbox) doPostFormOnce(client *request.Client, endpoint string, formData map[string]string, result any) (*http.Response, error) {
+	req, err := tb.formRequest(endpoint, formData)
+	if err != nil {
+		return nil, err
+	}
+	return client.DoJSONOnce(req, result)
+}
+
+func (tb *Torbox) formRequest(endpoint string, formData map[string]string) (*http.Request, error) {
 	form := url.Values{}
 	for k, v := range formData {
 		form.Set(k, v)
@@ -179,8 +210,7 @@ func (tb *Torbox) doPostFormWithClient(client *request.Client, endpoint string, 
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	return client.DoJSON(req, result)
+	return req, nil
 }
 
 // doPostJSON performs a POST request with a JSON body.
@@ -246,7 +276,53 @@ func (tb *Torbox) IsAvailable(hashes []string) (map[string]bool, error) {
 	return result, nil
 }
 
+// addsPausedUntil returns when adds may resume, or zero if they are allowed now.
+func (tb *Torbox) addsPausedUntil() time.Time {
+	tb.addPauseMu.Lock()
+	defer tb.addPauseMu.Unlock()
+	if time.Now().Before(tb.addPauseUntil) {
+		return tb.addPauseUntil
+	}
+	return time.Time{}
+}
+
+// pauseAdds records a TorBox add-limit refusal and returns when adds resume.
+func (tb *Torbox) pauseAdds(resp *http.Response) time.Time {
+	wait := defaultAddLimitPause
+	if ra := resp.Header.Get("Retry-After"); ra != "" {
+		if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
+			wait = time.Duration(secs) * time.Second
+		} else if t, err := http.ParseTime(ra); err == nil && time.Until(t) > 0 {
+			wait = time.Until(t)
+		}
+	}
+	wait = min(wait, maxAddLimitPause)
+
+	tb.addPauseMu.Lock()
+	defer tb.addPauseMu.Unlock()
+	if until := time.Now().Add(wait); until.After(tb.addPauseUntil) {
+		tb.addPauseUntil = until
+	}
+	return tb.addPauseUntil
+}
+
 func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
+	if until := tb.addsPausedUntil(); !until.IsZero() {
+		return nil, fmt.Errorf("torbox add limit reached, torrent adds paused until %s", until.Local().Format("15:04:05"))
+	}
+
+	// Every createtorrent call counts against TorBox's add limit, including
+	// add_only_if_cached refusals. Ask checkcached first so uncached torrents
+	// are rejected without spending that limit.
+	if !torrent.DownloadUncached && torrent.InfoHash != "" {
+		available, err := tb.IsAvailable([]string{torrent.InfoHash})
+		if err != nil {
+			tb.logger.Debug().Err(err).Str("hash", torrent.InfoHash).Msg("Cache check failed, submitting anyway")
+		} else if !available[torrent.InfoHash] {
+			return nil, fmt.Errorf("torrent %s is not cached on torbox", torrent.InfoHash)
+		}
+	}
+
 	var data AddMagnetResponse
 
 	formData := map[string]string{
@@ -256,11 +332,16 @@ func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
 		formData["add_only_if_cached"] = "true"
 	}
 
-	resp, err := tb.doPostFormWithClient(tb.submissionClient(), "/api/torrents/createtorrent", formData, &data)
+	resp, err := tb.doPostFormOnce(tb.submissionClient(), "/api/torrents/createtorrent", formData, &data)
 	if err != nil {
 		return nil, err
 	}
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		until := tb.pauseAdds(resp)
+		tb.logger.Warn().Msgf("TorBox add limit reached, pausing torrent adds until %s", until.Local().Format("15:04:05"))
+		return nil, fmt.Errorf("torbox add limit reached, torrent adds paused until %s", until.Local().Format("15:04:05"))
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("torbox API error: Status: %d", resp.StatusCode)
 	}
