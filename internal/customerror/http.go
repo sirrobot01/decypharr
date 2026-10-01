@@ -20,6 +20,23 @@ var UsenetCorruptContentError = &Error{
 	Code:       "usenet_corrupt_content",
 }
 
+// A missing or invalid .meta manifest is a local, deterministic failure: the
+// segment map the file needs is gone, so re-probing returns the same error
+// forever. Repair treats both as broken rather than deferring them, otherwise
+// the entry stays unrepairable while the arr still counts the file as
+// downloaded.
+var UsenetManifestMissingError = &Error{
+	statusCode: 404,
+	err:        errors.New("usenet metadata manifest is missing"),
+	Code:       "usenet_manifest_missing",
+}
+
+var UsenetManifestInvalidError = &Error{
+	statusCode: 422,
+	err:        errors.New("usenet metadata manifest is invalid"),
+	Code:       "usenet_manifest_invalid",
+}
+
 var TrafficExceededError = &Error{
 	statusCode: 503,
 	err:        errors.New("traffic limit exceeded"),

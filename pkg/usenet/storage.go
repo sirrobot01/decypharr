@@ -13,6 +13,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/customerror"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sourcegraph/conc/pool"
@@ -70,6 +71,32 @@ func NewNZBStorage() (*NZBStorage, error) {
 // metaFilePath returns the path for a given NZB ID
 func (s *NZBStorage) metaFilePath(id string) string {
 	return filepath.Join(s.metaDir, id+metaFileExtension)
+}
+
+// readMetaLocked reads an NZB's meta blob. A manifest that is absent while the
+// meta directory itself is present is reported as UsenetManifestMissingError so
+// repair can treat the entry as broken. The directory check matters: an
+// unmounted data dir makes every ReadFile return ENOENT, and without it a
+// missing mount would mark the whole library permanently broken.
+// Caller must hold s.mu.
+func (s *NZBStorage) readMetaLocked(id string) ([]byte, error) {
+	data, err := os.ReadFile(s.metaFilePath(id))
+	if err == nil {
+		return data, nil
+	}
+	if os.IsNotExist(err) {
+		if _, dirErr := os.Stat(s.metaDir); dirErr != nil {
+			return nil, fmt.Errorf("meta directory unavailable: %w", dirErr)
+		}
+		return nil, fmt.Errorf("nzb not found: %s: %w", id, customerror.UsenetManifestMissingError)
+	}
+	return nil, fmt.Errorf("failed to read NZB meta file: %w", err)
+}
+
+// invalidManifest marks a decode failure as permanent: the bytes on disk do not
+// parse, so every later probe of this entry fails the same way.
+func invalidManifest(id string, err error) error {
+	return fmt.Errorf("decode NZB meta %s: %w: %w", id, err, customerror.UsenetManifestInvalidError)
 }
 
 // recalculateStatsLocked rebuilds cached stats by scanning metadata files.
@@ -155,13 +182,9 @@ func (s *NZBStorage) GetNZB(id string) (*storage.NZB, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	path := s.metaFilePath(id)
-	data, err := os.ReadFile(path)
+	data, err := s.readMetaLocked(id)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("nzb not found: %s", id)
-		}
-		return nil, fmt.Errorf("failed to read NZB meta file: %w", err)
+		return nil, err
 	}
 
 	return decodeNZB(data)
@@ -174,13 +197,9 @@ func (s *NZBStorage) GetNZBHeader(id string) (*storage.NZB, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	path := s.metaFilePath(id)
-	data, err := os.ReadFile(path)
+	data, err := s.readMetaLocked(id)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("nzb not found: %s", id)
-		}
-		return nil, fmt.Errorf("failed to read NZB meta file: %w", err)
+		return nil, err
 	}
 
 	if isCodecV2(data) {
@@ -199,22 +218,22 @@ func (s *NZBStorage) GetNZBFile(id, filename string) (*storage.NZBFile, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	path := s.metaFilePath(id)
-	data, err := os.ReadFile(path)
+	data, err := s.readMetaLocked(id)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("nzb not found: %s", id)
-		}
-		return nil, fmt.Errorf("failed to read NZB meta file: %w", err)
+		return nil, err
 	}
 
 	if isCodecV2(data) {
-		return decodeFileV2(data, filename)
+		file, err := decodeFileV2(data, filename)
+		if err != nil {
+			return nil, invalidManifest(id, err)
+		}
+		return file, nil
 	}
 
 	nzb, err := decodeNZB(data)
 	if err != nil {
-		return nil, err
+		return nil, invalidManifest(id, err)
 	}
 	for i := range nzb.Files {
 		if nzb.Files[i].Name == filename && !nzb.Files[i].IsDeleted {
@@ -235,24 +254,23 @@ func (s *NZBStorage) SampleFileMessageIDs(id, filename string, percent int) ([]s
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	path := s.metaFilePath(id)
-	data, err := os.ReadFile(path)
+	data, err := s.readMetaLocked(id)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("nzb not found: %s", id)
-		}
-		return nil, fmt.Errorf("failed to read NZB meta file: %w", err)
+		return nil, err
 	}
 
 	if isCodecV2(data) {
 		ids, _, err := decodeFileMessageIDsSampled(data, filename, percent)
-		return ids, err
+		if err != nil {
+			return nil, invalidManifest(id, err)
+		}
+		return ids, nil
 	}
 
 	// Legacy proto: full decode then sample in memory.
 	nzb, err := decodeNZB(data)
 	if err != nil {
-		return nil, err
+		return nil, invalidManifest(id, err)
 	}
 	f := nzb.GetFileByName(filename)
 	if f == nil || len(f.Segments) == 0 {

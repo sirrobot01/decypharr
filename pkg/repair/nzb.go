@@ -54,6 +54,17 @@ func (p *nzbProber) probe(ctx context.Context, request nzbProbeRequest) fileResu
 	case errors.Is(probeErr, customerror.UsenetCorruptContentError):
 		result.broken = true
 		result.reason = "usenet_corrupt_content"
+	// A missing or invalid local manifest never recovers on its own: the probe
+	// returns the same error every sweep, so deferring leaves the entry stuck
+	// as unknown while the arr still counts the file as downloaded. Treat it as
+	// broken so auto-repair can replace the release. Transient NNTP and
+	// filesystem failures stay deferred below.
+	case errors.Is(probeErr, customerror.UsenetManifestMissingError):
+		result.broken = true
+		result.reason = "usenet_manifest_missing"
+	case errors.Is(probeErr, customerror.UsenetManifestInvalidError):
+		result.broken = true
+		result.reason = "usenet_manifest_invalid"
 	default:
 		result.deferred = true
 		result.reason = "usenet_probe_error"
