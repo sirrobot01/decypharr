@@ -70,9 +70,17 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Torbox, er
 	if mainRL == nil {
 		mainRL = ratelimit.New(300, ratelimit.Per(time.Minute), ratelimit.WithSlack(30))
 	}
-	submitRL := ratelimits["download"]
-	if submitRL == nil {
-		submitRL = ratelimit.New(300, ratelimit.Per(time.Minute), ratelimit.WithSlack(30))
+	// The cap counts per key, not per workload, so list traffic and submit
+	// traffic authenticated with the same key have to share one bucket. Giving
+	// each its own would let a refresh sweep and an import burst together emit
+	// twice the configured limit against a single key and earn the 429s the
+	// limiter exists to prevent.
+	submitRL := mainRL
+	if !onlyUsesKey(dc.DownloadAPIKeys, dc.APIKey) {
+		submitRL = ratelimits["download"]
+		if submitRL == nil {
+			submitRL = ratelimit.New(300, ratelimit.Per(time.Minute), ratelimit.WithSlack(30))
+		}
 	}
 
 	newClient := func(rateLimiter ratelimit.Limiter) *request.Client {
@@ -105,6 +113,17 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Torbox, er
 		logger:                _log,
 	}
 	return tb, nil
+}
+
+// onlyUsesKey reports whether the download keys are just the main key, in which
+// case download traffic spends the same per-key budget as everything else.
+func onlyUsesKey(downloadKeys []string, apiKey string) bool {
+	for _, key := range downloadKeys {
+		if key != "" && key != apiKey {
+			return false
+		}
+	}
+	return true
 }
 
 func (tb *Torbox) Config() config.Debrid {
