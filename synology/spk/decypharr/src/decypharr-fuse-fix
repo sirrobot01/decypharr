@@ -1,0 +1,80 @@
+#!/bin/sh
+set -eu
+
+PKG_NAME="decypharr"
+PKG_DIR="/var/packages/${PKG_NAME}"
+TARGET_DIR="${PKG_DIR}/target"
+FUSE_CONF="${TARGET_DIR}/etc/fuse.conf"
+HELPERS="fusermount fusermount3"
+
+if [ ! -d "${TARGET_DIR}" ]; then
+    echo "Decypharr is not installed: ${TARGET_DIR} is missing." >&2
+    exit 1
+fi
+
+if [ "$(id -u)" -eq 0 ]; then
+    SUDO=""
+elif command -v sudo >/dev/null 2>&1; then
+    SUDO="sudo"
+    if ! sudo -n true 2>/dev/null; then
+        echo "This operation requires administrator privileges."
+        echo "Enter your DSM password when prompted."
+    fi
+else
+    echo "Run this command as root." >&2
+    exit 1
+fi
+
+# libfuse3 is built with the package prefix, so fusermount3 reads this
+# package-local configuration rather than /etc/fuse.conf.
+${SUDO} chmod 0755 "${TARGET_DIR}/etc"
+${SUDO} chmod 0644 "${FUSE_CONF}"
+
+for helper in ${HELPERS}; do
+    helper_path="${TARGET_DIR}/bin/${helper}"
+    if [ ! -f "${helper_path}" ]; then
+        echo "Missing helper: ${helper_path}" >&2
+        exit 1
+    fi
+
+    ${SUDO} chown root:root "${helper_path}"
+    ${SUDO} chmod 4755 "${helper_path}"
+    echo "Enabled unprivileged FUSE mounts through ${helper_path}"
+done
+
+echo
+echo "FUSE helper status:"
+ls -l "${TARGET_DIR}/bin/fusermount" "${TARGET_DIR}/bin/fusermount3"
+echo
+echo "FUSE configuration:"
+cat "${FUSE_CONF}"
+
+echo
+echo "FUSE device:"
+ls -l /dev/fuse
+
+if command -v sudo >/dev/null 2>&1; then
+    echo
+    echo "Package-user FUSE access:"
+    if sudo -u sc-decypharr sh -c 'test -r /dev/fuse && test -w /dev/fuse'; then
+        echo "sc-decypharr can read and write /dev/fuse"
+    else
+        echo "Warning: sc-decypharr cannot read/write /dev/fuse" >&2
+    fi
+
+    echo
+    echo "Package-local fuse.conf access:"
+    if sudo -u sc-decypharr cat "${FUSE_CONF}" >/dev/null 2>&1; then
+        echo "sc-decypharr can read ${FUSE_CONF}"
+    else
+        echo "Warning: sc-decypharr cannot read ${FUSE_CONF}" >&2
+    fi
+fi
+
+echo
+echo "Restarting Decypharr..."
+${SUDO} synopkg restart "${PKG_NAME}"
+echo
+${SUDO} synopkg status "${PKG_NAME}" || true
+echo
+echo "FUSE setup complete."

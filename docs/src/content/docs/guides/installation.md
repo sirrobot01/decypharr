@@ -70,6 +70,18 @@ tar -xzf decypharr_linux_amd64.tar.gz
 ./decypharr --config /path/to/
 ```
 
+## Synology DSM / SRM
+
+Native Synology packages can be built for DSM 7.3 and SRM 1.3 from the `synology/` spksrc overlay. Tagged releases can attach architecture-specific `.spk` files through the Synology GitHub Actions workflow.
+
+After installing or upgrading the package, enable the FUSE helpers:
+
+```bash
+/var/packages/decypharr/target/bin/decypharr-fuse-fix
+```
+
+The Decypharr service itself remains unprivileged. Shared-folder ACLs must allow the package account and any consumers such as Sonarr, Radarr, Bazarr or Plex to traverse the configured mount path. See `synology/README.md` for details.
+
 ## Managed (ElfHosted)
 
 Prefer not to self-host? A managed Decypharr instance is available

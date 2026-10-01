@@ -27,3 +27,4 @@ node_modules/
 # profiling artifacts
 *.pprof
 *.prof
+.synology-build/
