@@ -1276,6 +1276,11 @@ class ConfigManager {
 
             document.getElementById('virtualFolderValidationSummary')?.classList.add('hidden');
 
+            // Read the running instance marker first. If this save turns out
+            // to need a restart, it is what tells us the service that comes
+            // back is the new one and not the old one still draining.
+            const previousInstance = await this.readInstanceMarker();
+
             const response = await window.decypharrUtils.fetcher('/api/config', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -1297,10 +1302,17 @@ class ConfigManager {
 
             if (restarted) {
                 window.decypharrUtils.createToast('Configuration saved successfully! Services are restarting...', 'success');
-                // Reload page after a delay to allow services to restart
-                setTimeout(() => {
-                    window.location.reload();
-                }, 2000);
+                // Wait for the service to answer again before reloading. A
+                // fixed delay used to race the restart: the listener is shut
+                // while the old one drains, so reloading on a timer landed on
+                // a closed port and the browser showed a bad gateway instead
+                // of the settings page.
+                const back = await this.waitForServiceRestart(previousInstance);
+                if (!back) {
+                    window.decypharrUtils.createToast(
+                        'Configuration saved, but the service has not come back yet. Reloading anyway.', 'warning');
+                }
+                window.location.reload();
             } else {
                 // Applied live — no restart, no disruptive reload.
                 window.decypharrUtils.createToast('Configuration saved and applied.', 'success');
@@ -1312,6 +1324,76 @@ class ConfigManager {
             window.decypharrUtils.createToast(`Error saving configuration: ${error.message}`, 'error');
             this.refs.loadingOverlay.classList.add('hidden');
         }
+    }
+
+    sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // Returns the running service's instance marker, or null if it cannot be
+    // read. The marker changes on every restart.
+    //
+    // timeoutMs is not optional in spirit: a proxy that accepts the connection
+    // and then stalls would otherwise hang this forever, and this runs on the
+    // way to every save, including the ones that need no restart at all.
+    async readInstanceMarker(timeoutMs = 5000) {
+        try {
+            const response = await window.decypharrUtils.fetcher('/version', {
+                cache: 'no-store',
+                signal: AbortSignal.timeout(timeoutMs)
+            });
+            if (!response.ok) return null;
+            return (await response.json()).instance ?? null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    // Polls /version until the service is answering as a new instance.
+    // Resolves true once it is back, false if it has not returned in time.
+    async waitForServiceRestart(previousInstance, {timeoutMs = 120000, pollMs = 500, probeMs = 5000} = {}) {
+        const deadline = Date.now() + timeoutMs;
+        // Without a marker to compare against (an unreachable pre-save probe)
+        // the only evidence a restart happened is the listener dropping, so
+        // fall back to watching for that, and give up waiting for it shortly.
+        const blindDeadline = Date.now() + 10000;
+        let sawDowntime = false;
+
+        while (Date.now() < deadline) {
+            await this.sleep(pollMs);
+
+            // Each probe is capped at whatever is left of the budget, up to
+            // probeMs. Checking the deadline between probes is not enough on
+            // its own: a stalled response would park the loop inside a single
+            // await and the timeout below would never be reached.
+            const probeBudget = Math.min(probeMs, deadline - Date.now());
+            if (probeBudget <= 0) break;
+
+            let instance;
+            try {
+                const response = await window.decypharrUtils.fetcher('/version', {
+                    cache: 'no-store',
+                    signal: AbortSignal.timeout(probeBudget)
+                });
+                if (!response.ok) {
+                    sawDowntime = true;
+                    continue;
+                }
+                instance = (await response.json()).instance ?? null;
+            } catch (_) {
+                // Expected for the middle of a restart: the listener is closed,
+                // or the probe ran out its budget.
+                sawDowntime = true;
+                continue;
+            }
+
+            if (previousInstance !== null) {
+                if (instance !== previousInstance) return true;
+            } else if (sawDowntime || Date.now() > blindDeadline) {
+                return true;
+            }
+        }
+        return false;
     }
 
     validateConfiguration(config) {
