@@ -107,6 +107,9 @@ var (
 	Err404 = errors.New("HTTP 404 Not Found")
 	Err429 = errors.New("HTTP 429 Too Many Requests")
 	Err503 = errors.New("HTTP 503 Service Unavailable")
+	// ErrLinkRejected is a 400 from the provider/CDN, which in practice means
+	// the presigned link expired or rotated rather than a malformed request.
+	ErrLinkRejected = errors.New("HTTP 400: link rejected")
 )
 
 // NewLinkError creates a new LinkError with the given error and category
@@ -157,6 +160,14 @@ func ErrorCodeToLinkError(code string) *Error {
 		return NewPermanentError(Err404, code)
 	case "429":
 		return NewRetryableError(Err429, code)
+	// Some providers (TorBox) return a bare 400 for a presigned link that has
+	// expired or rotated. ClassifyStreamStatus already treats 400 at the CDN
+	// layer as refetchable; the provider-API path must agree, otherwise a stale
+	// link is classified permanent, fast-trips the VFS circuit breaker
+	// (errorCount = maxErrorCount) and the file reads 0 bytes until cooldown
+	// instead of simply refetching the link.
+	case "400":
+		return NewRefetchableError(ErrLinkRejected, code)
 	case "503", "read_pxy_timeout":
 		return NewRetryableError(Err503, code)
 	default:
