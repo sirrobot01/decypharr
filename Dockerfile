@@ -76,7 +76,7 @@ RUN apk add --no-cache fuse3 ca-certificates su-exec shadow curl unzip tzdata li
 COPY --from=builder /decypharr /usr/bin/decypharr
 COPY --from=builder /healthcheck /usr/bin/healthcheck
 COPY scripts/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 # Set environment variables
 ENV PUID=1000
