@@ -283,7 +283,7 @@ func (s *Storage) SyncFromConfig(arrs []config.Arr) {
 		if ac, ok := newMaps.Load(name); ok {
 			// Update existing arr with new config values.
 			// Only preserve the resolved host from memory if the new host is invalid.
-			if utils.ValidateURL(ac.Host) == nil {
+			if utils.ValidateURL(ac.Host) != nil {
 				ac.Host = arr.Host
 			}
 			ac.Token = cmp.Or(ac.Token, arr.Token)
