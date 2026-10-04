@@ -327,6 +327,11 @@ func (m *Manager) processQueuedTorrent(entry *storage.Entry) {
 }
 
 func (m *Manager) processAction(entry *storage.Entry) {
+	// Deleting the entry cancels ctx; until release, the queue refuses to
+	// write the entry back.
+	ctx, release := m.queue.track(m.downloader.operationContext(), entry.InfoHash)
+	defer release()
+
 	entry.Status = debridTypes.TorrentStatusDownloaded
 	entry.UpdatedAt = time.Now()
 	_ = m.queue.Update(entry)
@@ -353,8 +358,12 @@ func (m *Manager) processAction(entry *storage.Entry) {
 	if err := m.RefreshMount(); err != nil {
 		m.logger.Error().Err(err).Msg("Mount refresh failed")
 	}
-	err := m.downloader.download(entry)
+	err := m.downloader.download(ctx, entry)
 	if err != nil {
+		if isEntryDeleted(ctx) {
+			m.logger.Info().Str("name", entry.Name).Msg("Entry deleted, stopped its download")
+			return
+		}
 		if errors.Is(err, context.Canceled) && m.ctx.Err() != nil {
 			entry.IsDownloading = false
 			if err := m.queue.Update(entry); err != nil {
