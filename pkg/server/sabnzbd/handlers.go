@@ -430,14 +430,19 @@ func (s *SABnzbd) handleAddFile(w http.ResponseWriter, r *http.Request) {
 		// Read file content
 		content, err := io.ReadAll(file)
 		if err != nil {
-			s.writeError(w, "Failed to read file", http.StatusInternalServerError)
+			// Real SABnzbd's api.py always answers 200 with status:false on a
+			// failed enqueue, never a 5xx. A 5xx here made Sonarr/Radarr
+			// report a generic "Unable to connect to SABnzbd" for what is
+			// actually a normal, expected failure -- indistinguishable from
+			// a real outage in the *arr UI. Same fix shape as #429.
+			s.writeError(w, "Failed to read file", http.StatusOK)
 			return
 		}
 
 		// Parse NZB file
 		nzbID, err := s.addNZBFile(ctx, content, header.Filename, _arr, action)
 		if err != nil {
-			s.writeError(w, fmt.Sprintf("Failed to add NZB file: %s", err.Error()), http.StatusInternalServerError)
+			s.writeError(w, fmt.Sprintf("Failed to add NZB file: %s", err.Error()), http.StatusOK)
 			return
 		}
 		if nzbID != "" {
@@ -450,7 +455,9 @@ func (s *SABnzbd) handleAddFile(w http.ResponseWriter, r *http.Request) {
 		if len(errors) > 0 {
 			errMsg = strings.Join(errors, "; ")
 		}
-		s.writeError(w, errMsg, http.StatusInternalServerError)
+		// Same reasoning as above: a failed enqueue is a normal outcome
+		// (dead NZB, missing usenet segment, etc.), not a server fault.
+		s.writeError(w, errMsg, http.StatusOK)
 		return
 	}
 
