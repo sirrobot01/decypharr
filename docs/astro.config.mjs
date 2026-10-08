@@ -5,12 +5,13 @@ const docsBasePath = normalizeBasePath(process.env.PUBLIC_DOCS_BASE_PATH || '/')
 
 // https://astro.build/config
 export default defineConfig({
+    site: process.env.PUBLIC_DOCS_SITE_URL || 'https://docs.decypharr.com',
     base: docsBasePath,
     redirects: {
-        '/guides/mounting/rclone': '/guides/mounting/rclone-internal',
-        '/guides/mounting/webdav': '/guides/shares/webdav',
-        '/guides/mounting/nfs': '/guides/shares/nfs',
-        '/guides/mounting/smb': '/guides/shares/smb',
+        '/guides/mounting/rclone': `${docsBasePath}guides/mounting/rclone-internal`,
+        '/guides/mounting/webdav': `${docsBasePath}guides/shares/webdav`,
+        '/guides/mounting/nfs': `${docsBasePath}guides/shares/nfs`,
+        '/guides/mounting/smb': `${docsBasePath}guides/shares/smb`,
     },
     integrations: [
         starlight({

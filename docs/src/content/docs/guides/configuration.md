@@ -449,7 +449,7 @@ move the cache to another filesystem.
 | `auto_repair`             | When `true`, broken Arr-managed files are deleted and searched again through Arr | `false` |
 | `nntp_connection_percent` | Share of NNTP connections probes may use, to avoid starving downloads      | `20`        |
 
-See the [Health Checker & Repair guide](/guides/repair/) for the full model, API, and Browse-page integration.
+See the [Health Checker & Repair guide](../repair/) for the full model, API, and Browse-page integration.
 
 ## Arr Configuration
 
