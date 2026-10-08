@@ -27,3 +27,5 @@ node_modules/
 # profiling artifacts
 *.pprof
 *.prof
+.codex/
+.claude/
