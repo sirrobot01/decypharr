@@ -8,6 +8,19 @@ import qbitImage from '../../../assets/images/qbittorent.png';
 
 Decypharr provides both QBitTorrent and Sabnzbd-compatible APIs for Sonarr, Radarr, and other *Arr applications.
 
+## Authentication
+
+If Decypharr authentication is enabled, use one of these options:
+
+- Enter your Decypharr username and password in the download client.
+- Enter your Decypharr API token in the download client's **API Key** field, if available.
+- Enter your Decypharr API token in the **Password** field. Use `decypharr` as the **Username** if the client requires one.
+- Use the Arr host and API key as shown below. First save this Arr in Decypharr under **Settings** → **Arrs**. Use the saved Arr name as the download category.
+
+Decypharr checks saved Arr credentials without contacting the Arr server.
+An Arr found through automatic discovery must be saved before its credentials can authenticate a client.
+The Decypharr API token and the Arr API key are different credentials.
+
 ## For Torrents/Debrid: QBitTorrent Client
 
 In Sonarr/Radarr:

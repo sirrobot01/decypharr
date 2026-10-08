@@ -2,7 +2,6 @@ package sabnzbd
 
 import (
 	"context"
-	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"strings"
@@ -74,6 +73,9 @@ func (s *SABnzbd) authContext(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := r.FormValue("ma_username")
 		token := r.FormValue("ma_password")
+		if apiKey := r.FormValue("apikey"); config.Get().UseAuth && config.VerifyToken(apiKey) {
+			host, token = "", apiKey
+		}
 		category := getCategory(r.Context())
 		a, err := s.authenticate(r.Context(), category, host, token)
 		if err != nil {
@@ -103,9 +105,8 @@ func (s *SABnzbd) authenticate(ctx context.Context, category, username, password
 		if config.VerifyAuth(username, password) || config.VerifyToken(password) {
 			return instance, nil
 		}
-		if known && instance.Source != arr.SourceAuto && username == instance.Host && password != "" &&
-			subtle.ConstantTimeCompare([]byte(password), []byte(instance.Token)) == 1 {
-			return instance, nil
+		if matched, ok := s.manager.Arr().MatchCredentials(category, username, password); ok {
+			return matched, nil
 		}
 		return arr.Arr{}, fmt.Errorf("unauthorized: invalid credentials")
 	}

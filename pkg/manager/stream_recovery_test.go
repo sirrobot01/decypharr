@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/puzpuzpuz/xsync/v4"
@@ -227,6 +228,29 @@ func TestUsenetArticleNotFoundQueuesOneNonBlockingReacquire(t *testing.T) {
 	if got := recovery.calls.Load(); got != 1 {
 		t.Fatalf("reacquire calls after completion = %d, want 1", got)
 	}
+}
+
+func TestStreamReacquireWaitsForArrBinding(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		recovery := &fakeArrRecovery{started: make(chan struct{})}
+		m := &Manager{}
+		m.SetArrRecovery(recovery)
+
+		for range 10 {
+			m.submitStreamReacquire("nzb-1", "file-1")
+			synctest.Wait()
+		}
+		if got := recovery.calls.Load(); got != 0 {
+			t.Fatalf("reacquire calls without a binding = %d, want 0", got)
+		}
+
+		recovery.binding = reacquire.Binding{EntryID: "nzb-1", EntryFileID: "file-1"}
+		m.submitStreamReacquire("nzb-1", "file-1")
+		synctest.Wait()
+		if got := recovery.calls.Load(); got != 1 {
+			t.Fatalf("reacquire calls after indexing = %d, want 1", got)
+		}
+	})
 }
 
 var _ DirectReader = missingArticleReader{}

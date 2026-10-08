@@ -3,9 +3,11 @@ package arr
 import (
 	"cmp"
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/rs/zerolog"
@@ -57,6 +59,35 @@ func (s *Service) Get(name string) (Arr, bool) {
 	defer s.mu.RUnlock()
 	instance, ok := s.arrs[name]
 	return instance, ok
+}
+
+// MatchCredentials checks saved Arr credentials without a network request.
+// An empty category permits login before the client sends its category.
+func (s *Service) MatchCredentials(category, host, token string) (Arr, bool) {
+	if host == "" || token == "" {
+		return Arr{}, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for name, instance := range s.arrs {
+		if category != "" && name != category {
+			continue
+		}
+		if host != instance.Host || subtle.ConstantTimeCompare([]byte(token), []byte(instance.Token)) != 1 {
+			continue
+		}
+		if instance.Source != SourceAuto {
+			return instance, true
+		}
+		// Auto-discovered credentials must also exist in the saved config.
+		for _, configured := range config.Get().Arrs {
+			if configured.Name == name && configured.Host == host &&
+				subtle.ConstantTimeCompare([]byte(token), []byte(strings.TrimSpace(configured.Token))) == 1 {
+				return instance, true
+			}
+		}
+	}
+	return Arr{}, false
 }
 
 // GetOrCreate returns a placeholder for a category with no configured Arr, so

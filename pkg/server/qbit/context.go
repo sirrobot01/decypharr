@@ -3,7 +3,6 @@ package qbit
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -121,6 +120,9 @@ func (q *QBit) authContext(next http.Handler) http.Handler {
 }
 
 func getUsernameAndPassword(r *http.Request) (string, string, error) {
+	if scheme, token, ok := strings.Cut(r.Header.Get("Authorization"), " "); ok && strings.EqualFold(scheme, "Bearer") {
+		return "", strings.TrimSpace(token), nil
+	}
 	// Try to get from authorization header
 	username, password, err := decodeAuthHeader(r.Header.Get("Authorization"))
 	if err == nil && username != "" {
@@ -159,9 +161,8 @@ func (q *QBit) authenticate(ctx context.Context, category, username, password st
 		if config.VerifyAuth(username, password) || config.VerifyToken(password) {
 			return instance, nil
 		}
-		if known && instance.Source != arr.SourceAuto && username == instance.Host && password != "" &&
-			subtle.ConstantTimeCompare([]byte(password), []byte(instance.Token)) == 1 {
-			return instance, nil
+		if matched, ok := q.manager.Arr().MatchCredentials(category, username, password); ok {
+			return matched, nil
 		}
 		return arr.Arr{}, fmt.Errorf("unauthorized: invalid credentials")
 	}

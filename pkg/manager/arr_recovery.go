@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"errors"
 	"slices"
 
 	"github.com/sirrobot01/decypharr/pkg/arr/reacquire"
@@ -48,6 +49,10 @@ func (m *Manager) submitStreamReacquire(entryID, fileID string) {
 	if recovery == nil || entryID == "" || fileID == "" {
 		return
 	}
+	// Files can be unclaimed or still waiting for the Arr index.
+	if _, ok := recovery.Lookup(entryID, fileID); !ok {
+		return
+	}
 
 	target := streamTarget{entryID: entryID, fileID: fileID}
 	if _, loaded := m.reacquireNotifications.LoadOrStore(target, struct{}{}); loaded {
@@ -62,6 +67,9 @@ func (m *Manager) submitStreamReacquire(entryID, fileID string) {
 			Cause:   reacquire.CauseStream,
 		})
 		if err != nil {
+			if errors.Is(err, reacquire.ErrBindingNotFound) {
+				return
+			}
 			m.logger.Error().Err(err).
 				Str("entry_id", entryID).
 				Str("file_id", fileID).
