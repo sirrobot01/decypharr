@@ -168,6 +168,13 @@ func (dl *DownloadLink) Valid() error {
 	return nil
 }
 
+// Expired reports whether the link is past the expiry the provider (or
+// auto_expire_links_after) gave it. Providers that don't expose an expiry leave
+// ExpiresAt zero; those links are never considered expired.
+func (dl *DownloadLink) Expired() bool {
+	return !dl.ExpiresAt.IsZero() && time.Now().After(dl.ExpiresAt)
+}
+
 func (dl *DownloadLink) Empty() bool {
 	return dl.DownloadLink == ""
 }
