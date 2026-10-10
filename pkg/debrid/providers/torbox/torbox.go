@@ -2,6 +2,7 @@ package torbox
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -264,12 +265,18 @@ func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("torbox API error: Status: %d", resp.StatusCode)
 	}
-	if data.Data == nil {
+	// An array response can list several torrents; take the one for this hash.
+	var id int
+	for _, added := range data.Data {
+		if len(data.Data) == 1 || strings.EqualFold(added.Hash, torrent.InfoHash) {
+			id = cmp.Or(added.TorrentId, added.Id)
+			break
+		}
+	}
+	if id == 0 {
 		return nil, fmt.Errorf("error adding torrent")
 	}
-	dt := *data.Data
-	torrentId := strconv.Itoa(dt.Id)
-	torrent.Id = torrentId
+	torrent.Id = strconv.Itoa(id)
 	torrent.Debrid = tb.config.Name
 	torrent.Added = time.Now()
 

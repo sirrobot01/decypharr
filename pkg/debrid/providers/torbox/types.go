@@ -20,10 +20,56 @@ type AvailableResponse APIResponse[map[string]struct {
 	Hash string `json:"hash"`
 }]
 
-type AddMagnetResponse APIResponse[struct {
-	Id   int    `json:"torrent_id"`
-	Hash string `json:"hash"`
-}]
+type addedTorrent struct {
+	TorrentId int    `json:"torrent_id"`
+	Id        int    `json:"id"` // array responses use "id" instead of "torrent_id"
+	Hash      string `json:"hash"`
+}
+
+type AddMagnetResponse struct {
+	Success bool           `json:"success"`
+	Error   any            `json:"error"`
+	Detail  string         `json:"detail"`
+	Data    []addedTorrent `json:"data"`
+}
+
+// UnmarshalJSON accepts both the documented object response and the array
+// response TorBox sometimes returns for /torrents/createtorrent.
+func (r *AddMagnetResponse) UnmarshalJSON(data []byte) error {
+	var envelope struct {
+		Success bool            `json:"success"`
+		Error   any             `json:"error"`
+		Detail  string          `json:"detail"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return err
+	}
+
+	r.Success = envelope.Success
+	r.Error = envelope.Error
+	r.Detail = envelope.Detail
+	r.Data = nil
+
+	raw := bytes.TrimSpace(envelope.Data)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil
+	}
+
+	if raw[0] == '[' {
+		if err := json.Unmarshal(raw, &r.Data); err != nil {
+			return fmt.Errorf("decode TorBox created torrent array: %w", err)
+		}
+		return nil
+	}
+
+	var item addedTorrent
+	if err := json.Unmarshal(raw, &item); err != nil {
+		return fmt.Errorf("decode TorBox created torrent object: %w", err)
+	}
+	r.Data = []addedTorrent{item}
+	return nil
+}
 
 type torboxInfo struct {
 	Id              int       `json:"id"`
