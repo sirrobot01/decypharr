@@ -458,7 +458,7 @@ class TorrentDashboard {
         if (!confirm('Are you sure you want to delete this torrent?')) return;
 
         try {
-            const url = `${window.urlBase}api/torrents/${category}/${hash}?removeFromDebrid=${removeFromDebrid}`;
+            const url = `/api/torrents/${category}/${hash}?removeFromDebrid=${removeFromDebrid}`;
             const response = await window.decypharrUtils.fetcher(url, {method: 'DELETE'});
 
             if (!response.ok) throw new Error('Failed to delete entry');
@@ -479,7 +479,7 @@ class TorrentDashboard {
 
         try {
             const hashes = Array.from(this.state.selectedEntries).join(',');
-            const url = `${window.urlBase}api/torrents?hashes=${hashes}&removeFromDebrid=${removeFromDebrid}`;
+            const url = `/api/torrents?hashes=${hashes}&removeFromDebrid=${removeFromDebrid}`;
             const response = await window.decypharrUtils.fetcher(url, {method: 'DELETE'});
 
             if (!response.ok) throw new Error('Failed to delete items');
