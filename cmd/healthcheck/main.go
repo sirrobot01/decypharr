@@ -60,7 +60,8 @@ func main() {
 
 	status.QbitAPI = checkQbitAPI(ctx, client, baseUrl, port, auth, cfg.UseAuth)
 	status.WebUI = checkWebUI(ctx, client, baseUrl, port, auth, cfg.UseAuth)
-	status.WebDAVService = checkBaseWebdav(ctx, client, baseUrl, port, cfg)
+	// WebDAV is not served when it is disabled, so it cannot fail the check.
+	status.WebDAVService = cfg.DisableWebDav || checkBaseWebdav(ctx, client, baseUrl, port, cfg)
 	// Determine overall status
 	// Consider the application healthy if core services are running
 	status.OverallStatus = status.QbitAPI && status.WebUI && status.WebDAVService
