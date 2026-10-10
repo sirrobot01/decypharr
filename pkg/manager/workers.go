@@ -62,7 +62,9 @@ func (m *Manager) addQueueProcessorJob(ctx context.Context) error {
 		} else {
 			// Schedule the job
 			if _, err := m.scheduler.NewJob(jd, gocron.NewTask(func() {
-				err := m.queue.DeleteStalled()
+				err := m.queue.DeleteStalled(func(infoHash string) bool {
+					return !m.queueRestored.Load() || m.jobQueue.FindJob(infoHash) != nil
+				})
 				if err != nil {
 					m.logger.Error().Err(err).Msg("Failed to process remove stalled torrents")
 				}

@@ -152,13 +152,17 @@ func (q *Queue) DeleteWhere(category string, protocol config.Protocol, state sto
 	return q.storage.DeleteWhereQueued(q.ListFilterFunc(category, protocol, state, hashes), q.wrapCleanupWithFileDelete(cleanup))
 }
 
-func (q *Queue) DeleteStalled() error {
+// DeleteStalled removes entries older than remove_stalled_after that made no
+// progress. pending reports whether an entry still waits for a job worker;
+// those entries are kept. A Queued entry that is not pending is stuck, for
+// example in a provider "too many active downloads" retry loop.
+func (q *Queue) DeleteStalled(pending func(infoHash string) bool) error {
 	cutoff := time.Now().Add(-q.removeStalledAfter)
 	return q.storage.DeleteWhereQueued(func(t *storage.Entry) bool {
 		if !t.AddedOn.Before(cutoff) {
 			return false
 		}
-		if t.Status == debridTypes.TorrentStatusQueued {
+		if t.Status == debridTypes.TorrentStatusQueued && pending(t.InfoHash) {
 			return false
 		}
 		// Torrent entries: not downloading, no seeders, no progress

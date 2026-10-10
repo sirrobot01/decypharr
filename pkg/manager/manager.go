@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-co-op/gocron/v2"
@@ -97,6 +98,10 @@ type Manager struct {
 	// duplicate goroutines from processing the same entry when the scheduler
 	// re-fires before the previous pass has updated the queue row.
 	processingEntries *xsync.Map[string, struct{}]
+
+	// Set when restoreActiveDownloadJobs has resubmitted the persisted queue.
+	// Until then a Queued entry may still be waiting for its job.
+	queueRestored atomic.Bool
 
 	// Suppresses repeated provider submissions for the same torrent after an
 	// Arr import/re-grab loop. The queue itself handles duplicates while an
@@ -351,6 +356,7 @@ func (m *Manager) initJobQueue() {
 				m.logger.Error().Interface("panic", r).Msg("Recovered from panic while restoring active downloads")
 			}
 		}()
+		defer m.queueRestored.Store(true)
 		m.restoreActiveDownloadJobs()
 	})
 }
