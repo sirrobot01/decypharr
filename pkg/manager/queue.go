@@ -2,11 +2,13 @@ package manager
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -87,6 +89,24 @@ type Queue struct {
 	storage            *storage.Storage
 	logger             zerolog.Logger
 	removeStalledAfter time.Duration
+
+	inflightMu sync.Mutex
+	inflight   map[string]*inflightEntry
+}
+
+// errEntryDeleted is the cancellation cause for work whose queue entry was
+// deleted while it was running.
+var errEntryDeleted = errors.New("queue entry deleted")
+
+// inflightCancelWait bounds how long a delete waits for cancelled work to stop
+// before it removes the entry's files.
+const inflightCancelWait = 15 * time.Second
+
+// inflightEntry is the post-download work currently running for one entry.
+type inflightEntry struct {
+	ctx    context.Context
+	cancel context.CancelCauseFunc
+	done   chan struct{}
 }
 
 func newQueue(storage *storage.Storage, removeStalledAfterStr string) *Queue {
@@ -103,6 +123,78 @@ func newQueue(storage *storage.Storage, removeStalledAfterStr string) *Queue {
 	}
 
 	return q
+}
+
+// track registers work for infohash and returns a context derived from parent
+// that is cancelled when the entry is deleted from the queue. release must be
+// called once the work, including its final queue writes, has finished.
+func (q *Queue) track(parent context.Context, infohash string) (context.Context, func()) {
+	ctx, cancel := context.WithCancelCause(parent)
+	work := &inflightEntry{ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	key := strings.ToLower(infohash)
+	q.inflightMu.Lock()
+	if q.inflight == nil {
+		q.inflight = make(map[string]*inflightEntry)
+	}
+	q.inflight[key] = work
+	q.inflightMu.Unlock()
+
+	var once sync.Once
+	return ctx, func() {
+		once.Do(func() {
+			q.inflightMu.Lock()
+			if q.inflight[key] == work {
+				delete(q.inflight, key)
+			}
+			q.inflightMu.Unlock()
+			cancel(nil)
+			close(work.done)
+		})
+	}
+}
+
+// cancelInflight stops any running work for infohash and waits for it to
+// release, so the caller can remove the entry and its files afterwards.
+func (q *Queue) cancelInflight(infohash string) {
+	q.inflightMu.Lock()
+	work := q.inflight[strings.ToLower(infohash)]
+	q.inflightMu.Unlock()
+	if work == nil {
+		return
+	}
+	work.cancel(errEntryDeleted)
+	timer := time.NewTimer(inflightCancelWait)
+	defer timer.Stop()
+	select {
+	case <-work.done:
+	case <-timer.C:
+		q.logger.Warn().Str("infohash", infohash).Msg("Timed out waiting for cancelled download to stop")
+	}
+}
+
+// isDeleted reports whether infohash has running work that was cancelled
+// because the entry was deleted. Such work must not write the entry back.
+func (q *Queue) isDeleted(infohash string) bool {
+	q.inflightMu.Lock()
+	work := q.inflight[strings.ToLower(infohash)]
+	q.inflightMu.Unlock()
+	return work != nil && isEntryDeleted(work.ctx)
+}
+
+// isEntryDeleted reports whether ctx was cancelled by deleting its entry.
+func isEntryDeleted(ctx context.Context) bool {
+	return errors.Is(context.Cause(ctx), errEntryDeleted)
+}
+
+// withCancelInflight cancels running work for each entry before cleanup runs.
+func (q *Queue) withCancelInflight(cleanup func(*storage.Entry) error) func(*storage.Entry) error {
+	return func(entry *storage.Entry) error {
+		q.cancelInflight(entry.InfoHash)
+		if cleanup != nil {
+			return cleanup(entry)
+		}
+		return nil
+	}
 }
 
 func (q *Queue) Add(torrent *storage.Entry) error {
@@ -141,7 +233,16 @@ func (q *Queue) wrapCleanupWithFileDelete(cleanup func(t *storage.Entry) error) 
 	}
 }
 
+// Delete removes an entry from the queue, first cancelling any download that
+// is still running for it.
 func (q *Queue) Delete(infohash string, deleteFiles bool, cleanup func(t *storage.Entry) error) error {
+	q.cancelInflight(infohash)
+	return q.remove(infohash, deleteFiles, cleanup)
+}
+
+// remove deletes an entry without cancelling running work. It is for the
+// entry's own worker, which would otherwise wait on itself.
+func (q *Queue) remove(infohash string, deleteFiles bool, cleanup func(t *storage.Entry) error) error {
 	if deleteFiles {
 		cleanup = q.wrapCleanupWithFileDelete(cleanup)
 	}
@@ -149,7 +250,7 @@ func (q *Queue) Delete(infohash string, deleteFiles bool, cleanup func(t *storag
 }
 
 func (q *Queue) DeleteWhere(category string, protocol config.Protocol, state storage.TorrentState, hashes []string, cleanup func(t *storage.Entry) error) error {
-	return q.storage.DeleteWhereQueued(q.ListFilterFunc(category, protocol, state, hashes), q.wrapCleanupWithFileDelete(cleanup))
+	return q.storage.DeleteWhereQueued(q.ListFilterFunc(category, protocol, state, hashes), q.withCancelInflight(q.wrapCleanupWithFileDelete(cleanup)))
 }
 
 // DeleteStalled removes entries older than remove_stalled_after that made no
@@ -174,11 +275,14 @@ func (q *Queue) DeleteStalled(pending func(infoHash string) bool) error {
 			return true
 		}
 		return false
-	}, nil)
+	}, q.withCancelInflight(nil))
 }
 
 func (q *Queue) Update(torrent *storage.Entry) error {
-	// Update the state here
+	// A cancelled worker for a deleted entry must not write it back.
+	if q.isDeleted(torrent.InfoHash) {
+		return errEntryDeleted
+	}
 	return q.storage.UpdateQueue(torrent)
 }
 
