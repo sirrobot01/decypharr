@@ -221,6 +221,7 @@ func TestInvalidConfigurationDisablesHearsay(t *testing.T) {
 		{name: "support", mutate: func(cfg *config.Hearsay) { cfg.MinSupport = 1.1 }},
 		{name: "storage", mutate: func(cfg *config.Hearsay) { cfg.MaxStorageBytes = -1 }},
 		{name: "seeded torrents", mutate: func(cfg *config.Hearsay) { cfg.MaxSeededTorrents = -1 }},
+		{name: "blocklist", mutate: func(cfg *config.Hearsay) { cfg.Blocklist = []string{"10.0.0.1"} }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

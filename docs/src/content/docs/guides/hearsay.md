@@ -50,6 +50,8 @@ The Hearsay settings page exposes these options:
 | Maximum seeded torrents | `max_seeded_torrents` | `256` |
 | Maximum sources per namespace | `max_feeds_per_namespace` | `256` |
 | Trusted publishers | `follow` | discover automatically |
+| Block private peers | `block_private_peers` | off |
+| Blocked address ranges | `blocklist` | none |
 
 Example:
 
@@ -68,7 +70,9 @@ Example:
     "max_storage_bytes": 1073741824,
     "max_seeded_torrents": 256,
     "max_feeds_per_namespace": 256,
-    "follow": []
+    "follow": [],
+    "block_private_peers": false,
+    "blocklist": []
   }
 }
 ```
@@ -76,6 +80,8 @@ Example:
 `publish` has no effect unless `participate` is also true. With `participate: true` and `publish: false`, Decypharr receives and relays evidence but keeps its observations local.
 
 `max_seeded_torrents` limits the number of retained swarms. This limit is separate from `max_storage_bytes`. Each swarm uses memory for peers and network state, even when its generation file is small. An omitted value or `0` uses the default of `256`. Negative values are invalid. Active transfers can temporarily exceed this limit. Restart Decypharr after you change this setting.
+
+`block_private_peers` stops Decypharr from connecting to private addresses. This applies to swarm peers, DHT nodes, and discovery partners. The blocked ranges are RFC 1918, CGNAT (`100.64.0.0/10`), link-local, loopback, and IPv6 unique local addresses. Use this setting behind a VPN. There, DHT can return addresses from the VPN provider's internal network. These addresses are not reachable, and in a cluster they can collide with internal ranges. `blocklist` adds more ranges in CIDR format, for example `203.0.113.0/24`. Decypharr rejects a range that is not valid CIDR. Restart Decypharr after you change these settings.
 
 `follow` is an allowlist. When it is non-empty, Decypharr accepts only those publisher identities, disables open discovery for other identities, and removes retained feeds outside the list.
 
@@ -95,6 +101,8 @@ environment:
   - DECYPHARR_HEARSAY__MAX_SEEDED_TORRENTS=256
   - DECYPHARR_HEARSAY__MAX_FEEDS_PER_NAMESPACE=256
   - DECYPHARR_HEARSAY__FOLLOW=ed25519:a3f9...,ed25519:b101...
+  - DECYPHARR_HEARSAY__BLOCK_PRIVATE_PEERS=true
+  - DECYPHARR_HEARSAY__BLOCKLIST=203.0.113.0/24,198.51.100.0/24
 ```
 
 Fixed ports are optional. A publicly reachable relay can additionally set `DECYPHARR_HEARSAY__PORT` and `DECYPHARR_HEARSAY__GOSSIP_PORT`, then publish the matching TCP and UDP ports from its container.

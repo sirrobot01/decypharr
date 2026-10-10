@@ -171,6 +171,8 @@ class ConfigManager {
         if ($('hearsay.max_feeds_per_namespace')) $('hearsay.max_feeds_per_namespace').value = h.max_feeds_per_namespace || '';
         if ($('hearsay.max_seeded_torrents')) $('hearsay.max_seeded_torrents').value = h.max_seeded_torrents || '';
         if ($('hearsay.follow')) $('hearsay.follow').value = (h.follow || []).join('\n');
+        if ($('hearsay.block_private_peers')) $('hearsay.block_private_peers').checked = !!h.block_private_peers;
+        if ($('hearsay.blocklist')) $('hearsay.blocklist').value = (h.blocklist || []).join('\n');
     }
 
     collectHearsayConfig() {
@@ -191,6 +193,9 @@ class ConfigManager {
             max_seeded_torrents: parseInt($('hearsay.max_seeded_torrents')?.value, 10) || 0,
             follow: ($('hearsay.follow')?.value || '')
                 .split('\n').map((k) => k.trim()).filter(Boolean),
+            block_private_peers: $('hearsay.block_private_peers')?.checked ?? false,
+            blocklist: ($('hearsay.blocklist')?.value || '')
+                .split('\n').map((cidr) => cidr.trim()).filter(Boolean),
         };
     }
 

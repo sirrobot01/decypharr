@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/netip"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -48,6 +49,7 @@ type Service struct {
 	maxStorage  int64
 	maxFeeds    int
 	maxSeeded   int
+	blocked     []netip.Prefix
 	follow      []string
 
 	mu               sync.Mutex
@@ -75,6 +77,10 @@ func New(cfg *config.Config, log zerolog.Logger) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	blocked, err := transport.ParseBlockedPeers(cfg.Hearsay.BlockPrivatePeers, cfg.Hearsay.Blocklist)
+	if err != nil {
+		return nil, fmt.Errorf("hearsay: %w", err)
+	}
 	s := &Service{
 		log:         log.With().Str("component", "hearsay").Logger(),
 		debrids:     map[string]string{},
@@ -90,6 +96,7 @@ func New(cfg *config.Config, log zerolog.Logger) (*Service, error) {
 		maxStorage:  cfg.Hearsay.MaxStorageBytes,
 		maxFeeds:    cfg.Hearsay.MaxFeedsPerNamespace,
 		maxSeeded:   cfg.Hearsay.MaxSeededTorrents,
+		blocked:     blocked,
 	}
 	var domains []hearsaylib.Domain
 	for _, d := range cfg.Debrids {
@@ -221,6 +228,7 @@ func (s *Service) Start(ctx context.Context) error {
 		MaxStorage:           s.maxStorage,
 		MaxFeedsPerNamespace: s.maxFeeds,
 		MaxSeededTorrents:    s.maxSeeded,
+		BlockedPeers:         s.blocked,
 	})
 	if err != nil {
 		return fmt.Errorf("hearsay transport: %w", err)

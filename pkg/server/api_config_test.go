@@ -125,3 +125,21 @@ func TestConfigHandlersUseSnapshots(t *testing.T) {
 		t.Fatal("live URL update restarted services")
 	}
 }
+
+func TestUpdateConfigRejectsInvalidHearsayBlocklist(t *testing.T) {
+	config.Reset()
+	config.SetConfigPath(t.TempDir())
+	t.Cleanup(config.Reset)
+	mgr := manager.New()
+	t.Cleanup(func() { _ = mgr.Stop() })
+	server := &Server{manager: mgr}
+
+	response := httptest.NewRecorder()
+	server.handleUpdateConfig(response, httptest.NewRequest(http.MethodPost, "/api/config", strings.NewReader(`{"hearsay":{"blocklist":["10.0.0.1"]}}`)))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("POST status=%d body=%s, want 400", response.Code, response.Body.String())
+	}
+	if len(config.Get().Hearsay.Blocklist) != 0 {
+		t.Fatal("invalid blocklist was saved")
+	}
+}

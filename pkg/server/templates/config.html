@@ -1918,6 +1918,28 @@ fe80::/10</textarea>
                                 Leave empty and Decypharr finds users by itself. Add keys and Decypharr uses
                                 only those users, and deletes snapshots from any user it found earlier.</span>
                         </div>
+
+                        <div class="space-y-2">
+                            <label class="label cursor-pointer justify-start gap-3">
+                                <input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
+                                       id="hearsay.block_private_peers" name="hearsay.block_private_peers">
+                                <div>
+                                    <span class="label-text font-medium">Block private peers</span>
+                                    <div class="label-text-alt">Do not connect to private, CGNAT, link-local or
+                                        loopback addresses. Use this behind a VPN. Requires a restart.
+                                    </div>
+                                </div>
+                            </label>
+                            <label class="label" for="hearsay.blocklist">
+                                <span class="font-medium">Blocked address ranges
+                                    <span class="opacity-60 font-normal">(optional)</span>
+                                </span>
+                            </label>
+                            <textarea class="textarea w-full font-mono text-sm" rows="2" name="hearsay.blocklist"
+                                      id="hearsay.blocklist" placeholder="203.0.113.0/24"></textarea>
+                            <span class="label-text-alt opacity-70">Enter one CIDR range per line. Decypharr does not
+                                connect to peers in these ranges. Requires a restart.</span>
+                        </div>
                     </div>
                 </div>
 

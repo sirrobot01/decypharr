@@ -20,6 +20,9 @@ type Hearsay struct {
 	MaxFeedsPerNamespace int      `json:"max_feeds_per_namespace,omitzero"`
 	MaxSeededTorrents    int      `json:"max_seeded_torrents,omitzero"`
 	Follow               []string `json:"follow,omitempty"`
+	// BlockPrivatePeers skips private, CGNAT, link-local and loopback peers.
+	BlockPrivatePeers bool     `json:"block_private_peers,omitzero"`
+	Blocklist         []string `json:"blocklist,omitempty"`
 }
 
 func (h Hearsay) Participates() bool {
@@ -34,7 +37,8 @@ func (h Hearsay) IsZero() bool {
 	return !h.Disabled && h.Participate == nil && h.Publish == nil && h.AdviceMode == "" &&
 		h.MinSupport == 0 && h.MinEvidence == 0 && h.MinSources == 0 &&
 		h.Port == 0 && h.GossipPort == 0 && h.Interval == "" &&
-		h.MaxStorageBytes == 0 && h.MaxFeedsPerNamespace == 0 && h.MaxSeededTorrents == 0 && len(h.Follow) == 0
+		h.MaxStorageBytes == 0 && h.MaxFeedsPerNamespace == 0 && h.MaxSeededTorrents == 0 && len(h.Follow) == 0 &&
+		!h.BlockPrivatePeers && len(h.Blocklist) == 0
 }
 
 func (c *Config) applyHearsayEnvVars() {
@@ -91,6 +95,17 @@ func (c *Config) applyHearsayEnvVars() {
 	if v := getEnv("HEARSAY__MAX_SEEDED_TORRENTS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			c.Hearsay.MaxSeededTorrents = n
+		}
+	}
+	if v := getEnv("HEARSAY__BLOCK_PRIVATE_PEERS"); v != "" {
+		c.Hearsay.BlockPrivatePeers = parseBool(v)
+	}
+	if v := getEnv("HEARSAY__BLOCKLIST"); v != "" {
+		c.Hearsay.Blocklist = nil
+		for cidr := range strings.SplitSeq(v, ",") {
+			if cidr = strings.TrimSpace(cidr); cidr != "" {
+				c.Hearsay.Blocklist = append(c.Hearsay.Blocklist, cidr)
+			}
 		}
 	}
 	if v := getEnv("HEARSAY__FOLLOW"); v != "" {

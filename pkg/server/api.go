@@ -18,6 +18,7 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/repair"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sirrobot01/decypharr/pkg/version"
+	"github.com/sirrobot01/hearsay/transport"
 )
 
 type mountCacheCleaner interface {
@@ -328,6 +329,10 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		if err := next.ValidateVirtualFolders(); err != nil {
 			invalid = true
 			return fmt.Errorf("invalid virtual folders: %w", err)
+		}
+		if _, err := transport.ParseBlockedPeers(next.Hearsay.BlockPrivatePeers, next.Hearsay.Blocklist); err != nil {
+			invalid = true
+			return fmt.Errorf("invalid hearsay blocklist: %w", err)
 		}
 		next.Auth = current.Auth
 		next.SessionSecret = current.SessionSecret
