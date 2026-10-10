@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -126,7 +127,10 @@ func (s *Service) CleanupQueue(ctx context.Context, name string) error {
 		case QueueActionBlocklistResearch:
 			blocklistResearch = append(blocklistResearch, item.Id)
 		case QueueActionImport:
-			manualImports = append(manualImports, item.DownloadId)
+			// Sonarr lists a season pack once per episode, all sharing one downloadId.
+			if !slices.Contains(manualImports, item.DownloadId) {
+				manualImports = append(manualImports, item.DownloadId)
+			}
 		}
 	}
 
