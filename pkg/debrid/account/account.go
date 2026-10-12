@@ -53,6 +53,12 @@ func (a *Account) GetDownloadLink(ctx context.Context, id string, file *types.Fi
 	}
 	slicedLink := a.sliceFileLink(file.Link)
 	dl, ok := a.links.Load(slicedLink)
+	if ok && dl.Expired(time.Now()) {
+		// Providers stamp ExpiresAt from auto_expire_links_after; past it the
+		// CDN may reject the URL, so treat the entry as a miss and re-fetch.
+		a.links.Delete(slicedLink)
+		ok = false
+	}
 	if !ok {
 		var err error
 		dl, err = fetcher(ctx, a, id, file)

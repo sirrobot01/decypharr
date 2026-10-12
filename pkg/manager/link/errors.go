@@ -153,6 +153,10 @@ func ErrorCodeToLinkError(code string) *Error {
 		return NewRefetchableError(ErrInvalidDownloadCode, code)
 	case "401", "unauthorized":
 		return NewPermanentError(ErrUnauthorized, code)
+	case "400", "403", "410":
+		// A bare CDN status on HEAD validation (no X-Error header) means the
+		// presigned link expired or rotated, same as ClassifyStreamStatus.
+		return NewRefetchableError(fmt.Errorf("HTTP %s: link rejected", code), code)
 	case "404":
 		return NewPermanentError(Err404, code)
 	case "429":

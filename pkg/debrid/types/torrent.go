@@ -168,6 +168,12 @@ func (dl *DownloadLink) Valid() error {
 	return nil
 }
 
+// Expired reports whether the link is past its ExpiresAt. A zero ExpiresAt
+// never expires.
+func (dl *DownloadLink) Expired(now time.Time) bool {
+	return !dl.ExpiresAt.IsZero() && now.After(dl.ExpiresAt)
+}
+
 func (dl *DownloadLink) Empty() bool {
 	return dl.DownloadLink == ""
 }
