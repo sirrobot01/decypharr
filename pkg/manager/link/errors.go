@@ -155,12 +155,19 @@ func ErrorCodeToLinkError(code string) *Error {
 		return NewPermanentError(ErrUnauthorized, code)
 	case "404":
 		return NewPermanentError(Err404, code)
+	case "400":
+		// Same reading as ClassifyStreamStatus: a 400 from the link host
+		// usually means a rejected or not-yet-ready presigned link.
+		return NewRefetchableError(fmt.Errorf("HTTP 400: link rejected"), code)
 	case "429":
 		return NewRetryableError(Err429, code)
 	case "503", "read_pxy_timeout":
 		return NewRetryableError(Err503, code)
 	default:
-		return NewPermanentError(fmt.Errorf("unknown error code: %s", code), code)
+		// Unknown codes are more often transient than permanent. A wrong
+		// "retryable" costs a refetch, a wrong "permanent" makes the file
+		// unreadable (see failedValidationTTL).
+		return NewRetryableError(fmt.Errorf("unknown error code: %s", code), code)
 	}
 }
 
