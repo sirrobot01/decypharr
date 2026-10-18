@@ -5,6 +5,7 @@ description: Configure Arrs to use Decypharr.
 
 import sabnzbdImage from '../../../assets/images/sabnzbd.png';
 import qbitImage from '../../../assets/images/qbittorent.png';
+import arrsImage from '../../../assets/images/setup/arrs.png';
 
 Decypharr provides both QBitTorrent and Sabnzbd-compatible APIs for Sonarr, Radarr, and other *Arr applications.
 
@@ -191,6 +192,45 @@ cycle — no restart needed.
 The raw `queue_cleanup` config shape and the full list of catalog rule IDs are documented in
 [Configuration → Queue Cleanup](../configuration/#queue-cleanup).
 :::
+
+## Application Type and API Version
+
+Leave **Type** on **Auto-detect** and **API Version** on **Auto**. Decypharr reads the application
+type from the service name, confirms it with a probe, and calls the API version that type serves.
+
+Declare them when the service name does not say which application runs, for example a Chaptarr
+(a Readarr fork) reachable at `http://chaptarr:8789`:
+
+| Field | Values | Notes |
+|-------|--------|-------|
+| **Type** | `sonarr`, `radarr`, `lidarr`, `readarr`, `prowlarr` | Which application this instance runs |
+| **API Version** | `v3` (Sonarr, Radarr), `v1` (Lidarr, Readarr) | Which API path Decypharr calls; on Auto it follows **Type** |
+
+<img
+	src={arrsImage.src}
+	width={arrsImage.width}
+	height={arrsImage.height}
+	alt="Decypharr Arr settings with the Type and API Version fields"
+/>
+*Screenshot: Settings → Arrs, one instance on Auto-detect, one declared as Readarr / v1.*
+
+```json
+{
+  "arrs": [
+    {
+      "name": "Chaptarr",
+      "host": "http://chaptarr:8789",
+      "token": "ARR_API_KEY",
+      "type": "readarr",
+      "api_version": "v1"
+    }
+  ]
+}
+```
+
+A declared value is never overwritten. On Auto, the type is a runtime fact: it is detected when
+Decypharr talks to the instance and is not written back to `config.json`. Declaring `prowlarr`
+also keeps the instance out of queue cleanup, since Prowlarr has no download queue.
 
 ## Auto-Detection
 
