@@ -76,7 +76,7 @@ func (s *Service) ManualImport(ctx context.Context, name, downloadID string) err
 
 	var candidates []ImportResponseSchema
 	query := url.Values{"downloadId": {downloadID}}
-	resp, err := s.get(ctx, instance, "api/v3/manualimport?"+query.Encode(), &candidates)
+	resp, err := s.get(ctx, instance, instance.APIRoot()+"/manualimport?"+query.Encode(), &candidates)
 	if err != nil {
 		return fmt.Errorf("manual import lookup: %w", err)
 	}

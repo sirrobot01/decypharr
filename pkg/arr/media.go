@@ -48,7 +48,7 @@ func (s *Service) DownloadClientConfig(ctx context.Context, name string) (Downlo
 	}
 
 	var clientConfig DownloadClientConfig
-	resp, err := s.get(ctx, instance, "api/v3/config/downloadclient", &clientConfig)
+	resp, err := s.get(ctx, instance, instance.APIRoot()+"/config/downloadclient", &clientConfig)
 	if err != nil {
 		return DownloadClientConfig{}, fmt.Errorf("get download client config: %w", err)
 	}
@@ -73,7 +73,7 @@ func (s *Service) LibraryFile(ctx context.Context, name string, fileID int) (Lib
 	}
 
 	var file mediaFile
-	resp, err := s.get(ctx, instance, fmt.Sprintf("api/v3/%s/%d", resource, fileID), &file)
+	resp, err := s.get(ctx, instance, fmt.Sprintf("%s/%s/%d", instance.APIRoot(), resource, fileID), &file)
 	if err != nil {
 		return LibraryFile{}, false, fmt.Errorf("get %s %d: %w", resource, fileID, err)
 	}
@@ -117,7 +117,7 @@ func (s *Service) DeleteLibraryFile(ctx context.Context, name string, fileID int
 		return err
 	}
 
-	resp, err := s.mutate(ctx, instance, http.MethodDelete, fmt.Sprintf("api/v3/%s/%d", resource, fileID), nil, nil)
+	resp, err := s.mutate(ctx, instance, http.MethodDelete, fmt.Sprintf("%s/%s/%d", instance.APIRoot(), resource, fileID), nil, nil)
 	if err != nil {
 		return fmt.Errorf("delete %s %d: %w", resource, fileID, err)
 	}
@@ -194,7 +194,7 @@ func (s *Service) Commands(ctx context.Context, name string) ([]Command, error) 
 	}
 
 	var commands []Command
-	resp, err := s.get(ctx, instance, "api/v3/command", &commands)
+	resp, err := s.get(ctx, instance, instance.APIRoot()+"/command", &commands)
 	if err != nil {
 		return nil, fmt.Errorf("list arr commands: %w", err)
 	}
@@ -206,7 +206,7 @@ func (s *Service) Commands(ctx context.Context, name string) ([]Command, error) 
 
 func (s *Service) command(ctx context.Context, instance Arr, payload any) (Command, error) {
 	var command Command
-	resp, err := s.mutate(ctx, instance, http.MethodPost, "api/v3/command", payload, &command)
+	resp, err := s.mutate(ctx, instance, http.MethodPost, instance.APIRoot()+"/command", payload, &command)
 	if err != nil {
 		if dispatched(resp, err) {
 			return Command{}, UnknownMutationOutcome(fmt.Errorf("submit arr command: %w", err), 0)

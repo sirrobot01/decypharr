@@ -113,6 +113,22 @@ func dispatched(resp *http.Response, err error) bool {
 	return ok
 }
 
+// httpStatusError is a non-success response from an Arr. It keeps the status
+// code so callers can react to a specific one, such as an instance that does
+// not expose the queue endpoint at all.
+type httpStatusError struct {
+	StatusCode int
+	Status     string
+}
+
+func (e *httpStatusError) Error() string { return "arr returned " + e.Status }
+
+// IsNotFound reports whether err came from a 404 response.
+func IsNotFound(err error) bool {
+	status, ok := errors.AsType[*httpStatusError](err)
+	return ok && status.StatusCode == http.StatusNotFound
+}
+
 func expectStatus(resp *http.Response, allowed ...int) error {
 	if resp == nil {
 		return errors.New("arr returned no response")
@@ -120,7 +136,7 @@ func expectStatus(resp *http.Response, allowed ...int) error {
 	if slices.Contains(allowed, resp.StatusCode) {
 		return nil
 	}
-	return fmt.Errorf("arr returned %s", resp.Status)
+	return &httpStatusError{StatusCode: resp.StatusCode, Status: resp.Status}
 }
 
 func expectSuccess(resp *http.Response) error {
@@ -130,7 +146,7 @@ func expectSuccess(resp *http.Response) error {
 	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
 		return nil
 	}
-	return fmt.Errorf("arr returned %s", resp.Status)
+	return &httpStatusError{StatusCode: resp.StatusCode, Status: resp.Status}
 }
 
 // Probe reports which application an instance runs, and fails when it does not
@@ -146,16 +162,24 @@ func (s *Service) Probe(ctx context.Context, instance Arr) (Type, error) {
 	var status struct {
 		AppName string `json:"appName"`
 	}
-	resp, err := s.get(ctx, instance, "api/v3/system/status", &status)
-	if err != nil {
-		return Others, err
-	}
-	// Lidarr and Readarr serve v1, so a 404 still means the instance answered.
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound {
-		return Others, fmt.Errorf("validate arr %s: %s", instance.Name, resp.Status)
-	}
-	if kind := typeFromAppName(status.AppName); kind != Others {
-		return kind, nil
+	// Ask the version the instance should serve first, then the other one: a
+	// v1 application (Lidarr, Readarr, Chaptarr) answers 404 on v3 and vice
+	// versa, and the app name it returns identifies it.
+	for _, root := range []string{instance.APIRoot(), instance.AlternateAPIRoot()} {
+		resp, err := s.get(ctx, instance, root+"/system/status", &status)
+		if err != nil {
+			return Others, err
+		}
+		switch resp.StatusCode {
+		case http.StatusOK:
+			if kind := typeFromAppName(status.AppName); kind != Others {
+				return kind, nil
+			}
+		case http.StatusNotFound:
+			continue
+		default:
+			return Others, fmt.Errorf("validate arr %s: %s", instance.Name, resp.Status)
+		}
 	}
 	return inferType(instance.Host, instance.Name), nil
 }

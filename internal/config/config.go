@@ -64,9 +64,17 @@ func (q QBitTorrent) IsZero() bool {
 }
 
 type Arr struct {
-	Name             string `json:"name,omitempty"`
-	Host             string `json:"host,omitempty"`
-	Token            string `json:"token,omitempty"`
+	Name  string `json:"name,omitempty"`
+	Host  string `json:"host,omitempty"`
+	Token string `json:"token,omitempty"`
+	// Type declares which application the instance runs, e.g. "sonarr",
+	// "radarr", "lidarr", "readarr" or "prowlarr". Empty means auto-detect from
+	// the host and name.
+	Type string `json:"type,omitempty"`
+	// APIVersion declares the API version the instance serves: "v1" (Lidarr,
+	// Readarr and their forks) or "v3" (Sonarr, Radarr). Empty means infer it
+	// from Type, falling back to v3.
+	APIVersion       string `json:"api_version,omitempty"`
 	SkipRepair       bool   `json:"skip_repair,omitempty"`
 	DownloadUncached *bool  `json:"download_uncached,omitempty"`
 	SelectedDebrid   string `json:"selected_debrid,omitempty"`
@@ -74,7 +82,7 @@ type Arr struct {
 }
 
 func (a Arr) IsZero() bool {
-	return a.Name == "" && a.Host == "" && a.Token == "" && !a.SkipRepair && a.DownloadUncached == nil && a.SelectedDebrid == "" && a.Source == ""
+	return a.Name == "" && a.Host == "" && a.Token == "" && a.Type == "" && a.APIVersion == "" && !a.SkipRepair && a.DownloadUncached == nil && a.SelectedDebrid == "" && a.Source == ""
 }
 
 // QueueCleanup is the global policy that drives CleanupQueue. It maps

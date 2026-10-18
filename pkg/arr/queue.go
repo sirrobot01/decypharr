@@ -95,7 +95,7 @@ func (s *Service) Queue(ctx context.Context, name string) ([]QueueSchema, error)
 	for page := 1; ; page++ {
 		query := url.Values{"page": {strconv.Itoa(page)}, "pageSize": {"200"}}
 		var response QueueResponseScheme
-		resp, err := s.get(ctx, instance, "api/v3/queue?"+query.Encode(), &response)
+		resp, err := s.get(ctx, instance, instance.APIRoot()+"/queue?"+query.Encode(), &response)
 		if err != nil {
 			return items, err
 		}
@@ -116,6 +116,9 @@ func (s *Service) CleanupQueue(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
+	// Debug trace: makes a working cleanup observable (the arr was reached on
+	// its own API version and answered), not just the absence of an error.
+	s.logger.Debug().Str("arr", name).Int("items", len(items)).Msg("Arr queue fetched for cleanup")
 
 	rules := config.Get().QueueCleanup.Rules
 	var blocklist, blocklistResearch []int
@@ -209,7 +212,7 @@ func (s *Service) removeQueueItems(ctx context.Context, name string, ids []int, 
 		Ids []int `json:"ids"`
 	}{Ids: ids}
 
-	resp, err := s.mutate(ctx, instance, http.MethodDelete, "api/v3/queue/bulk?"+query.Encode(), payload, nil)
+	resp, err := s.mutate(ctx, instance, http.MethodDelete, instance.APIRoot()+"/queue/bulk?"+query.Encode(), payload, nil)
 	if err != nil {
 		return fmt.Errorf("remove queue items: %w", err)
 	}

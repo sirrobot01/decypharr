@@ -75,7 +75,7 @@ func (s *Service) LibraryFiles(ctx context.Context, name string) ([]LibraryFile,
 
 func (s *Service) sonarrLibraryFiles(ctx context.Context, instance Arr) ([]LibraryFile, error) {
 	var series []sonarrSeries
-	resp, err := s.getDecoded(ctx, instance, "api/v3/series", arrayResponseDecoder(func(item sonarrSeries) error {
+	resp, err := s.getDecoded(ctx, instance, instance.APIRoot()+"/series", arrayResponseDecoder(func(item sonarrSeries) error {
 		series = append(series, item)
 		return nil
 	}))
@@ -110,7 +110,7 @@ func (s *Service) sonarrLibraryFiles(ctx context.Context, instance Arr) ([]Libra
 
 func (s *Service) sonarrSeriesFiles(ctx context.Context, instance Arr, seriesID int) ([]LibraryFile, error) {
 	var episodeFiles []sonarrEpisodeFile
-	endpoint := fmt.Sprintf("api/v3/episodefile?seriesId=%d", seriesID)
+	endpoint := fmt.Sprintf("%s/episodefile?seriesId=%d", instance.APIRoot(), seriesID)
 	resp, err := s.getDecoded(ctx, instance, endpoint, arrayResponseDecoder(func(file sonarrEpisodeFile) error {
 		episodeFiles = append(episodeFiles, file)
 		return nil
@@ -146,7 +146,7 @@ func (s *Service) sonarrSeriesFiles(ctx context.Context, instance Arr, seriesID 
 
 func (s *Service) sonarrEpisodeIDs(ctx context.Context, instance Arr, seriesID int) (map[int][]int, error) {
 	byFile := make(map[int][]int)
-	endpoint := fmt.Sprintf("api/v3/episode?seriesId=%d", seriesID)
+	endpoint := fmt.Sprintf("%s/episode?seriesId=%d", instance.APIRoot(), seriesID)
 	resp, err := s.getDecoded(ctx, instance, endpoint, arrayResponseDecoder(func(episode sonarrEpisode) error {
 		if episode.ID > 0 && episode.EpisodeFileID > 0 {
 			byFile[episode.EpisodeFileID] = append(byFile[episode.EpisodeFileID], episode.ID)
@@ -169,7 +169,7 @@ func (s *Service) sonarrEpisodeIDs(ctx context.Context, instance Arr, seriesID i
 
 func (s *Service) radarrLibraryFiles(ctx context.Context, instance Arr) ([]LibraryFile, error) {
 	var files []LibraryFile
-	resp, err := s.getDecoded(ctx, instance, "api/v3/movie", arrayResponseDecoder(func(movie radarrMovie) error {
+	resp, err := s.getDecoded(ctx, instance, instance.APIRoot()+"/movie", arrayResponseDecoder(func(movie radarrMovie) error {
 		if file, ok := movieLibraryFile(movie); ok {
 			files = append(files, file)
 		}
@@ -203,7 +203,7 @@ func movieLibraryFile(movie radarrMovie) (LibraryFile, bool) {
 // longer has contributes nothing.
 func (s *Service) radarrMovieFiles(ctx context.Context, instance Arr, movieID int) ([]LibraryFile, error) {
 	var movie radarrMovie
-	endpoint := fmt.Sprintf("api/v3/movie/%d", movieID)
+	endpoint := fmt.Sprintf("%s/movie/%d", instance.APIRoot(), movieID)
 	resp, err := s.get(ctx, instance, endpoint, &movie)
 	if err != nil {
 		return nil, fmt.Errorf("get radarr movie %d: %w", movieID, err)

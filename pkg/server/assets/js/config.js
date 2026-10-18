@@ -1218,6 +1218,33 @@ class ConfigManager {
                         </div>
 
                         <div>
+                            <label class="label" for="arr[${index}].type">
+                                <span class="font-medium">Type</span>
+                            </label>
+                            <select class="select w-full" name="arr[${index}].type" id="arr[${index}].type">
+                                <option value="">Auto-detect</option>
+                                <option value="sonarr">Sonarr</option>
+                                <option value="radarr">Radarr</option>
+                                <option value="lidarr">Lidarr</option>
+                                <option value="readarr">Readarr</option>
+                                <option value="prowlarr">Prowlarr</option>
+                            </select>
+                            <span class="text-sm opacity-70">Which application this instance runs. Auto-detect works from the name or a probe.</span>
+                        </div>
+
+                        <div>
+                            <label class="label" for="arr[${index}].api_version">
+                                <span class="font-medium">API Version</span>
+                            </label>
+                            <select class="select w-full" name="arr[${index}].api_version" id="arr[${index}].api_version">
+                                <option value="">Auto</option>
+                                <option value="v3">v3 (Sonarr, Radarr)</option>
+                                <option value="v1">v1 (Lidarr, Readarr)</option>
+                            </select>
+                            <span class="text-sm opacity-70">Leave on Auto unless the application needs the other version.</span>
+                        </div>
+
+                        <div>
                             <label class="label" for="arr[${index}].selected_debrid">
                                 <span class="font-medium">Preferred Provider(debrid)</span>
                             </label>
@@ -1609,6 +1636,8 @@ class ConfigManager {
             const nameInput = getField('name');
             const hostInput = getField('host');
             const tokenInput = getField('token');
+            const typeInput = getField('type');
+            const apiVersionInput = getField('api_version');
             const skipRepairInput = getField('skip_repair');
             const downloadUncachedInput = getField('download_uncached');
             const selectedDebridInput = getField('selected_debrid');
@@ -1626,6 +1655,13 @@ class ConfigManager {
                 selected_debrid: selectedDebridInput.value,
                 source: sourceInput.value
             };
+
+            if (typeInput && typeInput.value) {
+                arr.type = typeInput.value;
+            }
+            if (apiVersionInput && apiVersionInput.value) {
+                arr.api_version = apiVersionInput.value;
+            }
 
             if (downloadUncachedInput.value !== '') {
                 arr.download_uncached = downloadUncachedInput.value === 'true';

@@ -22,6 +22,9 @@ import (
 type Service struct {
 	mu   sync.RWMutex
 	arrs map[string]Arr
+	// noQueue records instances whose queue endpoint answered 404, so an
+	// application without a queue is asked once rather than on every pass.
+	noQueue map[string]struct{}
 
 	client   *request.Client
 	mutation *request.Client
@@ -31,8 +34,9 @@ type Service struct {
 
 func New() *Service {
 	service := &Service{
-		arrs:   make(map[string]Arr),
-		logger: logger.New("arr"),
+		arrs:    make(map[string]Arr),
+		noQueue: make(map[string]struct{}),
+		logger:  logger.New("arr"),
 		client: request.New(
 			request.WithTimeout(0),
 			request.WithMaxRetries(5),
@@ -99,7 +103,7 @@ func (s *Service) GetOrCreate(name string) Arr {
 	if instance, ok := s.Get(name); ok {
 		return instance
 	}
-	return Arr{Name: name, Type: inferType("", name), Source: SourceManual}
+	return Arr{Name: name, Type: inferType("", name), TypeInferred: true, Source: SourceManual}
 }
 
 func (s *Service) All() []Arr {
@@ -118,16 +122,19 @@ func (s *Service) AddOrUpdate(instance Arr) {
 	}
 	if instance.Type == "" {
 		instance.Type = inferType(instance.Host, instance.Name)
+		instance.TypeInferred = true
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.arrs[instance.Name] = instance
+	delete(s.noQueue, instance.Name)
 }
 
 func (s *Service) Clear() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	clear(s.arrs)
+	clear(s.noQueue)
 }
 
 func (s *Service) SyncFromConfig(configured []config.Arr) {
@@ -152,6 +159,8 @@ func (s *Service) SyncFromConfig(configured []config.Arr) {
 		updated[name] = instance
 	}
 	s.arrs = updated
+	// The configuration changed, so a queue endpoint may have changed too.
+	clear(s.noQueue)
 }
 
 func (s *Service) SyncToConfig() []config.Arr {
@@ -176,6 +185,11 @@ func (s *Service) SyncToConfig() []config.Arr {
 		existing.SkipRepair = instance.SkipRepair
 		existing.DownloadUncached = instance.DownloadUncached
 		existing.SelectedDebrid = instance.SelectedDebrid
+		// The type stays as the user wrote it: one that was only detected is a
+		// runtime fact, and writing it back would make a wrong detection
+		// permanent. An instance the configuration does not hold yet is saved
+		// through toConfig, which carries a type only when it is not a guess.
+		existing.APIVersion = instance.APIVersion
 		merged[instance.Name] = existing
 	}
 	return slices.Collect(maps.Values(merged))
@@ -188,7 +202,10 @@ func (s *Service) ResolveType(ctx context.Context, name string) Type {
 	if !ok {
 		return Others
 	}
-	if instance.Type == Sonarr || instance.Type == Radarr {
+	// A type declared in the configuration, or one a probe already confirmed, is
+	// trusted as-is. A type guessed from the name and host is checked once: a
+	// wrong guess then corrects itself instead of sticking.
+	if instance.Type != "" && instance.Type != Others && !instance.TypeInferred {
 		return instance.Type
 	}
 	kind, err := s.Probe(ctx, instance)
@@ -204,21 +221,33 @@ func (s *Service) ResolveType(ctx context.Context, name string) Type {
 	defer s.mu.Unlock()
 	if current, ok := s.arrs[name]; ok {
 		current.Type = kind
+		current.TypeInferred = false
 		s.arrs[name] = current
 	}
 	return kind
 }
 
-// CleanupQueues runs the configured queue cleanup rules against every
-// instance, one run per instance at a time.
+// CleanupQueues runs the configured queue cleanup rules against every instance
+// that exposes a queue, one run per instance at a time.
 func (s *Service) CleanupQueues(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, instance := range s.All() {
+		if !instance.HasQueue() || s.queueSkipped(instance.Name) {
+			continue
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			_, _, _ = s.cleanups.Do(instance.Name, func() (any, error) {
 				if err := s.CleanupQueue(ctx, instance.Name); err != nil {
+					// An arr that has no queue endpoint answers 404 on every
+					// pass: record it once instead of logging an error each run.
+					if IsNotFound(err) {
+						if s.markNoQueue(instance.Name) {
+							s.logger.Debug().Str("arr", instance.Name).Msg("Arr has no download queue; skipping queue cleanup")
+						}
+						return nil, nil
+					}
 					s.logger.Error().Err(err).Str("arr", instance.Name).Msg("Failed to clean up arr queue")
 				}
 				return nil, nil
@@ -226,6 +255,26 @@ func (s *Service) CleanupQueues(ctx context.Context) {
 		}()
 	}
 	wg.Wait()
+}
+
+// queueSkipped reports whether an instance already answered 404 on its queue.
+func (s *Service) queueSkipped(name string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, skipped := s.noQueue[name]
+	return skipped
+}
+
+// markNoQueue records that an instance has no queue endpoint, reporting whether
+// it was newly recorded.
+func (s *Service) markNoQueue(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.noQueue[name]; exists {
+		return false
+	}
+	s.noQueue[name] = struct{}{}
+	return true
 }
 
 func (s *Service) instance(name string) (Arr, error) {
