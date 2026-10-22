@@ -123,6 +123,18 @@ func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, fi
 		return s.handleBadLink(ctx, err, entry, link, attempt)
 	}
 
+	// A link we already know is expired cannot be validated back to life: the
+	// HEAD below would burn the whole retry ladder before landing in
+	// invalidateAndRefetch anyway. Refetch first, then validate the fresh link
+	// once through the normal path.
+	if link.Expired() && link.Debrid != "" {
+		fresh, refetchErr := s.invalidateAndRefetch(ctx, entry, link, attempt)
+		if refetchErr != nil {
+			return fresh, refetchErr
+		}
+		link = fresh
+	}
+
 	// Is link already validated
 	// Check if we've already validated this link
 	if validationErr, exists := s.validated.Load(link.DownloadLink); exists {
