@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sirrobot01/appendstore"
+	"github.com/sirrobot01/decypharr/internal/config"
 )
 
 func TestEntryMutationsReportIndexFailures(t *testing.T) {
@@ -113,5 +114,28 @@ func TestEntryMutationReportsHealthFailure(t *testing.T) {
 				t.Fatalf("index changed after health failure: %v, %v", item, err)
 			}
 		})
+	}
+}
+
+func TestDeleteKeepsFolderSharedWithAnotherEntry(t *testing.T) {
+	config.SetConfigPath(t.TempDir())
+	t.Cleanup(config.Reset)
+	s, err := NewStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	for _, hash := range []string{"first", "second"} {
+		entry := &Entry{InfoHash: hash, Name: "folder", Files: map[string]*File{"file": {Name: "file", InfoHash: hash, Size: 10}}}
+		if err := s.AddOrUpdate(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Delete("first"); err != nil {
+		t.Fatal(err)
+	}
+	item, err := s.GetEntryItem("folder")
+	if err != nil || item.Files["file"] == nil {
+		t.Fatalf("folder lost the remaining entry's file: %v, %v", item, err)
 	}
 }

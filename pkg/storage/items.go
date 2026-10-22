@@ -3,6 +3,8 @@ package storage
 import (
 	"errors"
 	"fmt"
+	"strings"
+
 	"github.com/sirrobot01/appendstore"
 	"google.golang.org/protobuf/proto"
 )
@@ -122,6 +124,25 @@ func (s *Storage) removeFromEntryItem(entry *Entry) error {
 	for fileName := range entry.Files {
 		if f, exists := item.Files[fileName]; exists && f.InfoHash == entry.InfoHash {
 			delete(item.Files, fileName)
+		}
+	}
+	// Another entry can render the same folder, so keep serving its files.
+	var others []string
+	_ = s.entries.ForEachMetadata(func(key string, meta *appendstore.Metadata) error {
+		if !strings.EqualFold(key, entry.InfoHash) && meta.Attribute(attributeName) == name {
+			others = append(others, key)
+		}
+		return nil
+	})
+	for _, key := range others {
+		other, err := s.Get(key)
+		if err != nil {
+			continue
+		}
+		for fileName, file := range other.Files {
+			if _, exists := item.Files[fileName]; !exists {
+				item.Files[fileName] = file
+			}
 		}
 	}
 	if len(item.Files) == 0 {
