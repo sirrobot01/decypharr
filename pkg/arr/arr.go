@@ -20,6 +20,7 @@ const (
 	Lidarr   Type = "lidarr"
 	Readarr  Type = "readarr"
 	Prowlarr Type = "prowlarr"
+	Chaptarr Type = "chaptarr"
 	Others   Type = "others"
 )
 
@@ -28,6 +29,12 @@ type Source string
 const (
 	SourceAuto   Source = "auto"
 	SourceManual Source = "manual"
+)
+
+// API roots. Lidarr and Readarr serve v1; the Sonarr and Radarr family serves v3.
+const (
+	APIv1 = "api/v1"
+	APIv3 = "api/v3"
 )
 
 // Arr is one configured Arr instance. It carries no behaviour: every call to
@@ -41,6 +48,17 @@ type Arr struct {
 	DownloadUncached *bool  `json:"download_uncached"`
 	SelectedDebrid   string `json:"selected_debrid,omitempty"`
 	Source           Source `json:"source,omitempty"`
+}
+
+// APIRoot is the API path every request to this instance must use. Lidarr,
+// Readarr and Chaptarr serve v1; the Sonarr and Radarr family serves v3.
+func (a Arr) APIRoot() string {
+	switch a.Type {
+	case Lidarr, Readarr, Chaptarr:
+		return APIv1
+	default:
+		return APIv3
+	}
 }
 
 // Reachable reports whether the instance carries enough to be called.
@@ -130,6 +148,9 @@ func (a Arr) toConfig() config.Arr {
 
 // inferType guesses from the name and host. Probe resolves it for certain.
 func inferType(host, name string) Type {
+	// Display names are typed by hand ("Chaptarr", "Sonarr 4K"): match them
+	// regardless of case so a name alone is enough to classify an instance.
+	host, name = strings.ToLower(host), strings.ToLower(name)
 	switch {
 	case strings.Contains(host, "sonarr") || strings.Contains(name, "sonarr"):
 		return Sonarr
@@ -141,6 +162,8 @@ func inferType(host, name string) Type {
 		return Readarr
 	case strings.Contains(host, "prowlarr") || strings.Contains(name, "prowlarr"):
 		return Prowlarr
+	case strings.Contains(host, "chaptarr") || strings.Contains(name, "chaptarr"):
+		return Chaptarr
 	default:
 		return Others
 	}
@@ -158,6 +181,8 @@ func typeFromAppName(appName string) Type {
 		return Readarr
 	case "prowlarr":
 		return Prowlarr
+	case "chaptarr":
+		return Chaptarr
 	default:
 		return Others
 	}

@@ -146,7 +146,7 @@ func (s *Service) Probe(ctx context.Context, instance Arr) (Type, error) {
 	var status struct {
 		AppName string `json:"appName"`
 	}
-	resp, err := s.get(ctx, instance, "api/v3/system/status", &status)
+	resp, err := s.get(ctx, instance, instance.APIRoot()+"/system/status", &status)
 	if err != nil {
 		return Others, err
 	}
