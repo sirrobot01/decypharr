@@ -32,7 +32,8 @@ type FixerRequest struct {
 	AttemptedDebrids []string
 	StartedAt        time.Time
 	LastAttempt      time.Time
-	result           chan *FixResult
+	done             chan struct{}
+	result           *FixResult
 }
 
 // FixResult is the result of a fix operation
@@ -93,29 +94,26 @@ func (f *Fixer) FixTorrent(ctx context.Context, entry *storage.Entry, skipCurren
 			AttemptsCount: 0,
 		}, nil
 	}
-	// Check if repair is already in flight
-	if req, exists := f.inFlightRepairs.Load(entry.InfoHash); exists {
-		// Wait for existing repair to complete
+	req := &FixerRequest{
+		InfoHash:         entry.InfoHash,
+		AttemptedDebrids: make([]string, 0),
+		StartedAt:        time.Now(),
+		LastAttempt:      time.Now(),
+		done:             make(chan struct{}),
+	}
+	// Join a repair that is already in flight
+	if inFlight, loaded := f.inFlightRepairs.LoadOrStore(entry.InfoHash, req); loaded {
 		select {
-		case result := <-req.result:
-			return result, nil
+		case <-inFlight.done:
+			return inFlight.result, nil
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-time.After(5 * time.Minute):
 			return nil, fmt.Errorf("repair timeout for %s", entry.Name)
 		}
 	}
-
-	// Create new repair request
-	req := &FixerRequest{
-		InfoHash:         entry.InfoHash,
-		AttemptedDebrids: make([]string, 0),
-		StartedAt:        time.Now(),
-		LastAttempt:      time.Now(),
-		result:           make(chan *FixResult, 1),
-	}
-	f.inFlightRepairs.Store(entry.InfoHash, req)
 	defer f.inFlightRepairs.Delete(entry.InfoHash)
+	defer close(req.done)
 	req.CurrentDebrid = entry.ActiveProvider
 
 	// Build debrid attempt order: current debrid first, then others in config order
@@ -133,7 +131,7 @@ func (f *Fixer) FixTorrent(ctx context.Context, entry *storage.Entry, skipCurren
 		select {
 		case <-ctx.Done():
 			result := &FixResult{Success: false, Error: ctx.Err(), AttemptsCount: totalAttempts}
-			req.result <- result
+			req.result = result
 			return result, ctx.Err()
 		default:
 		}
@@ -170,7 +168,7 @@ func (f *Fixer) FixTorrent(ctx context.Context, entry *storage.Entry, skipCurren
 				Error:         nil,
 				AttemptsCount: totalAttempts,
 			}
-			req.result <- result
+			req.result = result
 			return result, nil
 		}
 
@@ -203,7 +201,7 @@ func (f *Fixer) FixTorrent(ctx context.Context, entry *storage.Entry, skipCurren
 		Error:         fmt.Errorf("all re-insertion attempts failed: %w", lastErr),
 		AttemptsCount: totalAttempts,
 	}
-	req.result <- result
+	req.result = result
 	return result, result.Error
 }
 
