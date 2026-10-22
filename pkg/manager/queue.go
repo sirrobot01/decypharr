@@ -2,6 +2,7 @@ package manager
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
@@ -87,12 +89,16 @@ type Queue struct {
 	storage            *storage.Storage
 	logger             zerolog.Logger
 	removeStalledAfter time.Duration
+	running            *xsync.Map[string, context.CancelCauseFunc] // infohash -> cancels its post-download action
 }
+
+var errEntryDeleted = errors.New("queue entry deleted")
 
 func newQueue(storage *storage.Storage, removeStalledAfterStr string) *Queue {
 	q := &Queue{
 		storage: storage,
 		logger:  logger.New("queue"),
+		running: xsync.NewMap[string, context.CancelCauseFunc](),
 	}
 
 	if removeStalledAfterStr != "" {
@@ -131,6 +137,7 @@ func (q *Queue) deleteEntryFiles(entry *storage.Entry) error {
 
 func (q *Queue) wrapCleanupWithFileDelete(cleanup func(t *storage.Entry) error) func(*storage.Entry) error {
 	return func(entry *storage.Entry) error {
+		q.stopRunning(entry.InfoHash)
 		if err := q.deleteEntryFiles(entry); err != nil {
 			return err
 		}
@@ -141,7 +148,15 @@ func (q *Queue) wrapCleanupWithFileDelete(cleanup func(t *storage.Entry) error) 
 	}
 }
 
+// stopRunning cancels the post-download action of a deleted entry.
+func (q *Queue) stopRunning(infohash string) {
+	if cancel, ok := q.running.Load(strings.ToLower(infohash)); ok {
+		cancel(errEntryDeleted)
+	}
+}
+
 func (q *Queue) Delete(infohash string, deleteFiles bool, cleanup func(t *storage.Entry) error) error {
+	q.stopRunning(infohash)
 	if deleteFiles {
 		cleanup = q.wrapCleanupWithFileDelete(cleanup)
 	}

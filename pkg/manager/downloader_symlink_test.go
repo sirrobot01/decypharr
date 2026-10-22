@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,7 +30,7 @@ func TestCreateSymlinksSkipsMatchingDirectoryName(t *testing.T) {
 	entry := &storage.Entry{Name: "release"}
 	files := []*storage.File{{Name: fileName}}
 
-	paths, err := d.createSymlinksWhenMountFilesAppear(entry, files, mountPath, symlinkDir)
+	paths, err := d.createSymlinksWhenMountFilesAppear(context.Background(), entry, files, mountPath, symlinkDir)
 	if err != nil {
 		t.Fatalf("create symlinks: %v", err)
 	}
