@@ -471,9 +471,89 @@ func (d *Downloader) processDownload(entry *storage.Entry) error {
 	return d.processTorrentDownload(entry)
 }
 
+// refreshFilesWithBackoff re-fetches the torrent from its active debrid
+// provider a few times with backoff when the entry has no files yet.
+//
+// Some debrid providers (Premiumize in particular) can flip a transfer's
+// status to "finished" before the underlying file's download link has
+// actually been generated on their side - most noticeably for content
+// that is already cached and completes in well under a second. The very
+// first status check right after submission can race this window and see
+// zero files, even though the same provider confirms a valid link for the
+// same file moments later. Without a retry, this permanently fails the
+// download with "no valid download links available" for torrents that,
+// paradoxically, were the fastest and most available to fetch.
+//
+// This gives the provider a short, bounded window (~30s across 5 attempts)
+// to catch up before giving up and returning the original empty result.
+func (d *Downloader) refreshFilesWithBackoff(entry *storage.Entry) []*storage.File {
+	provider := entry.GetActiveProvider()
+	if provider == nil {
+		return entry.GetActiveFiles()
+	}
+	client := d.manager.ProviderClient(provider.Provider)
+	if client == nil {
+		return entry.GetActiveFiles()
+	}
+
+	backoff := 2 * time.Second
+	const maxAttempts = 5
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		time.Sleep(backoff)
+		refreshed, err := client.GetTorrent(provider.ID)
+		if err != nil || refreshed == nil || len(refreshed.Files) == 0 {
+			if backoff < 16*time.Second {
+				backoff *= 2
+			}
+			continue
+		}
+		applyRefreshedFiles(entry, provider, refreshed)
+		if files := entry.GetActiveFiles(); len(files) > 0 {
+			d.logger.Info().Int("attempt", attempt+1).Str("name", entry.Name).
+				Msg("Recovered file links after provider was briefly not ready")
+			return files
+		}
+		if backoff < 16*time.Second {
+			backoff *= 2
+		}
+	}
+	return entry.GetActiveFiles()
+}
+
+// applyRefreshedFiles merges a freshly-fetched debrid torrent's files into
+// the entry: the canonical per-entry file list (name/size/path) and the
+// active provider's per-file link/id data used to resolve download links.
+func applyRefreshedFiles(entry *storage.Entry, provider *storage.ProviderEntry, refreshed *types.Torrent) {
+	if provider.Files == nil {
+		provider.Files = make(map[string]*storage.ProviderFile)
+	}
+	if entry.Files == nil {
+		entry.Files = make(map[string]*storage.File)
+	}
+	for name, f := range refreshed.Files {
+		provider.Files[name] = &storage.ProviderFile{
+			Id:   f.Id,
+			Link: f.Link,
+			Path: f.Path,
+		}
+		if _, exists := entry.Files[name]; !exists {
+			entry.Files[name] = &storage.File{
+				Name:     name,
+				Path:     f.Path,
+				Size:     f.Size,
+				InfoHash: entry.InfoHash,
+				AddedOn:  time.Now(),
+			}
+		}
+	}
+}
+
 // processTorrentDownload downloads files from debrid via HTTP
 func (d *Downloader) processTorrentDownload(entry *storage.Entry) error {
 	files := entry.GetActiveFiles()
+	if len(files) == 0 {
+		files = d.refreshFilesWithBackoff(entry)
+	}
 	d.logger.Info().Msgf("Downloading %d files...", len(files))
 
 	totalSize := int64(0)
