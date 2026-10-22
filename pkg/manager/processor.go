@@ -266,7 +266,9 @@ func (m *Manager) processQueuedTorrent(entry *storage.Entry) {
 		Id:               placement.ID,
 		InfoHash:         entry.InfoHash,
 		Magnet:           magnet,
-		Name:             magnet.Name,
+		Name:             entry.Name,
+		OriginalFilename: entry.OriginalFilename,
+		Debrid:           entry.ActiveProvider,
 		Size:             entry.Size,
 		Files:            make(map[string]debridTypes.File),
 		DownloadUncached: entry.DownloadUncached,
@@ -322,6 +324,8 @@ func (m *Manager) processQueuedTorrent(entry *storage.Entry) {
 	_ = m.queue.Update(entry)
 	// Check if done or failed
 	if debridTorrent.Status == debridTypes.TorrentStatusDownloaded {
+		// Uncached torrents only list their files once downloaded
+		applyDebridTorrentToEntry(entry, debridTorrent)
 		m.processAction(entry)
 	}
 }
