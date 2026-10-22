@@ -104,6 +104,7 @@ var (
 
 // HTTP error sentinels
 var (
+	Err400 = errors.New("HTTP 400 Bad Request")
 	Err404 = errors.New("HTTP 404 Not Found")
 	Err429 = errors.New("HTTP 429 Too Many Requests")
 	Err503 = errors.New("HTTP 503 Service Unavailable")
@@ -153,6 +154,9 @@ func ErrorCodeToLinkError(code string) *Error {
 		return NewRefetchableError(ErrInvalidDownloadCode, code)
 	case "401", "unauthorized":
 		return NewPermanentError(ErrUnauthorized, code)
+	case "400":
+		// TorBox answers 400 for a link that is not ready yet.
+		return NewRefetchableError(Err400, code)
 	case "404":
 		return NewPermanentError(Err404, code)
 	case "429":
