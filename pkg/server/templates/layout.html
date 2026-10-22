@@ -6,14 +6,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Decypharr - {{.Title}}</title>
 
-    <link href="{{.URLBase}}assets/css/styles.css" rel="stylesheet" type="text/css"/>
+    <link href="{{.URLBase}}assets/css/styles.css?v={{assetVersion "css/styles.css"}}" rel="stylesheet" type="text/css"/>
 
     <link rel="apple-touch-icon" sizes="180x180" href="{{.URLBase}}images/favicon/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="{{.URLBase}}images/favicon/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="{{.URLBase}}images/favicon/favicon-16x16.png">
     <link rel="manifest" href="{{.URLBase}}images/favicon/site.webmanifest">
 
-    <link rel="preload" href="{{.URLBase}}assets/js/common.js" as="script">
+    <link rel="preload" href="{{.URLBase}}assets/js/common.js?v={{assetVersion "js/common.js"}}" as="script">
 
     <script>
         // Early theme detection to prevent FOUC
@@ -186,23 +186,23 @@
     </aside>
 </footer>
 
-<script src="{{.URLBase}}assets/js/jquery-3.7.1.min.js"></script>
-<script src="{{.URLBase}}assets/js/common.js"></script>
+<script src="{{.URLBase}}assets/js/jquery-3.7.1.min.js?v={{assetVersion "js/jquery-3.7.1.min.js"}}"></script>
+<script src="{{.URLBase}}assets/js/common.js?v={{assetVersion "js/common.js"}}"></script>
 
 {{ if eq .Page "index" }}
-<script src="{{.URLBase}}assets/js/dashboard.js"></script>
+<script src="{{.URLBase}}assets/js/dashboard.js?v={{assetVersion "js/dashboard.js"}}"></script>
 {{ else if eq .Page "browse" }}
-<script src="{{.URLBase}}assets/js/browse.js"></script>
+<script src="{{.URLBase}}assets/js/browse.js?v={{assetVersion "js/browse.js"}}"></script>
 {{ else if eq .Page "download" }}
-<script src="{{.URLBase}}assets/js/download.js"></script>
+<script src="{{.URLBase}}assets/js/download.js?v={{assetVersion "js/download.js"}}"></script>
 {{ else if eq .Page "repair" }}
-<script src="{{.URLBase}}assets/js/repair.js"></script>
+<script src="{{.URLBase}}assets/js/repair.js?v={{assetVersion "js/repair.js"}}"></script>
 {{ else if eq .Page "reacquire" }}
-<script src="{{.URLBase}}assets/js/reacquire.js"></script>
+<script src="{{.URLBase}}assets/js/reacquire.js?v={{assetVersion "js/reacquire.js"}}"></script>
 {{ else if eq .Page "config" }}
-<script src="{{.URLBase}}assets/js/config.js"></script>
+<script src="{{.URLBase}}assets/js/config.js?v={{assetVersion "js/config.js"}}"></script>
 {{ else if eq .Page "setup" }}
-<script src="{{.URLBase}}assets/js/setup.js"></script>
+<script src="{{.URLBase}}assets/js/setup.js?v={{assetVersion "js/setup.js"}}"></script>
 {{ end }}
 </body>
 </html>

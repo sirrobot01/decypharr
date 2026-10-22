@@ -29,9 +29,6 @@ import (
 //go:embed templates/*
 var content embed.FS
 
-//go:embed assets/build/*
-var assetsEmbed embed.FS
-
 //go:embed assets/images/*
 var imagesEmbed embed.FS
 
@@ -78,7 +75,9 @@ func New(mgr *manager.Manager) *Server {
 
 	cfg := config.Get()
 
-	templates := template.Must(template.ParseFS(
+	templates := template.Must(template.New("").Funcs(template.FuncMap{
+		"assetVersion": assetVersion,
+	}).ParseFS(
 		content,
 		"templates/layout.html",
 		"templates/setup_layout.html",
