@@ -214,6 +214,10 @@ func (s *Service) ResolveType(ctx context.Context, name string) Type {
 func (s *Service) CleanupQueues(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, instance := range s.All() {
+		// Prowlarr manages indexers and has no download queue.
+		if instance.Type == Prowlarr {
+			continue
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
