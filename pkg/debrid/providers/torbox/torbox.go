@@ -292,7 +292,7 @@ func (tb *Torbox) getTorboxStatus(status string, finished bool) types.TorrentSta
 	switch status {
 	case "paused", "downloading", "checkingResumeData", "metaDL", "pausedUP",
 		"queuedUP", "checkingUP", "forcedUP", "allocating", "pausedDL",
-		"queuedDL", "checkingDL", "forcedDL", "moving", "incomplete":
+		"queuedDL", "checkingDL", "forcedDL", "moving", "incomplete", "queued":
 		return types.TorrentStatusDownloading
 	case "completed", "cached", "uploading", "downloaded":
 		return types.TorrentStatusDownloaded
