@@ -70,7 +70,7 @@ func (s *Service) Media(ctx context.Context, name, mediaID string) ([]Content, e
 		Title string `json:"title"`
 		Id    int    `json:"id"`
 	}
-	resp, err := s.get(ctx, instance, fmt.Sprintf("api/v3/series?tvdbId=%s", mediaID), &series)
+	resp, err := s.get(ctx, instance, fmt.Sprintf("%s/series?tvdbId=%s", instance.APIRoot(), mediaID), &series)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func (s *Service) Media(ctx context.Context, name, mediaID string) ([]Content, e
 
 func (s *Service) movies(ctx context.Context, instance Arr, mediaID string) ([]Content, error) {
 	var movies []Movie
-	resp, err := s.get(ctx, instance, fmt.Sprintf("api/v3/movie?tmdbId=%s", mediaID), &movies)
+	resp, err := s.get(ctx, instance, fmt.Sprintf("%s/movie?tmdbId=%s", instance.APIRoot(), mediaID), &movies)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +223,7 @@ func (s *Service) DeleteFiles(ctx context.Context, name string, files []ContentF
 		if len(ids) == 0 {
 			continue
 		}
-		resp, err := s.mutate(ctx, instance, http.MethodDelete, "api/v3/"+resource+"/bulk", map[string][]int{field: ids}, nil)
+		resp, err := s.mutate(ctx, instance, http.MethodDelete, instance.APIRoot()+"/"+resource+"/bulk", map[string][]int{field: ids}, nil)
 		if err != nil {
 			return fmt.Errorf("delete %s bulk: %w", resource, err)
 		}

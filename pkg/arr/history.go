@@ -201,7 +201,7 @@ func (s *Service) FailHistory(ctx context.Context, name string, historyID int) e
 		return fmt.Errorf("fail history: invalid history ID %d", historyID)
 	}
 
-	endpoint := fmt.Sprintf("api/v3/history/failed/%d", historyID)
+	endpoint := fmt.Sprintf("%s/history/failed/%d", instance.APIRoot(), historyID)
 	resp, err := s.mutate(ctx, instance, http.MethodPost, endpoint, nil, nil)
 	if err != nil {
 		if dispatched(resp, err) {
@@ -217,7 +217,7 @@ func (s *Service) FailHistory(ctx context.Context, name string, historyID int) e
 
 func (s *Service) history(ctx context.Context, instance Arr, query url.Values) (HistorySchema, error) {
 	var history HistorySchema
-	resp, err := s.get(ctx, instance, "api/v3/history?"+query.Encode(), &history)
+	resp, err := s.get(ctx, instance, instance.APIRoot()+"/history?"+query.Encode(), &history)
 	if err != nil {
 		return HistorySchema{}, err
 	}

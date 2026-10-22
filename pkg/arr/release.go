@@ -75,7 +75,7 @@ func (s *Service) GrabRelease(ctx context.Context, name string, release Release)
 		return fmt.Errorf("grab release: release identity is incomplete")
 	}
 
-	resp, err := s.mutate(ctx, instance, http.MethodPost, "api/v3/release", release.Payload, nil)
+	resp, err := s.mutate(ctx, instance, http.MethodPost, instance.APIRoot()+"/release", release.Payload, nil)
 	if err != nil {
 		if dispatched(resp, err) {
 			return UnknownMutationOutcome(fmt.Errorf("grab release %q: %w", release.Title, err), 0)
@@ -90,7 +90,7 @@ func (s *Service) GrabRelease(ctx context.Context, name string, release Release)
 
 func (s *Service) releases(ctx context.Context, instance Arr, query url.Values) ([]Release, error) {
 	var payloads []stdjson.RawMessage
-	resp, err := s.get(ctx, instance, "api/v3/release?"+query.Encode(), &payloads)
+	resp, err := s.get(ctx, instance, instance.APIRoot()+"/release?"+query.Encode(), &payloads)
 	if err != nil {
 		return nil, fmt.Errorf("search releases: %w", err)
 	}
