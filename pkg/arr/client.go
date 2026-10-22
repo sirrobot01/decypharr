@@ -42,6 +42,13 @@ func (s *Service) get(ctx context.Context, instance Arr, endpoint string, out an
 	return s.getDecoded(ctx, instance, endpoint, decodeResponseInto(out))
 }
 
+// getOnce issues a read that is never retried. Use it for reads that make the
+// Arr do expensive work, such as the manual import scan: a timed-out attempt
+// keeps running in the Arr, so a retry only stacks a second scan on top.
+func (s *Service) getOnce(ctx context.Context, instance Arr, endpoint string, out any) (*http.Response, error) {
+	return s.do(ctx, s.mutation, instance, http.MethodGet, endpoint, nil, decodeResponseInto(out))
+}
+
 // getDecoded issues a read whose successful response has a specialized
 // decoder. Large collection endpoints use it to process one element at a time.
 func (s *Service) getDecoded(ctx context.Context, instance Arr, endpoint string, decode responseDecoder) (*http.Response, error) {
