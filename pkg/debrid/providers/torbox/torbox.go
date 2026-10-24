@@ -50,6 +50,9 @@ type Torbox struct {
 	downloadPresentCache  sync.Map
 	downloadPresentMu     sync.Mutex
 	downloadPresentLoaded bool
+	// usenet items (see usenet.go)
+	usenetHashes  sync.Map // lowercase hash -> struct{}
+	usenetPresent sync.Map // bare usenet id -> download_present
 }
 
 func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Torbox, error) {
@@ -248,6 +251,9 @@ func (tb *Torbox) IsAvailable(hashes []string) (map[string]bool, error) {
 }
 
 func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
+	if tb.isKnownUsenetHash(torrent.InfoHash) {
+		return nil, fmt.Errorf("%s is a TorBox usenet item and cannot be re-added from a magnet; re-grab it from the *arr instead", torrent.Name)
+	}
 	var data AddMagnetResponse
 
 	formData := map[string]string{
@@ -302,6 +308,9 @@ func (tb *Torbox) getTorboxStatus(status string, finished bool) types.TorrentSta
 }
 
 func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
+	if uid, ok := usenetID(torrentId); ok {
+		return tb.getUsenetTorrent(uid)
+	}
 	var res InfoResponse
 
 	resp, err := tb.doGet("/api/torrents/mylist", map[string]string{"id": torrentId}, &res)
@@ -392,6 +401,23 @@ func (tb *Torbox) loadDownloadPresent(ctx context.Context) error {
 }
 
 func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
+	if uid, ok := usenetID(t.Id); ok {
+		u, err := tb.getUsenetTorrent(uid)
+		if err != nil {
+			return err
+		}
+		t.Name = u.Name
+		t.Bytes = u.Bytes
+		t.Progress = u.Progress
+		t.Status = u.Status
+		t.Speed = u.Speed
+		t.Filename = u.Filename
+		t.OriginalFilename = u.OriginalFilename
+		t.InfoHash = u.InfoHash
+		t.Debrid = u.Debrid
+		t.Files = u.Files
+		return nil
+	}
 	return tb.updateTorrentWithClient(tb.client, t)
 }
 
@@ -484,6 +510,10 @@ func (tb *Torbox) CheckStatus(torrent *types.Torrent) (*types.Torrent, error) {
 }
 
 func (tb *Torbox) DeleteTorrent(torrentId string) error {
+	if _, ok := usenetID(torrentId); ok {
+		tb.logger.Warn().Str("id", torrentId).Msg("refusing to delete a TorBox usenet item: decypharr cannot recreate it")
+		return nil
+	}
 	id, err := strconv.Atoi(torrentId)
 	if err != nil {
 		return fmt.Errorf("invalid TorBox torrent id %q: %w", torrentId, err)
@@ -515,6 +545,9 @@ func (tb *Torbox) GetDownloadLink(ctx context.Context, id string, file *types.Fi
 }
 
 func (tb *Torbox) fetchDownloadLink(ctx context.Context, account *account.Account, id string, file *types.File) (types.DownloadLink, error) {
+	if uid, ok := usenetID(id); ok {
+		return tb.fetchUsenetDownloadLink(account, uid, file)
+	}
 	query := url.Values{}
 	query.Set("token", account.Token)
 	query.Set("torrent_id", id)
@@ -555,6 +588,11 @@ func (tb *Torbox) GetTorrents() ([]*types.Torrent, error) {
 		allTorrents = append(allTorrents, torrents...)
 		offset += len(torrents)
 	}
+	usenetItems, err := tb.getAllUsenet()
+	if err != nil {
+		return nil, err
+	}
+	allTorrents = append(allTorrents, usenetItems...)
 	return allTorrents, nil
 }
 
@@ -668,6 +706,17 @@ func (tb *Torbox) CheckFile(ctx context.Context, infohash, link string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if uid, ok := usenetID(torrentID); ok {
+		present, err := tb.usenetPresentFor(uid)
+		if err != nil {
+			return err
+		}
+		if !present {
+			return customerror.HosterUnavailableError
+		}
+		return nil
+	}
+
 	if present, ok := tb.downloadPresentCache.Load(torrentID); ok {
 		if !present.(bool) {
 			return customerror.HosterUnavailableError
