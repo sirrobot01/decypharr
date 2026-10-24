@@ -205,3 +205,42 @@ func TestRouterQueueContracts(t *testing.T) {
 		})
 	}
 }
+
+func TestAddURLFailureReturnsStatusFalseNot5xx(t *testing.T) {
+	config.Reset()
+	config.SetConfigPath(t.TempDir())
+	t.Cleanup(config.Reset)
+	if _, err := config.Update(func(c *config.Config) error {
+		c.UseAuth = true
+		c.Auth = &config.Auth{APIToken: "test-token", TokenOnly: true}
+		c.DownloadFolder = t.TempDir()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mgr := manager.New()
+	t.Cleanup(func() {
+		if err := mgr.Stop(); err != nil {
+			t.Error(err)
+		}
+	})
+	router := New(mgr).Routes()
+	values := url.Values{"mode": {"addurl"}, "name": {"http://127.0.0.1:1/missing.nzb"}, "cat": {"tv"}, "ma_password": {"test-token"}}
+	req := httptest.NewRequest(http.MethodPost, "/api/", strings.NewReader(values.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (SABnzbd reports enqueue failures in the body); body = %s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Status bool   `json:"status"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v; body = %s", err, response.Body.String())
+	}
+	if body.Status || body.Error == "" {
+		t.Fatalf("want status:false with an error, got %+v", body)
+	}
+}
