@@ -286,18 +286,36 @@ func (ad *AllDebrid) GetTorrent(torrentId string) (*types.Torrent, error) {
 	}
 	t.Bytes = data.Size
 	t.Seeders = data.Seeders
-	if status == "downloaded" {
-		t.Progress = 100
+	t.Status = ad.applyMagnetFiles(t, status, data)
+	return t, nil
+}
+
+// applyMagnetFiles fills in progress, speed and files from a magnet status
+// response. AllDebrid sometimes reports a magnet as ready (statusCode 4)
+// before the files list in that same /magnet/status response is actually
+// populated. Trusting that as a real completion used to leave decypharr with
+// a "downloaded" torrent that has zero files, so no symlink was ever created
+// for an otherwise finished download (see issues #113 and #122). When that
+// happens we report the torrent as still downloading instead, so the next
+// poll picks up the real file list.
+func (ad *AllDebrid) applyMagnetFiles(t *types.Torrent, status types.TorrentStatus, data magnetInfo) types.TorrentStatus {
+	if status == types.TorrentStatusDownloaded {
 		index := -1
 		files := ad.flattenFiles(t.Id, data.Files, "", &index)
-		t.Files = files
-	} else {
+		if len(files) == 0 && data.Size > 0 {
+			status = types.TorrentStatusDownloading
+		} else {
+			t.Progress = 100
+			t.Files = files
+		}
+	}
+	if status != types.TorrentStatusDownloaded {
 		if data.Size > 0 {
 			t.Progress = float64(data.Downloaded) / float64(data.Size) * 100
 		}
 		t.Speed = data.DownloadSpeed
 	}
-	return t, nil
+	return status
 }
 
 func (ad *AllDebrid) updateTorrent(t *types.Torrent) (int, error) {
@@ -319,7 +337,6 @@ func (ad *AllDebrid) updateTorrent(t *types.Torrent) (int, error) {
 	status := getAlldebridStatus(data.StatusCode)
 	name := data.Filename
 	t.Name = name
-	t.Status = status
 	t.Filename = name
 	t.OriginalFilename = name
 	t.Debrid = ad.config.Name
@@ -329,17 +346,7 @@ func (ad *AllDebrid) updateTorrent(t *types.Torrent) (int, error) {
 		t.InfoHash = data.Hash
 	}
 	t.Added = time.Unix(data.CompletionDate, 0)
-	if status == "downloaded" {
-		t.Progress = 100
-		index := -1
-		files := ad.flattenFiles(t.Id, data.Files, "", &index)
-		t.Files = files
-	} else {
-		if data.Size > 0 {
-			t.Progress = float64(data.Downloaded) / float64(data.Size) * 100
-		}
-		t.Speed = data.DownloadSpeed
-	}
+	t.Status = ad.applyMagnetFiles(t, status, data)
 	return data.StatusCode, nil
 }
 
