@@ -166,7 +166,7 @@ func TestRouterQueueContracts(t *testing.T) {
 				}
 			}
 			value := strings.ReplaceAll(tc.value, "target", entries[0].InfoHash)
-			values := url.Values{"mode": {"queue"}, "name": {"delete"}, "value": {value}, "category": {"delete-tv"}, "ma_password": {"test-token"}}
+			values := url.Values{"mode": {"queue"}, "name": {"delete"}, "value": {value}, "del_files": {"1"}, "category": {"delete-tv"}, "ma_password": {"test-token"}}
 			var req *http.Request
 			if tc.method == http.MethodPost {
 				req = httptest.NewRequest(tc.method, "/api/", strings.NewReader(values.Encode()))
