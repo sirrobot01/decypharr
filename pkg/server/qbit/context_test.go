@@ -72,6 +72,31 @@ func TestAuthenticateDiscoversValidatedArrCredentials(t *testing.T) {
 	}
 }
 
+func TestAuthenticateWithoutCategoryMatchesSavedArrCredentials(t *testing.T) {
+	q := newAuthenticationTestQBit(t)
+	config.Get().UseAuth = true
+	existing := arr.Arr{Name: "sonarr", Host: "http://sonarr:8989", Token: "arr-api-key"}
+	q.manager.Arr().AddOrUpdate(existing)
+
+	got, err := q.authenticate(t.Context(), "", existing.Host, existing.Token)
+	if err != nil {
+		t.Fatalf("category-less authentication: %v", err)
+	}
+	if got.Name != existing.Name || got.Host != existing.Host || got.Token != existing.Token {
+		t.Fatalf("authenticated Arr = %#v, want %#v", got, existing)
+	}
+}
+
+func TestAuthenticateWithoutCategoryRejectsUnknownCredentials(t *testing.T) {
+	q := newAuthenticationTestQBit(t)
+	config.Get().UseAuth = true
+	q.manager.Arr().AddOrUpdate(arr.Arr{Name: "sonarr", Host: "http://sonarr:8989", Token: "arr-api-key"})
+
+	if _, err := q.authenticate(t.Context(), "", "http://unknown:8989", "wrong-token"); err == nil {
+		t.Fatal("category-less authentication accepted unknown credentials")
+	}
+}
+
 func TestPreferencesRequireAuthentication(t *testing.T) {
 	q := newAuthenticationTestQBit(t)
 	cfg := config.Get()
