@@ -308,16 +308,17 @@ func (q *QBit) handleTorrentFiles(w http.ResponseWriter, r *http.Request) {
 
 func (q *QBit) handleSetCategory(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	category := getCategory(ctx)
+	category := strings.TrimSpace(getCategory(ctx))
 	hashes := getHashes(ctx)
-	var filterFunc func(t *storage.Entry) bool
+	if category == "" {
+		http.Error(w, "No category provided", http.StatusBadRequest)
+		return
+	}
 
-	hashSet := make(map[string]bool)
-	if len(hashes) > 0 {
-		for _, h := range hashes {
-			hashSet[h] = true
-		}
-
+	filterFunc, ok := hashFilter(hashes)
+	if !ok {
+		http.Error(w, "No hashes provided", http.StatusBadRequest)
+		return
 	}
 
 	updateFunc := func(t *storage.Entry) bool {
@@ -334,6 +335,34 @@ func (q *QBit) handleSetCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	utils.JSONResponse(w, nil, http.StatusOK)
+}
+
+// hashFilter implements qBittorrent's hash selection for setCategory. An
+// empty selection must never become a nil predicate because Storage treats a
+// nil predicate as "match every queued entry".
+func hashFilter(hashes []string) (func(*storage.Entry) bool, bool) {
+	hashSet := make(map[string]struct{}, len(hashes))
+	all := false
+	for _, hash := range hashes {
+		hash = strings.ToLower(strings.TrimSpace(hash))
+		if hash == "all" {
+			all = true
+			continue
+		}
+		if hash != "" {
+			hashSet[hash] = struct{}{}
+		}
+	}
+	if !all && len(hashSet) == 0 {
+		return nil, false
+	}
+	if all {
+		return func(*storage.Entry) bool { return true }, true
+	}
+	return func(entry *storage.Entry) bool {
+		_, ok := hashSet[strings.ToLower(strings.TrimSpace(entry.InfoHash))]
+		return ok
+	}, true
 }
 
 func (q *QBit) handleAddTorrentTags(w http.ResponseWriter, r *http.Request) {
