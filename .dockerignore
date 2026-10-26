@@ -4,8 +4,8 @@ config.json
 docker-compose.yml
 .DS_Store
 **/.idea/
-*.magnet
-**.torrent
+# Test fixtures are needed by the Docker-context compatibility tests. They are
+# copied only into the builder stage and are not shipped in the final image.
 torrents.json
 **/dist/
 *.json
