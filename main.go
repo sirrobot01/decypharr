@@ -9,8 +9,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"syscall"
+	"time"
 
 	"github.com/sirrobot01/decypharr/internal/config"
 
@@ -53,6 +55,10 @@ func main() {
 
 	// Start pprof server if enabled
 	if pprofAddr != "" && enablePprof {
+		// Sample 1 in 100 contended mutex events and about one blocking event
+		// per millisecond blocked, so /debug/pprof/mutex and /block have data.
+		runtime.SetMutexProfileFraction(100)
+		runtime.SetBlockProfileRate(int(time.Millisecond))
 		go func() {
 			log.Printf("Starting pprof server on %s", pprofAddr)
 			if err := http.ListenAndServe(pprofAddr, nil); err != nil {
