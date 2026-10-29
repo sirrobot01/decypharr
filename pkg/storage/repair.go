@@ -420,31 +420,43 @@ func (s *Storage) CountEntryHealthByStatus() map[HealthStatus]int {
 	s.healthCountsMu.Unlock()
 
 	counts := make(map[HealthStatus]int)
-	// Fast path: read the status straight from the index (no disk read, no
-	// JSON decode). Records persisted before the status was indexed have an
-	// empty status attribute; collect those and decode them after the metadata
-	// pass so the fast path remains in-memory only.
-	// This self-heals: the next SaveEntryHealth (every sweep) populates the
-	// index, so the fallback set shrinks to zero.
-	var needDecode []string
-	_ = s.repairState.ForEachMetadata(func(key string, meta *appendstore.Metadata) error {
-		if status := meta.Attribute(attributeStatus); status != "" {
-			counts[HealthStatus(status)]++
-		} else {
-			needDecode = append(needDecode, key)
-		}
-		return nil
-	})
-	for _, key := range needDecode {
-		data, err := s.repairState.Get(key)
-		if err != nil {
+	// Fast path: count straight from the status secondary index. Unlike
+	// ForEachMetadata it does not clone every record's attributes.
+	indexed := 0
+	for _, status := range s.repairState.AttributeValues(attributeStatus) {
+		if status == "" {
 			continue
 		}
-		var stub struct {
-			Status HealthStatus `json:"status"`
-		}
-		if json.Unmarshal(data, &stub) == nil && stub.Status != "" {
-			counts[stub.Status]++
+		n := s.repairState.CountBy(attributeStatus, status)
+		counts[HealthStatus(status)] = n
+		indexed += n
+	}
+	if indexed != s.repairState.Len() {
+		// Records persisted before the status was indexed have an empty
+		// status attribute; collect those and decode them after the metadata
+		// pass. This self-heals: the next SaveEntryHealth (every sweep)
+		// populates the index, so the fallback set shrinks to zero.
+		clear(counts)
+		var needDecode []string
+		_ = s.repairState.ForEachMetadata(func(key string, meta *appendstore.Metadata) error {
+			if status := meta.Attribute(attributeStatus); status != "" {
+				counts[HealthStatus(status)]++
+			} else {
+				needDecode = append(needDecode, key)
+			}
+			return nil
+		})
+		for _, key := range needDecode {
+			data, err := s.repairState.Get(key)
+			if err != nil {
+				continue
+			}
+			var stub struct {
+				Status HealthStatus `json:"status"`
+			}
+			if json.Unmarshal(data, &stub) == nil && stub.Status != "" {
+				counts[stub.Status]++
+			}
 		}
 	}
 
