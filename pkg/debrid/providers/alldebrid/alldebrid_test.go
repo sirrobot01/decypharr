@@ -237,3 +237,56 @@ func TestAvailabilityReportsUnsupported(t *testing.T) {
 		t.Fatalf("IsAvailable = %v, %v", result, err)
 	}
 }
+
+func TestMagnetStatusWaitsForFileLinks(t *testing.T) {
+	tests := map[string]struct {
+		data magnetInfo
+		want debridTypes.TorrentStatus
+	}{
+		"ready with links": {
+			data: magnetInfo{StatusCode: 4, Files: []MagnetFile{{Name: "a.mkv", Link: "https://alldebrid.com/f/a"}}},
+			want: debridTypes.TorrentStatusDownloaded,
+		},
+		"ready without files": {
+			data: magnetInfo{StatusCode: 4},
+			want: debridTypes.TorrentStatusDownloading,
+		},
+		"ready with a nested file missing its link": {
+			data: magnetInfo{StatusCode: 4, Files: []MagnetFile{{Name: "dir", Elements: []MagnetFile{
+				{Name: "a.mkv", Link: "https://alldebrid.com/f/a"},
+				{Name: "b.mkv"},
+			}}}},
+			want: debridTypes.TorrentStatusDownloading,
+		},
+		"uploading": {
+			data: magnetInfo{StatusCode: 3},
+			want: debridTypes.TorrentStatusDownloading,
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := magnetStatus(tt.data); got != tt.want {
+				t.Errorf("magnetStatus() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckStatusKeepsReadyMagnetWithoutLinksPending(t *testing.T) {
+	config.SetConfigPath(t.TempDir())
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"status":"success","data":{"magnets":[{"id":42,"filename":"Release.mkv","statusCode":4,"files":[]}]}}`)
+	}))
+	t.Cleanup(server.Close)
+
+	ad := testAllDebrid(server.URL)
+	got, err := ad.CheckStatus(&debridTypes.Torrent{Id: "42"})
+	if err != nil {
+		t.Fatalf("CheckStatus() error = %v, want pending without error", err)
+	}
+	if got.Status != debridTypes.TorrentStatusDownloading {
+		t.Errorf("CheckStatus() status = %q, want %q", got.Status, debridTypes.TorrentStatusDownloading)
+	}
+}
