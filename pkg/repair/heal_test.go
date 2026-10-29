@@ -243,3 +243,36 @@ func TestHealBrokenEntryDoesNotBypassUnsafeOrUnavailableReacquisition(t *testing
 		})
 	}
 }
+
+func TestHealDanglingArrFilesQueuesEachArrFileOnce(t *testing.T) {
+	store := newRepairTestStorage(t)
+	reacquirer := &fakeReacquirer{library: func(reacquire.LibraryRequest) (*reacquire.Job, error) {
+		return &reacquire.Job{ID: "library-1"}, nil
+	}}
+	service := New(Dependencies{Storage: store, Reacquirer: reacquirer})
+	run := &storage.RepairRun{ID: "repair-run-1"}
+	episode := arr.ContentFile{Path: "/tv/Show/S01E01-E02.mkv", FileId: 11, IsSymlink: true}
+	files := []danglingArrFile{
+		{arrName: "sonarr", file: episode},
+		{arrName: "sonarr", file: episode}, // second episode of the same file
+	}
+
+	service.healDanglingArrFiles(t.Context(), run, files, true)
+
+	if len(reacquirer.libraryRequests) != 1 {
+		t.Fatalf("library requests = %d, want 1", len(reacquirer.libraryRequests))
+	}
+	request := reacquirer.libraryRequests[0]
+	if request.ArrName != "sonarr" || request.ArrFileID != 11 || request.LibraryPath != episode.Path {
+		t.Fatalf("library request = %#v", request)
+	}
+	if run.Stats.Broken != 1 || run.Stats.Repaired != 1 || run.Stats.RepairFailed != 0 {
+		t.Fatalf("run stats = %#v", run.Stats)
+	}
+
+	reportOnly := &storage.RepairRun{ID: "repair-run-2"}
+	service.healDanglingArrFiles(t.Context(), reportOnly, files, false)
+	if len(reacquirer.libraryRequests) != 1 || reportOnly.Stats.Broken != 1 || reportOnly.Stats.Repaired != 0 {
+		t.Fatalf("report-only run queued work or miscounted: requests=%d stats=%#v", len(reacquirer.libraryRequests), reportOnly.Stats)
+	}
+}

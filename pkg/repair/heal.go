@@ -78,6 +78,53 @@ func (r *Service) healBrokenEntry(ctx context.Context, run *storage.RepairRun, s
 	statsMu.Unlock()
 }
 
+// healDanglingArrFiles reports library symlinks whose entry no longer exists
+// and, with auto repair, has the owning Arr replace them. They have no entry,
+// so the entry probe never sees them.
+func (r *Service) healDanglingArrFiles(ctx context.Context, run *storage.RepairRun, files []danglingArrFile, autoRepair bool) {
+	type arrFile struct {
+		arrName string
+		fileID  int
+	}
+	seen := make(map[arrFile]struct{}, len(files))
+	for _, d := range files {
+		if ctx.Err() != nil {
+			return
+		}
+		// A multi-episode file is listed once per episode.
+		key := arrFile{d.arrName, d.file.FileId}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		run.Stats.Broken++
+		log := r.logger.With().Str("arr", d.arrName).Str("path", d.file.Path).Logger()
+		if !autoRepair {
+			log.Warn().Msg("Repair: library symlink points to a removed entry")
+			continue
+		}
+		if r.reacquirer == nil {
+			run.Stats.RepairFailed++
+			log.Warn().Err(errReacquirerUnavailable).Msg("Repair: failed to queue Arr reacquisition for removed entry")
+			continue
+		}
+		job, err := r.reacquirer.ReacquireLibraryFile(ctx, reacquire.LibraryRequest{
+			ArrName: d.arrName, ArrFileID: d.file.FileId, LibraryPath: d.file.Path, Cause: reacquire.CauseRepair,
+		})
+		if err == nil && (job == nil || job.ID == "") {
+			err = errors.New("arr reacquirer returned no job")
+		}
+		if err != nil {
+			run.Stats.RepairFailed++
+			log.Warn().Err(err).Msg("Repair: failed to queue Arr reacquisition for removed entry")
+			continue
+		}
+		run.Stats.Repaired++
+		log.Info().Str("job_id", job.ID).Msg("Repair: queued Arr reacquisition for removed entry")
+	}
+	r.saveRun(run)
+}
+
 func (r *Service) arrInstance(name string) (arr.Arr, bool) {
 	if r.arrs == nil {
 		return arr.Arr{}, false

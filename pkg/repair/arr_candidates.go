@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -22,6 +23,13 @@ type managedArrFile struct {
 	fileName  string
 }
 
+// danglingArrFile is an Arr library symlink into the mount whose entry is
+// gone: the debrid sync removed it after the provider dropped the torrent.
+type danglingArrFile struct {
+	arrName string
+	file    arr.ContentFile
+}
+
 type arrFileCollectionStats struct {
 	total     int
 	resolved  int
@@ -38,20 +46,21 @@ func (s *arrFileCollectionStats) add(other arrFileCollectionStats) {
 	s.ambiguous += other.ambiguous
 }
 
-func (r *Service) enumerateArrCandidates(ctx context.Context, cfg config.RepairConfig) (map[string]*candidate, error) {
+func (r *Service) enumerateArrCandidates(ctx context.Context, cfg config.RepairConfig) (map[string]*candidate, []danglingArrFile, error) {
 	candidates := make(map[string]*candidate)
+	var dangling []danglingArrFile
 	var mu sync.Mutex
 	var collectionErrors []error
 
 	arrs := r.eligibleArrs(cfg.Arrs)
 	if len(arrs) == 0 {
-		return candidates, nil
+		return candidates, nil, nil
 	}
 
 	group, groupCtx := errgroup.WithContext(ctx)
 	for _, a := range arrs {
 		group.Go(func() error {
-			found, err := r.collectArrMediaCandidates(groupCtx, a, "")
+			found, orphans, err := r.collectArrMediaCandidates(groupCtx, a, "")
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
 					return err
@@ -64,32 +73,34 @@ func (r *Service) enumerateArrCandidates(ctx context.Context, cfg config.RepairC
 			}
 			mu.Lock()
 			mergeCandidates(candidates, found)
+			dangling = append(dangling, orphans...)
 			mu.Unlock()
 			return nil
 		})
 	}
 	if err := group.Wait(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if len(candidates) == 0 && len(collectionErrors) > 0 {
-		return nil, errors.Join(collectionErrors...)
+	if len(candidates) == 0 && len(dangling) == 0 && len(collectionErrors) > 0 {
+		return nil, nil, errors.Join(collectionErrors...)
 	}
-	return candidates, nil
+	return candidates, dangling, nil
 }
 
-func (r *Service) collectArrMediaCandidates(ctx context.Context, instance arr.Arr, mediaID string) (map[string]*candidate, error) {
+func (r *Service) collectArrMediaCandidates(ctx context.Context, instance arr.Arr, mediaID string) (map[string]*candidate, []danglingArrFile, error) {
 	candidates := make(map[string]*candidate)
+	var dangling []danglingArrFile
 	kind := r.arrs.ResolveType(ctx, instance.Name)
 	media, err := r.arrs.Media(ctx, instance.Name, mediaID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	managedFiles := r.managedArrFileIndex(instance.Name)
 	var stats arrFileCollectionStats
 	for _, content := range media {
 		select {
 		case <-ctx.Done():
-			return candidates, ctx.Err()
+			return candidates, dangling, ctx.Err()
 		default:
 		}
 		grouped, contentStats := collectArrFiles(content, managedFiles)
@@ -98,6 +109,11 @@ func (r *Service) collectArrMediaCandidates(ctx context.Context, instance arr.Ar
 			name := filepath.Clean(filepath.Base(entryPath))
 			item, err := r.storage.GetEntryItem(name)
 			if err != nil || item == nil {
+				for _, file := range files {
+					if isDanglingEntryLink(file, entryPath) {
+						dangling = append(dangling, danglingArrFile{arrName: instance.Name, file: file})
+					}
+				}
 				continue
 			}
 			found := candidates[name]
@@ -117,13 +133,27 @@ func (r *Service) collectArrMediaCandidates(ctx context.Context, instance arr.Ar
 			}
 		}
 	}
-	if len(candidates) == 0 && stats.total > 0 {
-		return nil, fmt.Errorf(
+	if len(candidates) == 0 && len(dangling) == 0 && stats.total > 0 {
+		return nil, nil, fmt.Errorf(
 			"arr returned %d media files but none mapped to managed entries (local symlinks=%d unique size matches=%d unmapped=%d ambiguous=%d); mount the Arr library paths in Decypharr or align the Arr/Decypharr category",
 			stats.total, stats.resolved, stats.fallback, stats.unmapped, stats.ambiguous,
 		)
 	}
-	return candidates, nil
+	return candidates, dangling, nil
+}
+
+// isDanglingEntryLink reports whether file is a library symlink whose entry
+// directory is gone while the directory that holds entries is still there.
+// A mount that is down removes both, so it never reads as dangling.
+func isDanglingEntryLink(file arr.ContentFile, entryPath string) bool {
+	if !file.IsSymlink || file.FileId <= 0 {
+		return false
+	}
+	if _, err := os.Stat(filepath.Dir(entryPath)); err != nil {
+		return false
+	}
+	_, err := os.Stat(entryPath)
+	return errors.Is(err, fs.ErrNotExist)
 }
 
 func (r *Service) managedArrFileIndex(arrName string) map[int64][]managedArrFile {

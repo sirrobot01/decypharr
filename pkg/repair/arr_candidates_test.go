@@ -80,3 +80,27 @@ func TestCollectArrFilesPrefersReadableSymlink(t *testing.T) {
 		t.Fatalf("symlink stats = %#v", stats)
 	}
 }
+
+func TestIsDanglingEntryLink(t *testing.T) {
+	root := t.TempDir()
+	container := filepath.Join(root, "mount", "__all__")
+	if err := os.MkdirAll(filepath.Join(container, "Live.Release"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := arr.ContentFile{Path: "/library/movie.mkv", FileId: 7, IsSymlink: true}
+
+	if !isDanglingEntryLink(link, filepath.Join(container, "Removed.Release")) {
+		t.Error("removed entry under a live mount should be dangling")
+	}
+	if isDanglingEntryLink(link, filepath.Join(container, "Live.Release")) {
+		t.Error("existing entry should not be dangling")
+	}
+	if isDanglingEntryLink(link, filepath.Join(root, "unmounted", "__all__", "Removed.Release")) {
+		t.Error("an unmounted container must not make links dangling")
+	}
+	plain := link
+	plain.IsSymlink = false
+	if isDanglingEntryLink(plain, filepath.Join(container, "Removed.Release")) {
+		t.Error("a size-matched file is not a symlink and must not be dangling")
+	}
+}
