@@ -31,7 +31,7 @@ func (r *Service) executeSweep(ctx context.Context, run *storage.RepairRun, opts
 	}
 
 	log.Info().Str("source", string(cfg.Source)).Msg("Sweep: selecting candidates")
-	candidates, err := r.enumerateCandidates(ctx, cfg)
+	candidates, dangling, err := r.enumerateCandidates(ctx, cfg)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			r.finishCancelledRepairSweep(ctx, run, stopState, autoRepair, "context cancelled during selection", nil)
@@ -75,6 +75,8 @@ func (r *Service) executeSweep(ctx context.Context, run *storage.RepairRun, opts
 		r.finishCancelledRepairSweep(ctx, run, stopState, autoRepair, "context cancelled after probing", names)
 		return
 	}
+
+	r.healDanglingArrFiles(ctx, run, dangling, autoRepair)
 
 	r.finalizeRun(run, storage.RepairRunCompleted, "", "")
 	log.Info().

@@ -128,7 +128,7 @@ func (r *Service) executeRecheckMedia(ctx context.Context, run *storage.RepairRu
 		if ctx.Err() != nil {
 			break
 		}
-		sub, err := r.collectArrMediaCandidates(ctx, a, mediaID)
+		sub, _, err := r.collectArrMediaCandidates(ctx, a, mediaID)
 		if err != nil {
 			lastErr = err
 			r.logger.Trace().Err(err).Str("arr", a.Name).Str("media_id", mediaID).Msg("RecheckMedia: GetMedia failed")

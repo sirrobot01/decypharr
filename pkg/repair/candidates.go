@@ -19,9 +19,10 @@ type candidate struct {
 	contentMap map[string]arr.ContentFile
 }
 
-func (r *Service) enumerateCandidates(ctx context.Context, cfg config.RepairConfig) (map[string]*candidate, error) {
+func (r *Service) enumerateCandidates(ctx context.Context, cfg config.RepairConfig) (map[string]*candidate, []danglingArrFile, error) {
 	if cfg.Source == config.RepairSourceManaged {
-		return r.enumerateManagedCandidates(ctx)
+		candidates, err := r.enumerateManagedCandidates(ctx)
+		return candidates, nil, err
 	}
 	return r.enumerateArrCandidates(ctx, cfg)
 }
