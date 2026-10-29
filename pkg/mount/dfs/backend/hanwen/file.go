@@ -5,7 +5,6 @@ package hanwen
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"sync/atomic"
 	"syscall"
@@ -23,7 +22,7 @@ import (
 type File struct {
 	fs.Inode
 	config    *config.FuseConfig
-	logger    *logger.RateLimitedEvent
+	rl        *logger.RateLimitedLogger
 	info      atomic.Pointer[manager.FileInfo]
 	createdAt time.Time
 	vfs       *vfs.Manager
@@ -45,7 +44,7 @@ func NewFile(vfsManager *vfs.Manager, config *config.FuseConfig, info *manager.F
 
 	file := &File{
 		config:    config,
-		logger:    rl.Rate(fmt.Sprintf("%s/%s", info.Parent(), info.Name())),
+		rl:        rl,
 		vfs:       vfsManager,
 		createdAt: createdAt,
 	}
@@ -101,13 +100,14 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 		return nil, 0, syscall.EIO
 	}
 	content := info.Content()
+	log := f.rl.Rate(info.Parent() + "/" + info.Name())
 
 	var reader *vfs.StreamingFile
 	if info.IsRemote() && len(content) == 0 {
 		var err error
 		reader, err = f.vfs.GetFile(info)
 		if err != nil {
-			f.logger.Error().Err(err).Str("file", info.Name()).Msg("Failed to get reader at open")
+			log.Error().Err(err).Str("file", info.Name()).Msg("Failed to get reader at open")
 			return nil, 0, syscall.EIO
 		}
 	}
@@ -117,7 +117,7 @@ func (f *File) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, s
 		info:       info,
 		content:    content,
 		streamFile: reader,
-		logger:     f.logger,
+		logger:     log,
 	}
 	return fh, 0, 0
 }
