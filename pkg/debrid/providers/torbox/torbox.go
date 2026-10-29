@@ -523,6 +523,27 @@ func (tb *Torbox) fetchDownloadLink(ctx context.Context, account *account.Accoun
 
 	downloadURL := fmt.Sprintf("%s/api/torrents/requestdl?%s", tb.Host, query.Encode())
 
+	// Resolve the CDN URL once through the rate-limited client. Streaming the
+	// redirect URL makes every range read a requestdl call against the
+	// account-wide API limit. An expired CDN URL is refetched like any link;
+	// on failure the redirect URL still works.
+	client := account.Client()
+	if client == nil {
+		client = tb.client
+	}
+	var res DownloadLinksResponse
+	resp, err := tb.doGetWithClient(ctx, client, "/api/torrents/requestdl", map[string]string{
+		"token":      account.Token,
+		"torrent_id": id,
+		"file_id":    file.Id,
+		"redirect":   "false",
+	}, &res)
+	if err == nil && resp.StatusCode == http.StatusOK && res.Success && res.Data != nil && strings.HasPrefix(*res.Data, "http") {
+		downloadURL = *res.Data
+	} else {
+		tb.logger.Debug().Err(err).Str("torrent_id", id).Msg("requestdl redirect=false failed, using redirect URL")
+	}
+
 	now := time.Now()
 
 	// Always expires

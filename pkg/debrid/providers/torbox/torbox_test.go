@@ -14,6 +14,7 @@ import (
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/debrid/account"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 )
 
@@ -258,5 +259,39 @@ func TestSubmitMagnetAcceptsObjectAndArrayResponses(t *testing.T) {
 				t.Fatalf("SubmitMagnet() id = %q, want 17", torrent.Id)
 			}
 		})
+	}
+}
+
+func TestFetchDownloadLinkResolvesCDNURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/torrents/requestdl" || r.URL.Query().Get("redirect") != "false" {
+			t.Errorf("request = %s, want requestdl with redirect=false", r.URL)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"success":true,"data":"https://store-1.tb-cdn.st/file?token=x"}`)
+	}))
+	t.Cleanup(server.Close)
+
+	dl, err := testTorbox(server.URL).fetchDownloadLink(t.Context(), &account.Account{Token: "key"}, "7", &types.File{Id: "3", Name: "a.mkv"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dl.DownloadLink != "https://store-1.tb-cdn.st/file?token=x" {
+		t.Fatalf("DownloadLink = %q, want the CDN URL", dl.DownloadLink)
+	}
+}
+
+func TestFetchDownloadLinkFallsBackToRedirectURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "busy", http.StatusTooManyRequests)
+	}))
+	t.Cleanup(server.Close)
+
+	dl, err := testTorbox(server.URL).fetchDownloadLink(t.Context(), &account.Account{Token: "key"}, "7", &types.File{Id: "3", Name: "a.mkv"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(dl.DownloadLink, "/api/torrents/requestdl?") || !strings.Contains(dl.DownloadLink, "redirect=true") {
+		t.Fatalf("DownloadLink = %q, want the redirect URL", dl.DownloadLink)
 	}
 }
