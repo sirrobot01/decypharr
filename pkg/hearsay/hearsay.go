@@ -555,9 +555,10 @@ func (h zerologHandler) Handle(_ context.Context, r slog.Record) error {
 
 func hearsayLogLevel(level slog.Level, message string) slog.Level {
 	switch {
-	case level == slog.LevelInfo && (message == "published generation" || message == "ingested generation"):
+	case level == slog.LevelInfo && message == "published generation":
 		return slog.LevelDebug
-	case level == slog.LevelWarn && message == "fetch failed":
+	case level == slog.LevelInfo && message == "ingested generation",
+		level == slog.LevelWarn && message == "fetch failed":
 		return slogLevelTrace
 	default:
 		return level

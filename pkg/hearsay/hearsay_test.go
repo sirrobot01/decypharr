@@ -31,7 +31,7 @@ func TestZerologHandlerDemotesRoutineSyncTraffic(t *testing.T) {
 		want    string
 	}{
 		{name: "published generation", level: slog.LevelInfo, message: "published generation", want: "debug"},
-		{name: "ingested generation", level: slog.LevelInfo, message: "ingested generation", want: "debug"},
+		{name: "ingested generation", level: slog.LevelInfo, message: "ingested generation", want: "trace"},
 		{name: "transient fetch failure", level: slog.LevelWarn, message: "fetch failed", want: "trace"},
 		{name: "real warning", level: slog.LevelWarn, message: "publish failed", want: "warn"},
 		{name: "other information", level: slog.LevelInfo, message: "pruned stale feeds", want: "info"},
