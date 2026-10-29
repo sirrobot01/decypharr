@@ -174,7 +174,22 @@ func (c *Cursor) Close() {
 	sr.cursorMu.Lock()
 	delete(sr.cursors, c)
 	sr.cursorMu.Unlock()
+	// Hints this cursor queued would otherwise run ahead of every later one
+	// in the shared FIFO, downloading a window nobody reads.
+	sr.cancelQueuedPrefetch()
 	sr.publishConsumedFloor()
+}
+
+// cancelQueuedPrefetch drops all queued read-ahead hints. Hints are not owned
+// per cursor, so the live cursors forget their queued marks and re-hint their
+// window on the next read; segments already fetched or fetching are skipped.
+func (sr *StreamingReader) cancelQueuedPrefetch() {
+	sr.fetcher.CancelPendingPrefetch()
+	sr.cursorMu.Lock()
+	for c := range sr.cursors {
+		c.queuedThrough.Store(-1)
+	}
+	sr.cursorMu.Unlock()
 }
 
 // markConsumed records delivery through c and republishes the floor.
@@ -354,8 +369,7 @@ func (sr *StreamingReader) readAtPlain(ctx context.Context, cur *Cursor, p []byt
 	// from while this read waits for connection slots.
 	prevEnd := cur.lastEndSeg.Swap(int64(endSeg))
 	if seekAbandonedWindow(prevEnd, startSeg, endSeg, sr.config.PrefetchAhead) {
-		sr.fetcher.CancelPendingPrefetch()
-		cur.queuedThrough.Store(-1)
+		sr.cancelQueuedPrefetch()
 	}
 	if prevEnd < 0 && startSeg == 0 && endSeg < sr.segCount-1 {
 		sr.fetcher.QueueProbeRange(max(sr.segCount-2, 0), sr.segCount-1)
