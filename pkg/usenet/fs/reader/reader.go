@@ -114,6 +114,12 @@ type Cursor struct {
 	// window delta. Reset on seek.
 	queuedThrough atomic.Int64
 
+	// runStart is the first segment of this cursor's current sequential run
+	// (-1 until the first read). The read-ahead window grows with the run, so
+	// a probe that reads a few blocks queues a few segments, not a full
+	// window.
+	runStart atomic.Int64
+
 	closed atomic.Bool
 }
 
@@ -146,6 +152,7 @@ func (sr *StreamingReader) registerCursorLocked() *Cursor {
 	c.lastEndSeg.Store(-1)
 	c.consumed.Store(-1)
 	c.queuedThrough.Store(-1)
+	c.runStart.Store(-1)
 	sr.cursors[c] = struct{}{}
 	return c
 }
@@ -271,6 +278,14 @@ func NewStreamingReader(
 	return sr, nil
 }
 
+const (
+	// minReadAheadSegments is the read-ahead window at the start of a
+	// sequential run, before the run shows it is a stream rather than a probe.
+	minReadAheadSegments = 16
+	// readAheadRampFactor scales the window with the sequential run length.
+	readAheadRampFactor = 4
+)
+
 // seekAbandonedWindow reports whether a read landing on [startSeg, endSeg]
 // after a previous read that ended at prevEnd constitutes a seek that
 // abandons the queued read-ahead window. Reads within one prefetch window of
@@ -368,6 +383,9 @@ func (sr *StreamingReader) readAtPlain(ctx context.Context, cur *Cursor, p []byt
 	// workers would otherwise keep downloading data the consumer jumped away
 	// from while this read waits for connection slots.
 	prevEnd := cur.lastEndSeg.Swap(int64(endSeg))
+	if prevEnd < 0 || int64(startSeg) > prevEnd+1 || int64(endSeg) < prevEnd {
+		cur.runStart.Store(int64(startSeg))
+	}
 	if seekAbandonedWindow(prevEnd, startSeg, endSeg, sr.config.PrefetchAhead) {
 		sr.cancelQueuedPrefetch()
 	}
@@ -378,11 +396,13 @@ func (sr *StreamingReader) readAtPlain(ctx context.Context, cur *Cursor, p []byt
 	waitRequired := sr.fetcher.PrepareSegments(ctx, startSeg, endSeg)
 
 	// Queue read-ahead hints for the part of the window this cursor hasn't
-	// already hinted (non-blocking). The depth is clamped to what the cache
-	// can actually hold: reading further ahead than the RAM budget allows
-	// only downloads segments that get dropped before the player reaches
-	// them.
-	ahead := min(sr.config.PrefetchAhead, sr.cache.MaxPrefetchSegments())
+	// already hinted (non-blocking). The window grows with the sequential
+	// run so far, so it reaches full depth only for a real stream. The depth is
+	// clamped to what the cache can actually hold: reading further ahead than
+	// the RAM budget allows only downloads segments that get dropped before
+	// the player reaches them.
+	run := endSeg - int(cur.runStart.Load()) + 1
+	ahead := min(sr.config.PrefetchAhead, sr.cache.MaxPrefetchSegments(), max(readAheadRampFactor*run, minReadAheadSegments))
 	prefetchEnd := min(endSeg+ahead, sr.segCount-1)
 	if prefetchEnd > endSeg {
 		qStart := max(endSeg+1, int(cur.queuedThrough.Load())+1)

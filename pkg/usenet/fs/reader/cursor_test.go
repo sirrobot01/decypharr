@@ -174,3 +174,43 @@ func TestConsumedFloorTracksSlowestCursor(t *testing.T) {
 		t.Fatalf("floor after seek-back = %d, want 500", got)
 	}
 }
+
+// TestReadAheadRampsWithSequentialRun: a short read queues only the minimum
+// window, a sequential run widens it, and a seek starts over.
+func TestReadAheadRampsWithSequentialRun(t *testing.T) {
+	sr := newTestReader(t, 300)
+	sr.config.PrefetchAhead = 64
+	prefillSegments(t, sr, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 250)
+	cur := sr.newCursor()
+	defer cur.Close()
+
+	buf := make([]byte, 1000) // one segment per read
+	ctx := context.Background()
+
+	// A first read is a probe until proven otherwise: segments 101-116 are
+	// hinted, and the prefilled 101-110 are skipped.
+	if _, err := cur.ReadAtContext(ctx, buf, 100*1000); err != nil {
+		t.Fatal(err)
+	}
+	if got := sr.fetcher.pendingPrefetch(); got != minReadAheadSegments-10 {
+		t.Fatalf("after one read: %d hints, want %d", got, minReadAheadSegments-10)
+	}
+
+	// Eleven sequential segments widen the window to 4*11 = 44 past 110.
+	for seg := 101; seg <= 110; seg++ {
+		if _, err := cur.ReadAtContext(ctx, buf, int64(seg)*1000); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := sr.fetcher.pendingPrefetch(); got != 44 {
+		t.Fatalf("after an 11-segment run: %d hints, want 44", got)
+	}
+
+	// A seek restarts the run at the minimum window.
+	if _, err := cur.ReadAtContext(ctx, buf, 250*1000); err != nil {
+		t.Fatal(err)
+	}
+	if got := sr.fetcher.pendingPrefetch(); got != minReadAheadSegments {
+		t.Fatalf("after a seek: %d hints, want %d", got, minReadAheadSegments)
+	}
+}

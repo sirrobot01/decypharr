@@ -579,8 +579,6 @@ func (t *usenetTransport) open(ctx context.Context, pos int64) (io.ReadCloser, e
 		_ = h.Close()
 		return nil, fmt.Errorf("usenet stream prime at offset %d read %d bytes, want %d: %w", pos, n, len(probe), io.ErrUnexpectedEOF)
 	}
-	// Warm the read-ahead window from the starting offset (bounded inside).
-	h.Prefetch(ctx, pos, t.size-pos)
 	return &usenetBody{
 		h:    h,
 		ctx:  ctx,
