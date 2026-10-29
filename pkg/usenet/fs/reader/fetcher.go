@@ -729,7 +729,11 @@ func (sf *SegmentFetcher) EnsureSegments(ctx context.Context, startSeg, endSeg i
 func (sf *SegmentFetcher) PrepareSegments(ctx context.Context, startSeg, endSeg int) func() error {
 	var missing []int
 	for i := startSeg; i <= endSeg; i++ {
-		if sf.cache.GetState(i) != StateOnDisk {
+		switch sf.cache.GetState(i) {
+		case StateOnDisk, StateFetching:
+			// A fetching segment already has a producer; readFromCache waits
+			// on it and re-fetches if that producer gives it up.
+		default:
 			missing = append(missing, i)
 		}
 	}
