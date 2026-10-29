@@ -634,7 +634,7 @@ class ConfigManager {
                             </label>
                             <input type="text" class="input w-full" 
                                    name="debrid[${index}].name" id="debrid[${index}].name" 
-                                   placeholder="realdebrid">
+                                   placeholder="realdebrid" autocomplete="off">
                             <span class="text-sm opacity-70">A unique name for this debrid account</span>
                         </div>
 
@@ -644,7 +644,8 @@ class ConfigManager {
                             </label>
                             <div class="password-toggle-container">
                                 <input type="password" class="input input-has-toggle" 
-                                       name="debrid[${index}].api_key" id="debrid[${index}].api_key" required>
+                                       name="debrid[${index}].api_key" id="debrid[${index}].api_key"
+                                       autocomplete="new-password" required>
                                 <button type="button" class="password-toggle-btn">
                                     <i class="bi bi-eye" id="debrid[${index}].api_key_icon"></i>
                                 </button>
@@ -663,6 +664,7 @@ class ConfigManager {
                                 <textarea class="textarea has-toggle font-mono h-full min-h-[200px]" 
                                           name="debrid[${index}].download_api_keys" 
                                           id="debrid[${index}].download_api_keys" 
+                                          autocomplete="off" 
                                           placeholder="Multiple API keys for download (one per line). If empty, main API key will be used."></textarea>
                                 <button type="button" class="password-toggle-btn textarea-toggle">
                                     <i class="bi bi-eye" id="debrid[${index}].download_api_keys_icon"></i>
@@ -1209,6 +1211,7 @@ class ConfigManager {
                             <div class="password-toggle-container">
                                 <input type="password" class="input input-has-toggle ${isAutoDetected ? 'input-disabled' : ''}"
                                        name="arr[${index}].token" id="arr[${index}].token"
+                                       autocomplete="new-password"
                                        ${isAutoDetected ? 'readonly' : 'required'}>
                                 <button type="button" class="password-toggle-btn ${isAutoDetected ? 'opacity-50 cursor-not-allowed' : ''}"
                                         ${isAutoDetected ? 'disabled' : ''}>
