@@ -44,6 +44,8 @@ type matchStats struct {
 	ambiguousTarget int
 	conflicted      int
 	managedSkipped  int
+	// foreignOwner counts matches whose managed file another Arr holds.
+	foreignOwner int
 }
 
 func (s matchStats) matched() int {
@@ -172,6 +174,9 @@ func (s matchStats) fields(event *zerolog.Event) *zerolog.Event {
 		Int("arr_files", s.libraryFiles).
 		Int("managed_files", s.managedFiles).
 		Int("indexed", s.matched())
+	if s.foreignOwner > 0 {
+		event = event.Int("owned_by_other_arr", s.foreignOwner)
+	}
 	return event
 }
 
