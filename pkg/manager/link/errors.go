@@ -157,6 +157,10 @@ func ErrorCodeToLinkError(code string) *Error {
 	case "400":
 		// TorBox answers 400 for a link that is not ready yet.
 		return NewRefetchableError(Err400, code)
+	case "403", "410":
+		// Signed CDN links (e.g. Premiumize) expire with 403/410; a fresh
+		// link for the same file works.
+		return NewRefetchableError(ErrLinkExpired, code)
 	case "404":
 		return NewPermanentError(Err404, code)
 	case "429":
