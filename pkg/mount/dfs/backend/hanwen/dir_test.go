@@ -190,3 +190,39 @@ func testRemoteFileInfo(t *testing.T, size int64, addedOn time.Time) *manager.Fi
 	}
 	return info
 }
+
+func TestLookupChildServesFreshListing(t *testing.T) {
+	info := testRemoteFileInfo(t, 1024, time.Unix(1_700_000_000, 0))
+	// A nil vfs makes any manager query panic, so a pass proves the lookup
+	// was served from the listing.
+	d := newDir(nil, "test-entry", "/__all__/test-entry", LevelFile, 0, nil, zerolog.Nop(), nil)
+	d.listing.Store(&dirListing{at: time.Now(), byName: map[string]*manager.FileInfo{info.Name(): info}})
+
+	got, errno := d.lookupChild(info.Name())
+	if errno != 0 {
+		t.Fatalf("lookupChild errno = %v", errno)
+	}
+	if got == info {
+		t.Fatal("lookupChild returned the shared listing entry, want a copy")
+	}
+	if got.Name() != info.Name() || got.Size() != info.Size() {
+		t.Fatalf("lookupChild = %s/%d, want %s/%d", got.Name(), got.Size(), info.Name(), info.Size())
+	}
+
+	d.Refresh()
+	if d.listing.Load() != nil {
+		t.Fatal("Refresh kept the listing")
+	}
+}
+
+func TestLookupChildDropsExpiredListing(t *testing.T) {
+	d := newDir(nil, "test-entry", "/__all__/test-entry", -1, 0, nil, zerolog.Nop(), nil)
+	d.listing.Store(&dirListing{at: time.Now().Add(-EntryTimeout), byName: map[string]*manager.FileInfo{"x": {}}})
+
+	if _, errno := d.lookupChild("x"); errno == 0 {
+		t.Fatal("lookupChild served an expired listing")
+	}
+	if d.listing.Load() != nil {
+		t.Fatal("expired listing was not dropped")
+	}
+}

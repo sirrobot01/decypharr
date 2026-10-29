@@ -41,6 +41,15 @@ type Dir struct {
 	// modTime is atomic because Lookup refreshes it on a retained inode while
 	// Getattr may be reading it concurrently.
 	modTime atomic.Uint64
+	// listing holds the children from the latest Readdir of a LevelFile dir.
+	// READDIRPLUS looks up every entry right after Readdir; serving those
+	// lookups from the listing avoids decoding the whole torrent per child.
+	listing atomic.Pointer[dirListing]
+}
+
+type dirListing struct {
+	at     time.Time
+	byName map[string]*manager.FileInfo
 }
 
 var _ = (fs.NodeLookuper)((*Dir)(nil))
@@ -61,7 +70,7 @@ func newDir(vfsManager *vfs.Manager, name, virtualPath string, level DirLevel, m
 		virtualPath: virtualPath,
 		level:       level,
 		config:      config,
-		logger:      log.With().Str("dir", name).Logger(),
+		logger:      log,
 		rlLogger:    rl,
 	}
 	d.modTime.Store(modTime)
@@ -201,6 +210,19 @@ func (d *Dir) nodeModTime(info *manager.FileInfo, node fs.InodeEmbedder) uint64 
 
 // lookupChild looks up a child by name using O(1) lookups where possible
 func (d *Dir) lookupChild(name string) (*manager.FileInfo, syscall.Errno) {
+	if l := d.listing.Load(); l != nil {
+		if time.Since(l.at) < EntryTimeout {
+			if info, ok := l.byName[name]; ok {
+				// Copy: Lookup calls SetSys on the result, and concurrent
+				// lookups must not share one FileInfo.
+				c := *info
+				return &c, 0
+			}
+		} else {
+			d.listing.CompareAndSwap(l, nil)
+		}
+	}
+
 	switch d.level {
 	case LevelRoot:
 		// Root level: small static list (~6 entries), O(n) is acceptable
@@ -261,6 +283,14 @@ func (d *Dir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		return nil, errno
 	}
 
+	if d.level == LevelFile {
+		byName := make(map[string]*manager.FileInfo, len(entries))
+		for i := range entries {
+			byName[entries[i].Name()] = &entries[i]
+		}
+		d.listing.Store(&dirListing{at: time.Now(), byName: byName})
+	}
+
 	fuseEntries := make([]fuse.DirEntry, 0, len(entries))
 	for _, info := range entries {
 		mode := uint32(fuse.S_IFREG | 0644)
@@ -304,6 +334,7 @@ func (d *Dir) listChildren() ([]manager.FileInfo, syscall.Errno) {
 
 // Refresh clears any cached nodes so next lookup gets fresh data
 func (d *Dir) Refresh() {
+	d.listing.Store(nil)
 	// For kernel cache invalidation, we can still notify if we're mounted
 	if d.EmbeddedInode().StableAttr().Ino != 0 {
 		// Invalidate directory content cache to force Readdir
@@ -320,11 +351,14 @@ func (d *Dir) RefreshChild(name string) {
 	// Notify kernel that this entry may have changed (force re-lookup)
 	_ = d.NotifyEntry(name)
 
+	d.listing.Store(nil)
+
 	// get the child inode from the kernel's cache
 	// If it exists, also invalidate its content cache so Readdir is re-called
 	if child := d.GetChild(name); child != nil {
 		// get the Dir node from the child inode
 		if childDir, ok := child.Operations().(*Dir); ok {
+			childDir.listing.Store(nil)
 			// Invalidate the child directory's content cache
 			_ = childDir.NotifyContent(0, 0)
 		}
@@ -348,7 +382,7 @@ func (d *Dir) Unlink(ctx context.Context, name string) syscall.Errno {
 	}
 
 	if err := d.vfs.GetManager().RemoveEntry(info); err != nil {
-		d.logger.Error().Err(err).Str("file", info.Name()).Msg("Failed to remove file from source")
+		d.logger.Error().Err(err).Str("dir", d.name).Str("file", info.Name()).Msg("Failed to remove file from source")
 		return syscall.EIO
 	}
 
@@ -367,7 +401,7 @@ func (d *Dir) Rmdir(ctx context.Context, name string) syscall.Errno {
 	}
 
 	if err := d.vfs.GetManager().RemoveEntry(info); err != nil {
-		d.logger.Error().Err(err).Str("torrent", name).Msg("Failed to remove torrent from source")
+		d.logger.Error().Err(err).Str("dir", d.name).Str("torrent", name).Msg("Failed to remove torrent from source")
 		return syscall.EIO
 	}
 
