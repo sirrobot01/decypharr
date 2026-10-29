@@ -254,6 +254,12 @@ func (s *Service) ReplaceArrGeneration(arrName string, generation uint64, bindin
 	return s.completeWaitingJobs(prepared...)
 }
 
+// BindingOwner returns the Arr that holds the managed file, if any.
+func (s *Service) BindingOwner(entryID, fileID string) (string, bool) {
+	binding, ok := s.index.Lookup(entryID, fileID)
+	return binding.ArrName, ok
+}
+
 func (s *Service) DeleteBinding(entryID, fileID string) error {
 	release, err := s.beginOperation()
 	if err != nil {

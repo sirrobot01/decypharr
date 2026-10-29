@@ -38,6 +38,8 @@ type ManagedCatalog interface {
 type bindingWriter interface {
 	UpsertBinding(Binding) error
 	ReplaceArrGeneration(string, uint64, []Binding) error
+	// BindingOwner returns the Arr that holds the managed file, if any.
+	BindingOwner(entryID, fileID string) (string, bool)
 }
 
 type indexRequest struct {
@@ -426,6 +428,16 @@ func (i *Indexer) reconcile(ctx context.Context, instance arr.Arr, request index
 	generation := uint64(time.Now().UnixMilli()) + i.generationSequence.Add(1)
 	matches, stats := matchLibraryFiles(library, managed, i.managedRoot)
 	bindings := bindingsFromMatches(instance, generation, matches)
+	// A managed file bound to another Arr (a renamed instance, or two
+	// instances on one server) is skipped instead of failing the generation.
+	bindings = slices.DeleteFunc(bindings, func(binding Binding) bool {
+		owner, ok := i.writer.BindingOwner(binding.EntryID, binding.EntryFileID)
+		if ok && owner != instance.Name {
+			stats.foreignOwner++
+			return true
+		}
+		return false
+	})
 	if entryID == "" {
 		if err := i.writer.ReplaceArrGeneration(instance.Name, generation, bindings); err != nil {
 			return stats, err

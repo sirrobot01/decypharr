@@ -230,6 +230,12 @@ func (c fixedManagedCatalog) ListManagedFiles(context.Context, string) ([]Manage
 type recordingBindingWriter struct {
 	replacement []Binding
 	upserts     []Binding
+	owners      map[string]string // "entryID/fileID" -> Arr name
+}
+
+func (w *recordingBindingWriter) BindingOwner(entryID, fileID string) (string, bool) {
+	owner, ok := w.owners[entryID+"/"+fileID]
+	return owner, ok
 }
 
 func (w *recordingBindingWriter) UpsertBinding(binding Binding) error {
@@ -551,5 +557,52 @@ func TestRefreshCoverageSkipsOnlyOlderTargetedRequests(t *testing.T) {
 	}
 	if indexer.coveredByRefresh(indexRequest{arrName: "sonarr", entryID: "other", version: 1}) {
 		t.Fatal("Radarr refresh covered a Sonarr request")
+	}
+}
+
+func TestReconcileSkipsFilesOwnedByAnotherArr(t *testing.T) {
+	dir := t.TempDir()
+	managedRoot := filepath.Join(dir, "managed")
+	libraryDir := filepath.Join(dir, "library")
+	if err := os.MkdirAll(libraryDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	owned := filepath.Join(libraryDir, "Owned.mkv")
+	free := filepath.Join(libraryDir, "Free.mkv")
+	if err := os.Symlink(filepath.Join(managedRoot, "Owned.Release", "owned.mkv"), owned); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(managedRoot, "Free.Release", "free.mkv"), free); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/v3/movie" {
+			http.NotFound(w, request)
+			return
+		}
+		_, _ = fmt.Fprintf(w, `[{"id":1,"movieFile":{"id":41,"path":%q}},{"id":2,"movieFile":{"id":42,"path":%q}}]`, owned, free)
+	}))
+	defer server.Close()
+
+	instance := arr.Arr{Name: "radarr", Host: server.URL, Token: "secret", Type: arr.Radarr}
+	arrs := arr.New()
+	arrs.AddOrUpdate(instance)
+	writer := &recordingBindingWriter{owners: map[string]string{"owned-entry/owned-file": "Radarr"}}
+	managed := []ManagedFile{
+		{EntryID: "owned-entry", EntryFolder: "Owned.Release", FileID: "owned-file", FileName: "owned.mkv"},
+		{EntryID: "free-entry", EntryFolder: "Free.Release", FileID: "free-file", FileName: "free.mkv"},
+	}
+	indexer := &Indexer{arrs: arrs, catalog: fixedManagedCatalog(managed), writer: writer, managedRoot: managedRoot}
+
+	stats, err := indexer.reconcile(t.Context(), instance, indexRequest{}, managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.foreignOwner != 1 {
+		t.Fatalf("foreignOwner = %d, want 1", stats.foreignOwner)
+	}
+	if len(writer.replacement) != 1 || writer.replacement[0].EntryID != "free-entry" {
+		t.Fatalf("bindings = %#v, want only the free file", writer.replacement)
 	}
 }
