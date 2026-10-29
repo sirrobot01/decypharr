@@ -130,6 +130,7 @@ func (a Arr) toConfig() config.Arr {
 
 // inferType guesses from the name and host. Probe resolves it for certain.
 func inferType(host, name string) Type {
+	host, name = strings.ToLower(host), strings.ToLower(name)
 	switch {
 	case strings.Contains(host, "sonarr") || strings.Contains(name, "sonarr"):
 		return Sonarr

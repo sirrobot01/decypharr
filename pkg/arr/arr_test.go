@@ -59,3 +59,21 @@ func TestArrInstanceFingerprintCanonicalizesHost(t *testing.T) {
 		t.Fatal("different Arr instances produced the same fingerprint")
 	}
 }
+
+func TestInferTypeIgnoresCase(t *testing.T) {
+	tests := []struct {
+		host, name string
+		want       Type
+	}{
+		{"http://localhost:7878", "Radarr", Radarr},
+		{"http://localhost:8989", "Sonarr", Sonarr},
+		{"http://RADARR:7878", "movies", Radarr},
+		{"http://localhost:8686", "LiDaRr", Lidarr},
+		{"http://localhost:9000", "Movies", Others},
+	}
+	for _, tt := range tests {
+		if got := inferType(tt.host, tt.name); got != tt.want {
+			t.Errorf("inferType(%q, %q) = %v, want %v", tt.host, tt.name, got, tt.want)
+		}
+	}
+}

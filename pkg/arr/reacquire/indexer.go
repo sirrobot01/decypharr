@@ -265,6 +265,11 @@ func (i *Indexer) handleRefresh(ctx context.Context, request indexRequest) {
 	failed := false
 	indexed, arrs := 0, 0
 	for _, instance := range i.arrs.All() {
+		// A name or host that does not reveal the app leaves the type
+		// unknown until the Arr is asked.
+		if instance.Type == arr.Others {
+			instance.Type = i.arrs.ResolveType(ctx, instance.Name)
+		}
 		if instance.Type != arr.Sonarr && instance.Type != arr.Radarr {
 			continue
 		}
@@ -305,6 +310,9 @@ func (i *Indexer) handleArrRefresh(ctx context.Context, request indexRequest) {
 	if !ok {
 		i.logger.Warn().Str("arr", request.arrName).Msg("Arr index refresh skipped: instance not found")
 		return
+	}
+	if instance.Type == arr.Others {
+		instance.Type = i.arrs.ResolveType(ctx, instance.Name)
 	}
 	if instance.Type != arr.Sonarr && instance.Type != arr.Radarr {
 		return
