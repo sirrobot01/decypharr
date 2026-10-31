@@ -111,6 +111,9 @@ func (s *Storage) List(filter func(*Entry) bool) ([]*Entry, error) {
 	var entries []*Entry
 
 	err := s.entries.ForEach(func(key string, value []byte) error {
+		if isSystemKey(key) {
+			return nil
+		}
 		var pb EntryProto
 		if err := proto.Unmarshal(value, &pb); err != nil {
 			return nil
@@ -128,6 +131,9 @@ func (s *Storage) List(filter func(*Entry) bool) ([]*Entry, error) {
 // ForEach iterates over entries
 func (s *Storage) ForEach(fn func(*Entry) error) error {
 	return s.entries.ForEach(func(key string, value []byte) error {
+		if isSystemKey(key) {
+			return nil
+		}
 		var pb EntryProto
 		if err := proto.Unmarshal(value, &pb); err != nil {
 			return nil
@@ -148,6 +154,9 @@ func (s *Storage) ForEachBatch(batchSize int, fn func([]*Entry) error) error {
 	// before the next Unmarshal, leaving the prior entry's slice untouched).
 	var pb EntryProto
 	err := s.entries.ForEach(func(key string, value []byte) error {
+		if isSystemKey(key) {
+			return nil
+		}
 		proto.Reset(&pb)
 		if err := proto.Unmarshal(value, &pb); err != nil {
 			return nil
@@ -268,5 +277,9 @@ func (s *Storage) Delete(infohash string) error {
 
 // Count returns the number of entries
 func (s *Storage) Count() (int, error) {
-	return s.entries.Len(), nil
+	n := s.entries.Len()
+	if s.entries.Exists(migrationStatusKey) {
+		n--
+	}
+	return n, nil
 }

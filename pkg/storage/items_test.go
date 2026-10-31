@@ -140,7 +140,7 @@ func TestDeleteKeepsFolderSharedWithAnotherEntry(t *testing.T) {
 	}
 }
 
-func TestForEachMetaSkipsInternalRecords(t *testing.T) {
+func TestIterationSkipsInternalRecords(t *testing.T) {
 	config.SetConfigPath(t.TempDir())
 	t.Cleanup(config.Reset)
 	s, err := NewStorage(t.TempDir())
@@ -155,14 +155,34 @@ func TestForEachMetaSkipsInternalRecords(t *testing.T) {
 	if err := s.AddOrUpdate(entry); err != nil {
 		t.Fatal(err)
 	}
-	var names []string
+
+	var metaNames []string
 	if err := s.ForEachMeta(func(m *EntryMetaInfo) error {
-		names = append(names, m.Name)
+		metaNames = append(metaNames, m.Name)
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if len(names) != 1 || names[0] != "folder" {
-		t.Fatalf("ForEachMeta returned %q, want only the real entry", names)
+	if len(metaNames) != 1 || metaNames[0] != "folder" {
+		t.Errorf("ForEachMeta returned %q, want only the real entry", metaNames)
+	}
+
+	listed, err := s.List(nil)
+	if err != nil || len(listed) != 1 || listed[0].InfoHash != "abc" {
+		t.Errorf("List returned %d entries (err %v), want only the real entry", len(listed), err)
+	}
+
+	each := 0
+	if err := s.ForEach(func(*Entry) error { each++; return nil }); err != nil || each != 1 {
+		t.Errorf("ForEach visited %d entries (err %v), want 1", each, err)
+	}
+
+	batched := 0
+	if err := s.ForEachBatch(10, func(b []*Entry) error { batched += len(b); return nil }); err != nil || batched != 1 {
+		t.Errorf("ForEachBatch visited %d entries (err %v), want 1", batched, err)
+	}
+
+	if n, err := s.Count(); err != nil || n != 1 {
+		t.Errorf("Count = %d (err %v), want 1", n, err)
 	}
 }

@@ -152,6 +152,9 @@ func (s *Storage) DiskSize() int64 {
 	return size
 }
 
+// migrationStatusKey is an internal record kept in the entries store; it is not an entry.
+const migrationStatusKey = "__migration_status__"
+
 // SaveMigrationStatus saves the system migration status
 func (s *Storage) SaveMigrationStatus(status *SystemMigrationStatus) error {
 	pb := SystemMigrationStatusToProto(status)
@@ -159,12 +162,12 @@ func (s *Storage) SaveMigrationStatus(status *SystemMigrationStatus) error {
 	if err != nil {
 		return err
 	}
-	return s.entries.Put("__migration_status__", data, nil)
+	return s.entries.Put(migrationStatusKey, data, nil)
 }
 
 // GetMigrationStatus retrieves the system migration status
 func (s *Storage) GetMigrationStatus() (*SystemMigrationStatus, error) {
-	data, err := s.entries.Get("__migration_status__")
+	data, err := s.entries.Get(migrationStatusKey)
 	if err != nil {
 		return nil, err
 	}
