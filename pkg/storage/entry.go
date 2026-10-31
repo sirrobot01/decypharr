@@ -181,10 +181,21 @@ type EntryMetaInfo struct {
 	Bad      bool
 }
 
+// isSystemKey reports whether key names an internal record rather than an entry.
+func isSystemKey(key string) bool {
+	return strings.HasPrefix(key, "__")
+}
+
 // ForEachMeta iterates over entry metadata without reading full entries from disk.
 // This is O(n) in-memory only - no disk reads, no protobuf deserialization.
 func (s *Storage) ForEachMeta(fn func(*EntryMetaInfo) error) error {
 	return s.entries.ForEachMetadata(func(key string, meta *appendstore.Metadata) error {
+		// Skip internal records such as __migration_status__. They share the
+		// store with real entries but have no name, and listing one would
+		// surface as a nameless directory entry in the mount.
+		if isSystemKey(key) {
+			return nil
+		}
 		return fn(&EntryMetaInfo{
 			InfoHash: key,
 			Name:     meta.Attribute(attributeName),
@@ -208,7 +219,7 @@ func (s *Storage) MigrateMetadata() (int, error) {
 	var keysToMigrate []string
 	_ = s.entries.ForEachMetadata(func(key string, meta *appendstore.Metadata) error {
 		// Skip special keys
-		if strings.HasPrefix(key, "__") {
+		if isSystemKey(key) {
 			return nil
 		}
 		// Check if metadata needs migration (Protocol empty = old format)

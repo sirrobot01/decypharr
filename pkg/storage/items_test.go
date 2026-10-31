@@ -139,3 +139,30 @@ func TestDeleteKeepsFolderSharedWithAnotherEntry(t *testing.T) {
 		t.Fatalf("folder lost the remaining entry's file: %v, %v", item, err)
 	}
 }
+
+func TestForEachMetaSkipsInternalRecords(t *testing.T) {
+	config.SetConfigPath(t.TempDir())
+	t.Cleanup(config.Reset)
+	s, err := NewStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if err := s.SaveMigrationStatus(&SystemMigrationStatus{}); err != nil {
+		t.Fatal(err)
+	}
+	entry := &Entry{InfoHash: "abc", Name: "folder", Protocol: config.ProtocolNZB, Files: map[string]*File{"file": {Name: "file", InfoHash: "abc", Size: 10}}}
+	if err := s.AddOrUpdate(entry); err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	if err := s.ForEachMeta(func(m *EntryMetaInfo) error {
+		names = append(names, m.Name)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 1 || names[0] != "folder" {
+		t.Fatalf("ForEachMeta returned %q, want only the real entry", names)
+	}
+}
