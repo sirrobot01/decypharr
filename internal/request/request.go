@@ -108,23 +108,8 @@ func WithProxy(proxyURL string) ClientOption {
 
 // Do performs an HTTP request with retries for certain status codes
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
-	// Apply headers
-	c.headersMu.RLock()
-	if c.headers != nil {
-		for key, value := range c.headers {
-			req.Header.Set(key, value)
-		}
-	}
-	c.headersMu.RUnlock()
-
-	// Apply rate limiting
-	if c.rateLimiter != nil {
-		select {
-		case <-req.Context().Done():
-			return nil, req.Context().Err()
-		default:
-			c.rateLimiter.Take()
-		}
+	if err := c.prepare(req); err != nil {
+		return nil, err
 	}
 
 	// Convert to retryablehttp request
@@ -134,6 +119,38 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	}
 
 	return c.client.Do(retryReq)
+}
+
+// DoOnce performs exactly one HTTP request, whatever the client's retry
+// settings. Use it for endpoints with a tight per-call quota or side effects,
+// where a retry spends more quota or repeats work the server may still be
+// doing.
+func (c *Client) DoOnce(req *http.Request) (*http.Response, error) {
+	if err := c.prepare(req); err != nil {
+		return nil, err
+	}
+	return c.httpClient.Do(req)
+}
+
+// prepare applies the client's headers and rate limit to req.
+func (c *Client) prepare(req *http.Request) error {
+	c.headersMu.RLock()
+	if c.headers != nil {
+		for key, value := range c.headers {
+			req.Header.Set(key, value)
+		}
+	}
+	c.headersMu.RUnlock()
+
+	if c.rateLimiter != nil {
+		select {
+		case <-req.Context().Done():
+			return req.Context().Err()
+		default:
+			c.rateLimiter.Take()
+		}
+	}
+	return nil
 }
 
 // MakeRequest performs an HTTP request and returns the response body as bytes
