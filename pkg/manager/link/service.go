@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/rs/zerolog"
@@ -21,7 +22,18 @@ const (
 	MaxReinsertionAttempt = 3
 	// maxValidatedEntries caps the validated-link memo map (see GetLink).
 	maxValidatedEntries = 8192
+	// failedValidationTTL bounds how long a failed validation is remembered.
+	// Some providers (TorBox) build deterministic download URLs, so the memo
+	// key never changes on its own and a remembered failure would otherwise
+	// last until the process restarts.
+	failedValidationTTL = time.Minute
 )
+
+// validation is a memoised link validation result.
+type validation struct {
+	err error
+	at  time.Time
+}
 
 var (
 	emptyDownloadLink = types.DownloadLink{}
@@ -35,7 +47,7 @@ type EntrySaver func(entry *storage.Entry) error
 // Service handles download link fetching and validation.
 // It uses the account-level cache for storing links and only tracks validation state.
 type Service struct {
-	validated      *xsync.Map[string, error]
+	validated      *xsync.Map[string, validation]
 	singleflight   singleflight.Group
 	clients        *xsync.Map[string, debrid.Client]
 	entryRefresher EntryRefresher
@@ -57,7 +69,7 @@ func New(
 	logger zerolog.Logger,
 ) *Service {
 	return &Service{
-		validated:      xsync.NewMap[string, error](),
+		validated:      xsync.NewMap[string, validation](),
 		clients:        clients,
 		entryRefresher: entryRefresher,
 		repairer:       entryReinsert,
@@ -125,7 +137,7 @@ func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, fi
 
 	// Is link already validated
 	// Check if we've already validated this link
-	if validationErr, exists := s.validated.Load(link.DownloadLink); exists {
+	if validationErr, exists := s.loadValidation(link.DownloadLink); exists {
 		if validationErr == nil {
 			return link, nil // Already validated successfully
 		}
@@ -171,12 +183,27 @@ func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, fi
 	if s.validated.Size() > maxValidatedEntries {
 		s.validated.Clear()
 	}
-	s.validated.Store(link.DownloadLink, validationErr)
+	s.validated.Store(link.DownloadLink, validation{err: validationErr, at: time.Now()})
 
 	if validationErr == nil {
 		return link, nil
 	}
 	return emptyDownloadLink, validationErr
+}
+
+// loadValidation returns the memoised validation result for a download URL.
+// Failed results expire after failedValidationTTL so the link is validated
+// again instead of failing for the life of the process.
+func (s *Service) loadValidation(downloadLink string) (error, bool) {
+	v, ok := s.validated.Load(downloadLink)
+	if !ok {
+		return nil, false
+	}
+	if v.err != nil && time.Since(v.at) > failedValidationTTL {
+		s.validated.Delete(downloadLink)
+		return nil, false
+	}
+	return v.err, true
 }
 
 func (s *Service) handleBadLink(ctx context.Context, err error, entry *storage.Entry, dl types.DownloadLink, attempt int) (types.DownloadLink, error) {
