@@ -266,17 +266,25 @@ func (tb *Torbox) SubmitMagnet(torrent *types.Torrent) (*types.Torrent, error) {
 		return nil, fmt.Errorf("torbox API error: Status: %d", resp.StatusCode)
 	}
 	// An array response can list several torrents; take the one for this hash.
-	var id int
+	var id, queuedId int
 	for _, added := range data.Data {
 		if len(data.Data) == 1 || strings.EqualFold(added.Hash, torrent.InfoHash) {
 			id = cmp.Or(added.TorrentId, added.Id)
+			queuedId = added.QueuedId
 			break
 		}
 	}
-	if id == 0 {
+	switch {
+	case id != 0:
+		torrent.Id = strconv.Itoa(id)
+	case queuedId != 0:
+		// At the active download limit TorBox queues the add and starts it when a
+		// slot frees up. Track it by its queued id until it gets a torrent id.
+		tb.logger.Info().Str("hash", torrent.InfoHash).Int("queued_id", queuedId).Msg("TorBox queued the torrent (active download limit)")
+		torrent.Id = queuedPrefix + strconv.Itoa(queuedId)
+	default:
 		return nil, fmt.Errorf("error adding torrent")
 	}
-	torrent.Id = strconv.Itoa(id)
 	torrent.Debrid = tb.config.Name
 	torrent.Added = time.Now()
 
@@ -290,7 +298,7 @@ func (tb *Torbox) getTorboxStatus(status string, finished bool) types.TorrentSta
 	status = regexp.MustCompile(`\s*\(.*?\)\s*`).ReplaceAllString(status, "")
 
 	switch status {
-	case "paused", "downloading", "checkingResumeData", "metaDL", "pausedUP",
+	case "paused", "downloading", "checking", "checkingResumeData", "metaDL", "pausedUP",
 		"queuedUP", "checkingUP", "forcedUP", "allocating", "pausedDL",
 		"queuedDL", "checkingDL", "forcedDL", "moving", "incomplete", "queued":
 		return types.TorrentStatusDownloading
@@ -302,6 +310,10 @@ func (tb *Torbox) getTorboxStatus(status string, finished bool) types.TorrentSta
 }
 
 func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
+	if strings.HasPrefix(torrentId, queuedPrefix) {
+		t := &types.Torrent{Id: torrentId, Debrid: tb.config.Name, Files: make(map[string]types.File)}
+		return t, tb.updateQueued(tb.client, t)
+	}
 	var res InfoResponse
 
 	resp, err := tb.doGet("/api/torrents/mylist", map[string]string{"id": torrentId}, &res)
@@ -396,13 +408,22 @@ func (tb *Torbox) UpdateTorrent(t *types.Torrent) error {
 }
 
 func (tb *Torbox) updateTorrentWithClient(client *request.Client, t *types.Torrent) error {
+	if strings.HasPrefix(t.Id, queuedPrefix) {
+		return tb.updateQueued(client, t)
+	}
 	var res InfoResponse
 
-	resp, err := tb.doGetWithClient(context.Background(), client, "/api/torrents/mylist", map[string]string{"id": t.Id}, &res)
+	resp, err := tb.doGetWithClient(context.Background(), client, "/api/torrents/mylist", map[string]string{"id": t.Id, "bypass_cache": "true"}, &res)
 	if err != nil {
 		return err
 	}
 
+	if resp.StatusCode == http.StatusNotFound && t.InfoHash != "" {
+		// TorBox can move a just-created torrent into its queue (active download
+		// limit), so its id stops resolving. Find it again by hash before calling
+		// it failed.
+		return tb.updateQueued(client, t)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("torbox API error: Status: %d", resp.StatusCode)
 	}
@@ -483,7 +504,88 @@ func (tb *Torbox) CheckStatus(torrent *types.Torrent) (*types.Torrent, error) {
 	}
 }
 
+// queuedPrefix marks a Torrent.Id that is a TorBox queued id, not a torrent id.
+const queuedPrefix = "queued:"
+
+func (tb *Torbox) getQueued(client *request.Client) ([]queuedItem, error) {
+	var res QueuedResponse
+	resp, err := tb.doGetWithClient(context.Background(), client, "/api/queued/getqueued", map[string]string{"type": "torrent", "bypass_cache": "true"}, &res)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("torbox API error: Status: %d", resp.StatusCode)
+	}
+	if res.Data == nil {
+		return nil, nil
+	}
+	return *res.Data, nil
+}
+
+// updateQueued resolves a torrent that has no usable torrent id: still in
+// TorBox's queue (reported as downloading at 0%), or started since, in which
+// case it takes the torrent id and is updated normally.
+func (tb *Torbox) updateQueued(client *request.Client, t *types.Torrent) error {
+	queuedId, _ := strconv.Atoi(strings.TrimPrefix(t.Id, queuedPrefix))
+	queued, err := tb.getQueued(client)
+	if err != nil {
+		return err
+	}
+	for _, q := range queued {
+		if (queuedId != 0 && q.Id == queuedId) || (t.InfoHash != "" && strings.EqualFold(q.Hash, t.InfoHash)) {
+			t.Id = queuedPrefix + strconv.Itoa(q.Id)
+			if q.Hash != "" {
+				t.InfoHash = q.Hash
+			}
+			t.Name = cmp.Or(t.Name, q.Name)
+			t.Status = types.TorrentStatusDownloading
+			t.Progress = 0
+			t.Debrid = tb.config.Name
+			return nil
+		}
+	}
+	if t.InfoHash == "" {
+		return fmt.Errorf("torbox: queued torrent %s not found", t.Id)
+	}
+	for offset := 0; ; {
+		torrents, err := tb.getTorrents(offset)
+		if err != nil {
+			return err
+		}
+		if len(torrents) == 0 {
+			break
+		}
+		for _, active := range torrents {
+			if strings.EqualFold(active.InfoHash, t.InfoHash) && active.Id != "" {
+				if active.Id == t.Id {
+					return fmt.Errorf("torbox: torrent %s is listed but its id does not resolve", t.Id)
+				}
+				t.Id = active.Id
+				return tb.updateTorrentWithClient(client, t)
+			}
+		}
+		offset += len(torrents)
+	}
+	return fmt.Errorf("torbox: no active or queued torrent for hash %s", t.InfoHash)
+}
+
 func (tb *Torbox) DeleteTorrent(torrentId string) error {
+	if after, ok := strings.CutPrefix(torrentId, queuedPrefix); ok {
+		id, err := strconv.Atoi(after)
+		if err != nil {
+			return fmt.Errorf("invalid TorBox queued id %q: %w", torrentId, err)
+		}
+		payload := map[string]any{"queued_id": id, "operation": "delete"}
+		resp, err := tb.doPostJSON("/api/queued/controlqueued", payload, nil)
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return fmt.Errorf("torbox API error: Status: %d", resp.StatusCode)
+		}
+		tb.logger.Info().Msgf("Queued torrent %s deleted from Torbox", after)
+		return nil
+	}
 	id, err := strconv.Atoi(torrentId)
 	if err != nil {
 		return fmt.Errorf("invalid TorBox torrent id %q: %w", torrentId, err)

@@ -22,9 +22,20 @@ type AvailableResponse APIResponse[map[string]struct {
 
 type addedTorrent struct {
 	TorrentId int    `json:"torrent_id"`
-	Id        int    `json:"id"` // array responses use "id" instead of "torrent_id"
+	Id        int    `json:"id"`        // array responses use "id" instead of "torrent_id"
+	QueuedId  int    `json:"queued_id"` // set instead of torrent_id when TorBox queues the add (active download limit)
 	Hash      string `json:"hash"`
 }
+
+// queuedItem is one entry of /queued/getqueued: an add TorBox accepted but has
+// not started, because the account is at its active download limit.
+type queuedItem struct {
+	Id   int    `json:"id"`
+	Hash string `json:"hash"`
+	Name string `json:"name"`
+}
+
+type QueuedResponse APIResponse[[]queuedItem]
 
 type AddMagnetResponse struct {
 	Success bool           `json:"success"`
