@@ -292,6 +292,11 @@ func (m *Manager) processQueuedTorrent(entry *storage.Entry) {
 
 	debridTorrent = dbT
 
+	// A provider can hand back a new id, e.g. TorBox once a queued add starts.
+	if debridTorrent != nil && debridTorrent.Id != "" && debridTorrent.Id != placement.ID {
+		placement.ID = debridTorrent.Id
+	}
+
 	if debridTorrent == nil {
 		m.logger.Error().Str("name", entry.Name).Msg("Provider entry not found")
 		entry.MarkAsError(fmt.Errorf("debrid entry not found"))
