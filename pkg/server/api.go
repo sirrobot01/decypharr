@@ -273,7 +273,7 @@ func (s *Server) handleDeleteTorrents(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 	}
-	if err := s.manager.Queue().DeleteWhere("", config.ProtocolAll, "", hashes, cleanup); err != nil {
+	if err := s.manager.Queue().DeleteWhere("", config.ProtocolAll, "", hashes, true, cleanup); err != nil {
 		s.logger.Error().Err(err).Msg("Failed to delete torrents")
 		http.Error(w, "Failed to delete torrents", http.StatusInternalServerError)
 		return

@@ -135,11 +135,13 @@ func (q *Queue) deleteEntryFiles(entry *storage.Entry) error {
 	return nil
 }
 
-func (q *Queue) wrapCleanupWithFileDelete(cleanup func(t *storage.Entry) error) func(*storage.Entry) error {
+func (q *Queue) wrapCleanup(deleteFiles bool, cleanup func(t *storage.Entry) error) func(*storage.Entry) error {
 	return func(entry *storage.Entry) error {
 		q.stopRunning(entry.InfoHash)
-		if err := q.deleteEntryFiles(entry); err != nil {
-			return err
+		if deleteFiles {
+			if err := q.deleteEntryFiles(entry); err != nil {
+				return err
+			}
 		}
 		if cleanup != nil {
 			return cleanup(entry)
@@ -157,14 +159,11 @@ func (q *Queue) stopRunning(infohash string) {
 
 func (q *Queue) Delete(infohash string, deleteFiles bool, cleanup func(t *storage.Entry) error) error {
 	q.stopRunning(infohash)
-	if deleteFiles {
-		cleanup = q.wrapCleanupWithFileDelete(cleanup)
-	}
-	return q.storage.DeleteQueued(infohash, cleanup)
+	return q.storage.DeleteQueued(infohash, q.wrapCleanup(deleteFiles, cleanup))
 }
 
-func (q *Queue) DeleteWhere(category string, protocol config.Protocol, state storage.TorrentState, hashes []string, cleanup func(t *storage.Entry) error) error {
-	return q.storage.DeleteWhereQueued(q.ListFilterFunc(category, protocol, state, hashes), q.wrapCleanupWithFileDelete(cleanup))
+func (q *Queue) DeleteWhere(category string, protocol config.Protocol, state storage.TorrentState, hashes []string, deleteFiles bool, cleanup func(t *storage.Entry) error) error {
+	return q.storage.DeleteWhereQueued(q.ListFilterFunc(category, protocol, state, hashes), q.wrapCleanup(deleteFiles, cleanup))
 }
 
 // DeleteStalled removes entries older than remove_stalled_after that made no

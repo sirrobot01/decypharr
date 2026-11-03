@@ -76,6 +76,7 @@ func (s *SABnzbd) handleQueueResume(w http.ResponseWriter, r *http.Request) {
 // handleDelete handles delete operations
 func (s *SABnzbd) handleDelete(w http.ResponseWriter, r *http.Request) {
 	nzoIDs := r.FormValue("value")
+	deleteFiles := r.FormValue("del_files") == "1"
 	cat := getCategory(r.Context())
 	if nzoIDs == "" {
 		s.writeError(w, "No NZB IDs provided", http.StatusBadRequest)
@@ -87,7 +88,7 @@ func (s *SABnzbd) handleDelete(w http.ResponseWriter, r *http.Request) {
 
 	if nzoIDs == "failed" {
 		// Delete all failed entries
-		if err := s.manager.Queue().DeleteWhere(cat, config.ProtocolNZB, storage.EntryStateError, nil, nil); err != nil {
+		if err := s.manager.Queue().DeleteWhere(cat, config.ProtocolNZB, storage.EntryStateError, nil, deleteFiles, nil); err != nil {
 			s.logger.Error().
 				Err(err).
 				Msg("Failed to delete all failed NZBs")
@@ -108,7 +109,7 @@ func (s *SABnzbd) handleDelete(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Use atomic delete operation
-		if err := s.manager.Queue().Delete(nzoID, true, nil); err != nil {
+		if err := s.manager.Queue().Delete(nzoID, deleteFiles, nil); err != nil {
 			errors = append(errors, fmt.Sprintf("Failed to delete %s: %v", nzoID, err))
 		} else {
 			successCount++
