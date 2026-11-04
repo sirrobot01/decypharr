@@ -2,12 +2,14 @@ package sabnzbd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/sirrobot01/appendstore"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/arr"
@@ -83,7 +85,7 @@ func (s *SABnzbd) handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var successCount int
-	var errors []string
+	var failures []string
 
 	if nzoIDs == "failed" {
 		// Delete all failed entries
@@ -107,33 +109,36 @@ func (s *SABnzbd) handleDelete(w http.ResponseWriter, r *http.Request) {
 			continue // Skip empty IDs
 		}
 
-		// Use atomic delete operation
-		if err := s.manager.Queue().Delete(nzoID, true, nil); err != nil {
-			errors = append(errors, fmt.Sprintf("Failed to delete %s: %v", nzoID, err))
+		// Use atomic delete operation. An id that is already gone counts as
+		// deleted, as in SABnzbd itself: Arrs retry a failed history delete
+		// every refresh, so an error here leaves them stuck on the item.
+		err := s.manager.Queue().Delete(nzoID, true, nil)
+		if err != nil && !errors.Is(err, appendstore.ErrKeyNotFound) {
+			failures = append(failures, fmt.Sprintf("Failed to delete %s: %v", nzoID, err))
 		} else {
 			successCount++
 		}
 	}
 
 	// Return response with success/error information
-	if len(errors) > 0 {
+	if len(failures) > 0 {
 		if successCount == 0 {
 			// All deletions failed
-			s.writeError(w, fmt.Sprintf("All deletions failed: %s", strings.Join(errors, "; ")), http.StatusInternalServerError)
+			s.writeError(w, fmt.Sprintf("All deletions failed: %s", strings.Join(failures, "; ")), http.StatusInternalServerError)
 			return
 		}
 
 		// Partial success
 		s.logger.Warn().
 			Int("success_count", successCount).
-			Int("error_count", len(errors)).
-			Strs("errors", errors).
+			Int("error_count", len(failures)).
+			Strs("errors", failures).
 			Msg("Partial success in queue deletion")
 	}
 
 	response := StatusResponse{
 		Status: true,
-		Error:  strings.Join(errors, "; "),
+		Error:  strings.Join(failures, "; "),
 	}
 	utils.JSONResponse(w, response, http.StatusOK)
 }
