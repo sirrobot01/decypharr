@@ -119,7 +119,7 @@ func (f *FS) Readdir(path string, fill func(name string, stat *fuse.Stat_t, ofst
 
 	if path == "/" {
 		// Root directory - list all torrents/entries
-		entries := f.vfs.GetManager().GetEntries()
+		entries := f.vfs.ListableChildren(path, f.vfs.GetManager().GetEntries())
 		for _, entry := range entries {
 			fill(entry.Name(), f.entryStat(&entry), 0)
 		}
@@ -141,7 +141,7 @@ func (f *FS) Readdir(path string, fill func(name string, stat *fuse.Stat_t, ofst
 			// Try as a direct torrent directory
 			_, children = f.vfs.GetManager().GetTorrentChildren(groupOrTorrent)
 		}
-		for _, child := range children {
+		for _, child := range f.vfs.ListableChildren(path, children) {
 			fill(child.Name(), f.entryStat(&child), 0)
 		}
 		return 0
@@ -153,7 +153,7 @@ func (f *FS) Readdir(path string, fill func(name string, stat *fuse.Stat_t, ofst
 
 	// get the torrent's children (files)
 	_, children := f.vfs.GetManager().GetTorrentChildren(torrentName)
-	for _, child := range children {
+	for _, child := range f.vfs.ListableChildren(path, children) {
 		fill(child.Name(), f.entryStat(&child), 0)
 	}
 

@@ -282,6 +282,7 @@ func (d *Dir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 	if errno != 0 {
 		return nil, errno
 	}
+	entries = d.vfs.ListableChildren(d.virtualPath, entries)
 
 	if d.level == LevelFile {
 		byName := make(map[string]*manager.FileInfo, len(entries))

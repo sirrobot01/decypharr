@@ -88,11 +88,14 @@ func NewFileID() string {
 
 // Exists checks if an entry exists
 func (s *Storage) Exists(infohash string) (bool, error) {
-	return s.entries.Exists(infohash), nil
+	return !isInternalKey(infohash) && s.entries.Exists(infohash), nil
 }
 
 // Get retrieves an entry by InfoHash
 func (s *Storage) Get(infohash string) (*Entry, error) {
+	if isInternalKey(infohash) {
+		return nil, appendstore.ErrKeyNotFound
+	}
 	data, err := s.entries.Get(infohash)
 	if err != nil {
 		return nil, err
@@ -110,7 +113,7 @@ func (s *Storage) Get(infohash string) (*Entry, error) {
 func (s *Storage) List(filter func(*Entry) bool) ([]*Entry, error) {
 	var entries []*Entry
 
-	err := s.entries.ForEach(func(key string, value []byte) error {
+	err := s.forEachEntryRecord(func(value []byte) error {
 		var pb EntryProto
 		if err := proto.Unmarshal(value, &pb); err != nil {
 			return nil
@@ -125,9 +128,37 @@ func (s *Storage) List(filter func(*Entry) bool) ([]*Entry, error) {
 	return entries, err
 }
 
+// isInternalKey reports whether key names a system record kept in the entries
+// store, such as the migration status, rather than an entry.
+func isInternalKey(key string) bool {
+	return strings.HasPrefix(key, "__")
+}
+
+// forEachEntryRecord visits the stored value of every entry, skipping internal
+// records. Their bytes can decode into an EntryProto without error.
+func (s *Storage) forEachEntryRecord(fn func(value []byte) error) error {
+	return s.entries.ForEach(func(key string, value []byte) error {
+		if isInternalKey(key) {
+			return nil
+		}
+		return fn(value)
+	})
+}
+
+// forEachEntryMetadata visits the metadata of every entry, skipping internal
+// records, which carry no entry attributes.
+func (s *Storage) forEachEntryMetadata(fn func(key string, meta *appendstore.Metadata) error) error {
+	return s.entries.ForEachMetadata(func(key string, meta *appendstore.Metadata) error {
+		if isInternalKey(key) {
+			return nil
+		}
+		return fn(key, meta)
+	})
+}
+
 // ForEach iterates over entries
 func (s *Storage) ForEach(fn func(*Entry) error) error {
-	return s.entries.ForEach(func(key string, value []byte) error {
+	return s.forEachEntryRecord(func(value []byte) error {
 		var pb EntryProto
 		if err := proto.Unmarshal(value, &pb); err != nil {
 			return nil
@@ -147,7 +178,7 @@ func (s *Storage) ForEachBatch(batchSize int, fn func([]*Entry) error) error {
 	// fresh Entry (the one aliased field, Tags, is replaced by Reset->nil
 	// before the next Unmarshal, leaving the prior entry's slice untouched).
 	var pb EntryProto
-	err := s.entries.ForEach(func(key string, value []byte) error {
+	err := s.forEachEntryRecord(func(value []byte) error {
 		proto.Reset(&pb)
 		if err := proto.Unmarshal(value, &pb); err != nil {
 			return nil
@@ -184,7 +215,7 @@ type EntryMetaInfo struct {
 // ForEachMeta iterates over entry metadata without reading full entries from disk.
 // This is O(n) in-memory only - no disk reads, no protobuf deserialization.
 func (s *Storage) ForEachMeta(fn func(*EntryMetaInfo) error) error {
-	return s.entries.ForEachMetadata(func(key string, meta *appendstore.Metadata) error {
+	return s.forEachEntryMetadata(func(key string, meta *appendstore.Metadata) error {
 		return fn(&EntryMetaInfo{
 			InfoHash: key,
 			Name:     meta.Attribute(attributeName),
@@ -206,11 +237,7 @@ func (s *Storage) MigrateMetadata() (int, error) {
 	// First, collect all keys that need migration
 	// We check if Protocol is empty as indicator of unmigrated data
 	var keysToMigrate []string
-	_ = s.entries.ForEachMetadata(func(key string, meta *appendstore.Metadata) error {
-		// Skip special keys
-		if strings.HasPrefix(key, "__") {
-			return nil
-		}
+	_ = s.forEachEntryMetadata(func(key string, meta *appendstore.Metadata) error {
 		// Check if metadata needs migration (Protocol empty = old format)
 		if meta.Attribute(attributeProtocol) == "" {
 			keysToMigrate = append(keysToMigrate, key)
@@ -257,5 +284,9 @@ func (s *Storage) Delete(infohash string) error {
 
 // Count returns the number of entries
 func (s *Storage) Count() (int, error) {
-	return s.entries.Len(), nil
+	count := s.entries.Len()
+	if s.entries.Exists(migrationStatusKey) {
+		count--
+	}
+	return count, nil
 }
