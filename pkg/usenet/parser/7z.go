@@ -313,7 +313,7 @@ func (p *SevenZParser) buildSegmentsForRARFile(
 	segmentIndex *segmentLayout,
 ) ([]storage.NZBSegment, error) {
 	if len(rarEntry.VolumeParts) == 0 {
-		return nil, fmt.Errorf("no volume parts for file %s", rarEntry.Name)
+		return nil, fmt.Errorf("no volume parts for file %q", rarEntry.Name)
 	}
 
 	var fileSegments []storage.NZBSegment
@@ -329,7 +329,7 @@ func (p *SevenZParser) buildSegmentsForRARFile(
 		rarVolumeName := filepath.Base(part.Name)
 		rarVolumeOffset, ok := rarFileOffsets[rarVolumeName]
 		if !ok {
-			return nil, fmt.Errorf("RAR part %q for %s is absent from the 7z file list", part.Name, rarEntry.Name)
+			return nil, fmt.Errorf("RAR part %q for %q is absent from the 7z file list", part.Name, rarEntry.Name)
 		}
 
 		// The file data starts at: rarVolumeOffset (in 7z) + part.DataOffset (in RAR volume)
@@ -342,7 +342,7 @@ func (p *SevenZParser) buildSegmentsForRARFile(
 		}
 
 		if len(partSegments) == 0 {
-			return nil, fmt.Errorf("RAR part %d of %s has no source segments", partIdx, rarEntry.Name)
+			return nil, fmt.Errorf("RAR part %d of %q has no source segments", partIdx, rarEntry.Name)
 		}
 
 		// Assign output-file positions cumulatively across parts (same

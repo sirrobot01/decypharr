@@ -5,7 +5,9 @@ import (
 	"math"
 	"path"
 	"path/filepath"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/utils"
@@ -421,11 +423,40 @@ func (e *Entry) MarkAsError(err error) {
 	e.State = EntryStateError
 	e.Status = debridTypes.TorrentStatusError
 	e.IsDownloading = false
-	e.LastError = err.Error()
+	e.LastError = sanitizeErrorMessage(err.Error())
 	e.ErrorCount++
 	now := time.Now()
 	e.LastErrorTime = &now
 	e.UpdatedAt = now
+}
+
+// maxErrorMessageRunes caps a stored error message. Parser errors can quote
+// archive bytes, and the message is shown in the UI and sent to Arrs.
+const maxErrorMessageRunes = 1024
+
+// sanitizeErrorMessage makes an error message safe to store and pass on.
+// Errors from archive parsing can carry raw bytes, including NUL. Arrs copy
+// SABnzbd's fail_message into their database, and PostgreSQL rejects NUL in
+// text columns, so the Arr's blocklist insert fails and it grabs the same
+// release again. Invalid UTF-8 becomes U+FFFD and control characters become
+// spaces.
+func sanitizeErrorMessage(msg string) string {
+	msg = strings.ToValidUTF8(msg, "\uFFFD")
+	var b strings.Builder
+	b.Grow(len(msg))
+	n := 0
+	for _, r := range msg {
+		if n == maxErrorMessageRunes {
+			b.WriteString("…")
+			break
+		}
+		if unicode.IsControl(r) {
+			r = ' '
+		}
+		b.WriteRune(r)
+		n++
+	}
+	return b.String()
 }
 
 func (e *Entry) GetFile(filename string) (*File, error) {
