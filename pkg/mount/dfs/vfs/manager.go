@@ -17,6 +17,7 @@ type Manager struct {
 	manager *manager.Manager
 	cache   *Cache
 	logger  zerolog.Logger
+	rl      *logger.RateLimitedLogger
 
 	files *xsync.Map[string, *fileEntry]
 
@@ -51,6 +52,7 @@ func NewManager(ctx context.Context, mgr *manager.Manager, config *config.FuseCo
 		manager: mgr,
 		cache:   cache,
 		logger:  logger.New("vfs"),
+		rl:      logger.NewRateLimitedLogger(),
 		files:   xsync.NewMap[string, *fileEntry](),
 		ctx:     ctx,
 		cancel:  cancel,

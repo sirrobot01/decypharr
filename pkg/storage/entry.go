@@ -88,11 +88,20 @@ func NewFileID() string {
 
 // Exists checks if an entry exists
 func (s *Storage) Exists(infohash string) (bool, error) {
-	return s.entries.Exists(infohash), nil
+	return !isInternalKey(infohash) && s.entries.Exists(infohash), nil
+}
+
+// isInternalKey reports whether key names a system record kept in the entries
+// store, such as the migration status, rather than an entry.
+func isInternalKey(key string) bool {
+	return strings.HasPrefix(key, "__")
 }
 
 // Get retrieves an entry by InfoHash
 func (s *Storage) Get(infohash string) (*Entry, error) {
+	if isInternalKey(infohash) {
+		return nil, appendstore.ErrKeyNotFound
+	}
 	data, err := s.entries.Get(infohash)
 	if err != nil {
 		return nil, err
@@ -333,5 +342,9 @@ func (s *Storage) Delete(infohash string) error {
 
 // Count returns the number of entries
 func (s *Storage) Count() (int, error) {
-	return s.entries.Len(), nil
+	count := s.entries.Len()
+	if s.entries.Exists(migrationStatusKey) {
+		count--
+	}
+	return count, nil
 }
