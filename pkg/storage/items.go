@@ -128,7 +128,7 @@ func (s *Storage) removeFromEntryItem(entry *Entry) error {
 	}
 	// Another entry can render the same folder, so keep serving its files.
 	var others []string
-	_ = s.entries.ForEachMetadata(func(key string, meta *appendstore.Metadata) error {
+	_ = s.forEachEntryMetadata(func(key string, meta *appendstore.Metadata) error {
 		if !strings.EqualFold(key, entry.InfoHash) && meta.Attribute(attributeName) == name {
 			others = append(others, key)
 		}
