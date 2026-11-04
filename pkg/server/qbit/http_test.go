@@ -1,6 +1,7 @@
 package qbit
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/customerror"
 	"github.com/sirrobot01/decypharr/pkg/manager"
+	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
 func TestHandleLoginAlwaysReturnsSID(t *testing.T) {
@@ -102,5 +104,70 @@ func TestWriteTorrentAddErrorPreservesSemantics(t *testing.T) {
 				t.Fatalf("response = %#v, want code=%q retryable=%t permanent=%t", response, tt.code, tt.retryable, tt.permanent)
 			}
 		})
+	}
+}
+
+func TestHandleSetCategoryUpdatesOnlyRequestedHashes(t *testing.T) {
+	q := newAuthenticationTestQBit(t)
+	entries := []*storage.Entry{
+		{InfoHash: "hash-a", Category: "old"},
+		{InfoHash: "hash-b", Category: "old"},
+		{InfoHash: "hash-c", Category: "old"},
+	}
+	for _, entry := range entries {
+		if err := q.manager.Queue().Add(entry); err != nil {
+			t.Fatalf("add queue entry %s: %v", entry.InfoHash, err)
+		}
+	}
+
+	ctx := context.WithValue(context.Background(), categoryKey, "new")
+	ctx = context.WithValue(ctx, hashesKey, []string{" HASH-A ", "hash-b"})
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/torrents/setCategory", nil).WithContext(ctx)
+	q.handleSetCategory(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("setCategory status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	for _, want := range []struct {
+		hash     string
+		category string
+	}{
+		{hash: "hash-a", category: "new"},
+		{hash: "hash-b", category: "new"},
+		{hash: "hash-c", category: "old"},
+	} {
+		entry, err := q.manager.Queue().GetTorrent(want.hash)
+		if err != nil {
+			t.Fatalf("read queue entry %s: %v", want.hash, err)
+		}
+		if entry.Category != want.category {
+			t.Fatalf("entry %s category = %q, want %q", want.hash, entry.Category, want.category)
+		}
+	}
+}
+
+func TestHandleSetCategoryRejectsEmptyHashSelection(t *testing.T) {
+	q := newAuthenticationTestQBit(t)
+	entry := &storage.Entry{InfoHash: "hash-only", Category: "old"}
+	if err := q.manager.Queue().Add(entry); err != nil {
+		t.Fatalf("add queue entry: %v", err)
+	}
+
+	ctx := context.WithValue(context.Background(), categoryKey, "new")
+	ctx = context.WithValue(ctx, hashesKey, []string(nil))
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/torrents/setCategory", nil).WithContext(ctx)
+	q.handleSetCategory(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("empty hash selection status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	unchanged, err := q.manager.Queue().GetTorrent(entry.InfoHash)
+	if err != nil {
+		t.Fatalf("read queue entry: %v", err)
+	}
+	if unchanged.Category != "old" {
+		t.Fatalf("empty hash selection changed category to %q", unchanged.Category)
 	}
 }

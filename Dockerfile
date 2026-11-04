@@ -9,6 +9,7 @@ ARG TARGETARCH
 ARG TARGETPLATFORM
 ARG VERSION=0.0.0
 ARG CHANNEL=dev
+ARG RCLONE_VERSION=1.75.2
 
 # Copy xx scripts for cross-compilation
 COPY --from=xx / /
@@ -43,6 +44,16 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go build -trimpath -ldflags="-w -s" \
     -o /healthcheck cmd/healthcheck/main.go
 
+# Build rclone from the pinned upstream release with the fixed Go toolchain
+# above. The prebuilt release currently embeds a vulnerable Go standard
+# library, while rclone itself does not require CGO.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    mkdir -p /rclone-bin && \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    unset GOBIN && go install github.com/rclone/rclone@v${RCLONE_VERSION} && \
+    mv /go/bin/rclone /rclone-bin/rclone
+
 # Stage 2: Final image
 FROM alpine:latest
 
@@ -55,26 +66,14 @@ LABEL org.opencontainers.image.title="decypharr"
 LABEL org.opencontainers.image.authors="sirrobot01"
 LABEL org.opencontainers.image.documentation="https://github.com/sirrobot01/decypharr/blob/main/README.md"
 
-# Install dependencies including rclone (from binary).
 # libstdc++/libgcc: required at runtime by rapidyenc's C++ decoder.
-RUN apk add --no-cache fuse3 ca-certificates su-exec shadow curl unzip tzdata libstdc++ libgcc && \
-    echo "user_allow_other" >> /etc/fuse.conf && \
-    case "$(uname -m)" in \
-        x86_64) ARCH=amd64 ;; \
-        aarch64) ARCH=arm64 ;; \
-        armv7l|armv7) ARCH=arm ;; \
-        *) echo "Unsupported architecture: $(uname -m)" && exit 1 ;; \
-    esac && \
-    curl -O "https://downloads.rclone.org/rclone-current-linux-${ARCH}.zip" && \
-    unzip "rclone-current-linux-${ARCH}.zip" && \
-    cp rclone-*/rclone /usr/local/bin/ && \
-    chmod +x /usr/local/bin/rclone && \
-    rm -rf rclone-* && \
-    apk del curl unzip
+RUN apk add --no-cache fuse3 ca-certificates su-exec shadow tzdata libstdc++ libgcc && \
+    echo "user_allow_other" >> /etc/fuse.conf
 
 # Copy binaries and entrypoint
 COPY --from=builder /decypharr /usr/bin/decypharr
 COPY --from=builder /healthcheck /usr/bin/healthcheck
+COPY --from=builder /rclone-bin/rclone /usr/local/bin/rclone
 COPY scripts/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
