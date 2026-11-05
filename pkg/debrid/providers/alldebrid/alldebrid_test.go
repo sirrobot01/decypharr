@@ -222,6 +222,83 @@ func TestCheckStatusDoesNotRestartTerminalStatus(t *testing.T) {
 	}
 }
 
+// AllDebrid can answer statusCode 4 (ready) with an empty files array in the
+// same response, before it has actually populated the file list. We used to
+// trust that as a real completion, so decypharr went ahead and created zero
+// symlinks for a torrent that was, from AllDebrid's own account page, fully
+// downloaded (issue #113, #122). GetTorrent should now report this as still
+// downloading instead of downloaded.
+func TestGetTorrentTreatsReadyWithNoFilesAsStillDownloading(t *testing.T) {
+	config.SetConfigPath(t.TempDir())
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"status":"success","data":{"magnets":[{"id":1,"filename":"Release.mkv","statusCode":4,"size":1000,"downloaded":1000,"files":[]}]}}`)
+	}))
+	t.Cleanup(server.Close)
+
+	ad := testAllDebrid(server.URL)
+	torrent, err := ad.GetTorrent("1")
+	if err != nil {
+		t.Fatalf("GetTorrent() error = %v", err)
+	}
+	if torrent.Status != debridTypes.TorrentStatusDownloading {
+		t.Fatalf("Status = %q, want %q for a ready magnet with no files yet", torrent.Status, debridTypes.TorrentStatusDownloading)
+	}
+	if len(torrent.Files) != 0 {
+		t.Fatalf("Files = %v, want none", torrent.Files)
+	}
+}
+
+// A magnet that is genuinely ready, with its files populated, should still
+// be reported as downloaded.
+func TestGetTorrentKeepsDownloadedWhenFilesArePresent(t *testing.T) {
+	config.SetConfigPath(t.TempDir())
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"status":"success","data":{"magnets":[{"id":1,"filename":"Release.mkv","statusCode":4,"size":1000,"downloaded":1000,"files":[{"n":"Release.mkv","s":1000,"l":"https://alldebrid.com/f/xyz"}]}]}}`)
+	}))
+	t.Cleanup(server.Close)
+
+	ad := testAllDebrid(server.URL)
+	torrent, err := ad.GetTorrent("1")
+	if err != nil {
+		t.Fatalf("GetTorrent() error = %v", err)
+	}
+	if torrent.Status != debridTypes.TorrentStatusDownloaded {
+		t.Fatalf("Status = %q, want %q", torrent.Status, debridTypes.TorrentStatusDownloaded)
+	}
+	if len(torrent.Files) != 1 {
+		t.Fatalf("Files = %v, want 1 file", torrent.Files)
+	}
+	if torrent.Progress != 100 {
+		t.Fatalf("Progress = %v, want 100", torrent.Progress)
+	}
+}
+
+// updateTorrent backs UpdateTorrent/CheckStatus, the path the active
+// downloader polls while a torrent is in progress, so it needs the same
+// guard as GetTorrent.
+func TestUpdateTorrentTreatsReadyWithNoFilesAsStillDownloading(t *testing.T) {
+	config.SetConfigPath(t.TempDir())
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"status":"success","data":{"magnets":[{"id":1,"filename":"Release.mkv","statusCode":4,"size":1000,"downloaded":1000,"files":[]}]}}`)
+	}))
+	t.Cleanup(server.Close)
+
+	ad := testAllDebrid(server.URL)
+	torrent := &debridTypes.Torrent{Id: "1"}
+	if err := ad.UpdateTorrent(torrent); err != nil {
+		t.Fatalf("UpdateTorrent() error = %v", err)
+	}
+	if torrent.Status != debridTypes.TorrentStatusDownloading {
+		t.Fatalf("Status = %q, want %q for a ready magnet with no files yet", torrent.Status, debridTypes.TorrentStatusDownloading)
+	}
+}
+
 func testAllDebrid(host string) *AllDebrid {
 	return &AllDebrid{
 		Host:               host,
