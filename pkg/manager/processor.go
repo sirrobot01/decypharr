@@ -277,16 +277,24 @@ func (m *Manager) processQueuedTorrent(entry *storage.Entry) {
 
 	dbT, err := client.CheckStatus(debridTorrent)
 	if err != nil {
+		terminal := customerror.IsTerminalTorrentError(err)
+		if !terminal && !errors.Is(err, customerror.TorrentNotFoundError) {
+			// The check failed, not the torrent. The next tick polls it again.
+			m.logger.Warn().Err(err).Str("name", entry.Name).Msg("Status check failed, retrying on next tick")
+			return
+		}
 		m.logger.Error().Err(err).Str("name", entry.Name).Msg("Error checking status")
 		entry.MarkAsError(err)
 		_ = m.queue.Update(entry)
 
 		// Delete from debrid on error
-		go func() {
-			if dbT != nil && dbT.Id != "" {
-				_ = client.DeleteTorrent(dbT.Id)
-			}
-		}()
+		if terminal {
+			go func() {
+				if dbT != nil && dbT.Id != "" {
+					_ = client.DeleteTorrent(dbT.Id)
+				}
+			}()
+		}
 		return
 	}
 
@@ -508,6 +516,15 @@ func (m *Manager) SendToDebrid(ctx context.Context, importRequest *ImportRequest
 			m.hearsay.RecordAdd(decision, false)
 		}
 		if err != nil && torrent != nil && torrent.Id != "" {
+			if !customerror.IsTerminalTorrentError(err) {
+				// The provider accepted the torrent, so it stays there. The
+				// queue finds its real state on the next tick.
+				_logger.Warn().Err(err).Str("id", torrent.Id).Msg("Status check failed after submit, keeping torrent")
+				m.hearsay.DiscardAdd(decision)
+				torrent.Debrid = db.Config().Name
+				torrent.Status = debridTypes.TorrentStatusDownloading
+				return torrent, nil
+			}
 			// Delete the torrent if it was not downloaded
 			go func(id string) {
 				_ = db.DeleteTorrent(id)

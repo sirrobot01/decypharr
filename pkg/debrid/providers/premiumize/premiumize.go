@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -132,7 +133,7 @@ func (pm *Premiumize) do(req *http.Request, out any) (*http.Response, error) {
 
 	var envelope apiError
 	if err := json.Unmarshal(body, &envelope); err == nil && envelope.Status == "error" {
-		return resp, fmt.Errorf("premiumize API error: %s (%s)", envelope.Message, envelope.Code)
+		return resp, &envelope
 	}
 
 	return resp, nil
@@ -229,7 +230,7 @@ func (pm *Premiumize) UpdateAndReturnTorrent(t *types.Torrent) (*types.Torrent, 
 		}
 		return t, nil
 	}
-	return t, fmt.Errorf("torrent: %s has error status: %s", t.Name, t.Status)
+	return t, fmt.Errorf("torrent %s has status %s: %w", t.Name, t.Status, customerror.TorrentFailedError)
 }
 
 func (pm *Premiumize) GetTorrent(torrentID string) (*types.Torrent, error) {
@@ -319,10 +320,17 @@ func (pm *Premiumize) GetTorrents() ([]*types.Torrent, error) {
 	for _, tr := range transfers {
 		torrent, err := pm.transferToTorrent(tr, "")
 		if err != nil {
-			pm.logger.Warn().Err(err).Str("transfer_id", tr.ID).Msg("Skipping Premiumize transfer")
-			continue
+			if apiErr, ok := errors.AsType[*apiError](err); ok && apiErr.Code == "not_found" {
+				pm.logger.Warn().Err(err).Str("transfer_id", tr.ID).Msg("Skipping Premiumize transfer")
+				continue
+			}
+			// Sync treats a missing transfer as deleted, so a partial list
+			// would remove entries that are still on the account.
+			return nil, fmt.Errorf("read Premiumize transfer %s: %w", tr.ID, err)
 		}
-		if torrent.Status == types.TorrentStatusDownloaded {
+		// A finished transfer whose links are not visible yet is still on the
+		// account. Sync skips it until its files are complete.
+		if mapStatus(tr.Status) == types.TorrentStatusDownloaded {
 			torrents = append(torrents, torrent)
 		}
 	}

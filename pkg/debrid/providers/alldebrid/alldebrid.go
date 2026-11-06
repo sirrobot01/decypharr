@@ -175,6 +175,7 @@ func (ad *AllDebrid) addTorrentFile(torrent *types.Torrent) (*types.Torrent, err
 		return nil, fmt.Errorf("alldebrid file upload error: %s", f.Error.Message)
 	}
 	torrent.Id = strconv.Itoa(f.ID)
+	torrent.Debrid = ad.config.Name
 	torrent.Added = time.Now()
 	return torrent, nil
 }
@@ -197,6 +198,7 @@ func (ad *AllDebrid) addMagnetLink(torrent *types.Torrent) (*types.Torrent, erro
 	}
 	magnet := magnets[0]
 	torrent.Id = strconv.Itoa(magnet.ID)
+	torrent.Debrid = ad.config.Name
 	torrent.Added = time.Now()
 	return torrent, nil
 }
@@ -421,9 +423,9 @@ func (ad *AllDebrid) CheckStatus(torrent *types.Torrent) (*types.Torrent, error)
 		}
 		return torrent, nil
 	case types.TorrentStatusError:
-		return torrent, fmt.Errorf("torrent %s has AllDebrid status code %d", torrent.Name, statusCode)
+		return torrent, fmt.Errorf("torrent %s has AllDebrid status code %d: %w", torrent.Name, statusCode, customerror.TorrentFailedError)
 	default:
-		return torrent, fmt.Errorf("torrent %s has unknown AllDebrid status code %d", torrent.Name, statusCode)
+		return torrent, fmt.Errorf("torrent %s has unknown AllDebrid status code %d: %w", torrent.Name, statusCode, customerror.TorrentFailedError)
 	}
 }
 
@@ -463,9 +465,10 @@ func (ad *AllDebrid) restartNoPeerTorrent(torrent *types.Torrent) (int, error) {
 
 	torrent.Status = types.TorrentStatusError
 	return allDebridNoPeerStatusCode, fmt.Errorf(
-		"AllDebrid torrent %s remained at status code 7 after restart and %d status checks",
+		"AllDebrid torrent %s remained at status code 7 after restart and %d status checks: %w",
 		torrent.Id,
 		len(backoff),
+		customerror.TorrentFailedError,
 	)
 }
 

@@ -403,10 +403,16 @@ func (tb *Torbox) updateTorrentWithClient(client *request.Client, t *types.Torre
 		return err
 	}
 
+	if resp.StatusCode == http.StatusNotFound {
+		return customerror.TorrentNotFoundError
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("torbox API error: Status: %d", resp.StatusCode)
 	}
 	data := res.Data
+	if data == nil {
+		return customerror.TorrentNotFoundError
+	}
 	name := data.Name
 
 	t.Name = name
@@ -478,7 +484,7 @@ func (tb *Torbox) CheckStatus(torrent *types.Torrent) (*types.Torrent, error) {
 			}
 			return torrent, nil
 		default:
-			return torrent, fmt.Errorf("torrent: %s has error", torrent.Name)
+			return torrent, fmt.Errorf("torrent %s: %w", torrent.Name, customerror.TorrentFailedError)
 		}
 	}
 }

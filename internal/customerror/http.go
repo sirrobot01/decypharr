@@ -61,6 +61,24 @@ var TorrentNotCachedError = (&Error{
 	Code:       "torrent_not_cached",
 }).Retryable()
 
+// TorrentFailedError means the provider reports that the torrent itself failed.
+// Only this class of error, not a request failure, justifies removing the
+// provider's copy.
+var TorrentFailedError = (&Error{
+	statusCode: 422,
+	err:        errors.New("torrent failed on provider"),
+	Code:       "torrent_failed",
+}).Permanent()
+
+// IsTerminalTorrentError reports whether err is a verdict from the provider
+// about the torrent. Every other error, such as a 429 or a dropped connection,
+// says nothing about the torrent, so its provider copy must stay.
+func IsTerminalTorrentError(err error) bool {
+	return errors.Is(err, TorrentNotCachedError) ||
+		errors.Is(err, TorrentFailedError) ||
+		errors.Is(err, TorrentBlockedError)
+}
+
 var TorrentBlockedError = (&Error{
 	statusCode: 451,
 	err:        errors.New("torrent blocked for legal reasons"),

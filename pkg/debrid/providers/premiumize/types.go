@@ -2,6 +2,7 @@ package premiumize
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 )
 
@@ -9,6 +10,10 @@ type apiError struct {
 	Status  string `json:"status"`
 	Message string `json:"message"`
 	Code    string `json:"code"`
+}
+
+func (e *apiError) Error() string {
+	return fmt.Sprintf("premiumize API error: %s (%s)", e.Message, e.Code)
 }
 
 type accountInfoResponse struct {

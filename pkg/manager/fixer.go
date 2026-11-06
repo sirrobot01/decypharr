@@ -284,8 +284,9 @@ func (f *Fixer) MoveTorrent(entry *storage.Entry, debridName string, reinsert bo
 		f.manager.hearsay.ReportAdd(client.Config().Provider, entry.InfoHash, false)
 	}
 	if err != nil {
-		// Delete the failed entry
-		if newDebridTorrent != nil && newDebridTorrent.Id != "" {
+		// Delete the failed entry. A failed status check says nothing about
+		// the torrent, and the next sync adopts a copy that stays.
+		if customerror.IsTerminalTorrentError(err) && newDebridTorrent != nil && newDebridTorrent.Id != "" {
 			_ = client.DeleteTorrent(newDebridTorrent.Id)
 		}
 		return false, fmt.Errorf("failed to check status: %w", err)

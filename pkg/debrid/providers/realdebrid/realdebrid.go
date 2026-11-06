@@ -546,6 +546,9 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent) (*types.Torrent, error) {
 			return t, err
 		}
 
+		if resp.StatusCode == http.StatusNotFound {
+			return t, customerror.TorrentNotFoundError
+		}
 		if resp.StatusCode != http.StatusOK {
 			return t, fmt.Errorf("realdebrid API error: Status: %d", resp.StatusCode)
 		}
@@ -570,7 +573,7 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent) (*types.Torrent, error) {
 			t.Status = types.TorrentStatusDownloading
 			t.Files = r.getTorrentFiles(t, data)
 			if len(t.Files) == 0 {
-				return t, fmt.Errorf("no valid files found")
+				return t, fmt.Errorf("torrent %s: no valid files found: %w", t.Name, customerror.TorrentFailedError)
 			}
 			filesId := make([]string, 0)
 			for _, f := range t.Files {
@@ -610,7 +613,7 @@ func (r *RealDebrid) CheckStatus(t *types.Torrent) (*types.Torrent, error) {
 				Str("debrid_status", debridStatus).
 				Str("mapped_status", string(t.Status)).
 				Msg("Unexpected debrid status, treating as error")
-			return t, fmt.Errorf("torrent: %s has error status: %s", t.Name, debridStatus)
+			return t, fmt.Errorf("torrent %s has status %s: %w", t.Name, debridStatus, customerror.TorrentFailedError)
 		}
 	}
 }

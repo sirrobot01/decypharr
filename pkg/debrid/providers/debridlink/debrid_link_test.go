@@ -4,9 +4,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/request"
+	"github.com/sirrobot01/decypharr/pkg/debrid/account"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 )
 
@@ -39,7 +43,7 @@ func TestTorrentResponses(t *testing.T) {
 				var torrent *types.Torrent
 				if list {
 					var torrents []*types.Torrent
-					torrents, err = provider.getTorrents(1, 100)
+					torrents, _, err = provider.getTorrents(1, 100)
 					if err == nil && len(torrents) == 1 {
 						torrent = torrents[0]
 					}
@@ -66,5 +70,43 @@ func TestTorrentResponses(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGetTorrentsKeepsPagingPastUnfinishedPages(t *testing.T) {
+	config.Reset()
+	config.SetConfigPath(t.TempDir())
+	t.Cleanup(config.Reset)
+	config.Get().AllowedExt = []string{"mkv"}
+
+	page := func(status int, count int, prefix string) string {
+		items := make([]string, count)
+		for i := range items {
+			items[i] = fmt.Sprintf(`{"id":"%s%d","hashString":"%s%d","status":%d,"files":[{"id":"f","name":"%s%d.mkv","size":1000,"downloadUrl":"https://files.example/f"}]}`,
+				prefix, i, prefix, i, status, prefix, i)
+		}
+		return `{"success":true,"value":[` + strings.Join(items, ",") + `]}`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("page") == "0" {
+			_, _ = fmt.Fprint(w, page(4, 100, "active"))
+			return
+		}
+		_, _ = fmt.Fprint(w, page(100, 3, "done"))
+	}))
+	t.Cleanup(server.Close)
+
+	provider := &DebridLink{
+		Host:            server.URL,
+		client:          request.New(request.WithMaxRetries(0)),
+		accountsManager: account.NewManager(config.Debrid{Name: "debridlink"}, nil, zerolog.Nop()),
+	}
+	torrents, err := provider.GetTorrents()
+	if err != nil {
+		t.Fatalf("GetTorrents() error = %v", err)
+	}
+	if len(torrents) != 3 {
+		t.Fatalf("torrents = %d, want the 3 finished torrents behind the unfinished page", len(torrents))
 	}
 }

@@ -95,3 +95,44 @@ func TestAvailabilityRejectsIncompleteResponses(t *testing.T) {
 		t.Fatalf("incomplete response = %v, %v", result, err)
 	}
 }
+
+func TestGetTorrentsFailsInsteadOfDroppingTransfers(t *testing.T) {
+	config.SetConfigPath(t.TempDir())
+
+	for _, test := range []struct {
+		name      string
+		folder    string
+		wantError bool
+		want      int
+	}{
+		{"rate limit fails the sync", `{"status":"error","message":"slow down","code":"rate_limit_reached"}`, true, 0},
+		{"missing folder skips the transfer", `{"status":"error","message":"gone","code":"not_found"}`, false, 0},
+		{"finished transfer without links stays listed", `{"status":"success","content":[]}`, false, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("GET /api/transfer/list", func(w http.ResponseWriter, r *http.Request) {
+				_, _ = fmt.Fprint(w, `{"status":"success","transfers":[{"id":"a","name":"A","status":"finished","progress":1,"folder_id":"folder-a"}]}`)
+			})
+			mux.HandleFunc("GET /api/folder/list", func(w http.ResponseWriter, r *http.Request) {
+				_, _ = fmt.Fprint(w, test.folder)
+			})
+			server := httptest.NewServer(mux)
+			t.Cleanup(server.Close)
+
+			pm := &Premiumize{
+				Host:                server.URL,
+				client:              request.New(request.WithMaxRetries(0)),
+				config:              config.Debrid{Name: "premiumize"},
+				validateFileAllowed: func(string, int64) error { return nil },
+			}
+			torrents, err := pm.GetTorrents()
+			if (err != nil) != test.wantError {
+				t.Fatalf("GetTorrents() error = %v, wantError %v", err, test.wantError)
+			}
+			if len(torrents) != test.want {
+				t.Fatalf("torrents = %d, want %d", len(torrents), test.want)
+			}
+		})
+	}
+}
