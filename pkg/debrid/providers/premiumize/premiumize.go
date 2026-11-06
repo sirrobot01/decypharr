@@ -9,14 +9,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/url"
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -35,6 +38,14 @@ import (
 const (
 	defaultHost          = "https://www.premiumize.me"
 	profileCacheDuration = time.Hour
+
+	// rateLimitPause is how long the key rests after rate_limit_reached.
+	// Premiumize publishes no number; zurg pauses for one minute.
+	rateLimitPause = time.Minute
+
+	// linkScheme marks a File.Link as a Premiumize item id. A generated CDN URL
+	// stops working, so it cannot identify a file for the cache or for repair.
+	linkScheme = "premiumize://"
 )
 
 var _ common.Client = (*Premiumize)(nil)
@@ -50,6 +61,14 @@ type Premiumize struct {
 	profile               *types.Profile
 	profileLastFetched    time.Time
 	validateFileAllowed   func(string, int64) error
+	throttle              *request.Throttle
+	transferFiles         sync.Map // transfer id -> transferFileList
+}
+
+// transferFileList is the file tree of a finished transfer, which never changes.
+type transferFileList struct {
+	files map[string]types.File
+	links []string
 }
 
 func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Premiumize, error) {
@@ -70,13 +89,14 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Premiumize
 	}
 
 	accounts := account.NewManager(dc, ratelimits["download"], _log)
+	throttle := accounts.Throttle(dc.APIKey)
 
 	opts := []request.ClientOption{
 		request.WithHeaders(headers),
 		request.WithLogger(_log),
 		request.WithMaxRetries(cfg.Retries),
 		request.WithRateLimiter(ratelimits["main"]),
-		request.WithThrottle(accounts.Throttle(dc.APIKey)),
+		request.WithThrottle(throttle),
 		request.WithRetryableStatus(http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout),
 	}
 	if dc.Proxy != "" {
@@ -92,6 +112,7 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Premiumize
 		logger:                _log,
 		config:                dc,
 		validateFileAllowed:   func(name string, size int64) error { return config.Get().ValidateFileAllowed(name, size) },
+		throttle:              throttle,
 	}, nil
 }
 
@@ -126,20 +147,37 @@ func (pm *Premiumize) do(req *http.Request, out any) (*http.Response, error) {
 		return resp, fmt.Errorf("premiumize API error: Status: %d || Body: %s", resp.StatusCode, string(body))
 	}
 
+	// Business errors arrive with HTTP 200, so read the envelope first. A call
+	// that wants no body still has to see them.
+	var envelope apiError
+	if err := json.Unmarshal(body, &envelope); err == nil && envelope.Status == "error" {
+		return resp, pm.apiError(&envelope)
+	}
+
 	if len(bytes.TrimSpace(body)) == 0 || out == nil {
 		return resp, nil
 	}
+	return resp, json.Unmarshal(body, out)
+}
 
-	if err := json.Unmarshal(body, out); err != nil {
-		return resp, err
+// apiError maps an error envelope. Codes left as *apiError are not about one
+// torrent or the budget, so callers treat them as transient.
+func (pm *Premiumize) apiError(e *apiError) error {
+	switch e.Code {
+	case "rate_limit_reached":
+		pm.throttle.Trip(rateLimitPause)
+		pm.logger.Warn().Dur("pause", rateLimitPause).Msg("Premiumize rate limit reached, pausing API requests")
+		return &request.ThrottledError{RetryAfter: rateLimitPause}
+	case "account_limit_reached", "service_limit_reached":
+		return fmt.Errorf("%w: %w", customerror.TrafficExceededError, e)
+	default:
+		return e
 	}
+}
 
-	var envelope apiError
-	if err := json.Unmarshal(body, &envelope); err == nil && envelope.Status == "error" {
-		return resp, &envelope
-	}
-
-	return resp, nil
+func hasCode(err error, codes ...string) bool {
+	apiErr, ok := errors.AsType[*apiError](err)
+	return ok && slices.Contains(codes, apiErr.Code)
 }
 
 func (pm *Premiumize) doForm(ctx context.Context, method, apiPath string, values url.Values, out any) (*http.Response, error) {
@@ -169,7 +207,7 @@ func (pm *Premiumize) addMagnet(t *types.Torrent) (*types.Torrent, error) {
 	var data transferCreateResponse
 	_, err := pm.doForm(context.Background(), http.MethodPost, "/api/transfer/create", url.Values{"src": {src}}, &data)
 	if err != nil {
-		return nil, err
+		return nil, submitError(err)
 	}
 	pm.applySubmittedTorrent(t, data)
 	return t, nil
@@ -197,10 +235,18 @@ func (pm *Premiumize) addTorrent(t *types.Torrent) (*types.Torrent, error) {
 
 	var data transferCreateResponse
 	if _, err := pm.do(req, &data); err != nil {
-		return nil, err
+		return nil, submitError(err)
 	}
 	pm.applySubmittedTorrent(t, data)
 	return t, nil
+}
+
+// submitError marks a refusal of the torrent itself as final.
+func submitError(err error) error {
+	if hasCode(err, "invalid_request", "service_unsupported", "permanent_error") {
+		return fmt.Errorf("%w: %w", customerror.TorrentFailedError, err)
+	}
+	return err
 }
 
 func (pm *Premiumize) applySubmittedTorrent(t *types.Torrent, data transferCreateResponse) {
@@ -279,7 +325,11 @@ func (pm *Premiumize) UpdateTorrent(t *types.Torrent) error {
 
 func (pm *Premiumize) DeleteTorrent(torrentID string) error {
 	_, err := pm.doForm(context.Background(), http.MethodPost, "/api/transfer/delete", url.Values{"id": {torrentID}}, nil)
-	return err
+	if err != nil {
+		return err
+	}
+	pm.transferFiles.Delete(torrentID)
+	return nil
 }
 
 func (pm *Premiumize) IsAvailable(infohashes []string) (map[string]bool, error) {
@@ -323,7 +373,7 @@ func (pm *Premiumize) GetTorrents() ([]*types.Torrent, error) {
 	for _, tr := range transfers {
 		torrent, err := pm.transferToTorrent(tr, "")
 		if err != nil {
-			if apiErr, ok := errors.AsType[*apiError](err); ok && apiErr.Code == "not_found" {
+			if hasCode(err, "not_found") {
 				pm.logger.Warn().Err(err).Str("transfer_id", tr.ID).Msg("Skipping Premiumize transfer")
 				continue
 			}
@@ -408,7 +458,21 @@ func (pm *Premiumize) transferInfoHash(tr premiumizeTransfer, fallbackInfoHash s
 	return fmt.Sprintf("%x", digest[:20])
 }
 
+// filesForTransfer returns the files of a finished transfer. A complete tree is
+// kept, so a sync only spends calls on transfers it has not seen.
 func (pm *Premiumize) filesForTransfer(tr premiumizeTransfer) (map[string]types.File, []string, bool, error) {
+	if cached, ok := pm.transferFiles.Load(tr.ID); ok {
+		list := cached.(transferFileList)
+		return maps.Clone(list.files), slices.Clone(list.links), true, nil
+	}
+	files, links, ready, err := pm.readTransferFiles(tr)
+	if err == nil && ready {
+		pm.transferFiles.Store(tr.ID, transferFileList{files: maps.Clone(files), links: slices.Clone(links)})
+	}
+	return files, links, ready, err
+}
+
+func (pm *Premiumize) readTransferFiles(tr premiumizeTransfer) (map[string]types.File, []string, bool, error) {
 	files := make(map[string]types.File)
 	links := make([]string, 0)
 	if fileID := tr.FileID.String(); fileID != "" {
@@ -489,6 +553,9 @@ func (pm *Premiumize) addFile(files map[string]types.File, links *[]string, tran
 	if _, exists := files[fileName]; exists {
 		fileName = itemPath
 	}
+	if id != "" {
+		link = linkScheme + id
+	}
 	files[fileName] = types.File{
 		TorrentId: transferID,
 		Id:        id,
@@ -510,6 +577,9 @@ func (pm *Premiumize) fetchDownloadLink(ctx context.Context, acc *account.Accoun
 	filename := file.Name
 	if file.Id != "" {
 		item, err := pm.itemDetails(ctx, file.Id)
+		if hasCode(err, "not_found") {
+			return types.DownloadLink{}, customerror.HosterUnavailableError
+		}
 		if err != nil {
 			return types.DownloadLink{}, err
 		}
@@ -559,13 +629,15 @@ func (pm *Premiumize) CheckFile(ctx context.Context, infohash, fileID string) er
 		}
 		return nil
 	}
+	fileID = strings.TrimPrefix(fileID, linkScheme)
 	if fileID == "" {
 		return customerror.HosterUnavailableError
 	}
-	if _, err := pm.itemDetails(ctx, fileID); err != nil {
-		return err
+	_, err := pm.itemDetails(ctx, fileID)
+	if hasCode(err, "not_found") {
+		return customerror.HosterUnavailableError
 	}
-	return nil
+	return err
 }
 
 func (pm *Premiumize) GetProfile() (*types.Profile, error) {
