@@ -38,6 +38,11 @@ const (
 	// sessionMaxThrottleWait caps how long a Retry-After is honored.
 	sessionMaxThrottleWait = 30 * time.Second
 	sessionResumeBaseDelay = 500 * time.Millisecond
+	// sessionWindowMin is the first range a windowed read asks for. Each
+	// following window doubles up to sessionWindowMax while reads stay
+	// sequential, so one abandoned read costs at most one window.
+	sessionWindowMin = 8 << 20
+	sessionWindowMax = 64 << 20
 )
 
 // StreamReader is a resilient, seekable byte stream over one remote file.
@@ -405,11 +410,75 @@ type httpTransport struct {
 	base  int64
 	limit int64
 
+	// size is the file size. A nonzero window asks upstream for bounded
+	// ranges of that many bytes; see windowedBody.
+	size   int64
+	window int64
+
 	mu   sync.Mutex
 	last types.DownloadLink
 }
 
 func (t *httpTransport) open(ctx context.Context, pos int64) (io.ReadCloser, error) {
+	if t.window <= 0 || pos+t.window >= t.size {
+		return t.openRange(ctx, pos, 0)
+	}
+	end := pos + t.window
+	body, err := t.openRange(ctx, pos, end)
+	if err != nil {
+		return nil, err
+	}
+	return &windowedBody{ctx: ctx, t: t, body: body, pos: pos, end: end, window: t.window}, nil
+}
+
+// windowedBody reads a file through consecutive bounded ranges and hides the
+// boundaries from the session. Some providers bill the range a request asks
+// for, not the bytes it reads, so an open-ended range bills the rest of the file.
+type windowedBody struct {
+	ctx    context.Context
+	t      *httpTransport
+	body   io.ReadCloser
+	pos    int64
+	end    int64
+	window int64
+}
+
+func (b *windowedBody) Read(p []byte) (int, error) {
+	n, err := b.body.Read(p)
+	b.pos += int64(n)
+	if err != io.EOF || b.pos != b.end || b.end >= b.t.size {
+		return n, err
+	}
+
+	b.window = min(b.window*2, sessionWindowMax)
+	end := b.pos + b.window
+	if end >= b.t.size {
+		end = 0 // the rest of the file fits, so ask for it plainly
+	}
+	body, err := b.t.openRange(b.ctx, b.pos, end)
+	if err != nil {
+		// The session recovers at its own offset. Bytes already read go first.
+		return n, err
+	}
+	b.body.Close()
+	b.body = body
+	if end == 0 {
+		b.end = b.t.size
+	} else {
+		b.end = end
+	}
+	if n == 0 {
+		return b.Read(p)
+	}
+	return n, nil
+}
+
+func (b *windowedBody) Close() error {
+	return b.body.Close()
+}
+
+// openRange asks for [pos, end) of the file, or for the rest of it when end is 0.
+func (t *httpTransport) openRange(ctx context.Context, pos, end int64) (io.ReadCloser, error) {
 	dl, err := t.getLink(ctx)
 	if err != nil {
 		return nil, err
@@ -425,9 +494,12 @@ func (t *httpTransport) open(ctx context.Context, pos int64) (io.ReadCloser, err
 	// A bounded slice also bounds the request end so the body EOFs at the
 	// slice boundary.
 	absStart := t.base + pos
-	if t.limit > 0 {
+	switch {
+	case end > 0:
+		req.Header.Set("Range", "bytes="+strconv.FormatInt(absStart, 10)+"-"+strconv.FormatInt(t.base+end-1, 10))
+	case t.limit > 0:
 		req.Header.Set("Range", "bytes="+strconv.FormatInt(absStart, 10)+"-"+strconv.FormatInt(t.base+t.limit-1, 10))
-	} else {
+	default:
 		req.Header.Set("Range", "bytes="+strconv.FormatInt(absStart, 10)+"-")
 	}
 	req.Header.Set("Accept-Encoding", "identity")
@@ -741,6 +813,10 @@ func (m *Manager) openSession(ctx context.Context, entry *storage.Entry, filenam
 		if br := file.ByteRange; br != nil {
 			ht.base = br[0]
 			ht.limit = file.Size
+		}
+		if client := m.ProviderClient(entry.ActiveProvider); client != nil && client.Config().Provider == "torbox" {
+			ht.size = file.Size
+			ht.window = sessionWindowMin
 		}
 		t = ht
 	}

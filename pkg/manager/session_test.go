@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -630,5 +631,115 @@ func TestSessionFailsFastDuringLongLockout(t *testing.T) {
 	}
 	if links.Load() != 1 {
 		t.Fatalf("link fetches = %d, want 1", links.Load())
+	}
+}
+
+// rangeCDN serves the exact range a request asks for and records every request.
+type rangeCDN struct {
+	data []byte
+	mu   sync.Mutex
+	got  []string
+	fail map[int]int // request index -> status
+}
+
+func (c *rangeCDN) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	c.mu.Lock()
+	index := len(c.got)
+	c.got = append(c.got, r.Header.Get("Range"))
+	status := c.fail[index]
+	c.mu.Unlock()
+	if status != 0 {
+		http.Error(w, "refused", status)
+		return
+	}
+	http.ServeContent(w, r, "file", time.Time{}, bytes.NewReader(c.data))
+}
+
+func (c *rangeCDN) ranges() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.got)
+}
+
+func windowedSession(t *testing.T, cdn *rangeCDN) (*session, *httpTransport) {
+	t.Helper()
+	server := httptest.NewServer(cdn)
+	t.Cleanup(server.Close)
+	var url atomic.Value
+	url.Store(server.URL)
+	tr := testTransport(server.Client(), &url, nil, nil)
+	tr.size = int64(len(cdn.data))
+	tr.window = 4 << 10
+	return newTestSession(t, tr, int64(len(cdn.data))), tr
+}
+
+func TestWindowedSessionAsksForBoundedRanges(t *testing.T) {
+	cdn := &rangeCDN{data: testPattern(30 << 10)}
+	s, _ := windowedSession(t, cdn)
+
+	got, err := io.ReadAll(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, cdn.data) {
+		t.Fatal("byte mismatch across window boundaries")
+	}
+	want := []string{"bytes=0-4095", "bytes=4096-12287", "bytes=12288-28671", "bytes=28672-"}
+	if ranges := cdn.ranges(); !slices.Equal(ranges, want) {
+		t.Fatalf("ranges = %v, want %v", ranges, want)
+	}
+	if resumes := s.resumes.Load(); resumes != 0 {
+		t.Fatalf("resumes = %d, a window boundary is not a failure", resumes)
+	}
+}
+
+func TestWindowedSessionRestartsSmallAfterSeek(t *testing.T) {
+	cdn := &rangeCDN{data: testPattern(30 << 10)}
+	s, _ := windowedSession(t, cdn)
+
+	if _, err := io.ReadFull(s, make([]byte, 6<<10)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Seek(2<<10, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadFull(s, make([]byte, 1<<10)); err != nil {
+		t.Fatal(err)
+	}
+	if ranges := cdn.ranges(); ranges[len(ranges)-1] != "bytes=2048-6143" {
+		t.Fatalf("ranges = %v, want a first-size window after the seek", ranges)
+	}
+}
+
+func TestWindowedSessionRecoversWhenNextWindowFails(t *testing.T) {
+	cdn := &rangeCDN{data: testPattern(30 << 10), fail: map[int]int{1: http.StatusBadGateway}}
+	s, _ := windowedSession(t, cdn)
+
+	got, err := io.ReadAll(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, cdn.data) {
+		t.Fatal("byte mismatch after a failed window")
+	}
+}
+
+func TestByteRangedWindowsStayInsideTheSlice(t *testing.T) {
+	cdn := &rangeCDN{data: testPattern(30 << 10)}
+	s, tr := windowedSession(t, cdn)
+	tr.base = 1 << 10
+	tr.limit = 12 << 10
+	tr.size = tr.limit
+	s.size = tr.limit
+
+	got, err := io.ReadAll(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, cdn.data[1<<10:13<<10]) {
+		t.Fatal("byte mismatch in slice")
+	}
+	if ranges := cdn.ranges(); ranges[len(ranges)-1] != "bytes=5120-13311" {
+		t.Fatalf("ranges = %v", ranges)
 	}
 }

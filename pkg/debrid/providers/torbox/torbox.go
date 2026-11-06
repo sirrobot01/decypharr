@@ -29,6 +29,22 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/version"
 	"go.uber.org/ratelimit"
+	"golang.org/x/time/rate"
+)
+
+const (
+	// requestdl has its own budget, far below the documented 300/min. zurg
+	// measured about 100 calls per rolling five minutes (2026-08-30), then a
+	// 300s lockout of the whole account. TorBox does not document it. This
+	// pace spends at most 95 calls in any five minutes.
+	linkBudgetRate  = rate.Limit(15.0 / 60.0)
+	linkBudgetBurst = 20
+	// linkBudgetMaxWait is the longest a read waits for budget.
+	linkBudgetMaxWait = 20 * time.Second
+
+	// maxLinkLifetime caps how long a CDN URL stays cached. TorBox documents
+	// no lifetime; zurg saw URLs go invalid and caches them for 24h.
+	maxLinkLifetime = 24 * time.Hour
 )
 
 var planSlots = map[string]int{
@@ -50,6 +66,7 @@ type Torbox struct {
 	downloadPresentCache  sync.Map
 	downloadPresentMu     sync.Mutex
 	downloadPresentLoaded bool
+	linkBudgets           sync.Map // token -> *rate.Limiter
 }
 
 func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Torbox, error) {
@@ -106,6 +123,7 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Torbox, er
 	if autoExpiresLinksAfter == 0 || err != nil {
 		autoExpiresLinksAfter = 48 * time.Hour
 	}
+	autoExpiresLinksAfter = min(autoExpiresLinksAfter, maxLinkLifetime)
 
 	tb := &Torbox{
 		Host:                  "https://api.torbox.app/v1",
@@ -524,34 +542,76 @@ func (tb *Torbox) GetDownloadLink(ctx context.Context, id string, file *types.Fi
 	return tb.accountsManager.GetDownloadLink(ctx, id, file, tb.fetchDownloadLink)
 }
 
-func (tb *Torbox) fetchDownloadLink(ctx context.Context, account *account.Account, id string, file *types.File) (types.DownloadLink, error) {
-	query := url.Values{}
-	query.Set("token", account.Token)
-	query.Set("torrent_id", id)
-	query.Set("file_id", file.Id)
-	query.Set("redirect", "true")
+// waitForLinkBudget spends one requestdl call of token's budget. It fails at
+// once if the wait is too long for a reader to sit through.
+func (tb *Torbox) waitForLinkBudget(ctx context.Context, token string) error {
+	budget, _ := tb.linkBudgets.LoadOrStore(token, rate.NewLimiter(linkBudgetRate, linkBudgetBurst))
+	reservation := budget.(*rate.Limiter).Reserve()
+	delay := reservation.Delay()
+	if delay > linkBudgetMaxWait {
+		reservation.Cancel()
+		return &request.ThrottledError{RetryAfter: delay}
+	}
+	if delay == 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		reservation.Cancel()
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
 
-	downloadURL := fmt.Sprintf("%s/api/torrents/requestdl?%s", tb.Host, query.Encode())
-
-	// Resolve the CDN URL once through the rate-limited client. Streaming the
-	// redirect URL makes every range read a requestdl call against the
-	// account-wide API limit. An expired CDN URL is refetched like any link;
-	// on failure the redirect URL still works.
-	client := account.Client()
+// requestLink resolves the CDN URL of a file. Streaming the CDN URL keeps range
+// reads off the API, so a failure here stays a failure: a redirect URL cached in
+// its place would spend one requestdl call on every read for the life of the link.
+func (tb *Torbox) requestLink(ctx context.Context, acc *account.Account, id string, file *types.File) (string, error) {
+	if err := tb.waitForLinkBudget(ctx, acc.Token); err != nil {
+		return "", err
+	}
+	client := acc.Client()
 	if client == nil {
 		client = tb.client
 	}
+
+	query := url.Values{}
+	query.Set("token", acc.Token)
+	query.Set("torrent_id", id)
+	query.Set("file_id", file.Id)
+	query.Set("redirect", "false")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tb.Host+"/api/torrents/requestdl?"+query.Encode(), nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer request.DrainAndClose(resp.Body)
+
+	// TorBox explains refusals in the body, whatever the status.
 	var res DownloadLinksResponse
-	resp, err := tb.doGetWithClient(ctx, client, "/api/torrents/requestdl", map[string]string{
-		"token":      account.Token,
-		"torrent_id": id,
-		"file_id":    file.Id,
-		"redirect":   "false",
-	}, &res)
-	if err == nil && resp.StatusCode == http.StatusOK && res.Success && res.Data != nil && strings.HasPrefix(*res.Data, "http") {
-		downloadURL = *res.Data
-	} else {
-		tb.logger.Debug().Err(err).Str("torrent_id", id).Msg("requestdl redirect=false failed, using redirect URL")
+	decodeErr := request.DecodeJSON(resp, &res)
+	if resp.StatusCode == http.StatusNotFound || res.Error == "ITEM_NOT_FOUND" {
+		return "", customerror.HosterUnavailableError
+	}
+	if resp.StatusCode == http.StatusOK && res.Success && res.Data != nil && strings.HasPrefix(*res.Data, "http") {
+		return *res.Data, nil
+	}
+	if decodeErr != nil {
+		return "", fmt.Errorf("torbox requestdl: status %d: %w", resp.StatusCode, decodeErr)
+	}
+	return "", fmt.Errorf("torbox requestdl: status %d: %v: %s", resp.StatusCode, res.Error, res.Detail)
+}
+
+func (tb *Torbox) fetchDownloadLink(ctx context.Context, account *account.Account, id string, file *types.File) (types.DownloadLink, error) {
+	link, err := tb.requestLink(ctx, account, id, file)
+	if err != nil {
+		return types.DownloadLink{}, err
 	}
 
 	now := time.Now()
@@ -562,7 +622,7 @@ func (tb *Torbox) fetchDownloadLink(ctx context.Context, account *account.Accoun
 		Size:         file.Size,
 		Token:        tb.APIKey,
 		Link:         file.Link,
-		DownloadLink: downloadURL,
+		DownloadLink: link,
 		Debrid:       tb.config.Name,
 		Id:           file.Id,
 		Generated:    now,

@@ -2,6 +2,7 @@ package torbox
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,9 +10,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
+	"github.com/sirrobot01/decypharr/internal/customerror"
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/debrid/account"
@@ -281,17 +285,97 @@ func TestFetchDownloadLinkResolvesCDNURL(t *testing.T) {
 	}
 }
 
-func TestFetchDownloadLinkFallsBackToRedirectURL(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "busy", http.StatusTooManyRequests)
-	}))
-	t.Cleanup(server.Close)
+func TestFetchDownloadLinkNeverCachesTheRedirectURL(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		status int
+		body   string
+		check  func(error) bool
+	}{
+		{"rate limited", http.StatusTooManyRequests, ``, func(err error) bool {
+			_, ok := errors.AsType[*request.ThrottledError](err)
+			return ok
+		}},
+		{"gone", http.StatusNotFound, `{"success":false,"error":"ITEM_NOT_FOUND"}`, func(err error) bool {
+			return errors.Is(err, customerror.HosterUnavailableError)
+		}},
+		{"gone with success status", http.StatusOK, `{"success":false,"error":"ITEM_NOT_FOUND"}`, func(err error) bool {
+			return errors.Is(err, customerror.HosterUnavailableError)
+		}},
+		{"refusal keeps its reason", http.StatusForbidden, `{"success":false,"error":"BANDWIDTH_LIMIT","detail":"used 1.5 TiB"}`, func(err error) bool {
+			return strings.Contains(err.Error(), "used 1.5 TiB")
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(test.status)
+				_, _ = fmt.Fprint(w, test.body)
+			}))
+			t.Cleanup(server.Close)
 
-	dl, err := testTorbox(server.URL).fetchDownloadLink(t.Context(), &account.Account{Token: "key"}, "7", &types.File{Id: "3", Name: "a.mkv"})
+			dl, err := testTorbox(server.URL).fetchDownloadLink(t.Context(), &account.Account{Token: "key"}, "7", &types.File{Id: "3", Name: "a.mkv"})
+			if err == nil {
+				t.Fatalf("fetchDownloadLink() = %q, want an error", dl.DownloadLink)
+			}
+			if !test.check(err) {
+				t.Fatalf("fetchDownloadLink() error = %v", err)
+			}
+			if !dl.Empty() {
+				t.Fatalf("DownloadLink = %q, want none", dl.DownloadLink)
+			}
+		})
+	}
+}
+
+func TestLinkBudgetPacesCallsAndFailsFastWhenDeep(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		tb := &Torbox{}
+		begin := time.Now()
+		for range linkBudgetBurst {
+			if err := tb.waitForLinkBudget(t.Context(), "key"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if elapsed := time.Since(begin); elapsed != 0 {
+			t.Fatalf("burst took %s", elapsed)
+		}
+		if err := tb.waitForLinkBudget(t.Context(), "key"); err != nil {
+			t.Fatal(err)
+		}
+		if elapsed := time.Since(begin); elapsed != 4*time.Second {
+			t.Fatalf("call past the burst waited %s, want 4s", elapsed)
+		}
+
+		// A queue of readers is what makes the wait long.
+		errs := make(chan error, 10)
+		for range 10 {
+			go func() { errs <- tb.waitForLinkBudget(t.Context(), "key") }()
+		}
+		var throttled int
+		for range 10 {
+			if _, ok := errors.AsType[*request.ThrottledError](<-errs); ok {
+				throttled++
+			}
+		}
+		if throttled == 0 {
+			t.Fatal("no call failed fast behind a deep queue")
+		}
+
+		// Another key has its own budget.
+		if err := tb.waitForLinkBudget(t.Context(), "other"); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestLinkLifetimeIsCapped(t *testing.T) {
+	config.SetConfigPath(t.TempDir())
+	t.Cleanup(config.Reset)
+	tb, err := New(config.Debrid{Name: "torbox", APIKey: "key", AutoExpireLinksAfter: "3d"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(dl.DownloadLink, "/api/torrents/requestdl?") || !strings.Contains(dl.DownloadLink, "redirect=true") {
-		t.Fatalf("DownloadLink = %q, want the redirect URL", dl.DownloadLink)
+	if tb.autoExpiresLinksAfter != maxLinkLifetime {
+		t.Fatalf("link lifetime = %s, want %s", tb.autoExpiresLinksAfter, maxLinkLifetime)
 	}
 }
