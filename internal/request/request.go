@@ -114,29 +114,33 @@ func WithProxy(proxyURL string) ClientOption {
 	}
 }
 
-// Do performs an HTTP request with retries for certain status codes
-func (c *Client) Do(req *http.Request) (*http.Response, error) {
-	// Apply headers
+// prepare applies headers and checks the cooldown and rate limit.
+func (c *Client) prepare(req *http.Request) error {
 	c.headersMu.RLock()
-	if c.headers != nil {
-		for key, value := range c.headers {
-			req.Header.Set(key, value)
-		}
+	for key, value := range c.headers {
+		req.Header.Set(key, value)
 	}
 	c.headersMu.RUnlock()
 
 	if wait := c.throttle.Remaining(); wait > 0 {
-		return nil, &ThrottledError{RetryAfter: wait}
+		return &ThrottledError{RetryAfter: wait}
 	}
 
-	// Apply rate limiting
 	if c.rateLimiter != nil {
 		select {
 		case <-req.Context().Done():
-			return nil, req.Context().Err()
+			return req.Context().Err()
 		default:
 			c.rateLimiter.Take()
 		}
+	}
+	return nil
+}
+
+// Do performs an HTTP request with retries for certain status codes
+func (c *Client) Do(req *http.Request) (*http.Response, error) {
+	if err := c.prepare(req); err != nil {
+		return nil, err
 	}
 
 	// Convert to retryablehttp request
@@ -146,6 +150,16 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	}
 
 	return c.client.Do(retryReq)
+}
+
+// DoOnce sends req exactly once and returns the response whatever its status.
+// Use it for an endpoint with a tight limit of its own, where a retry spends
+// that limit. The caller closes the body and owns any reaction to a 429.
+func (c *Client) DoOnce(req *http.Request) (*http.Response, error) {
+	if err := c.prepare(req); err != nil {
+		return nil, err
+	}
+	return c.httpClient.Do(req)
 }
 
 // MakeRequest performs an HTTP request and returns the response body as bytes
@@ -187,7 +201,7 @@ func (c *Client) Get(url string) (*http.Response, error) {
 // long as the server requests instead of using jittered exponential backoff.
 func retryAfterBackoff(min, max time.Duration, attemptNum int, resp *http.Response) time.Duration {
 	if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
-		if wait := retryAfter(resp); wait > 0 {
+		if wait := RetryAfter(resp); wait > 0 {
 			if wait > max {
 				return max
 			}
@@ -207,7 +221,7 @@ func (c *Client) handleExhausted(resp *http.Response, err error, tries int) (*ht
 		return nil, throttled
 	}
 	if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
-		return nil, &ThrottledError{RetryAfter: retryAfter(resp)}
+		return nil, &ThrottledError{RetryAfter: RetryAfter(resp)}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("giving up after %d attempt(s): %w", tries, err)
@@ -304,7 +318,7 @@ func New(options ...ClientOption) *Client {
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests {
-			wait := retryAfter(resp)
+			wait := RetryAfter(resp)
 			if client.throttle.Trip(wait) {
 				client.logger.Warn().Dur("retry_after", wait).Str("host", resp.Request.URL.Host).Msg("Provider rate limit reached, pausing requests")
 			}

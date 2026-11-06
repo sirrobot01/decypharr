@@ -63,9 +63,9 @@ func (e *ThrottledError) IsRetryable() bool {
 	return true
 }
 
-// retryAfter reads the Retry-After header of resp. It returns zero when the
+// RetryAfter reads the Retry-After header of resp. It returns zero when the
 // header is missing or invalid.
-func retryAfter(resp *http.Response) time.Duration {
+func RetryAfter(resp *http.Response) time.Duration {
 	if resp == nil {
 		return 0
 	}

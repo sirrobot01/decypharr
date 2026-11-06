@@ -33,7 +33,7 @@ func TestCheckFileHonorsCancellation(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			if cancelBefore {
-				provider.downloadPresentLoaded = true
+				provider.downloadPresentAt = time.Now()
 				cancel()
 			}
 			done := make(chan error, 1)

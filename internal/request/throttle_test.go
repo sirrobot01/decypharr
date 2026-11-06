@@ -115,3 +115,33 @@ func TestTripNeverShortensACooldown(t *testing.T) {
 		t.Fatalf("Remaining() = %s, want at most %s", got, maxThrottle)
 	}
 }
+
+func TestDoOnceSendsOneRequestAndKeepsTheStatus(t *testing.T) {
+	config.SetConfigPath(t.TempDir())
+	t.Cleanup(config.Reset)
+
+	var calls atomic.Int64
+	server := throttledServer(t, 300, &calls)
+	limiter := new(countingLimiter)
+	throttle := new(Throttle)
+	client := New(WithMaxRetries(3), WithRateLimiter(limiter), WithThrottle(throttle), WithHeaders(map[string]string{"X-Key": "v"}))
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.DoOnce(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer DrainAndClose(resp.Body)
+	if resp.StatusCode != http.StatusTooManyRequests || calls.Load() != 1 || limiter.takes.Load() != 1 {
+		t.Fatalf("status %d after %d calls and %d limiter takes", resp.StatusCode, calls.Load(), limiter.takes.Load())
+	}
+	if req.Header.Get("X-Key") != "v" {
+		t.Fatal("headers were not applied")
+	}
+	if throttle.Remaining() != 0 {
+		t.Fatal("DoOnce left the reaction to the caller")
+	}
+}
