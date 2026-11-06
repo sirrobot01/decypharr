@@ -47,6 +47,8 @@ const (
 	// no lifetime; zurg saw URLs go invalid and caches them for 24h.
 	maxLinkLifetime = 24 * time.Hour
 
+	profileCacheDuration = time.Hour
+
 	// defaultAddPause applies when TorBox refuses an add without Retry-After.
 	defaultAddPause = 5 * time.Minute
 
@@ -77,6 +79,7 @@ type Torbox struct {
 	submitClient          *request.Client
 	logger                zerolog.Logger
 	Profile               *types.Profile
+	profileFetched        time.Time
 	config                config.Debrid
 	downloadPresent       map[string]bool // torrent id -> download_present
 	downloadPresentAt     time.Time
@@ -952,12 +955,22 @@ func (tb *Torbox) GetAvailableSlots() (int, error) {
 }
 
 func (tb *Torbox) GetProfile() (*types.Profile, error) {
-	if tb.Profile != nil {
+	if tb.Profile != nil && time.Since(tb.profileFetched) < profileCacheDuration {
 		return tb.Profile, nil
 	}
+	profile, err := tb.getClientProfile(tb.client)
+	if err != nil {
+		return nil, err
+	}
+	tb.Profile = profile
+	tb.profileFetched = time.Now()
+	return profile, nil
+}
+
+func (tb *Torbox) getClientProfile(client *request.Client) (*types.Profile, error) {
 	var data ProfileResponse
 
-	resp, err := tb.doGet("/api/user/me", map[string]string{"settings": "true"}, &data)
+	resp, err := tb.doGetWithClient(context.Background(), client, "/api/user/me", map[string]string{"settings": "true"}, &data)
 	if err != nil {
 		return nil, err
 	}
@@ -995,8 +1008,6 @@ func (tb *Torbox) GetProfile() (*types.Profile, error) {
 		profile.Type = "free"
 	}
 
-	tb.Profile = profile
-
 	return profile, nil
 }
 
@@ -1004,7 +1015,16 @@ func (tb *Torbox) AccountManager() *account.Manager {
 	return tb.accountsManager
 }
 
-func (tb *Torbox) syncAccount(account *account.Account) error {
+func (tb *Torbox) syncAccount(acc *account.Account) error {
+	profile, err := tb.getClientProfile(acc.Client())
+	if err != nil {
+		return err
+	}
+	acc.Username = profile.Username
+	// A free account has no paid period to run out.
+	if profile.Type != "free" {
+		acc.Expiration = profile.Expiration
+	}
 	return nil
 }
 

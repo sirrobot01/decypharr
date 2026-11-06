@@ -11,10 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/customerror"
 	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/debrid/account"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 )
 
@@ -373,5 +375,59 @@ func TestCheckFileSeesTorrentsNewerThanTheSnapshot(t *testing.T) {
 	}
 	if listings.Load() != 2 {
 		t.Fatalf("listings = %d, want a fresh snapshot to answer misses", listings.Load())
+	}
+}
+
+func TestSyncAccountReadsTheAccountKey(t *testing.T) {
+	config.SetConfigPath(t.TempDir())
+	t.Cleanup(config.Reset)
+	for _, test := range []struct {
+		plan    int
+		expires bool
+	}{{2, true}, {0, false}} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Get("Authorization"); got != "Bearer account-key" {
+				t.Errorf("Authorization = %q", got)
+			}
+			_, _ = fmt.Fprintf(w, `{"success":true,"data":{"id":1,"email":"a@example.com","plan":%d,"premium_expires_at":"2030-01-02T03:04:05Z"}}`, test.plan)
+		}))
+		tb := testTorbox(server.URL)
+		tb.accountsManager = account.NewManager(config.Debrid{Name: "torbox", DownloadAPIKeys: []string{"account-key"}}, nil, zerolog.Nop())
+		tb.SyncAccounts()
+		server.Close()
+
+		acc := tb.accountsManager.Current()
+		if acc.Username != "a@example.com" {
+			t.Fatalf("Username = %q", acc.Username)
+		}
+		if got := !acc.Expiration.IsZero(); got != test.expires {
+			t.Fatalf("plan %d: Expiration = %s", test.plan, acc.Expiration)
+		}
+	}
+}
+
+func TestProfileRefreshesAfterTheCacheWindow(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_, _ = fmt.Fprint(w, `{"success":true,"data":{"id":1,"email":"a@example.com","plan":2}}`)
+	}))
+	t.Cleanup(server.Close)
+	tb := testTorbox(server.URL)
+
+	for range 2 {
+		if _, err := tb.GetProfile(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("calls = %d, want the cached profile", calls.Load())
+	}
+	tb.profileFetched = time.Now().Add(-2 * profileCacheDuration)
+	if _, err := tb.GetProfile(); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("calls = %d, a stale profile must refresh", calls.Load())
 	}
 }

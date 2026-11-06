@@ -114,7 +114,7 @@ Array of Debrid services:
 | `api_key`                         | string | API key from provider dashboard                                                | **Required**                    |
 | `download_api_keys`               | array  | Additional keys for download rotation                                          | `[api_key]`                     |
 | `download_uncached`               | bool   | Download torrents not in provider cache                                        | `false`                         |
-| `rate_limit`                      | string | API rate limit (`200/minute`, `10/second`)                                     | `200/minute`                    |
+| `rate_limit`                      | string | API rate limit (`200/minute`, `10/second`)                                     | Set by the provider             |
 | `repair_rate_limit`               | string | Separate limit for repair operations                                           | Same as `rate_limit`            |
 | `download_rate_limit`             | string | Separate limit for downloads                                                   | Same as `rate_limit`            |
 | `proxy`                           | string | HTTP(S) proxy URL                                                              | `""`                            |
@@ -122,9 +122,9 @@ Array of Debrid services:
 | `minimum_free_slot`               | int    | Minimum free torrent slots to use this provider                                | `0`                             |
 | `limit`                           | int    | Max torrents allowed on this provider                                          | `0` (unlimited)                 |
 | `workers`                         | int    | Concurrent API workers                                                         | Auto (CPU * 50 / num_providers) |
-| `torrents_refresh_interval`       | string | How often to refresh torrent list                                              | `5m`                            |
-| `download_links_refresh_interval` | string | How often to refresh download links                                            | `10m`                           |
-| `auto_expire_links_after`         | string | Auto-remove links after duration                                               | `24h`                           |
+| `torrents_refresh_interval`       | string | How often to refresh torrent list                                              | Set by the provider             |
+| `download_links_refresh_interval` | string | How often to refresh download links                                            | `5m`                            |
+| `auto_expire_links_after`         | string | Auto-remove links after duration                                               | `3d`                            |
 | `user_agent`                      | string | Custom User-Agent header                                                       | Default                         |
 
 ## Usenet

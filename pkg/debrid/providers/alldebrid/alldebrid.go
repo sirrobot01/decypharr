@@ -37,6 +37,8 @@ const (
 	// magnetFilesBatchSize keeps a /magnet/files form body a sensible size.
 	// AllDebrid documents no limit.
 	magnetFilesBatchSize = 100
+
+	profileCacheDuration = time.Hour
 )
 
 type AllDebrid struct {
@@ -49,6 +51,7 @@ type AllDebrid struct {
 	client                *request.Client
 	repairClient          *request.Client
 	Profile               *types.Profile `json:"profile"`
+	profileFetched        time.Time
 	logger                zerolog.Logger
 	config                config.Debrid
 }
@@ -776,12 +779,22 @@ func (ad *AllDebrid) GetAvailableSlots() (int, error) {
 }
 
 func (ad *AllDebrid) GetProfile() (*types.Profile, error) {
-	if ad.Profile != nil {
+	if ad.Profile != nil && time.Since(ad.profileFetched) < profileCacheDuration {
 		return ad.Profile, nil
 	}
+	profile, err := ad.getClientProfile(ad.client)
+	if err != nil {
+		return nil, err
+	}
+	ad.Profile = profile
+	ad.profileFetched = time.Now()
+	return profile, nil
+}
+
+func (ad *AllDebrid) getClientProfile(client *request.Client) (*types.Profile, error) {
 	var res UserProfileResponse
 
-	resp, err := ad.doRequest(context.Background(), ad.client, "/user", nil, &res)
+	resp, err := ad.doRequest(context.Background(), client, "/user", nil, &res)
 	if err != nil {
 		return nil, err
 	}
@@ -798,15 +811,16 @@ func (ad *AllDebrid) GetProfile() (*types.Profile, error) {
 		return nil, fmt.Errorf("error getting user profile: %s", message)
 	}
 	userData := res.Data.User
-	expiration := time.Unix(userData.PremiumUntil, 0)
 	profile := &types.Profile{
-		Id:         1,
-		Name:       ad.config.Name,
-		Username:   userData.Username,
-		Email:      userData.Email,
-		Points:     userData.FidelityPoints,
-		Premium:    userData.PremiumUntil,
-		Expiration: expiration,
+		Id:       1,
+		Name:     ad.config.Name,
+		Username: userData.Username,
+		Email:    userData.Email,
+		Points:   userData.FidelityPoints,
+		Premium:  userData.PremiumUntil,
+	}
+	if userData.PremiumUntil > 0 {
+		profile.Expiration = time.Unix(userData.PremiumUntil, 0)
 	}
 	if userData.IsPremium {
 		profile.Type = "premium"
@@ -815,7 +829,6 @@ func (ad *AllDebrid) GetProfile() (*types.Profile, error) {
 	} else {
 		profile.Type = "free"
 	}
-	ad.Profile = profile
 	return profile, nil
 }
 
@@ -823,7 +836,16 @@ func (ad *AllDebrid) AccountManager() *account.Manager {
 	return ad.accountsManager
 }
 
-func (ad *AllDebrid) syncAccount(account *account.Account) error {
+func (ad *AllDebrid) syncAccount(acc *account.Account) error {
+	profile, err := ad.getClientProfile(acc.Client())
+	if err != nil {
+		return err
+	}
+	acc.Username = profile.Username
+	// A free account has no paid period to run out.
+	if profile.Type != "free" {
+		acc.Expiration = profile.Expiration
+	}
 	return nil
 }
 

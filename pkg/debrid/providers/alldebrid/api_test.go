@@ -10,9 +10,11 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/customerror"
 	"github.com/sirrobot01/decypharr/internal/utils"
+	"github.com/sirrobot01/decypharr/pkg/debrid/account"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 )
 
@@ -238,5 +240,33 @@ func TestCheckFileKeepsTemporaryLinkFailuresOutOfRepair(t *testing.T) {
 				t.Fatalf("CheckFile() error = %v, broken = %v, want %v", err, got, test.broken)
 			}
 		})
+	}
+}
+
+func TestSyncAccountKeepsFreeAccountsWithoutExpiry(t *testing.T) {
+	config.SetConfigPath(t.TempDir())
+	t.Cleanup(config.Reset)
+	for _, test := range []struct {
+		body    string
+		expires bool
+	}{
+		{`{"status":"success","data":{"user":{"username":"u","isPremium":true,"premiumUntil":1893456000}}}`, true},
+		{`{"status":"success","data":{"user":{"username":"u","isPremium":false,"premiumUntil":0}}}`, false},
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = fmt.Fprint(w, test.body)
+		}))
+		ad := testAllDebrid(server.URL)
+		ad.accountsManager = account.NewManager(config.Debrid{Name: "alldebrid", DownloadAPIKeys: []string{"key"}}, nil, zerolog.Nop())
+		ad.SyncAccounts()
+		server.Close()
+
+		acc := ad.accountsManager.Current()
+		if acc.Username != "u" || acc.Disabled.Load() {
+			t.Fatalf("account = %q, disabled = %v", acc.Username, acc.Disabled.Load())
+		}
+		if got := !acc.Expiration.IsZero(); got != test.expires {
+			t.Fatalf("Expiration = %s, want set = %v", acc.Expiration, test.expires)
+		}
 	}
 }

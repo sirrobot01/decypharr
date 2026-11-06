@@ -158,7 +158,7 @@ func (s *Server) setupCompleteHandler(w http.ResponseWriter, r *http.Request) {
 				APIKey:           req.Debrid.APIKey,
 				DownloadAPIKeys:  []string{req.Debrid.APIKey},
 				DownloadUncached: false,
-				RateLimit:        config.DefaultRateLimit,
+				RateLimit:        config.ProviderRateLimit(req.Debrid.Provider),
 			}
 
 			if len(cfg.Debrids) == 0 {

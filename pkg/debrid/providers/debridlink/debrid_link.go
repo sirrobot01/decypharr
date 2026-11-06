@@ -30,6 +30,8 @@ const (
 	statusFinished = 100
 	// floodPause is the documented wait after floodDetected ("~1h").
 	floodPause = time.Hour
+
+	profileCacheDuration = time.Hour
 )
 
 type DebridLink struct {
@@ -45,7 +47,8 @@ type DebridLink struct {
 	logger                zerolog.Logger
 	config                config.Debrid
 
-	Profile *types.Profile `json:"profile,omitempty"`
+	Profile        *types.Profile `json:"profile,omitempty"`
+	profileFetched time.Time
 }
 
 func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*DebridLink, error) {
@@ -559,40 +562,50 @@ func (dl *DebridLink) GetAvailableSlots() (int, error) {
 }
 
 func (dl *DebridLink) GetProfile() (*types.Profile, error) {
-	if dl.Profile != nil {
+	if dl.Profile != nil && time.Since(dl.profileFetched) < profileCacheDuration {
 		return dl.Profile, nil
 	}
-	var res UserInfo
-
-	resp, err := dl.doGet("/account/infos", nil, &res)
+	profile, err := dl.getClientProfile(dl.client)
 	if err != nil {
 		return nil, err
 	}
+	dl.Profile = profile
+	dl.profileFetched = time.Now()
+	return profile, nil
+}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("debridlink API error: Status: %d", resp.StatusCode)
+func (dl *DebridLink) getClientProfile(client *request.Client) (*types.Profile, error) {
+	req, err := http.NewRequest(http.MethodGet, dl.Host+"/account/infos", nil)
+	if err != nil {
+		return nil, err
+	}
+	// This runs on a timer, so a refusal waits for the next run.
+	resp, err := client.DoOnce(req)
+	if err != nil {
+		return nil, err
+	}
+	var res UserInfo
+	if _, err := dl.read(resp, &res); err != nil {
+		return nil, err
 	}
 	if !res.Success || res.Value == nil {
 		return nil, fmt.Errorf("error getting user info")
 	}
 	data := *res.Value
-	// premiumLeft counts seconds, not a date.
-	expiration := time.Now().Add(time.Duration(data.PremiumLeft) * time.Second)
 	profile := &types.Profile{
-		Id:         1,
-		Username:   data.Username,
-		Name:       dl.config.Name,
-		Email:      data.Email,
-		Points:     data.Points,
-		Premium:    data.PremiumLeft,
-		Expiration: expiration,
+		Id:       1,
+		Username: data.Username,
+		Name:     dl.config.Name,
+		Email:    data.Email,
+		Points:   data.Points,
+		Premium:  data.PremiumLeft,
+		Type:     "free",
 	}
 	if data.PremiumLeft > 0 {
+		// premiumLeft counts seconds, not a date.
+		profile.Expiration = time.Now().Add(time.Duration(data.PremiumLeft) * time.Second)
 		profile.Type = "premium"
-	} else {
-		profile.Type = "free"
 	}
-	dl.Profile = profile
 	return profile, nil
 }
 
@@ -600,8 +613,16 @@ func (dl *DebridLink) AccountManager() *account.Manager {
 	return dl.accountsManager
 }
 
-func (dl *DebridLink) syncAccount(account *account.Account) error {
-	// Currently no account-specific data to sync
+func (dl *DebridLink) syncAccount(acc *account.Account) error {
+	profile, err := dl.getClientProfile(acc.Client())
+	if err != nil {
+		return err
+	}
+	acc.Username = profile.Username
+	// A free account has no paid period to run out.
+	if profile.Type != "free" {
+		acc.Expiration = profile.Expiration
+	}
 	return nil
 }
 

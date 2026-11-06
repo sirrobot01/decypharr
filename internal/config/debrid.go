@@ -55,8 +55,11 @@ func (c *Config) updateDebrid(d Debrid) Debrid {
 	}
 	d.DownloadAPIKeys = downloadKeys
 
+	if d.RateLimit == "" {
+		d.RateLimit = ProviderRateLimit(d.Provider)
+	}
 	if d.TorrentsRefreshInterval == "" {
-		d.TorrentsRefreshInterval = DefaultTorrentsRefreshInterval
+		d.TorrentsRefreshInterval = ProviderRefreshInterval(d.Provider)
 	}
 	if d.DownloadLinksRefreshInterval == "" {
 		d.DownloadLinksRefreshInterval = DefaultDownloadsRefreshInterval
