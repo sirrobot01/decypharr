@@ -95,6 +95,7 @@ func TestAllDebridStatusClassification(t *testing.T) {
 		"ready":                 {statusCode: 4, want: debridTypes.TorrentStatusDownloaded},
 		"processing":            {statusCode: 1, want: debridTypes.TorrentStatusDownloading},
 		"no peer timeout":       {statusCode: 7, want: debridTypes.TorrentStatusDownloading},
+		"no peer":               {statusCode: 15, want: debridTypes.TorrentStatusDownloading},
 		"72 hour timeout":       {statusCode: 10, want: debridTypes.TorrentStatusError},
 		"deleted by the hoster": {statusCode: 11, want: debridTypes.TorrentStatusError},
 	}
@@ -139,7 +140,8 @@ func TestCheckStatusRestartsStatusSeven(t *testing.T) {
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
-	ad := testAllDebrid(server.URL + "/v4.1")
+	ad := testAllDebrid(server.URL + "/v4")
+	ad.StatusHost = server.URL + "/v4.1"
 	torrent := &debridTypes.Torrent{Id: "42", DownloadUncached: true}
 	got, err := ad.CheckStatus(torrent)
 	if err != nil {

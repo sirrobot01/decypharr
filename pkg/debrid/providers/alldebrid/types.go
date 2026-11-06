@@ -1,6 +1,7 @@
 package alldebrid
 
 import (
+	stdjson "encoding/json"
 	"fmt"
 
 	json "github.com/bytedance/sonic"
@@ -75,8 +76,24 @@ type UploadMagnetResponse struct {
 			Size             int64  `json:"size"`
 			Ready            bool   `json:"ready"`
 			ID               int    `json:"id"`
+
+			Error *errorResponse `json:"error"`
 		} `json:"magnets"`
 	}
+	Error *errorResponse `json:"error"`
+}
+
+// MagnetFilesResponse is /magnet/files. Its id field is a string in the
+// documented example and an integer in the documented schema.
+type MagnetFilesResponse struct {
+	Status string `json:"status"`
+	Data   struct {
+		Magnets []struct {
+			Id    stdjson.Number `json:"id"`
+			Files []MagnetFile   `json:"files"`
+			Error *errorResponse `json:"error"`
+		} `json:"magnets"`
+	} `json:"data"`
 	Error *errorResponse `json:"error"`
 }
 
