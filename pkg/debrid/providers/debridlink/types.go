@@ -5,14 +5,11 @@ type APIResponse[T any] struct {
 	Value   *T   `json:"value"` // Use pointer to allow nil
 }
 
-type AvailableResponse APIResponse[map[string]map[string]struct {
-	Name       string `json:"name"`
-	HashString string `json:"hashString"`
-	Files      []struct {
-		Name string `json:"name"`
-		Size int    `json:"size"`
-	} `json:"files"`
-}]
+// errorResponse is the error part of a response envelope.
+type errorResponse struct {
+	Error       string `json:"error"`
+	Description string `json:"error_description"`
+}
 
 type _torrentInfo struct {
 	ID             string  `json:"id"`

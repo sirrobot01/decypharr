@@ -2,12 +2,14 @@ package debridlink
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
-	"strings"
+	"strconv"
 	"time"
 
 	json "github.com/bytedance/sonic"
@@ -23,6 +25,13 @@ import (
 	"go.uber.org/ratelimit"
 )
 
+const (
+	// statusFinished is the seedbox status of a finished torrent.
+	statusFinished = 100
+	// floodPause is the documented wait after floodDetected ("~1h").
+	floodPause = time.Hour
+)
+
 type DebridLink struct {
 	Host             string `json:"host"`
 	APIKey           string
@@ -30,6 +39,7 @@ type DebridLink struct {
 	DownloadUncached bool
 	client           *request.Client
 	repairClient     *request.Client
+	throttle         *request.Throttle
 
 	autoExpiresLinksAfter time.Duration
 	logger                zerolog.Logger
@@ -42,7 +52,6 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*DebridLink
 	cfg := config.Get()
 	headers := map[string]string{
 		"Authorization": fmt.Sprintf("Bearer %s", dc.APIKey),
-		"Content-Type":  "application/json",
 	}
 	if dc.UserAgent != "" {
 		headers["User-Agent"] = dc.UserAgent
@@ -57,7 +66,8 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*DebridLink
 		request.WithRateLimiter(ratelimits["main"]),
 		request.WithThrottle(throttle),
 		request.WithMaxRetries(cfg.Retries),
-		request.WithRetryableStatus(http.StatusTooManyRequests, http.StatusBadGateway),
+		// No 429 here: a retry into a flood refusal earns the next one.
+		request.WithRetryableStatus(http.StatusBadGateway),
 	}
 	if dc.Proxy != "" {
 		opts = append(opts, request.WithProxy(dc.Proxy))
@@ -85,6 +95,7 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*DebridLink
 		autoExpiresLinksAfter: autoExpiresLinksAfter,
 		client:                request.New(opts...),
 		repairClient:          request.New(repairOpts...),
+		throttle:              throttle,
 		logger:                log,
 		config:                dc,
 	}
@@ -97,6 +108,56 @@ func (dl *DebridLink) Config() config.Debrid {
 
 func (dl *DebridLink) Logger() zerolog.Logger {
 	return dl.logger
+}
+
+// apiError maps a Debrid-Link error code, which can arrive with any HTTP status.
+func (dl *DebridLink) apiError(code, description string) error {
+	switch code {
+	case "floodDetected":
+		dl.throttle.Trip(floodPause)
+		dl.logger.Warn().Dur("pause", floodPause).Msg("Debrid-Link flood limit reached, pausing API requests")
+		return &request.ThrottledError{RetryAfter: floodPause}
+	case "badId":
+		return customerror.TorrentNotFoundError
+	case "maxTorrent", "maxTransfer":
+		return customerror.TooManyActiveDownloadsError
+	case "torrentTooBig", "notAddTorrent":
+		return fmt.Errorf("debridlink refused the torrent: %s: %w", code, customerror.TorrentFailedError)
+	case "fileNotAvailable":
+		return customerror.TorrentBlockedError
+	case "maxData", "maxDataHost", "maxLink", "maxLinkHost":
+		return customerror.TrafficExceededError
+	default:
+		return fmt.Errorf("debridlink API error %s: %s", code, description)
+	}
+}
+
+// read decodes a response into out. Every provider error goes through here, so
+// a flood refusal stops the key no matter which call received it.
+func (dl *DebridLink) read(resp *http.Response, out any) (*http.Response, error) {
+	defer request.DrainAndClose(resp.Body)
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return resp, err
+	}
+	var failure errorResponse
+	if json.Unmarshal(body, &failure) == nil && failure.Error != "" {
+		return resp, dl.apiError(failure.Error, failure.Description)
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return resp, &request.ThrottledError{RetryAfter: request.RetryAfter(resp)}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return resp, fmt.Errorf("debridlink API error: Status: %d", resp.StatusCode)
+	}
+	if out == nil {
+		return resp, nil
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return resp, fmt.Errorf("empty response from debridlink API")
+	}
+	return resp, json.Unmarshal(body, out)
 }
 
 // doGet performs a GET request and unmarshals the response
@@ -119,113 +180,97 @@ func (dl *DebridLink) doGet(endpoint string, queryParams map[string]string, resu
 		return nil, err
 	}
 
-	return dl.client.DoJSON(req, result)
-}
-
-func (dl *DebridLink) IsAvailable(hashes []string) (map[string]bool, error) {
-	result := make(map[string]bool)
-
-	for i := 0; i < len(hashes); i += 100 {
-		end := min(i+100, len(hashes))
-
-		validHashes := make([]string, 0, end-i)
-		for _, hash := range hashes[i:end] {
-			if hash != "" {
-				validHashes = append(validHashes, hash)
-			}
-		}
-
-		if len(validHashes) == 0 {
-			continue
-		}
-
-		hashStr := strings.Join(validHashes, ",")
-		endpoint := fmt.Sprintf("/seedbox/cached/%s", hashStr)
-		var data AvailableResponse
-
-		resp, err := dl.doGet(endpoint, nil, &data)
-		if err != nil {
-			return result, fmt.Errorf("check availability: %w", err)
-		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return result, fmt.Errorf("check availability: HTTP %d", resp.StatusCode)
-		}
-		if !data.Success {
-			return result, fmt.Errorf("check availability: provider rejected the request")
-		}
-		for _, h := range validHashes {
-			result[h] = false
-			if data.Value != nil {
-				_, result[h] = (*data.Value)[h]
-			}
-		}
-	}
-	return result, nil
-}
-
-func (dl *DebridLink) GetTorrent(torrentId string) (*types.Torrent, error) {
-	endpoint := fmt.Sprintf("/seedbox/%s", torrentId)
-	var res torrentInfo
-
-	resp, err := dl.doGet(endpoint, nil, &res)
+	resp, err := dl.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
+	return dl.read(resp, result)
+}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("debridlink API error: Status: %d", resp.StatusCode)
-	}
-	if !res.Success || res.Value == nil {
-		return nil, fmt.Errorf("error getting torrent")
-	}
-	data := *res.Value
+// IsAvailable reports that Debrid-Link has no cache check. It removed
+// /seedbox/cached, so only an add can show whether a torrent is cached.
+func (dl *DebridLink) IsAvailable(hashes []string) (map[string]bool, error) {
+	return nil, types.ErrAvailabilityUnsupported
+}
 
-	if len(data) == 0 {
-		return nil, fmt.Errorf("torrent not found")
+// GetTorrent reads a torrent through /seedbox/list, the documented way to fetch
+// one torrent.
+func (dl *DebridLink) GetTorrent(torrentId string) (*types.Torrent, error) {
+	torrent := &types.Torrent{Id: torrentId, Debrid: dl.config.Name}
+	if err := dl.UpdateTorrent(torrent); err != nil {
+		return nil, err
 	}
-	t := data[0]
-	name := utils.RemoveInvalidChars(t.Name)
-	torrent := &types.Torrent{
-		Id:               t.ID,
-		Name:             name,
-		Bytes:            t.TotalSize,
-		Status:           types.TorrentStatusDownloaded,
-		Filename:         name,
-		OriginalFilename: name,
-		Debrid:           dl.config.Name,
-		Added:            time.Unix(t.Created, 0),
-		Files:            make(map[string]types.File, len(t.Files)),
-		InfoHash:         t.HashString,
+	return torrent, nil
+}
+
+// torrentStatus maps a torrent. A seeding torrent (status 8) is complete, and
+// only downloadPercent says so for every status Debrid-Link reports.
+func torrentStatus(t _torrentInfo) types.TorrentStatus {
+	if t.Status == statusFinished || t.DownloadPercent >= 100 {
+		return types.TorrentStatusDownloaded
 	}
+	return types.TorrentStatusDownloading
+}
+
+// torrentFiles converts the files of a torrent and caches their links. Each
+// file carries its download URL, so no link needs a separate call.
+func (dl *DebridLink) torrentFiles(t _torrentInfo) map[string]types.File {
+	files := make(map[string]types.File, len(t.Files))
 	cfg := config.Get()
+	now := time.Now()
 	for _, f := range t.Files {
 		if err := cfg.ValidateFileAllowed(f.Name, f.Size); err != nil {
 			continue
 		}
-		file := types.File{
-			TorrentId: t.ID,
-			Id:        f.ID,
-			Name:      f.Name,
-			Size:      f.Size,
-			Path:      f.Name,
-			Link:      f.DownloadURL,
+		link := types.DownloadLink{
+			Debrid:       dl.config.Name,
+			Token:        dl.APIKey,
+			Filename:     f.Name,
+			Size:         f.Size,
+			Link:         f.DownloadURL,
+			DownloadLink: f.DownloadURL,
+			Generated:    now,
+			ExpiresAt:    now.Add(dl.autoExpiresLinksAfter),
 		}
-		torrent.Files[file.Name] = file
+		files[f.Name] = types.File{
+			TorrentId:    t.ID,
+			Id:           f.ID,
+			Name:         f.Name,
+			Size:         f.Size,
+			Path:         f.Name,
+			Link:         f.DownloadURL,
+			Generated:    now,
+			DownloadLink: link,
+		}
+		dl.accountsManager.StoreDownloadLink(link)
 	}
+	return files
+}
 
-	return torrent, nil
+func (dl *DebridLink) applyTorrent(t *types.Torrent, data _torrentInfo) {
+	name := utils.RemoveInvalidChars(data.Name)
+	t.Id = data.ID
+	t.Name = name
+	t.Bytes = data.TotalSize
+	t.Progress = data.DownloadPercent
+	t.Status = torrentStatus(data)
+	t.Speed = data.DownloadSpeed
+	t.Seeders = data.PeersConnected
+	t.Filename = name
+	t.OriginalFilename = name
+	t.Debrid = dl.config.Name
+	if data.HashString != "" {
+		t.InfoHash = data.HashString
+	}
+	t.Added = time.Unix(data.Created, 0)
+	t.Files = dl.torrentFiles(data)
 }
 
 func (dl *DebridLink) UpdateTorrent(t *types.Torrent) error {
 	var res torrentInfo
 
-	resp, err := dl.doGet("/seedbox/list", map[string]string{"ids": t.Id}, &res)
-	if err != nil {
+	if _, err := dl.doGet("/seedbox/list", map[string]string{"ids": t.Id}, &res); err != nil {
 		return err
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("debridlink API error: Status: %d", resp.StatusCode)
 	}
 	if !res.Success {
 		return fmt.Errorf("error getting torrent")
@@ -233,130 +278,64 @@ func (dl *DebridLink) UpdateTorrent(t *types.Torrent) error {
 	if res.Value == nil || len(*res.Value) == 0 {
 		return customerror.TorrentNotFoundError
 	}
-	dt := *res.Value
-	data := dt[0]
-	status := types.TorrentStatusDownloading
-	if data.Status == 100 {
-		status = types.TorrentStatusDownloaded
-	}
-	name := utils.RemoveInvalidChars(data.Name)
-	t.Id = data.ID
-	t.Name = name
-	t.Bytes = data.TotalSize
-	t.Progress = data.DownloadPercent
-	t.Status = status
-	t.Speed = data.DownloadSpeed
-	t.Seeders = data.PeersConnected
-	t.Filename = name
-	t.OriginalFilename = name
-	if data.HashString != "" {
-		t.InfoHash = data.HashString
-	}
-	t.Added = time.Unix(data.Created, 0)
-	cfg := config.Get()
-	now := time.Now()
-	for _, f := range data.Files {
-		if err := cfg.ValidateFileAllowed(f.Name, f.Size); err != nil {
-			continue
-		}
-		file := types.File{
-			TorrentId: t.Id,
-			Id:        f.ID,
-			Name:      f.Name,
-			Size:      f.Size,
-			Path:      f.Name,
-			Link:      f.DownloadURL,
-		}
-		link := types.DownloadLink{
-			Debrid:       dl.config.Name,
-			Token:        dl.APIKey,
-			Filename:     f.Name,
-			Link:         f.DownloadURL,
-			DownloadLink: f.DownloadURL,
-			Generated:    now,
-			ExpiresAt:    now.Add(dl.autoExpiresLinksAfter),
-		}
-		file.DownloadLink = link
-		t.Files[f.Name] = file
-		dl.accountsManager.StoreDownloadLink(link)
-	}
-
+	dl.applyTorrent(t, (*res.Value)[0])
 	return nil
 }
 
+// addRequest builds a /seedbox/add request. A .torrent upload goes first,
+// because a private torrent cannot be recreated from its magnet.
+func (dl *DebridLink) addRequest(t *types.Torrent) (*http.Request, error) {
+	if !t.Magnet.IsTorrent() {
+		body, err := json.Marshal(map[string]string{"url": t.Magnet.Link})
+		if err != nil {
+			return nil, err
+		}
+		req, err := http.NewRequest(http.MethodPost, dl.Host+"/seedbox/add", bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		return req, nil
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", cmp.Or(t.Filename, t.Magnet.Name, "upload")+".torrent")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := part.Write(t.Magnet.File); err != nil {
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest(http.MethodPost, dl.Host+"/seedbox/add", &body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return req, nil
+}
+
 func (dl *DebridLink) SubmitMagnet(t *types.Torrent) (*types.Torrent, error) {
-	payload := map[string]string{"url": t.Magnet.Link}
-	var res SubmitTorrentInfo
-
-	dt, err := json.Marshal(payload)
+	req, err := dl.addRequest(t)
 	if err != nil {
 		return nil, err
 	}
-	body := bytes.NewReader(dt)
-
-	req, err := http.NewRequest(http.MethodPost, dl.Host+"/seedbox/add", body)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
 	resp, err := dl.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer request.DrainAndClose(resp.Body)
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bd, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("error adding torrent(status %d): %s", resp.StatusCode, string(bd))
-	}
-	if resp.ContentLength == 0 {
-		return nil, fmt.Errorf("empty response from debridlink API")
-	}
-	if err := request.DecodeJSON(resp, &res); err != nil {
+	var res SubmitTorrentInfo
+	if _, err := dl.read(resp, &res); err != nil {
 		return nil, err
 	}
 	if !res.Success || res.Value == nil {
 		return nil, fmt.Errorf("error adding torrent")
 	}
-	data := *res.Value
-	name := utils.RemoveInvalidChars(data.Name)
-	t.Id = data.ID
-	t.Name = name
-	t.Bytes = data.TotalSize
-	t.Progress = data.DownloadPercent
-	t.Status = types.TorrentStatusDownloading
-	t.Speed = data.DownloadSpeed
-	t.Seeders = data.PeersConnected
-	t.Filename = name
-	t.OriginalFilename = name
-	t.Debrid = dl.config.Name
-	t.Added = time.Unix(data.Created, 0)
-	now := time.Now()
-	for _, f := range data.Files {
-		file := types.File{
-			TorrentId: t.Id,
-			Id:        f.ID,
-			Name:      f.Name,
-			Size:      f.Size,
-			Path:      f.Name,
-			Link:      f.DownloadURL,
-			Generated: now,
-		}
-		link := types.DownloadLink{
-			Debrid:       dl.config.Name,
-			Token:        dl.APIKey,
-			Filename:     f.Name,
-			Link:         f.DownloadURL,
-			DownloadLink: f.DownloadURL,
-			Generated:    now,
-			ExpiresAt:    now.Add(dl.autoExpiresLinksAfter),
-		}
-		file.DownloadLink = link
-		t.Files[f.Name] = file
-		dl.accountsManager.StoreDownloadLink(link)
-	}
-
+	dl.applyTorrent(t, *res.Value)
 	return t, nil
 }
 
@@ -476,21 +455,14 @@ func (dl *DebridLink) _fetchDownloadLinks(account *account.Account, page, limit 
 		return links, err
 	}
 
-	resp, err := account.Client().Do(req)
+	// This runs on a timer, so a refusal waits for the next run. A retry here
+	// would only walk into the flood limit.
+	resp, err := account.Client().DoOnce(req)
 	if err != nil {
 		return links, err
 	}
-	defer request.DrainAndClose(resp.Body)
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return links, fmt.Errorf("debridlink API error: Status: %d", resp.StatusCode)
-	}
 	var res DownloadLinksResponse
-
-	if resp.ContentLength == 0 {
-		return links, fmt.Errorf("empty response from debridlink API")
-	}
-	if err := request.DecodeJSON(resp, &res); err != nil {
+	if _, err := dl.read(resp, &res); err != nil {
 		return links, err
 	}
 	if !res.Success || res.Value == nil {
@@ -531,71 +503,28 @@ func (dl *DebridLink) RefreshDownloadLinks() error {
 // getTorrents returns the finished torrents on a page, and how many torrents
 // the page listed before that filter.
 func (dl *DebridLink) getTorrents(page, perPage int) ([]*types.Torrent, int, error) {
-	torrents := make([]*types.Torrent, 0)
 	var res torrentInfo
 
 	params := map[string]string{
-		"page":    fmt.Sprintf("%d", page),
-		"perPage": fmt.Sprintf("%d", perPage),
+		"page":    strconv.Itoa(page),
+		"perPage": strconv.Itoa(perPage),
 	}
 
-	resp, err := dl.doGet("/seedbox/list", params, &res)
-	if err != nil {
-		return torrents, 0, err
+	if _, err := dl.doGet("/seedbox/list", params, &res); err != nil {
+		return nil, 0, err
 	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return torrents, 0, fmt.Errorf("debridlink API error: Status: %d", resp.StatusCode)
-	}
-
 	if !res.Success || res.Value == nil {
 		return nil, 0, fmt.Errorf("error getting torrents")
 	}
 
 	data := *res.Value
+	torrents := make([]*types.Torrent, 0, len(data))
 	for _, t := range data {
-		if t.Status != 100 {
+		if torrentStatus(t) != types.TorrentStatusDownloaded {
 			continue
 		}
-		torrent := &types.Torrent{
-			Id:               t.ID,
-			Name:             t.Name,
-			Bytes:            t.TotalSize,
-			Status:           types.TorrentStatusDownloaded,
-			Filename:         t.Name,
-			OriginalFilename: t.Name,
-			InfoHash:         t.HashString,
-			Files:            make(map[string]types.File, len(t.Files)),
-			Debrid:           dl.config.Name,
-			Added:            time.Unix(t.Created, 0),
-		}
-		cfg := config.Get()
-		now := time.Now()
-		for _, f := range t.Files {
-			if err := cfg.ValidateFileAllowed(f.Name, f.Size); err != nil {
-				continue
-			}
-			file := types.File{
-				TorrentId: torrent.Id,
-				Id:        f.ID,
-				Name:      f.Name,
-				Size:      f.Size,
-				Path:      f.Name,
-				Link:      f.DownloadURL,
-			}
-			link := types.DownloadLink{
-				Debrid:       dl.config.Name,
-				Token:        dl.APIKey,
-				Filename:     f.Name,
-				Link:         f.DownloadURL,
-				DownloadLink: f.DownloadURL,
-				Generated:    now,
-				ExpiresAt:    now.Add(dl.autoExpiresLinksAfter),
-			}
-			file.DownloadLink = link
-			torrent.Files[f.Name] = file
-			dl.accountsManager.StoreDownloadLink(link)
-		}
+		torrent := &types.Torrent{InfoHash: t.HashString}
+		dl.applyTorrent(torrent, t)
 		torrents = append(torrents, torrent)
 	}
 
@@ -625,7 +554,7 @@ func (dl *DebridLink) CheckFile(ctx context.Context, _, link string) error {
 }
 
 func (dl *DebridLink) GetAvailableSlots() (int, error) {
-	// AllDebrid does not provide available slots info
+	// Debrid-Link does not provide available slots info
 	return config.DefaultAvailableSlots, nil
 }
 
@@ -647,7 +576,8 @@ func (dl *DebridLink) GetProfile() (*types.Profile, error) {
 		return nil, fmt.Errorf("error getting user info")
 	}
 	data := *res.Value
-	expiration := time.Unix(data.PremiumLeft, 0)
+	// premiumLeft counts seconds, not a date.
+	expiration := time.Now().Add(time.Duration(data.PremiumLeft) * time.Second)
 	profile := &types.Profile{
 		Id:         1,
 		Username:   data.Username,
@@ -656,9 +586,6 @@ func (dl *DebridLink) GetProfile() (*types.Profile, error) {
 		Points:     data.Points,
 		Premium:    data.PremiumLeft,
 		Expiration: expiration,
-	}
-	if expiration.IsZero() {
-		profile.Expiration = time.Now().AddDate(1, 0, 0)
 	}
 	if data.PremiumLeft > 0 {
 		profile.Type = "premium"
