@@ -389,8 +389,9 @@ func (dl *DebridLink) fetchDownloadLink(ctx context.Context, account *account.Ac
 	now := time.Now()
 	link := types.DownloadLink{
 		Debrid:       dl.config.Name,
-		Token:        dl.APIKey,
+		Token:        account.Token,
 		Filename:     file.Name,
+		Size:         file.Size,
 		Link:         file.Link,
 		DownloadLink: file.Link,
 		Generated:    now,

@@ -425,6 +425,9 @@ func (tb *Torbox) GetTorrent(torrentId string) (*types.Torrent, error) {
 		return nil, err
 	}
 
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, customerror.TorrentNotFoundError
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("torbox API error: Status: %d", resp.StatusCode)
 	}
@@ -798,7 +801,7 @@ func (tb *Torbox) fetchDownloadLink(ctx context.Context, account *account.Accoun
 	dl := types.DownloadLink{
 		Filename:     file.Name,
 		Size:         file.Size,
-		Token:        tb.APIKey,
+		Token:        account.Token,
 		Link:         file.Link,
 		DownloadLink: link,
 		Debrid:       tb.config.Name,

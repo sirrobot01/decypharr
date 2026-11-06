@@ -431,3 +431,33 @@ func TestProfileRefreshesAfterTheCacheWindow(t *testing.T) {
 		t.Fatalf("calls = %d, a stale profile must refresh", calls.Load())
 	}
 }
+
+func TestRefetchReplacesALinkFromASeparateDownloadKey(t *testing.T) {
+	config.SetConfigPath(t.TempDir())
+	t.Cleanup(config.Reset)
+	var minted atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"success":true,"data":"https://cdn.example/%d"}`, minted.Add(1))
+	}))
+	t.Cleanup(server.Close)
+
+	tb := testTorbox(server.URL)
+	tb.APIKey = "main-key"
+	tb.accountsManager = account.NewManager(config.Debrid{Name: "torbox", DownloadAPIKeys: []string{"download-key"}}, nil, zerolog.Nop())
+
+	file := &types.File{Id: "1", Name: "a.mkv", Link: "torbox://7/1"}
+	first, err := tb.GetDownloadLink(t.Context(), "7", file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tb.DeleteLink(first); err != nil {
+		t.Fatalf("DeleteLink() error = %v", err)
+	}
+	second, err := tb.GetDownloadLink(t.Context(), "7", file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.DownloadLink == first.DownloadLink {
+		t.Fatalf("refetch returned the dead link %q", first.DownloadLink)
+	}
+}

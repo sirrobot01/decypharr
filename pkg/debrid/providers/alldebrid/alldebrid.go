@@ -619,7 +619,7 @@ func (ad *AllDebrid) fetchDownloadLink(ctx context.Context, account *account.Acc
 	now := time.Now()
 	dl := types.DownloadLink{
 		Debrid:       ad.config.Name,
-		Token:        ad.APIKey,
+		Token:        account.Token,
 		Link:         file.Link,
 		DownloadLink: link,
 		Id:           data.Data.Id,
