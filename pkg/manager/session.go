@@ -472,11 +472,16 @@ func (t *httpTransport) recover(ctx context.Context, err error, attempt int) err
 	case lerr.IsPermanent():
 		return err
 	case lerr.ShouldBackoff():
+		// A read cannot outlast a long lockout, so it fails now instead of
+		// hanging its caller.
+		if lerr.RetryAfter > sessionMaxThrottleWait {
+			return err
+		}
 		wait := lerr.RetryAfter
 		if wait <= 0 {
 			wait = sessionBackoff(attempt)
 		}
-		return sleepCtx(ctx, min(wait, sessionMaxThrottleWait))
+		return sleepCtx(ctx, wait)
 	case lerr.ShouldRefetch(), lerr.ShouldDisableAccount():
 		t.mu.Lock()
 		bad := t.last

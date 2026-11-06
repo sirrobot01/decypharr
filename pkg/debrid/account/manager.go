@@ -28,6 +28,7 @@ type Manager struct {
 	debrid              string
 	current             atomic.Pointer[Account]
 	accounts            *xsync.Map[string, *Account]
+	throttles           *xsync.Map[string, *request.Throttle]
 	logger              zerolog.Logger
 	lastNoActiveWarning atomic.Int64
 }
@@ -36,9 +37,10 @@ const noActiveWarningInterval = time.Minute
 
 func NewManager(debridConf config.Debrid, downloadRL ratelimit.Limiter, logger zerolog.Logger) *Manager {
 	m := &Manager{
-		debrid:   debridConf.Name,
-		accounts: xsync.NewMap[string, *Account](),
-		logger:   logger,
+		debrid:    debridConf.Name,
+		accounts:  xsync.NewMap[string, *Account](),
+		throttles: xsync.NewMap[string, *request.Throttle](),
+		logger:    logger,
 	}
 	cfg := config.Get()
 
@@ -54,6 +56,7 @@ func NewManager(debridConf config.Debrid, downloadRL ratelimit.Limiter, logger z
 		// Create request client with equivalent options
 		opts := []request.ClientOption{
 			request.WithRateLimiter(downloadRL),
+			request.WithThrottle(m.Throttle(token)),
 			request.WithHeaders(headers),
 			request.WithMaxRetries(cfg.Retries),
 			request.WithRetryableStatus(http.StatusTooManyRequests, http.StatusBadGateway, 447),
@@ -76,6 +79,13 @@ func NewManager(debridConf config.Debrid, downloadRL ratelimit.Limiter, logger z
 	}
 	m.current.Store(firstAccount)
 	return m
+}
+
+// Throttle returns the cooldown for token. Providers count limits per key, so
+// every client that uses the same token must share it.
+func (m *Manager) Throttle(token string) *request.Throttle {
+	throttle, _ := m.throttles.LoadOrStore(token, new(request.Throttle))
+	return throttle
 }
 
 func (m *Manager) Active() []*Account {

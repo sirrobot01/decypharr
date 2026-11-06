@@ -62,11 +62,14 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*RealDebrid
 	}
 
 	cfg := config.Get()
+	accounts := account.NewManager(dc, ratelimits["download"], _log)
+	throttle := accounts.Throttle(dc.APIKey)
 
 	opts := []request.ClientOption{
 		request.WithHeaders(headers),
 		request.WithMaxRetries(cfg.Retries),
 		request.WithRateLimiter(ratelimits["main"]),
+		request.WithThrottle(throttle),
 		request.WithRetryableStatus(http.StatusTooManyRequests),
 		request.WithProxy(dc.Proxy),
 	}
@@ -77,13 +80,14 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*RealDebrid
 		request.WithMaxRetries(4),
 		request.WithRetryableStatus(429),
 		request.WithRateLimiter(ratelimits["repair"]),
+		request.WithThrottle(throttle),
 		request.WithProxy(dc.Proxy),
 	}
 
 	r := &RealDebrid{
 		Host:                  "https://api.real-debrid.com/rest/1.0",
 		APIKey:                dc.APIKey,
-		accountsManager:       account.NewManager(dc, ratelimits["download"], _log),
+		accountsManager:       accounts,
 		autoExpiresLinksAfter: autoExpiresLinksAfter,
 		client:                request.New(opts...),
 		repairClient:          request.New(repairOpts...),

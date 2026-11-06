@@ -3,12 +3,12 @@ package request
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +32,7 @@ type Client struct {
 	client          *retryablehttp.Client
 	httpClient      *http.Client // underlying http client
 	rateLimiter     ratelimit.Limiter
+	throttle        *Throttle
 	headers         map[string]string
 	headersMu       sync.RWMutex
 	maxRetries      int
@@ -56,7 +57,14 @@ func WithTimeout(timeout time.Duration) ClientOption {
 	}
 }
 
-// WithRateLimiter sets a rate limiter
+// WithThrottle shares a cooldown with the other clients of one API key.
+func WithThrottle(throttle *Throttle) ClientOption {
+	return func(c *Client) {
+		c.throttle = throttle
+	}
+}
+
+// WithRateLimiter sets the limiter that every attempt of a request passes.
 func WithRateLimiter(rl ratelimit.Limiter) ClientOption {
 	return func(c *Client) {
 		c.rateLimiter = rl
@@ -117,6 +125,10 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	}
 	c.headersMu.RUnlock()
 
+	if wait := c.throttle.Remaining(); wait > 0 {
+		return nil, &ThrottledError{RetryAfter: wait}
+	}
+
 	// Apply rate limiting
 	if c.rateLimiter != nil {
 		select {
@@ -175,25 +187,35 @@ func (c *Client) Get(url string) (*http.Response, error) {
 // long as the server requests instead of using jittered exponential backoff.
 func retryAfterBackoff(min, max time.Duration, attemptNum int, resp *http.Response) time.Duration {
 	if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
-		if ra := resp.Header.Get("Retry-After"); ra != "" {
-			if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
-				wait := time.Duration(secs) * time.Second
-				if wait > max {
-					return max
-				}
-				return wait
+		if wait := retryAfter(resp); wait > 0 {
+			if wait > max {
+				return max
 			}
-			if t, err := http.ParseTime(ra); err == nil {
-				if wait := time.Until(t); wait > 0 {
-					if wait > max {
-						return max
-					}
-					return wait
-				}
-			}
+			return wait
 		}
 	}
 	return retryablehttp.DefaultBackoff(min, max, attemptNum, resp)
+}
+
+// handleExhausted runs when a request will not be tried again. A 429 keeps its
+// type here, because callers cannot see the status of a request that failed.
+func (c *Client) handleExhausted(resp *http.Response, err error, tries int) (*http.Response, error) {
+	if resp != nil {
+		defer DrainAndClose(resp.Body)
+	}
+	if throttled, ok := errors.AsType[*ThrottledError](err); ok {
+		return nil, throttled
+	}
+	if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
+		return nil, &ThrottledError{RetryAfter: retryAfter(resp)}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("giving up after %d attempt(s): %w", tries, err)
+	}
+	if resp != nil && resp.Request != nil {
+		return nil, fmt.Errorf("%s %s giving up after %d attempt(s), status %d", resp.Request.Method, resp.Request.URL.Path, tries, resp.StatusCode)
+	}
+	return nil, fmt.Errorf("giving up after %d attempt(s)", tries)
 }
 
 // New creates a new HTTP client with the specified options
@@ -259,6 +281,14 @@ func New(options ...ClientOption) *Client {
 	retryClient.RetryWaitMax = 30 * time.Second
 	retryClient.Logger = nil
 	retryClient.Backoff = retryAfterBackoff
+	retryClient.ErrorHandler = client.handleExhausted
+	// Do charges the limiter for the first attempt. Retries must pay as well,
+	// or they spend the provider budget unmetered.
+	retryClient.RequestLogHook = func(_ retryablehttp.Logger, _ *http.Request, attempt int) {
+		if attempt > 0 && client.rateLimiter != nil {
+			client.rateLimiter.Take()
+		}
+	}
 
 	// Custom retry policy based on retryable status codes
 	retryClient.CheckRetry = func(ctx context.Context, resp *http.Response, err error) (bool, error) {
@@ -271,6 +301,18 @@ func New(options ...ClientOption) *Client {
 		// configured status list so provider errors retain their response body.
 		if err != nil || resp == nil {
 			return retryablehttp.DefaultRetryPolicy(ctx, resp, err)
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests {
+			wait := retryAfter(resp)
+			if client.throttle.Trip(wait) {
+				client.logger.Warn().Dur("retry_after", wait).Str("host", resp.Request.URL.Host).Msg("Provider rate limit reached, pausing requests")
+			}
+			// A pause longer than one retry wait cannot end inside this
+			// request, so sending it again only spends the lockout.
+			if wait > retryClient.RetryWaitMax {
+				return false, &ThrottledError{RetryAfter: wait}
+			}
 		}
 
 		// Check for retryable status codes (only if resp is not nil)

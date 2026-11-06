@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sirrobot01/decypharr/internal/request"
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/manager/link"
 	"github.com/sirrobot01/decypharr/pkg/usenet"
@@ -602,4 +603,32 @@ func (t *scriptedTransport) open(ctx context.Context, pos int64) (io.ReadCloser,
 
 func (t *scriptedTransport) recover(ctx context.Context, err error, attempt int) error {
 	return t.recoverFn(ctx, err, attempt)
+}
+
+func TestSessionFailsFastDuringLongLockout(t *testing.T) {
+	var links atomic.Int64
+	tr := &httpTransport{
+		client: http.DefaultClient,
+		getLink: func(context.Context) (types.DownloadLink, error) {
+			links.Add(1)
+			return types.DownloadLink{}, fmt.Errorf("get link: %w", &request.ThrottledError{RetryAfter: 5 * time.Minute})
+		},
+		refresh: func(context.Context, types.DownloadLink) (types.DownloadLink, error) {
+			t.Error("a lockout must not refresh the link")
+			return types.DownloadLink{}, nil
+		},
+	}
+	s := newTestSession(t, tr, 1024)
+
+	begin := time.Now()
+	_, err := s.Read(make([]byte, 16))
+	if _, ok := errors.AsType[*request.ThrottledError](err); !ok {
+		t.Fatalf("Read() error = %v, want ThrottledError", err)
+	}
+	if elapsed := time.Since(begin); elapsed > time.Second {
+		t.Fatalf("Read() took %s, want fail fast", elapsed)
+	}
+	if links.Load() != 1 {
+		t.Fatalf("link fetches = %d, want 1", links.Load())
+	}
 }

@@ -49,9 +49,13 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*AllDebrid,
 	}
 	_log := logger.New(dc.Name)
 
+	accounts := account.NewManager(dc, ratelimits["download"], _log)
+	throttle := accounts.Throttle(dc.APIKey)
+
 	opts := []request.ClientOption{
 		request.WithHeaders(headers),
 		request.WithRateLimiter(ratelimits["main"]),
+		request.WithThrottle(throttle),
 		request.WithMaxRetries(cfg.Retries),
 		request.WithRetryableStatus(http.StatusTooManyRequests, http.StatusBadGateway),
 	}
@@ -61,6 +65,7 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*AllDebrid,
 	repairOpts := []request.ClientOption{
 		request.WithHeaders(headers),
 		request.WithRateLimiter(ratelimits["repair"]),
+		request.WithThrottle(throttle),
 		request.WithMaxRetries(4),
 		request.WithRetryableStatus(http.StatusTooManyRequests),
 	}
@@ -75,7 +80,7 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*AllDebrid,
 	ad := &AllDebrid{
 		Host:                  "https://api.alldebrid.com/v4.1",
 		APIKey:                dc.APIKey,
-		accountsManager:       account.NewManager(dc, ratelimits["download"], _log),
+		accountsManager:       accounts,
 		autoExpiresLinksAfter: autoExpiresLinksAfter,
 		noPeerRetryBackoff:    defaultNoPeerRetryBackoff(),
 		client:                request.New(opts...),

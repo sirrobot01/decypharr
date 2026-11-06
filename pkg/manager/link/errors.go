@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/sirrobot01/decypharr/internal/request"
 )
 
 // ErrorCategory defines the type of link error and its retry behavior
@@ -164,7 +166,7 @@ func ErrorCodeToLinkError(code string) *Error {
 	case "404":
 		return NewPermanentError(Err404, code)
 	case "429":
-		return NewRetryableError(Err429, code)
+		return NewLinkError(Err429, CategoryThrottled, code)
 	case "503", "read_pxy_timeout":
 		return NewRetryableError(Err503, code)
 	default:
@@ -222,6 +224,11 @@ func ClassifyTransportError(err error) *Error {
 	}
 	if existing := GetLinkError(err); existing != nil {
 		return existing
+	}
+	if throttled, ok := errors.AsType[*request.ThrottledError](err); ok {
+		e := NewLinkError(err, CategoryThrottled, "429")
+		e.RetryAfter = throttled.RetryAfter
+		return e
 	}
 	switch {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):

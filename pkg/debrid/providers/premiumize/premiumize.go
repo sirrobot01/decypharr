@@ -69,11 +69,14 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Premiumize
 		autoExpiresLinksAfter = 48 * time.Hour
 	}
 
+	accounts := account.NewManager(dc, ratelimits["download"], _log)
+
 	opts := []request.ClientOption{
 		request.WithHeaders(headers),
 		request.WithLogger(_log),
 		request.WithMaxRetries(cfg.Retries),
 		request.WithRateLimiter(ratelimits["main"]),
+		request.WithThrottle(accounts.Throttle(dc.APIKey)),
 		request.WithRetryableStatus(http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout),
 	}
 	if dc.Proxy != "" {
@@ -84,7 +87,7 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Premiumize
 		Host:                  defaultHost,
 		APIKey:                dc.APIKey,
 		client:                request.New(opts...),
-		accountsManager:       account.NewManager(dc, ratelimits["download"], _log),
+		accountsManager:       accounts,
 		autoExpiresLinksAfter: autoExpiresLinksAfter,
 		logger:                _log,
 		config:                dc,

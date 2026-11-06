@@ -158,9 +158,13 @@ func (s *Service) fetchAndValidate(ctx context.Context, entry *storage.Entry, fi
 					// Account swap doesn't consume a re-insertion attempt.
 					return s.fetchAndValidate(ctx, entry, filename, attempt)
 				}
-			} else if linkErr.ShouldRefetch() || linkErr.ShouldRetry() {
+			} else if linkErr.ShouldRefetch() {
 				// Invalidate and refetch
 				return s.invalidateAndRefetch(ctx, entry, link, attempt)
+			} else if linkErr.ShouldRetry() || linkErr.ShouldBackoff() {
+				// The link is fine, so a new one would only spend provider
+				// budget. Nothing is memoised, so the next read checks again.
+				return emptyDownloadLink, linkErr
 			}
 		}
 	}
@@ -403,7 +407,11 @@ func (s *Service) validateLink(ctx context.Context, link *types.DownloadLink) er
 		errorCode = strconv.Itoa(resp.StatusCode)
 	}
 
-	return ErrorCodeToLinkError(errorCode)
+	linkErr := ErrorCodeToLinkError(errorCode)
+	if linkErr.ShouldBackoff() {
+		linkErr.RetryAfter = parseRetryAfter(resp.Header.Get("Retry-After"))
+	}
+	return linkErr
 }
 
 // disableLinkAccount handles errors that require disabling an account
