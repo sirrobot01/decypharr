@@ -39,10 +39,6 @@ const (
 	defaultHost          = "https://www.premiumize.me"
 	profileCacheDuration = time.Hour
 
-	// rateLimitPause is how long the key rests after rate_limit_reached.
-	// Premiumize publishes no number; zurg pauses for one minute.
-	rateLimitPause = time.Minute
-
 	// linkScheme marks a File.Link as a Premiumize item id. A generated CDN URL
 	// stops working, so it cannot identify a file for the cache or for repair.
 	linkScheme = "premiumize://"
@@ -165,9 +161,9 @@ func (pm *Premiumize) do(req *http.Request, out any) (*http.Response, error) {
 func (pm *Premiumize) apiError(e *apiError) error {
 	switch e.Code {
 	case "rate_limit_reached":
-		pm.throttle.Trip(rateLimitPause)
-		pm.logger.Warn().Dur("pause", rateLimitPause).Msg("Premiumize rate limit reached, pausing API requests")
-		return &request.ThrottledError{RetryAfter: rateLimitPause}
+		// Premiumize documents no wait time, so the rate limiter paces the
+		// next request.
+		return &request.ThrottledError{}
 	case "account_limit_reached", "service_limit_reached":
 		return fmt.Errorf("%w: %w", customerror.TrafficExceededError, e)
 	default:

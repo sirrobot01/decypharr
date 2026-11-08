@@ -25,12 +25,12 @@ All configuration options from [Real Debrid](./real-debrid/) apply (rate limits,
 
 ## Defaults
 
-| Option                      | Default     |
-| --------------------------- | ----------- |
-| `rate_limit`                | `60/minute` |
-| `torrents_refresh_interval` | `15m`       |
+| Option                      | Default      |
+| --------------------------- | ------------ |
+| `rate_limit`                | `250/minute` |
+| `torrents_refresh_interval` | `10m`        |
 
-Debrid Link does not publish a rate limit.
+Debrid Link does not publish a rate limit. Decypharr uses its general default.
 
 ## Limits
 

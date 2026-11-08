@@ -10,8 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"testing/synctest"
-	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
@@ -324,58 +322,5 @@ func TestFetchDownloadLinkNeverCachesTheRedirectURL(t *testing.T) {
 				t.Fatalf("DownloadLink = %q, want none", dl.DownloadLink)
 			}
 		})
-	}
-}
-
-func TestLinkBudgetPacesCallsAndFailsFastWhenDeep(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		tb := &Torbox{}
-		begin := time.Now()
-		for range linkBudgetBurst {
-			if err := tb.waitForLinkBudget(t.Context(), "key"); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if elapsed := time.Since(begin); elapsed != 0 {
-			t.Fatalf("burst took %s", elapsed)
-		}
-		if err := tb.waitForLinkBudget(t.Context(), "key"); err != nil {
-			t.Fatal(err)
-		}
-		if elapsed := time.Since(begin); elapsed != 4*time.Second {
-			t.Fatalf("call past the burst waited %s, want 4s", elapsed)
-		}
-
-		// A queue of readers is what makes the wait long.
-		errs := make(chan error, 10)
-		for range 10 {
-			go func() { errs <- tb.waitForLinkBudget(t.Context(), "key") }()
-		}
-		var throttled int
-		for range 10 {
-			if _, ok := errors.AsType[*request.ThrottledError](<-errs); ok {
-				throttled++
-			}
-		}
-		if throttled == 0 {
-			t.Fatal("no call failed fast behind a deep queue")
-		}
-
-		// Another key has its own budget.
-		if err := tb.waitForLinkBudget(t.Context(), "other"); err != nil {
-			t.Fatal(err)
-		}
-	})
-}
-
-func TestLinkLifetimeIsCapped(t *testing.T) {
-	config.SetConfigPath(t.TempDir())
-	t.Cleanup(config.Reset)
-	tb, err := New(config.Debrid{Name: "torbox", APIKey: "key", AutoExpireLinksAfter: "3d"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if tb.autoExpiresLinksAfter != maxLinkLifetime {
-		t.Fatalf("link lifetime = %s, want %s", tb.autoExpiresLinksAfter, maxLinkLifetime)
 	}
 }

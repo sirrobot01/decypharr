@@ -27,17 +27,16 @@ All configuration options from [Real Debrid](./real-debrid/) apply (rate limits,
 
 | Option                      | Default      |
 | --------------------------- | ------------ |
-| `rate_limit`                | `240/minute` |
+| `rate_limit`                | `300/minute` |
 | `torrents_refresh_interval` | `30m`        |
 
-TorBox allows 300 API requests each minute for each API key. Keep `rate_limit` below this value.
+TorBox allows 300 API requests each minute for each endpoint and API key. TorBox allows 60 uncached adds each hour.
 
 ## Limits
 
 Decypharr controls these TorBox limits for you:
 
-- **Download links:** Decypharr requests at most 15 links each minute, with a burst of 20. TorBox does not document this limit. The value comes from third-party measurements. If the wait is too long, the read stops with an error. Try the read again.
-- **Link lifetime:** Decypharr keeps a download link for 24 hours or less. A higher `auto_expire_links_after` value has no effect on TorBox.
+- **Download links:** Decypharr requests a download link one time and streams from the CDN URL. If the CDN refuses the URL, Decypharr requests a new link.
 - **Adds:** Decypharr sends each add one time. If TorBox refuses an add with a 429 error, Decypharr stops adds for the time that TorBox requests. Streaming continues during this time.
 - **Cached-only adds:** If `download_uncached` is off, Decypharr checks the cache before each add. This prevents an add that TorBox cannot serve.
 - **Active slots:** If all active slots are full, TorBox queues the torrent. Decypharr monitors the queued torrent until it starts.

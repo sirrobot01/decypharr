@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
@@ -40,26 +39,17 @@ func errorBody(code string) string {
 	return fmt.Sprintf(`{"status":"error","message":"refused","code":%q}`, code)
 }
 
-func TestRateLimitEnvelopePausesTheKey(t *testing.T) {
-	var calls atomic.Int64
+func TestRateLimitEnvelopeIsThrottled(t *testing.T) {
 	pm := testPremiumize(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
 		_, _ = fmt.Fprint(w, errorBody("rate_limit_reached"))
 	}))
 
 	_, err := pm.GetTorrents()
-	throttled, ok := errors.AsType[*request.ThrottledError](err)
-	if !ok || throttled.RetryAfter != rateLimitPause {
-		t.Fatalf("GetTorrents() error = %v, want a %s pause", err, rateLimitPause)
+	if _, ok := errors.AsType[*request.ThrottledError](err); !ok {
+		t.Fatalf("GetTorrents() error = %v, want ThrottledError", err)
 	}
-	if _, err := pm.GetTorrents(); err == nil {
-		t.Fatal("GetTorrents() error = nil during the pause")
-	}
-	if calls.Load() != 1 {
-		t.Fatalf("calls = %d, the pause must keep requests off the network", calls.Load())
-	}
-	if remaining := pm.throttle.Remaining(); remaining > time.Minute || remaining < 50*time.Second {
-		t.Fatalf("Remaining() = %s", remaining)
+	if pm.throttle.Remaining() != 0 {
+		t.Fatal("Premiumize documents no wait, so the key must not pause")
 	}
 }
 

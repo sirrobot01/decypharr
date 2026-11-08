@@ -30,21 +30,15 @@ var (
 	DefaultRetryDelayMax = 30 * time.Second
 )
 
-// providerDefaults holds what differs between provider APIs. A rate limit stays
-// below the documented limit, or is cautious where the provider publishes none.
+// providerDefaults holds the documented rate limit of each provider. Debrid-Link
+// and Premiumize publish no limit, so they use DefaultRateLimit.
 var providerDefaults = map[string]struct {
 	rateLimit       string
 	refreshInterval string
 }{
 	"realdebrid": {"250/minute", DefaultTorrentsRefreshInterval},
-	// TorBox documents 300/minute per key.
-	"torbox": {"240/minute", "30m"},
-	// AllDebrid documents 600/minute.
-	"alldebrid": {"500/minute", DefaultTorrentsRefreshInterval},
-	// Debrid-Link publishes no limit and blocks a key for about an hour.
-	"debridlink": {"60/minute", "15m"},
-	// Premiumize publishes no limit.
-	"premiumize": {"120/minute", DefaultTorrentsRefreshInterval},
+	"torbox":     {"300/minute", "30m"},
+	"alldebrid":  {"600/minute", DefaultTorrentsRefreshInterval},
 }
 
 // ProviderRateLimit returns the default API rate limit for a provider.

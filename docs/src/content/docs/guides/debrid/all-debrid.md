@@ -27,7 +27,7 @@ All configuration options from [Real Debrid](./real-debrid/) apply (rate limits,
 
 | Option                      | Default      |
 | --------------------------- | ------------ |
-| `rate_limit`                | `500/minute` |
+| `rate_limit`                | `600/minute` |
 | `torrents_refresh_interval` | `10m`        |
 
 All Debrid allows 12 API requests each second and 600 API requests each minute.

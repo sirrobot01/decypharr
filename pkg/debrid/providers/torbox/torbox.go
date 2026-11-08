@@ -30,23 +30,9 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/version"
 	"go.uber.org/ratelimit"
-	"golang.org/x/time/rate"
 )
 
 const (
-	// requestdl has its own budget, far below the documented 300/min. zurg
-	// measured about 100 calls per rolling five minutes (2026-08-30), then a
-	// 300s lockout of the whole account. TorBox does not document it. This
-	// pace spends at most 95 calls in any five minutes.
-	linkBudgetRate  = rate.Limit(15.0 / 60.0)
-	linkBudgetBurst = 20
-	// linkBudgetMaxWait is the longest a read waits for budget.
-	linkBudgetMaxWait = 20 * time.Second
-
-	// maxLinkLifetime caps how long a CDN URL stays cached. TorBox documents
-	// no lifetime; zurg saw URLs go invalid and caches them for 24h.
-	maxLinkLifetime = 24 * time.Hour
-
 	profileCacheDuration = time.Hour
 
 	// defaultAddPause applies when TorBox refuses an add without Retry-After.
@@ -85,7 +71,6 @@ type Torbox struct {
 	downloadPresentAt     time.Time
 	downloadPresentMu     sync.Mutex
 	addPause              request.Throttle
-	linkBudgets           sync.Map // token -> *rate.Limiter
 }
 
 func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Torbox, error) {
@@ -142,7 +127,6 @@ func New(dc config.Debrid, ratelimits map[string]ratelimit.Limiter) (*Torbox, er
 	if autoExpiresLinksAfter == 0 || err != nil {
 		autoExpiresLinksAfter = 48 * time.Hour
 	}
-	autoExpiresLinksAfter = min(autoExpiresLinksAfter, maxLinkLifetime)
 
 	tb := &Torbox{
 		Host:                  "https://api.torbox.app/v1",
@@ -723,37 +707,10 @@ func (tb *Torbox) GetDownloadLink(ctx context.Context, id string, file *types.Fi
 	return tb.accountsManager.GetDownloadLink(ctx, id, file, tb.fetchDownloadLink)
 }
 
-// waitForLinkBudget spends one requestdl call of token's budget. It fails at
-// once if the wait is too long for a reader to sit through.
-func (tb *Torbox) waitForLinkBudget(ctx context.Context, token string) error {
-	budget, _ := tb.linkBudgets.LoadOrStore(token, rate.NewLimiter(linkBudgetRate, linkBudgetBurst))
-	reservation := budget.(*rate.Limiter).Reserve()
-	delay := reservation.Delay()
-	if delay > linkBudgetMaxWait {
-		reservation.Cancel()
-		return &request.ThrottledError{RetryAfter: delay}
-	}
-	if delay == 0 {
-		return nil
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		reservation.Cancel()
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
 // requestLink resolves the CDN URL of a file. Streaming the CDN URL keeps range
 // reads off the API, so a failure here stays a failure: a redirect URL cached in
 // its place would spend one requestdl call on every read for the life of the link.
 func (tb *Torbox) requestLink(ctx context.Context, acc *account.Account, id string, file *types.File) (string, error) {
-	if err := tb.waitForLinkBudget(ctx, acc.Token); err != nil {
-		return "", err
-	}
 	client := acc.Client()
 	if client == nil {
 		client = tb.client
