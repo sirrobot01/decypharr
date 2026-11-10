@@ -329,3 +329,25 @@ func TestProfileSlotsAndDelete(t *testing.T) {
 		t.Fatalf("GetTorrent() with bad token error = %v", err)
 	}
 }
+
+func TestDeleteNotRemoved(t *testing.T) {
+	hw := testHighway(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		switch {
+		case r.Method == http.MethodDelete:
+			writeJSON(w, 200, `{"removed":false}`)
+		case q.Get("id") == "12":
+			// Still there: the token was not allowed to remove it.
+			writeJSON(w, 200, `{"id":"12","service":"torrent","name":"Other","state":"completed","files":[]}`)
+		default:
+			writeJSON(w, 404, `{"error":"not_found","message":"x"}`)
+		}
+	})
+
+	if err := hw.DeleteTorrent("11"); err != nil {
+		t.Fatalf("DeleteTorrent(gone) error = %v", err)
+	}
+	if err := hw.DeleteTorrent("12"); err == nil || !strings.Contains(err.Error(), "delete_self") {
+		t.Fatalf("DeleteTorrent(not allowed) error = %v", err)
+	}
+}
