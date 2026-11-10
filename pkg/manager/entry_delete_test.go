@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -188,6 +189,66 @@ func TestConcurrentMountDeletesKeepEveryFlag(t *testing.T) {
 
 		if _, err := store.Get("hash"); err == nil {
 			t.Fatal("entry survived deleting every file")
+		}
+	})
+}
+
+func TestRmdirRefusesFolderWithFiles(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m, store := newDeleteTestManager(t)
+		const folder = "Example.Show.S04.1080p"
+		addDeleteTestEntry(t, store, "older", folder, time.Unix(1000, 0), "e01.mkv")
+		addDeleteTestEntry(t, store, "newer", folder, time.Unix(2000, 0), "e01.mkv")
+
+		info, err := m.GetTorrentEntry(folder)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := m.RemoveEmptyEntry(info); !errors.Is(err, ErrFolderNotEmpty) {
+			t.Fatalf("rmdir = %v, want ErrFolderNotEmpty", err)
+		}
+		for _, hash := range []string{"older", "newer"} {
+			if _, err := store.Get(hash); err != nil {
+				t.Errorf("entry %s was deleted: %v", hash, err)
+			}
+		}
+	})
+}
+
+// A folder whose files are all flagged deleted, but whose entries remain, lists
+// as empty and is cleared by rmdir.
+func TestRmdirClearsFolderWhoseFilesAreDeleted(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m, store := newDeleteTestManager(t)
+		const folder = "Example.Show.S05.1080p"
+		addDeleteTestEntry(t, store, "older", folder, time.Unix(1000, 0), "e01.mkv")
+		addDeleteTestEntry(t, store, "newer", folder, time.Unix(2000, 0), "e01.mkv")
+		item, err := store.GetEntryItem(folder)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range item.Files {
+			f.Deleted = true
+		}
+		if err := store.UpdateItem(item); err != nil {
+			t.Fatal(err)
+		}
+
+		info, err := m.GetTorrentEntry(folder)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, children := m.GetTorrentChildren(folder); len(children) != 0 {
+			t.Fatalf("folder lists %d files, want none", len(children))
+		}
+		if err := m.RemoveEmptyEntry(info); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		for _, hash := range []string{"older", "newer"} {
+			if _, err := store.Get(hash); err == nil {
+				t.Errorf("entry %s still exists", hash)
+			}
 		}
 	})
 }

@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -47,6 +48,19 @@ func TestDeletesStickOnRealMount(t *testing.T) {
 	add("files-new", "Example.Show.S01", "e01.mkv", "e02.mkv")
 	add("dir-old", "Example.Show.S02", "e01.mkv")
 	add("dir-new", "Example.Show.S02", "e01.mkv")
+	add("empty-old", "Example.Show.S03", "e01.mkv")
+	add("empty-new", "Example.Show.S03", "e01.mkv")
+	// Every file deleted but the entries left behind, as older builds could.
+	item, err := mgr.Storage().GetEntryItem("Example.Show.S03")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range item.Files {
+		f.Deleted = true
+	}
+	if err := mgr.Storage().UpdateItem(item); err != nil {
+		t.Fatal(err)
+	}
 
 	fuseConfig := &mountconfig.FuseConfig{CacheDir: t.TempDir(), CacheCleanupInterval: time.Hour}
 	vfsManager, err := vfs.NewManager(context.Background(), mgr, fuseConfig)
@@ -122,10 +136,25 @@ func TestDeletesStickOnRealMount(t *testing.T) {
 		gone(t, "Example.Show.S01")
 	})
 
-	t.Run("rmdir a shared folder", func(t *testing.T) {
-		if err := os.Remove(filepath.Join(all, "Example.Show.S02")); err != nil {
+	t.Run("rmdir refuses a folder with files", func(t *testing.T) {
+		dir := filepath.Join(all, "Example.Show.S02")
+		if err := syscall.Rmdir(dir); !errors.Is(err, syscall.ENOTEMPTY) {
+			t.Fatalf("rmdir = %v, want ENOTEMPTY", err)
+		}
+		if _, err := os.Lstat(filepath.Join(dir, "e01.mkv")); err != nil {
+			t.Fatalf("file after refused rmdir: %v", err)
+		}
+	})
+
+	t.Run("rmdir clears a folder whose files are deleted", func(t *testing.T) {
+		dir := filepath.Join(all, "Example.Show.S03")
+		entries, err := os.ReadDir(dir)
+		if err != nil || len(entries) != 0 {
+			t.Fatalf("listing = %d entries, %v; want an empty folder", len(entries), err)
+		}
+		if err := syscall.Rmdir(dir); err != nil {
 			t.Fatal(err)
 		}
-		gone(t, "Example.Show.S02")
+		gone(t, "Example.Show.S03")
 	})
 }

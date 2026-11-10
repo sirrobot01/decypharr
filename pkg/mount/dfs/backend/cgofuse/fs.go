@@ -383,7 +383,10 @@ func (f *FS) Rmdir(path string) int {
 		return -fuse.ENOTDIR
 	}
 
-	if err := f.vfs.GetManager().RemoveEntry(info); err != nil {
+	if err := f.vfs.GetManager().RemoveEmptyEntry(info); err != nil {
+		if errors.Is(err, manager.ErrFolderNotEmpty) {
+			return -fuse.ENOTEMPTY
+		}
 		f.logger.Error().Err(err).Str("dir", info.Name()).Msg("Failed to remove directory")
 		return -fuse.EIO
 	}

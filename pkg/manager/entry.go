@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"os"
@@ -166,23 +167,22 @@ func (m *Manager) GetEntryInfo(name string) (*FileInfo, error) {
 		return nil, fmt.Errorf("entry %s not found", name)
 	}
 
-	// Take metadata from a file that is still listed; deleted files keep
-	// their records in the name index.
+	// Prefer metadata from a file that is still listed; deleted files keep
+	// their records in the name index. A folder whose files are all deleted
+	// stays visible as an empty folder, so rmdir can clear it.
 	var modTime time.Time
 	var infohash string
 	var size int64
+	live := false
 	for _, f := range entry.Files {
-		if f.Deleted {
-			continue
+		if !f.Deleted {
+			size += f.Size
 		}
-		if infohash == "" {
+		if infohash == "" || (!live && !f.Deleted) {
 			modTime = f.AddedOn
 			infohash = f.InfoHash
+			live = !f.Deleted
 		}
-		size += f.Size
-	}
-	if infohash == "" {
-		return nil, fmt.Errorf("entry %s not found", name)
 	}
 
 	return &FileInfo{
@@ -392,11 +392,22 @@ func (m *Manager) getTorrentChildren(name string) (*FileInfo, []FileInfo) {
 	}
 
 	// Convert files to FileInfo
+	if len(entry.Files) == 0 {
+		return nil, nil
+	}
 	infos := make([]FileInfo, 0, len(entry.Files))
 	size := int64(0)
+	var modTime time.Time
 	for _, file := range entry.Files {
 		if file.Deleted {
+			// A folder whose files are all deleted lists as empty.
+			if len(infos) == 0 {
+				modTime = file.AddedOn
+			}
 			continue
+		}
+		if len(infos) == 0 {
+			modTime = file.AddedOn
 		}
 		infos = append(infos, FileInfo{
 			name:      file.Name,
@@ -410,14 +421,11 @@ func (m *Manager) getTorrentChildren(name string) (*FileInfo, []FileInfo) {
 		})
 		size += file.Size
 	}
-	if len(infos) == 0 {
-		return nil, nil
-	}
 
 	currentDir := &FileInfo{
 		name:      entry.Name,
 		size:      size,
-		modTime:   infos[0].modTime,
+		modTime:   modTime,
 		isDir:     true,
 		canDelete: true,
 		kind:      EntryKindEntry,
@@ -442,6 +450,31 @@ func (m *Manager) RemoveEntry(entry *FileInfo) error {
 	}
 	// This is a file within a torrent
 	return m.removeTorrentFile(entry.Parent(), entry.Name(), true)
+}
+
+// ErrFolderNotEmpty reports that a folder still has files, so rmdir must fail.
+var ErrFolderNotEmpty = errors.New("folder is not empty")
+
+// RemoveEmptyEntry deletes a torrent folder the way rmdir does: it refuses
+// while any file in the folder is still listed, and otherwise deletes every
+// entry that renders the folder.
+func (m *Manager) RemoveEmptyEntry(entry *FileInfo) error {
+	if entry == nil {
+		return fmt.Errorf("entry is nil")
+	}
+	if !entry.isDir || !entry.CanDelete() {
+		return fmt.Errorf("entry %s cannot be deleted", entry.name)
+	}
+	unlock := m.lockFolder(entry.name)
+	defer unlock()
+	if item, err := m.storage.GetEntryItem(entry.name); err == nil {
+		for _, f := range item.Files {
+			if !f.Deleted {
+				return ErrFolderNotEmpty
+			}
+		}
+	}
+	return m.deleteFolderEntries(entry.name, entry.infohash)
 }
 
 // lockFolder serialises deletes within one torrent folder.
