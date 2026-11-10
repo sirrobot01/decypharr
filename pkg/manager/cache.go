@@ -83,6 +83,12 @@ func (e *EntryCache) _refreshEntry(name string) EntryCacheItem {
 	return item
 }
 
+// InvalidateTorrent drops the cached children of one torrent folder.
+func (e *EntryCache) InvalidateTorrent(name string) {
+	e.generation.Add(1)
+	e.entries.Delete(torrentEntryCachePrefix + name)
+}
+
 // InvalidateAll clears cached entries. Reads rebuild them on demand.
 func (e *EntryCache) InvalidateAll() {
 	e.generation.Add(1)

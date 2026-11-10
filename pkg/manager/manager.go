@@ -88,6 +88,10 @@ type Manager struct {
 	downloader *Downloader
 	usenet     *usenet.Usenet
 
+	// folderLocks serialise deletes within one torrent folder, so concurrent
+	// unlinks cannot overwrite each other's Deleted flags.
+	folderLocks [64]sync.Mutex
+
 	// Debrid speed test results storage
 	debridSpeedTestResults *xsync.Map[string, debridTypes.SpeedTestResult]
 

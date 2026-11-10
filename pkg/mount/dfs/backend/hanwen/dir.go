@@ -385,6 +385,8 @@ func (d *Dir) Unlink(ctx context.Context, name string) syscall.Errno {
 		d.logger.Error().Err(err).Str("dir", d.name).Str("file", info.Name()).Msg("Failed to remove file from source")
 		return syscall.EIO
 	}
+	// Lookups must not answer from a listing that still holds the file.
+	d.listing.Store(nil)
 
 	return 0
 }

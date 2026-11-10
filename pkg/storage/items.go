@@ -157,3 +157,19 @@ func (s *Storage) removeFromEntryItem(entry *Entry) error {
 	item.Size = item.GetSize()
 	return s.UpdateItem(item)
 }
+
+// EntryHashesByFolder returns the infohash of every entry that renders the
+// folder name. Separate imports of one release share a folder this way.
+func (s *Storage) EntryHashesByFolder(name string) []string {
+	if name == "" {
+		return nil
+	}
+	var hashes []string
+	_ = s.entries.ForEachMetadata(func(key string, meta *appendstore.Metadata) error {
+		if meta.Attribute(attributeName) == name {
+			hashes = append(hashes, key)
+		}
+		return nil
+	})
+	return hashes
+}

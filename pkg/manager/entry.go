@@ -2,6 +2,7 @@ package manager
 
 import (
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"time"
@@ -165,19 +166,29 @@ func (m *Manager) GetEntryInfo(name string) (*FileInfo, error) {
 		return nil, fmt.Errorf("entry %s not found", name)
 	}
 
-	// get metadata from first file (all files in an entry share the same parent entry)
+	// Take metadata from a file that is still listed; deleted files keep
+	// their records in the name index.
 	var modTime time.Time
 	var infohash string
+	var size int64
 	for _, f := range entry.Files {
-		modTime = f.AddedOn
-		infohash = f.InfoHash
-		break
+		if f.Deleted {
+			continue
+		}
+		if infohash == "" {
+			modTime = f.AddedOn
+			infohash = f.InfoHash
+		}
+		size += f.Size
+	}
+	if infohash == "" {
+		return nil, fmt.Errorf("entry %s not found", name)
 	}
 
 	return &FileInfo{
 		infohash:  infohash,
 		name:      entry.Name,
-		size:      entry.Size,
+		size:      size,
 		modTime:   modTime,
 		isDir:     true,
 		canDelete: true,
@@ -384,6 +395,9 @@ func (m *Manager) getTorrentChildren(name string) (*FileInfo, []FileInfo) {
 	infos := make([]FileInfo, 0, len(entry.Files))
 	size := int64(0)
 	for _, file := range entry.Files {
+		if file.Deleted {
+			continue
+		}
 		infos = append(infos, FileInfo{
 			name:      file.Name,
 			size:      file.Size,
@@ -401,11 +415,12 @@ func (m *Manager) getTorrentChildren(name string) (*FileInfo, []FileInfo) {
 	}
 
 	currentDir := &FileInfo{
-		name:    entry.Name,
-		size:    size,
-		modTime: infos[0].modTime,
-		isDir:   true,
-		kind:    EntryKindEntry,
+		name:      entry.Name,
+		size:      size,
+		modTime:   infos[0].modTime,
+		isDir:     true,
+		canDelete: true,
+		kind:      EntryKindEntry,
 	}
 	return currentDir, infos
 }
@@ -421,26 +436,41 @@ func (m *Manager) RemoveEntry(entry *FileInfo) error {
 	if entry.isDir {
 		// This is a torrent folder
 		m.logger.Debug().Str("entry", entry.name).Msg("Removing entry folder")
-		infohash := entry.infohash
-		if infohash == "" {
-			// Fallback: look up from storage
-			et, err := m.storage.GetEntryItem(entry.name)
-			if err != nil {
-				return fmt.Errorf("torrent %s not found", entry.name)
-			}
-			if len(et.Files) == 0 {
-				return fmt.Errorf("torrent %s has no files", entry.name)
-			}
-			firstFile, err := et.GetFirstFile()
-			if err != nil {
-				return fmt.Errorf("failed to get first file of torrent %s: %w", entry.name, err)
-			}
-			infohash = firstFile.InfoHash
-		}
-		return m.DeleteEntry(infohash, true)
+		unlock := m.lockFolder(entry.name)
+		defer unlock()
+		return m.deleteFolderEntries(entry.name, entry.infohash)
 	}
 	// This is a file within a torrent
-	return m.RemoveTorrentFile(entry.Parent(), entry.Name())
+	return m.removeTorrentFile(entry.Parent(), entry.Name(), true)
+}
+
+// lockFolder serialises deletes within one torrent folder.
+func (m *Manager) lockFolder(name string) func() {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(name))
+	mu := &m.folderLocks[h.Sum32()%uint32(len(m.folderLocks))]
+	mu.Lock()
+	return mu.Unlock
+}
+
+// deleteFolderEntries deletes every entry that renders the folder, or the
+// fallback entry when none is found by name. Deleting only one of them would
+// let the name index serve the others' files again.
+func (m *Manager) deleteFolderEntries(name, fallback string) error {
+	hashes := m.storage.EntryHashesByFolder(name)
+	if len(hashes) == 0 && fallback != "" {
+		hashes = []string{fallback}
+	}
+	if len(hashes) == 0 {
+		return fmt.Errorf("torrent %s not found", name)
+	}
+	var firstErr error
+	for _, infohash := range hashes {
+		if err := m.DeleteEntry(infohash, true); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("delete entry %s of %s: %w", infohash, name, err)
+		}
+	}
+	return firstErr
 }
 
 func (m *Manager) CopyEntry(entry *FileInfo, destPath string, delete bool) error {
@@ -453,7 +483,20 @@ func (m *Manager) CopyEntry(entry *FileInfo, destPath string, delete bool) error
 	return fmt.Errorf("copying entries is not supported yet")
 }
 
+// RemoveTorrentFile removes one file, as repair does for a broken file. When it
+// was the last file of its entry, only that entry is deleted, so another entry
+// with the same folder can keep serving its copy.
 func (m *Manager) RemoveTorrentFile(torrentName, filename string) error {
+	return m.removeTorrentFile(torrentName, filename, false)
+}
+
+// removeTorrentFile flags a file as deleted. Once no file in the folder is
+// left, it deletes the file's entry, or with wholeFolder every entry that
+// renders the folder.
+func (m *Manager) removeTorrentFile(torrentName, filename string, wholeFolder bool) error {
+	unlock := m.lockFolder(torrentName)
+	defer unlock()
+
 	item, err := m.storage.GetEntryItem(torrentName)
 	if err != nil {
 		return fmt.Errorf("entry %s not found", torrentName)
@@ -480,8 +523,12 @@ func (m *Manager) RemoveTorrentFile(torrentName, filename string) error {
 	}
 	if !hasFiles {
 		m.logger.Debug().Str("entry", torrentName).Msg("Removing entry folder as it has no more files")
+		if wholeFolder {
+			return m.deleteFolderEntries(torrentName, file.InfoHash)
+		}
 		return m.DeleteEntry(file.InfoHash, true)
 	}
+	m.entry.InvalidateTorrent(torrentName)
 	return nil
 }
 
