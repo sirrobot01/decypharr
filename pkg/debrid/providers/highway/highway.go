@@ -44,8 +44,7 @@ var (
 	errNotFound = errors.New("highway: not found")
 )
 
-// Highway talks to the High-Way transfer API (OpenAPI description:
-// https://gitlab.high-way.me/HIGHWAY/highwaydownload2/-/blob/master/docs/openapi/highway-transfers.yaml).
+// Highway talks to the High-Way transfer API (https://cloud.high-way.me/center-api/transfers.php).
 //
 // Transfers that are not cached yet wait in a queue on High-Way's side and get a
 // temporary 32-hex id; once they start they get a numeric id, which is looked up
