@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
@@ -27,6 +28,11 @@ type Service struct {
 	mutation *request.Client
 	logger   zerolog.Logger
 	cleanups singleflight.Group
+
+	// importBackoff holds, per Arr and downloadId, when queue cleanup may try
+	// a manual import again after one found nothing to submit.
+	importMu      sync.Mutex
+	importBackoff map[string]time.Time
 }
 
 func New() *Service {
