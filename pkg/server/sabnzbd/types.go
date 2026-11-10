@@ -3,7 +3,6 @@ package sabnzbd
 import (
 	"fmt"
 
-	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
@@ -227,11 +226,7 @@ func convertToSABnzbdNZB(e *storage.Entry) NZB {
 		timeLeft = fmt.Sprintf("%d:%02d:%02d", hours, minutes, seconds)
 	}
 
-	// Map storage state to SABnzbd status
-	status := mapStorageStateToSABStatus(e.State)
-	if e.Status == debridTypes.TorrentStatusQueued {
-		status = StatusQueued
-	}
+	status := sabStatus(e.Phase())
 
 	var completedOn int64
 	if e.CompletedAt != nil {
@@ -272,14 +267,11 @@ func getNZBFiles(e *storage.Entry) []File {
 	const MB = 1024 * 1024
 	files := make([]File, 0, len(e.Files))
 
-	// Determine file status based on job state
 	fileStatus := "queued"
-	switch {
-	case e.Status == debridTypes.TorrentStatusQueued:
-		fileStatus = "queued"
-	case e.State == storage.EntryStateDownloading:
+	switch e.Phase() {
+	case storage.EntryPhaseDownloading, storage.EntryPhaseProcessing:
 		fileStatus = "active"
-	case e.State == storage.EntryStatePausedUP:
+	case storage.EntryPhaseCompleted:
 		fileStatus = "finished"
 	}
 	idx := 0
@@ -310,16 +302,16 @@ func getNZBFiles(e *storage.Entry) []File {
 	return files
 }
 
-// mapStorageStateToSABStatus maps storage.TorrentState to SABnzbd status
-func mapStorageStateToSABStatus(state storage.TorrentState) string {
-	switch state {
-	case storage.EntryStateDownloading:
+// sabStatus maps an entry phase to a SABnzbd status.
+func sabStatus(phase storage.EntryPhase) string {
+	switch phase {
+	case storage.EntryPhaseDownloading, storage.EntryPhaseProcessing:
 		return StatusDownloading
-	case storage.EntryStatePausedDL:
+	case storage.EntryPhasePaused:
 		return StatusPaused
-	case storage.EntryStatePausedUP:
+	case storage.EntryPhaseCompleted:
 		return StatusCompleted
-	case storage.EntryStateError:
+	case storage.EntryPhaseFailed:
 		return StatusFailed
 	default:
 		return StatusQueued

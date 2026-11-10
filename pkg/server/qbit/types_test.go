@@ -3,6 +3,7 @@ package qbit
 import (
 	"testing"
 
+	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
@@ -55,5 +56,24 @@ func TestConvertToQBitTorrentTorrentCalculatesETA(t *testing.T) {
 				t.Fatalf("Eta = %d, want %d", got.Eta, tt.wantETA)
 			}
 		})
+	}
+}
+
+// Arrs act on the qBit state, so each phase must keep its wire value.
+func TestConvertToQBitTorrentTorrentState(t *testing.T) {
+	tests := []struct {
+		entry storage.Entry
+		want  storage.TorrentState
+	}{
+		{storage.Entry{State: storage.EntryStateDownloading, Status: debridTypes.TorrentStatusQueued}, "queuedDL"},
+		{storage.Entry{State: storage.EntryStateDownloading, Status: debridTypes.TorrentStatusDownloading}, storage.EntryStateDownloading},
+		{storage.Entry{State: storage.EntryStateDownloading, Status: debridTypes.TorrentStatusDownloaded}, storage.EntryStateDownloading},
+		{storage.Entry{State: storage.EntryStatePausedUP}, storage.EntryStatePausedUP},
+		{storage.Entry{State: storage.EntryStateError, Status: debridTypes.TorrentStatusError}, storage.EntryStateError},
+	}
+	for _, tt := range tests {
+		if got := convertToQBitTorrentTorrent(&tt.entry).State; got != tt.want {
+			t.Errorf("phase %q: got %q, want %q", tt.entry.Phase(), got, tt.want)
+		}
 	}
 }

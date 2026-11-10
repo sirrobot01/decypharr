@@ -215,7 +215,7 @@ class TorrentDashboard {
             }
 
             if (this.state.selectedState) {
-                params.set('state', this.state.selectedState);
+                params.set('phase', this.state.selectedState);
             }
 
             const response = await window.decypharrUtils.fetcher(`/api/torrents?${params}`);
@@ -313,7 +313,7 @@ class TorrentDashboard {
                         <span class="text-sm">${torrent.num_seeds || 0}</span>
                     </td>
                     <td>
-                        ${this.renderStateBadge(torrent.state)}
+                        ${this.renderPhaseBadge(torrent)}
                     </td>
                     <td>
                         <button class="btn btn-ghost btn-xs text-error"
@@ -347,17 +347,21 @@ class TorrentDashboard {
         `;
     }
 
-    renderStateBadge(state) {
-        const stateMap = {
-            'pausedUP': {class: 'badge-success', text: 'Completed'},
-            'downloading': {class: 'badge-info', text: 'Downloading'},
-            'error': {class: 'badge-error', text: 'Error'},
-            'queued': {class: 'badge-ghost', text: 'Queued'},
-            'paused': {class: 'badge-warning', text: 'Paused'}
+    renderPhaseBadge(torrent) {
+        const phaseMap = {
+            'queued': {class: 'badge-ghost', text: 'Queued', title: 'Waiting for a free slot'},
+            'downloading': {class: 'badge-info', text: 'Downloading', title: 'The provider is preparing the content'},
+            'processing': {class: 'badge-warning', text: 'Processing', title: 'Running the post-download action'},
+            'paused': {class: 'badge-warning', text: 'Paused', title: ''},
+            'completed': {class: 'badge-success', text: 'Completed', title: ''},
+            'failed': {class: 'badge-error', text: 'Failed', title: ''}
         };
 
-        const s = stateMap[state] || {class: 'badge-ghost', text: state};
-        return `<span class="badge ${s.class} badge-sm">${s.text}</span>`;
+        const phase = torrent.phase || torrent.state;
+        const p = phaseMap[phase] || {class: 'badge-ghost', text: phase, title: ''};
+        const title = phase === 'failed' && torrent.last_error ? torrent.last_error : p.title;
+        const icon = phase === 'failed' && torrent.last_error ? '<i class="bi bi-info-circle ml-1"></i>' : '';
+        return `<span class="badge ${p.class} badge-sm" title="${this.escapeAttr(title)}">${this.escapeHtml(p.text)}${icon}</span>`;
     }
 
     renderProtocolBadge(protocol) {

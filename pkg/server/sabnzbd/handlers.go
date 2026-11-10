@@ -543,7 +543,7 @@ func (s *SABnzbd) getHistory(ctx context.Context, limit int, nzoIDs []string) (H
 	}
 	for _, item := range completed {
 		slot := HistorySlot{
-			Status:      mapStorageStateToSABStatus(item.State),
+			Status:      sabStatus(item.Phase()),
 			Name:        item.Name,
 			NZBName:     item.Name,
 			NzoId:       item.InfoHash,
@@ -557,7 +557,7 @@ func (s *SABnzbd) getHistory(ctx context.Context, limit int, nzoIDs []string) (H
 
 	for _, item := range failed {
 		slot := HistorySlot{
-			Status:      mapStorageStateToSABStatus(item.State),
+			Status:      sabStatus(item.Phase()),
 			Name:        item.Name,
 			NZBName:     item.Name,
 			NzoId:       item.InfoHash,

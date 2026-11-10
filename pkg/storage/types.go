@@ -31,6 +31,28 @@ const (
 	EntryStateError       TorrentState = "error"
 )
 
+// EntryPhase is the lifecycle phase of a queue entry. Entries do not store
+// it. Phase derives it from State, Status and IsDownloading, so the qBit,
+// SABnzbd and web views all report the same phase.
+//
+//	queued ──▶ downloading ──▶ processing ──▶ completed
+//	   │            │               │
+//	   └────────────┴───────────────┴──────▶ failed
+//
+// queued:      waits for a worker or a free provider slot.
+// downloading: the provider (debrid or usenet) prepares the content.
+// processing:  the content is ready. The symlink, download or STRM action runs.
+type EntryPhase string
+
+const (
+	EntryPhaseQueued      EntryPhase = "queued"
+	EntryPhaseDownloading EntryPhase = "downloading"
+	EntryPhaseProcessing  EntryPhase = "processing"
+	EntryPhasePaused      EntryPhase = "paused"
+	EntryPhaseCompleted   EntryPhase = "completed"
+	EntryPhaseFailed      EntryPhase = "failed"
+)
+
 // Common errors
 var (
 	ErrPlacementNotFound     = fmt.Errorf("providerEntry not found")
@@ -402,6 +424,25 @@ func (e *Entry) SwitchToNextProvider() {
 			return
 		}
 	}
+}
+
+// Phase reports the lifecycle phase of the entry.
+func (e *Entry) Phase() EntryPhase {
+	switch e.State {
+	case EntryStatePausedUP:
+		return EntryPhaseCompleted
+	case EntryStateError:
+		return EntryPhaseFailed
+	case EntryStatePausedDL:
+		return EntryPhasePaused
+	}
+	switch {
+	case e.Status == debridTypes.TorrentStatusQueued:
+		return EntryPhaseQueued
+	case e.IsDownloading, e.Status == debridTypes.TorrentStatusDownloaded:
+		return EntryPhaseProcessing
+	}
+	return EntryPhaseDownloading
 }
 
 // MarkAsCompleted marks the torrent as completed

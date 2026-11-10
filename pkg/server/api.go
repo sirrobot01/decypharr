@@ -112,6 +112,7 @@ func (s *Server) handleGetTorrents(w http.ResponseWriter, r *http.Request) {
 	search := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
 	category := strings.TrimSpace(r.URL.Query().Get("category"))
 	state := strings.TrimSpace(r.URL.Query().Get("state"))
+	phase := storage.EntryPhase(strings.TrimSpace(r.URL.Query().Get("phase")))
 	sortBy := strings.TrimSpace(r.URL.Query().Get("sort_by"))
 	sortOrder := strings.TrimSpace(r.URL.Query().Get("sort_order"))
 
@@ -149,6 +150,10 @@ func (s *Server) handleGetTorrents(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		if phase != "" && t.Phase() != phase {
+			continue
+		}
+
 		filteredTorrents = append(filteredTorrents, t)
 	}
 
@@ -158,12 +163,16 @@ func (s *Server) handleGetTorrents(w http.ResponseWriter, r *http.Request) {
 	totalPages := (total + limit - 1) / limit
 	offset := (page - 1) * limit
 
-	var paginatedTorrents []*storage.Entry
+	type torrentView struct {
+		*storage.Entry
+		Phase storage.EntryPhase `json:"phase"`
+	}
+	paginatedTorrents := []torrentView{}
 	if offset < total {
 		end := min(offset+limit, total)
-		paginatedTorrents = filteredTorrents[offset:end]
-	} else {
-		paginatedTorrents = []*storage.Entry{}
+		for _, t := range filteredTorrents[offset:end] {
+			paginatedTorrents = append(paginatedTorrents, torrentView{Entry: t, Phase: t.Phase()})
+		}
 	}
 
 	categorySet := make(map[string]bool)
@@ -210,6 +219,8 @@ func sortQueuedTorrents(torrents []*storage.Entry, sortBy, sortOrder string) {
 			result = strings.ToLower(torrents[i].Category) < strings.ToLower(torrents[j].Category)
 		case "state":
 			result = torrents[i].State < torrents[j].State
+		case "phase":
+			result = torrents[i].Phase() < torrents[j].Phase()
 		default:
 			result = torrents[i].AddedOn.Before(torrents[j].AddedOn)
 		}

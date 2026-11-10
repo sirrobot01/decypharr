@@ -2,7 +2,6 @@ package qbit
 
 import (
 	"github.com/sirrobot01/decypharr/internal/config"
-	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
@@ -435,7 +434,7 @@ func convertToQBitTorrentTorrent(t *storage.Entry) Torrent {
 		RatioLimit: 1,
 		Tracker:    "udp://tracker.opentrackr.org:1337",
 	}
-	if t.Status == debridTypes.TorrentStatusQueued {
+	if t.Phase() == storage.EntryPhaseQueued {
 		qbitTorrent.State = storage.TorrentState("queuedDL")
 	}
 
