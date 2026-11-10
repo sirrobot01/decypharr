@@ -109,7 +109,7 @@ Array of Debrid services:
 
 | Field                             | Type   | Description                                                                    | Default                         |
 |-----------------------------------|--------|--------------------------------------------------------------------------------|---------------------------------|
-| `provider`                        | string | Provider type: `realdebrid`, `alldebrid`, `debridlink`, `torbox`, `premiumize` | **Required**                    |
+| `provider`                        | string | Provider type: `realdebrid`, `alldebrid`, `debridlink`, `torbox`, `premiumize`, `highway` | **Required**                    |
 | `name`                            | string | Display name                                                                   | Provider type                   |
 | `api_key`                         | string | API key from provider dashboard                                                | **Required**                    |
 | `download_api_keys`               | array  | Additional keys for download rotation                                          | `[api_key]`                     |
