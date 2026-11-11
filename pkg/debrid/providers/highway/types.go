@@ -55,6 +55,8 @@ type checkResponse struct {
 
 type removeResponse struct {
 	Removed bool `json:"removed"`
+	// Only set when removed is false: "not_found" or "not_owner".
+	Reason string `json:"reason"`
 }
 
 type statsResponse struct {

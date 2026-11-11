@@ -456,16 +456,19 @@ func (hw *Highway) DeleteTorrent(torrentId string) error {
 		return err
 	}
 	if !res.Removed {
-		// removed=false also comes back when a token with torrent:delete_self tries to
-		// remove a transfer that another token added, so check whether it is really gone.
-		var data transfer
-		err := hw.get(context.Background(), nil, query, &data)
-		if errors.Is(err, errNotFound) {
+		notOwner := res.Reason == "not_owner"
+		if res.Reason == "" {
+			// Servers without "reason" answer removed=false for both cases; check whether it is really gone.
+			var data transfer
+			err := hw.get(context.Background(), nil, query, &data)
+			if err != nil && !errors.Is(err, errNotFound) {
+				return err
+			}
+			notOwner = err == nil
+		}
+		if !notOwner {
 			hw.logger.Debug().Msgf("Torrent %s was already gone on HighWay", torrentId)
 			return nil
-		}
-		if err != nil {
-			return err
 		}
 		// Callers may drop this error, so log it as well.
 		err = fmt.Errorf("highway: torrent %s was not removed; a token with torrent:delete_self can only remove transfers it added", torrentId)

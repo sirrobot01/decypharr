@@ -331,11 +331,21 @@ func TestProfileSlotsAndDelete(t *testing.T) {
 }
 
 func TestDeleteNotRemoved(t *testing.T) {
+	var statusCalls int
 	hw := testHighway(t, func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		switch {
+		case r.Method == http.MethodDelete && q.Get("id") == "13":
+			writeJSON(w, 200, `{"removed":false,"reason":"not_found"}`)
+		case r.Method == http.MethodDelete && q.Get("id") == "14":
+			writeJSON(w, 200, `{"removed":false,"reason":"not_owner"}`)
 		case r.Method == http.MethodDelete:
+			// Older servers without "reason".
 			writeJSON(w, 200, `{"removed":false}`)
+		case q.Get("id") == "12":
+			statusCalls++
+			// Still there: the token was not allowed to remove it.
+			writeJSON(w, 200, `{"id":"12","service":"torrent","name":"Other","state":"completed","files":[]}`)
 		case q.Get("id") == "12":
 			// Still there: the token was not allowed to remove it.
 			writeJSON(w, 200, `{"id":"12","service":"torrent","name":"Other","state":"completed","files":[]}`)
@@ -349,5 +359,19 @@ func TestDeleteNotRemoved(t *testing.T) {
 	}
 	if err := hw.DeleteTorrent("12"); err == nil || !strings.Contains(err.Error(), "delete_self") {
 		t.Fatalf("DeleteTorrent(not allowed) error = %v", err)
+	}
+	if statusCalls != 1 {
+		t.Fatalf("status lookups without reason = %d, want 1", statusCalls)
+	}
+
+	// With "reason" no extra status lookup is needed.
+	if err := hw.DeleteTorrent("13"); err != nil {
+		t.Fatalf("DeleteTorrent(reason not_found) error = %v", err)
+	}
+	if err := hw.DeleteTorrent("14"); err == nil || !strings.Contains(err.Error(), "delete_self") {
+		t.Fatalf("DeleteTorrent(reason not_owner) error = %v", err)
+	}
+	if statusCalls != 1 {
+		t.Fatalf("status lookups with reason = %d, want 1", statusCalls)
 	}
 }
