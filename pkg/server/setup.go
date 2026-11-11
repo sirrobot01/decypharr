@@ -146,6 +146,7 @@ func (s *Server) setupCompleteHandler(w http.ResponseWriter, r *http.Request) {
 				"debridlink": true,
 				"torbox":     true,
 				"premiumize": true,
+				"highway":    true,
 			}
 
 			if !validProviders[req.Debrid.Provider] {
