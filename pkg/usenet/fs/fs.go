@@ -37,7 +37,6 @@ type FS struct {
 	ctx               context.Context
 	volumes           *xsync.Map[string, *types.Volume]
 	client            *nntp.Client // Connection client for all readers
-	maxConcurrent     int          // Scheduler width for standalone readers
 	prefetchSize      int64        // Prefetch size in bytes
 	bodyPipelineDepth int
 	diskPath          string
@@ -62,7 +61,7 @@ func WithPools(pools *reader.Pools) Option { return func(f *FS) { f.pools = pool
 
 // NewFS creates a new filesystem backed by the provided connection nntpClient.
 // prefetchSize is the amount of data to prefetch ahead in bytes (e.g., 16*1024*1024 for 16MB)
-func NewFS(ctx context.Context, client *nntp.Client, maxConcurrent int, prefetchSize int64, volumes []*types.Volume, logger zerolog.Logger, opts ...Option) (*FS, error) {
+func NewFS(ctx context.Context, client *nntp.Client, prefetchSize int64, volumes []*types.Volume, logger zerolog.Logger, opts ...Option) (*FS, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -76,7 +75,6 @@ func NewFS(ctx context.Context, client *nntp.Client, maxConcurrent int, prefetch
 		ctx:               ctx,
 		volumes:           xsync.NewMap[string, *types.Volume](),
 		client:            client,
-		maxConcurrent:     maxConcurrent,
 		prefetchSize:      prefetchSize,
 		bodyPipelineDepth: usenetConfig.BodyPipelineDepth,
 		diskPath:          usenetConfig.DiskPath,
@@ -125,7 +123,6 @@ func (f *FS) Open(name string) (fs.File, error) {
 		info:              info,
 		ctx:               f.ctx,
 		manager:           f.client,
-		maxConcurrent:     f.maxConcurrent,
 		prefetchSize:      f.prefetchSize,
 		bodyPipelineDepth: f.bodyPipelineDepth,
 		diskPath:          f.diskPath,
@@ -233,14 +230,12 @@ func (f *FS) createNewReaderForVolume(vol *types.Volume) (PrefetchableReaderAt, 
 
 	// Configure the new reader
 	readerConfig := reader.DefaultConfig()
-	readerConfig.MaxConnections = f.maxConcurrent
 	readerConfig.PrefetchAhead = reader.PrefetchAheadSegments(f.prefetchSize, segments)
 	readerConfig.BodyPipelineDepth = f.bodyPipelineDepth
 	readerConfig.DiskPath = f.diskPath
 	readerConfig.Retention = f.retention
 	readerConfig.Scheduler = f.scheduler
 	readerOptions := []reader.Option{
-		reader.WithMaxConnections(readerConfig.MaxConnections),
 		reader.WithPrefetchAhead(readerConfig.PrefetchAhead),
 		reader.WithBodyPipelineDepth(readerConfig.BodyPipelineDepth),
 		reader.WithDiskPath(readerConfig.DiskPath),

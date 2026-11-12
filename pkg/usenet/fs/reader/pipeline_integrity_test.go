@@ -216,7 +216,7 @@ func TestPipelineAcceptedBufferRemainsPrivateDuringRecovery(t *testing.T) {
 			ctx, cancel := context.WithTimeout(sr.ctx, 5*time.Second)
 			defer cancel()
 			finished := make(chan error, 1)
-			if !sr.fetcher.submit(ctx, priorityPrefetch, func() { finished <- sr.fetcher.fetchPrefetchBatch(ctx, []int{0, 1}) }, nil) {
+			if !sr.fetcher.submit(priorityPrefetch, 0, func() { finished <- sr.fetcher.fetchPrefetchBatch(ctx, []int{0, 1}) }, nil) {
 				t.Fatal("submission failed")
 			}
 			select {

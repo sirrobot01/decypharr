@@ -1521,10 +1521,7 @@ class ConfigManager {
 
         return {
             providers: providers,
-            max_connections: parseInt(document.querySelector('[name="usenet.max_connections"]')?.value) || 15,
-            processing_max_connections: parseInt(document.querySelector('[name="usenet.processing_max_connections"]')?.value)
-                || parseInt(document.querySelector('[name="usenet.max_connections"]')?.value)
-                || 15,
+            processing_max_connections: parseInt(document.querySelector('[name="usenet.processing_max_connections"]')?.value) || 15,
             read_ahead: document.querySelector('[name="usenet.read_ahead"]').value || "16MB",
             body_pipeline_depth: Math.min(4, Math.max(1,
                 parseInt(document.querySelector('[name="usenet.body_pipeline_depth"]')?.value, 10) || 2)),
@@ -2375,7 +2372,6 @@ class ConfigManager {
 
         // Populate stream settings
         const streamFields = {
-            'max_connections': usenet.max_connections,
             'processing_max_connections': usenet.processing_max_connections,
             'read_ahead': usenet.read_ahead,
             'body_pipeline_depth': usenet.body_pipeline_depth ?? 2,

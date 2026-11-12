@@ -179,7 +179,6 @@ Increase connection limits:
 {
   "max_active_downloads": 5,
   "usenet": {
-    "max_connections": 20,
     "processing_max_connections": 20
   }
 }

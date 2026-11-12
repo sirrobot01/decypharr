@@ -181,8 +181,8 @@ func (c *Cursor) Close() {
 	sr.cursorMu.Lock()
 	delete(sr.cursors, c)
 	sr.cursorMu.Unlock()
-	// Hints this cursor queued would otherwise run ahead of every later one
-	// in the shared FIFO, downloading a window nobody reads.
+	// Hints this cursor queued would otherwise keep downloading a window
+	// nobody reads.
 	sr.cancelQueuedPrefetch()
 	sr.publishConsumedFloor()
 }

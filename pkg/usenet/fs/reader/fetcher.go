@@ -29,6 +29,7 @@ type SegmentFetcher struct {
 	// Background prefetch
 	scheduler      *FetchScheduler
 	ownedScheduler bool
+	queue          *prefetchQueue
 	prefetchQueued []atomic.Uint64 // one deduplication bit per segment
 	prefetchGen    atomic.Uint64
 	taskMu         sync.Mutex
@@ -89,8 +90,15 @@ func NewSegmentFetcher(
 		sf.scheduler = NewFetchScheduler(workers)
 		sf.ownedScheduler = true
 	}
+	sf.queue = sf.scheduler.newQueue(sf.lead)
 
 	return sf
+}
+
+// lead reports the bytes between the slowest consumer and segIdx. The
+// scheduler calls it under its lock, so it must stay lock-free.
+func (sf *SegmentFetcher) lead(segIdx int) int64 {
+	return max(sf.cache.SegmentOffset(segIdx)-sf.cache.consumedFloor.Load(), 0)
 }
 
 // Fetch schedules a foreground download and waits for it. Provider concurrency
@@ -114,7 +122,7 @@ func (sf *SegmentFetcher) schedule(ctx context.Context, priority fetchPriority, 
 		done <- run()
 		return done
 	}
-	if !sf.submit(ctx, priority, func() { done <- run() }, func() { done <- ErrCacheClosed }) {
+	if !sf.submit(priority, 0, func() { done <- run() }, func() { done <- ErrCacheClosed }) {
 		if err := ctx.Err(); err != nil {
 			done <- err
 		} else if err := sf.ctx.Err(); err != nil {
@@ -140,7 +148,9 @@ func (sf *SegmentFetcher) waitScheduled(ctx context.Context, done <-chan error) 
 	}
 }
 
-func (sf *SegmentFetcher) submit(ctx context.Context, priority fetchPriority, run, drop func()) bool {
+// submit hands work to the scheduler. seg orders read-ahead within this
+// reader's queue; demand and probe work ignore it.
+func (sf *SegmentFetcher) submit(priority fetchPriority, seg int, run, drop func()) bool {
 	sf.taskMu.Lock()
 	if sf.closing {
 		sf.taskMu.Unlock()
@@ -149,19 +159,29 @@ func (sf *SegmentFetcher) submit(ctx context.Context, priority fetchPriority, ru
 	sf.taskWg.Add(1)
 	sf.taskMu.Unlock()
 
-	if sf.scheduler.submit(ctx, priority, func() {
-		defer sf.taskWg.Done()
-		run()
-	}, func() {
-		defer sf.taskWg.Done()
-		if drop != nil {
-			drop()
-		}
-	}) {
-		return true
+	task := scheduledFetch{
+		run: func() {
+			defer sf.taskWg.Done()
+			run()
+		},
+		drop: func() {
+			defer sf.taskWg.Done()
+			if drop != nil {
+				drop()
+			}
+		},
+		seg: seg,
 	}
-	sf.taskWg.Done()
-	return false
+	var ok bool
+	if priority == priorityPrefetch {
+		ok = sf.scheduler.submitPrefetch(sf.queue, task)
+	} else {
+		ok = sf.scheduler.submitDemand(task)
+	}
+	if !ok {
+		sf.taskWg.Done()
+	}
+	return ok
 }
 
 // fetchDirect performs one deduplicated fetch inside a scheduler worker.
@@ -420,7 +440,7 @@ func (sf *SegmentFetcher) queueSpeculative(segIdx int, priority fetchPriority) {
 		return
 	}
 	gen := sf.prefetchGen.Load()
-	if !sf.submit(sf.ctx, priority, func() {
+	if !sf.submit(priority, segIdx, func() {
 		if gen != sf.prefetchGen.Load() {
 			return
 		}
@@ -473,7 +493,7 @@ func (sf *SegmentFetcher) queueSpeculativeBatch(startSeg, endSeg int, priority f
 	}
 	batch := batchStorage[:batchLen]
 	gen := sf.prefetchGen.Load()
-	if !sf.submit(sf.ctx, priority, func() {
+	if !sf.submit(priority, batch[0], func() {
 		if gen != sf.prefetchGen.Load() {
 			return
 		}
@@ -757,8 +777,9 @@ func (sf *SegmentFetcher) PrepareSegments(ctx context.Context, startSeg, endSeg 
 	}
 }
 
-// CancelPendingPrefetch invalidates queued work in O(bitmap words). Tasks
-// already running finish and remain reusable; stale queued tasks become no-ops.
+// CancelPendingPrefetch drops this reader's queued read-ahead. Tasks already
+// running finish and remain reusable; a task taken just before the cancel
+// sees the new generation and does nothing.
 func (sf *SegmentFetcher) CancelPendingPrefetch() {
 	sf.prefetchGen.Add(1)
 	var cancelled int64
@@ -768,6 +789,7 @@ func (sf *SegmentFetcher) CancelPendingPrefetch() {
 	if cancelled > 0 {
 		sf.stats.PrefetchCancelled.Add(cancelled)
 	}
+	sf.scheduler.clearQueue(sf.queue)
 }
 
 func (sf *SegmentFetcher) pendingPrefetch() int {
@@ -843,6 +865,7 @@ func (sf *SegmentFetcher) Close() {
 	sf.closing = true
 	sf.taskMu.Unlock()
 	sf.cancel()
+	sf.scheduler.removeQueue(sf.queue)
 	if sf.ownedScheduler {
 		sf.scheduler.Close()
 	}

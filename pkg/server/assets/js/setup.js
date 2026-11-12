@@ -73,7 +73,6 @@ class SetupWizard {
             document.getElementById('usenet-username').value = usenet.username || '';
             document.getElementById('usenet-password').value = usenet.password || '';
             document.getElementById('usenet-max-connections').value = usenet.max_connections || '';
-            document.getElementById('usenet-max-connections-per-reader').value = usenet.reader_connections || '';
             document.getElementById('usenet-ssl').checked = !!usenet.ssl;
         }
 
@@ -264,7 +263,6 @@ class SetupWizard {
         const username = document.getElementById('usenet-username').value.trim();
         const password = document.getElementById('usenet-password').value.trim();
         const maxConnections = document.getElementById('usenet-max-connections').value.trim();
-        const maxConnectionsPerReader = document.getElementById('usenet-max-connections-per-reader').value.trim();
         const useSSL = document.getElementById('usenet-ssl').checked;
 
         // If any field is filled, validate all required fields
@@ -302,21 +300,12 @@ class SetupWizard {
                 }
             }
 
-            if (maxConnectionsPerReader) {
-                const maxConnsPerReader = parseInt(maxConnectionsPerReader);
-                if (isNaN(maxConnsPerReader) || maxConnsPerReader < 1 || maxConnsPerReader > 50) {
-                    this.showError('Connections per stream must be between 1 and 50');
-                    return;
-                }
-            }
-
             this.setupState.step3 = {
                 host: host,
                 port: parseInt(port),
                 username: username,
                 password: password,
                 max_connections: maxConnections ? parseInt(maxConnections) : 30,
-                reader_connections: maxConnectionsPerReader ? parseInt(maxConnectionsPerReader) : 15,
                 ssl: useSSL,
                 skip_usenet: false,
             };
@@ -453,7 +442,6 @@ class SetupWizard {
                 <p><strong>Server:</strong> ${this.setupState.step3.host}:${this.setupState.step3.port}</p>
                 <p><strong>Username:</strong> ${this.setupState.step3.username}</p>
                 <p><strong>Max Connections:</strong> ${this.setupState.step3.max_connections}</p>
-                <p><strong>Connections Per Stream:</strong> ${this.setupState.step3.reader_connections}</p>
                 <p><strong>Use SSL:</strong> ${this.setupState.step3.ssl ? 'Yes' : 'No'}</p>
             `;
         } else {

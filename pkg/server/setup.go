@@ -92,14 +92,13 @@ type SetupCompleteRequest struct {
 		Skip     bool   `json:"skip_debrid,omitempty"`
 	} `json:"debrid"`
 	Usenet struct {
-		Host              string `json:"host,omitempty"`
-		Port              int    `json:"port,omitempty"`
-		Username          string `json:"username,omitempty"`
-		Password          string `json:"password,omitempty"`
-		MaxConnections    int    `json:"max_connections,omitempty"`
-		ReaderConnections int    `json:"reader_connections,omitempty"`
-		SSL               bool   `json:"ssl,omitempty"`
-		Skip              bool   `json:"skip_usenet,omitempty"`
+		Host           string `json:"host,omitempty"`
+		Port           int    `json:"port,omitempty"`
+		Username       string `json:"username,omitempty"`
+		Password       string `json:"password,omitempty"`
+		MaxConnections int    `json:"max_connections,omitempty"`
+		SSL            bool   `json:"ssl,omitempty"`
+		Skip           bool   `json:"skip_usenet,omitempty"`
 	} `json:"usenet"`
 	Download struct {
 		DownloadFolder string `json:"download_folder"`
@@ -180,11 +179,6 @@ func (s *Server) setupCompleteHandler(w http.ResponseWriter, r *http.Request) {
 				providerMax = 30
 			}
 
-			readerConnections := req.Usenet.ReaderConnections
-			if readerConnections <= 0 {
-				readerConnections = 15
-			}
-
 			cfg.Usenet.Providers = []config.UsenetProvider{{
 				Host:           req.Usenet.Host,
 				Port:           req.Usenet.Port,
@@ -194,8 +188,6 @@ func (s *Server) setupCompleteHandler(w http.ResponseWriter, r *http.Request) {
 				SSL:            req.Usenet.SSL,
 				Priority:       1,
 			}}
-			cfg.Usenet.MaxConnections = readerConnections
-			cfg.Usenet.ProcessingMaxConnections = readerConnections
 		} else {
 			cfg.Usenet.Providers = nil
 		}

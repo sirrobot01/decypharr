@@ -144,7 +144,6 @@ Array of Debrid services:
         "priority": 1
       }
     ],
-    "max_connections": 15,
     "processing_max_connections": 15,
     "read_ahead": "16MB",
     "body_pipeline_depth": 2,
@@ -162,8 +161,7 @@ Array of Debrid services:
 | Field                         | Type   | Description                     | Default                      |
 |-------------------------------|--------|---------------------------------|------------------------------|
 | `providers`                   | array  | NNTP server configurations      | `[]`                         |
-| `max_connections`             | int    | Global streaming fetch-worker limit | `15`                      |
-| `processing_max_connections`  | int    | Max connections per file for parsing and NZB downloads | Same as `max_connections` |
+| `processing_max_connections`  | int    | Max connections per file for parsing and NZB downloads | `15` |
 | `read_ahead`                  | string | Prefetch buffer size            | `16MB`                       |
 | `body_pipeline_depth`         | int    | Ordered read-ahead `BODY` commands per connection (`1` disables pipelining, range 1-4) | `2` |
 | `stream_backup_wait`          | string | Wait before urgent playback may use a busy-tier backup provider; `0` disables spillover | `0` |
@@ -544,7 +542,7 @@ DEBRIDS__0__PROVIDER=realdebrid
 DEBRIDS__0__API_KEY=your_key
 
 # Usenet
-USENET__MAX_CONNECTIONS=20
+USENET__PROCESSING_MAX_CONNECTIONS=20
 USENET__BODY_PIPELINE_DEPTH=2
 USENET__STREAM_BACKUP_WAIT=250ms
 USENET__PROVIDERS__0__HOST=news.provider.com

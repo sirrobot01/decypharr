@@ -54,9 +54,9 @@ func (u UsenetProvider) ID() string {
 // Usenet configuration for usenet streaming and downloading
 type Usenet struct {
 	Providers []UsenetProvider `json:"providers,omitempty"` // Usenet provider configurations
-	// Streaming and processing concurrency.
-	MaxConnections           int `json:"max_connections,omitempty"`            // Provider-wide streaming fetch limit (default: 15)
-	ProcessingMaxConnections int `json:"processing_max_connections,omitempty"` // Maximum concurrent connections per file for parsing and NZB downloads (default: max_connections)
+	// Streaming uses three quarters of the primary providers' connections;
+	// processing is bounded per file.
+	ProcessingMaxConnections int `json:"processing_max_connections,omitempty"` // Maximum concurrent connections per file for parsing and NZB downloads (default: 15)
 	// Read-ahead configuration
 	ReadAhead         string `json:"read_ahead,omitempty"`         // Bytes to prefetch ahead of streaming reads e.g. "16MB", "32MB" (default: 16MB)
 	BodyPipelineDepth int    `json:"body_pipeline_depth,omitzero"` // Speculative BODY commands sent per connection (1 disables, default: 2, max: 4)
@@ -111,16 +111,12 @@ func (u Usenet) UsesDiskBuffer() bool {
 }
 
 func (u Usenet) IsZero() bool {
-	return len(u.Providers) == 0 && u.MaxConnections == 0 && u.ProcessingMaxConnections == 0 && u.ReadAhead == "" && u.BodyPipelineDepth == 0 && u.StreamBackupWait == "" && u.ProcessingTimeout == "" && !u.UsesDiskBuffer()
+	return len(u.Providers) == 0 && u.ProcessingMaxConnections == 0 && u.ReadAhead == "" && u.BodyPipelineDepth == 0 && u.StreamBackupWait == "" && u.ProcessingTimeout == "" && !u.UsesDiskBuffer()
 }
 
 func (c *Config) updateUsenetConfig() {
-	// Provider-wide streaming scheduler width.
-	if c.Usenet.MaxConnections == 0 {
-		c.Usenet.MaxConnections = 15
-	}
 	if c.Usenet.ProcessingMaxConnections <= 0 {
-		c.Usenet.ProcessingMaxConnections = c.Usenet.MaxConnections
+		c.Usenet.ProcessingMaxConnections = 15
 	}
 
 	// Read-ahead default - bytes to prefetch ahead of reads
@@ -211,17 +207,7 @@ func validateUsenet(providers []UsenetProvider) error {
 }
 
 func (c *Config) applyUsenetEnvVars() {
-	// Per-stream configuration
-	processingMaxConns := getEnv("USENET__PROCESSING_MAX_CONNECTIONS")
-	if maxConns := getEnv("USENET__MAX_CONNECTIONS"); maxConns != "" {
-		if v, err := strconv.Atoi(maxConns); err == nil {
-			c.Usenet.MaxConnections = v
-			if processingMaxConns == "" {
-				c.Usenet.ProcessingMaxConnections = v
-			}
-		}
-	}
-	if processingMaxConns != "" {
+	if processingMaxConns := getEnv("USENET__PROCESSING_MAX_CONNECTIONS"); processingMaxConns != "" {
 		if v, err := strconv.Atoi(processingMaxConns); err == nil {
 			c.Usenet.ProcessingMaxConnections = v
 		}

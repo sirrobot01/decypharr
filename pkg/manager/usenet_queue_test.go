@@ -28,7 +28,6 @@ func TestAddNewNZBQueuesBeforeNetworkParsing(t *testing.T) {
 			Port:           1,
 			MaxConnections: 1,
 		}},
-		MaxConnections:           1,
 		ProcessingMaxConnections: 1,
 	}
 	t.Cleanup(func() { cfg.Usenet = oldUsenet })

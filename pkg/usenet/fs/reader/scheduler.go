@@ -1,9 +1,7 @@
 package reader
 
 import (
-	"context"
 	"sync"
-	"sync/atomic"
 )
 
 type fetchPriority uint8
@@ -17,158 +15,199 @@ const (
 type scheduledFetch struct {
 	run  func()
 	drop func()
+	seg  int // first segment of a prefetch task; orders it within its queue
+}
+
+// prefetchQueue holds one reader's pending read-ahead tasks.
+type prefetchQueue struct {
+	tasks []scheduledFetch
+	// lead reports how many bytes of the file lie between the reader's
+	// consumer and seg. A small lead means the consumer is close to a stall.
+	lead       func(seg int) int64
+	lastServed uint64
+	removed    bool
 }
 
 // FetchScheduler bounds NNTP work across every reader sharing a client.
-// Foreground reads use the demand queue; speculative work uses prefetch.
+//
+// Demand fetches (a read that is blocked now) run first, in arrival order.
+// Read-ahead waits in one queue per reader. A free worker takes the next task
+// of the reader whose consumer is closest to its next missing segment, so a
+// stream near a stall is served before a stream with a full buffer. One
+// reader alone can use every worker; several readers share them by need.
 type FetchScheduler struct {
-	demand   chan scheduledFetch
-	prefetch chan scheduledFetch
-	stop     chan struct{}
-	workers  int
-	wg       sync.WaitGroup
-	closed   atomic.Bool
-	submitMu sync.Mutex
-	submitWg sync.WaitGroup
+	mu sync.Mutex
+	// demandWake wakes the demand-only worker; anyWake wakes the others.
+	demandWake sync.Cond
+	anyWake    sync.Cond
+	demand     []scheduledFetch
+	queues     []*prefetchQueue
+	served     uint64
+	closed     bool
+	workers    int
+	wg         sync.WaitGroup
 }
 
-// NewFetchScheduler starts workers matching the real provider concurrency.
+// NewFetchScheduler starts workers matching the streaming connection budget.
 // A zero worker scheduler is useful for state-only tests.
 func NewFetchScheduler(workers int) *FetchScheduler {
-	if workers < 0 {
-		workers = 0
-	}
-	s := &FetchScheduler{
-		demand:   make(chan scheduledFetch, max(64, workers*16)),
-		prefetch: make(chan scheduledFetch, max(256, workers*32)),
-		stop:     make(chan struct{}),
-		workers:  workers,
-	}
-	reserved := 0
-	if workers > 1 {
-		reserved = 1
-	}
+	workers = max(workers, 0)
+	s := &FetchScheduler{workers: workers}
+	s.demandWake.L = &s.mu
+	s.anyWake.L = &s.mu
+	// With more than one worker, keep one for demand so a blocked read never
+	// waits behind a full set of read-ahead fetches.
 	for i := range workers {
-		s.wg.Add(1)
-		go s.worker(i >= reserved)
+		prefetch := workers == 1 || i > 0
+		s.wg.Go(func() { s.worker(prefetch) })
 	}
 	return s
 }
 
-func (s *FetchScheduler) worker(allowPrefetch bool) {
-	defer s.wg.Done()
+func (s *FetchScheduler) worker(prefetch bool) {
 	for {
-		if !allowPrefetch {
-			select {
-			case <-s.stop:
-				return
-			case task := <-s.demand:
-				task.run()
+		task, ok := s.next(prefetch)
+		if !ok {
+			return
+		}
+		task.run()
+	}
+}
+
+func (s *FetchScheduler) next(prefetch bool) (scheduledFetch, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for !s.closed {
+		if len(s.demand) > 0 {
+			task := s.demand[0]
+			s.demand[0] = scheduledFetch{}
+			s.demand = s.demand[1:]
+			return task, true
+		}
+		if prefetch {
+			if q := s.mostUrgentLocked(); q != nil {
+				task := q.tasks[0]
+				q.tasks[0] = scheduledFetch{}
+				q.tasks = q.tasks[1:]
+				s.served++
+				q.lastServed = s.served
+				return task, true
 			}
-			continue
-		}
-
-		select {
-		case <-s.stop:
-			return
-		default:
-		}
-
-		// Prefer demand already waiting before accepting speculative work.
-		select {
-		case task := <-s.demand:
-			task.run()
-			continue
-		default:
-		}
-
-		select {
-		case <-s.stop:
-			return
-		case task := <-s.demand:
-			task.run()
-		case task := <-s.prefetch:
-			task.run()
+			s.anyWake.Wait()
+		} else {
+			s.demandWake.Wait()
 		}
 	}
+	return scheduledFetch{}, false
 }
 
-func (s *FetchScheduler) submit(ctx context.Context, priority fetchPriority, run, drop func()) bool {
-	if s == nil || run == nil {
-		return false
-	}
-	s.submitMu.Lock()
-	if s.closed.Load() {
-		s.submitMu.Unlock()
-		return false
-	}
-	s.submitWg.Add(1)
-	s.submitMu.Unlock()
-	defer s.submitWg.Done()
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	task := scheduledFetch{run: run, drop: drop}
-	if priority == priorityPrefetch {
-		select {
-		case s.prefetch <- task:
-			return true
-		case <-ctx.Done():
-			return false
-		case <-s.stop:
-			return false
-		default:
-			return false
+// mostUrgentLocked returns the queue with the smallest lead. Ties go to the
+// queue served least recently, so equal streams take turns.
+func (s *FetchScheduler) mostUrgentLocked() *prefetchQueue {
+	var best *prefetchQueue
+	var bestLead int64
+	for _, q := range s.queues {
+		if len(q.tasks) == 0 {
+			continue
+		}
+		lead := q.lead(q.tasks[0].seg)
+		if best == nil || lead < bestLead || (lead == bestLead && q.lastServed < best.lastServed) {
+			best, bestLead = q, lead
 		}
 	}
-	if priority == priorityProbe {
-		select {
-		case s.demand <- task:
-			return true
-		case <-ctx.Done():
-			return false
-		case <-s.stop:
-			return false
-		default:
-			return false
-		}
-	}
-	select {
-	case s.demand <- task:
-		return true
-	case <-ctx.Done():
-		return false
-	case <-s.stop:
-		return false
-	}
+	return best
 }
 
-// Close stops accepting work and waits for active fetches. It is idempotent.
+// submitDemand queues a fetch ahead of all read-ahead.
+func (s *FetchScheduler) submitDemand(task scheduledFetch) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	s.demand = append(s.demand, task)
+	s.demandWake.Signal()
+	s.anyWake.Signal()
+	return true
+}
+
+// submitPrefetch queues a read-ahead fetch on q.
+func (s *FetchScheduler) submitPrefetch(q *prefetchQueue, task scheduledFetch) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || q.removed {
+		return false
+	}
+	q.tasks = append(q.tasks, task)
+	s.anyWake.Signal()
+	return true
+}
+
+// newQueue registers a read-ahead queue for one reader.
+func (s *FetchScheduler) newQueue(lead func(seg int) int64) *prefetchQueue {
+	q := &prefetchQueue{lead: lead}
+	s.mu.Lock()
+	s.queues = append(s.queues, q)
+	s.mu.Unlock()
+	return q
+}
+
+// clearQueue drops the tasks pending on q.
+func (s *FetchScheduler) clearQueue(q *prefetchQueue) {
+	s.mu.Lock()
+	tasks := q.tasks
+	q.tasks = nil
+	s.mu.Unlock()
+	dropAll(tasks)
+}
+
+// removeQueue unregisters q and drops its pending tasks.
+func (s *FetchScheduler) removeQueue(q *prefetchQueue) {
+	s.mu.Lock()
+	for i, queued := range s.queues {
+		if queued == q {
+			s.queues[i] = s.queues[len(s.queues)-1]
+			s.queues[len(s.queues)-1] = nil
+			s.queues = s.queues[:len(s.queues)-1]
+			break
+		}
+	}
+	q.removed = true
+	tasks := q.tasks
+	q.tasks = nil
+	s.mu.Unlock()
+	dropAll(tasks)
+}
+
+// Close stops accepting work, waits for running fetches, and drops the rest.
+// It is idempotent.
 func (s *FetchScheduler) Close() {
-	if s == nil {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
 		return
 	}
-	s.submitMu.Lock()
-	if !s.closed.CompareAndSwap(false, true) {
-		s.submitMu.Unlock()
-		return
-	}
-	s.submitMu.Unlock()
-	s.submitWg.Wait()
-	close(s.stop)
+	s.closed = true
+	s.demandWake.Broadcast()
+	s.anyWake.Broadcast()
+	s.mu.Unlock()
 	s.wg.Wait()
-	for {
-		select {
-		case task := <-s.demand:
-			if task.drop != nil {
-				task.drop()
-			}
-		case task := <-s.prefetch:
-			if task.drop != nil {
-				task.drop()
-			}
-		default:
-			return
+
+	s.mu.Lock()
+	tasks := s.demand
+	s.demand = nil
+	for _, q := range s.queues {
+		tasks = append(tasks, q.tasks...)
+		q.tasks = nil
+	}
+	s.mu.Unlock()
+	dropAll(tasks)
+}
+
+func dropAll(tasks []scheduledFetch) {
+	for _, task := range tasks {
+		if task.drop != nil {
+			task.drop()
 		}
 	}
 }

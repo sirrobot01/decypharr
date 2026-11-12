@@ -98,15 +98,17 @@ use `"0"` to disable spillover.
 ```json
 {
   "usenet": {
-    "max_connections": 15,
     "processing_max_connections": 15
   }
 }
 ```
 
-- `max_connections`: Per-file streaming connection limit
-- `processing_max_connections`: Per-file parsing and NZB download connection limit
-- Provider `max_connections`: Per-provider limit
+- Provider `max_connections`: The connection limit for one provider.
+- `processing_max_connections`: The connection limit for one file during parsing and NZB downloads.
+
+Streaming uses 75% of the connections of your primary providers. Decypharr keeps the remaining 25% for imports, repairs, and health checks. Backup providers count only when you have no primary provider.
+
+All streams share these connections. When a stream has less data ready ahead of the player, Decypharr gives it the next free connection first. One stream alone can use all streaming connections.
 
 **Example:**
 
@@ -228,9 +230,8 @@ See [Sabnzbd Integration](./sabnzbd/) for details.
 
 ### Slow Streaming
 
-1. Increase `max_connections` per provider
-2. Increase global `max_connections`
-3. Increase `read_ahead` buffer
+1. Increase `max_connections` for each provider. This also increases the streaming connections.
+2. Increase `read_ahead`.
 
 ### Processing Timeouts
 
@@ -262,7 +263,6 @@ Full Usenet config with optimal settings:
         "priority": 1
       }
     ],
-    "max_connections": 15,
     "processing_max_connections": 15,
     "read_ahead": "32MB",
     "body_pipeline_depth": 2,

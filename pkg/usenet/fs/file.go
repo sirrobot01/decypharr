@@ -26,7 +26,6 @@ type File struct {
 	readerOnce        sync.Once                              // Ensures streaming reader created exactly once
 	readerErr         error                                  // Error from streaming reader creation
 	manager           *nntp.Client                           // Connection manager
-	maxConcurrent     int                                    // Max concurrent connections for this file's reader
 	prefetchSize      int64                                  // Prefetch size in bytes
 	bodyPipelineDepth int
 	diskPath          string
@@ -170,7 +169,6 @@ func (vf *File) getOrCreateStreamingReader() *reader.StreamingReader {
 
 		// Configure the reader
 		readerConfig := reader.DefaultConfig()
-		readerConfig.MaxConnections = vf.maxConcurrent
 		readerConfig.PrefetchAhead = reader.PrefetchAheadSegments(vf.prefetchSize, segments)
 		readerConfig.BodyPipelineDepth = vf.bodyPipelineDepth
 		readerConfig.DiskPath = vf.diskPath
@@ -186,7 +184,6 @@ func (vf *File) getOrCreateStreamingReader() *reader.StreamingReader {
 				vf.manager,
 				segments,
 				encConfig,
-				reader.WithMaxConnections(readerConfig.MaxConnections),
 				reader.WithPrefetchAhead(readerConfig.PrefetchAhead),
 				reader.WithBodyPipelineDepth(readerConfig.BodyPipelineDepth),
 				reader.WithDiskPath(readerConfig.DiskPath),
@@ -199,7 +196,6 @@ func (vf *File) getOrCreateStreamingReader() *reader.StreamingReader {
 				vf.ctx,
 				vf.manager,
 				segments,
-				reader.WithMaxConnections(readerConfig.MaxConnections),
 				reader.WithPrefetchAhead(readerConfig.PrefetchAhead),
 				reader.WithBodyPipelineDepth(readerConfig.BodyPipelineDepth),
 				reader.WithDiskPath(readerConfig.DiskPath),
@@ -276,7 +272,6 @@ func (vf *File) newReaderForRange(start, end int64) (io.ReadCloser, error) {
 
 	// Configure the reader
 	readerConfig := reader.DefaultConfig()
-	readerConfig.MaxConnections = vf.maxConcurrent
 	readerConfig.PrefetchAhead = reader.PrefetchAheadSegments(vf.prefetchSize, segments)
 	readerConfig.BodyPipelineDepth = vf.bodyPipelineDepth
 	readerConfig.DiskPath = vf.diskPath
@@ -292,7 +287,6 @@ func (vf *File) newReaderForRange(start, end int64) (io.ReadCloser, error) {
 			vf.manager,
 			segments,
 			encConfig,
-			reader.WithMaxConnections(readerConfig.MaxConnections),
 			reader.WithPrefetchAhead(readerConfig.PrefetchAhead),
 			reader.WithBodyPipelineDepth(readerConfig.BodyPipelineDepth),
 			reader.WithDiskPath(readerConfig.DiskPath),
@@ -305,7 +299,6 @@ func (vf *File) newReaderForRange(start, end int64) (io.ReadCloser, error) {
 			vf.ctx,
 			vf.manager,
 			segments,
-			reader.WithMaxConnections(readerConfig.MaxConnections),
 			reader.WithPrefetchAhead(readerConfig.PrefetchAhead),
 			reader.WithBodyPipelineDepth(readerConfig.BodyPipelineDepth),
 			reader.WithDiskPath(readerConfig.DiskPath),

@@ -265,17 +265,7 @@ Increase timeout:
 
 ### "Too many connections"
 
-Provider limit exceeded. Reduce:
-
-```json
-{
-  "usenet": {
-    "max_connections": 10
-  }
-}
-```
-
-And per-provider:
+The provider limit is exceeded. Set each provider's `max_connections` to the limit of your account or less:
 
 ```json
 {
@@ -409,8 +399,7 @@ For Rclone:
 ```json
 {
   "usenet": {
-    "read_ahead": "32MB",
-    "max_connections": 20
+    "read_ahead": "32MB"
   }
 }
 ```

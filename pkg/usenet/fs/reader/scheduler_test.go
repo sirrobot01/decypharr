@@ -1,48 +1,99 @@
 package reader
 
 import (
-	"context"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
 )
 
-func TestFetchSchedulerRunsDemandBeforeQueuedPrefetch(t *testing.T) {
-	scheduler := NewFetchScheduler(1)
-	t.Cleanup(scheduler.Close)
+func zeroLead(int) int64 { return 0 }
 
+// blockWorker occupies the scheduler's only worker until the returned func
+// is called, so later submissions queue up.
+func blockWorker(t *testing.T, s *FetchScheduler) func() {
+	t.Helper()
 	started := make(chan struct{})
 	release := make(chan struct{})
-	order := make(chan string, 3)
-	if !scheduler.submit(context.Background(), priorityPrefetch, func() {
-		close(started)
-		<-release
-		order <- "active-prefetch"
-	}, nil) {
-		t.Fatal("submit active prefetch")
+	if !s.submitDemand(scheduledFetch{run: func() { close(started); <-release }}) {
+		t.Fatal("submit blocker")
 	}
 	<-started
-	if !scheduler.submit(context.Background(), priorityPrefetch, func() { order <- "queued-prefetch" }, nil) {
-		t.Fatal("submit queued prefetch")
+	return func() { close(release) }
+}
+
+func TestFetchSchedulerRunsDemandBeforeQueuedPrefetch(t *testing.T) {
+	s := NewFetchScheduler(1)
+	t.Cleanup(s.Close)
+	q := s.newQueue(zeroLead)
+
+	release := blockWorker(t, s)
+	order := make(chan string, 2)
+	if !s.submitPrefetch(q, scheduledFetch{run: func() { order <- "prefetch" }}) {
+		t.Fatal("submit prefetch")
 	}
-	if !scheduler.submit(context.Background(), priorityDemand, func() { order <- "demand" }, nil) {
+	if !s.submitDemand(scheduledFetch{run: func() { order <- "demand" }}) {
 		t.Fatal("submit demand")
 	}
-	close(release)
+	release()
 
-	got := []string{<-order, <-order, <-order}
-	want := []string{"active-prefetch", "demand", "queued-prefetch"}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("execution order = %v, want %v", got, want)
+	if got := []string{<-order, <-order}; !slices.Equal(got, []string{"demand", "prefetch"}) {
+		t.Fatalf("execution order = %v, want [demand prefetch]", got)
+	}
+}
+
+func TestFetchSchedulerServesSmallestLeadFirst(t *testing.T) {
+	s := NewFetchScheduler(1)
+	t.Cleanup(s.Close)
+	// The "full" reader has 100MB buffered ahead; the "starving" reader has 1MB.
+	full := s.newQueue(func(seg int) int64 { return 100<<20 + int64(seg) })
+	starving := s.newQueue(func(seg int) int64 { return 1<<20 + int64(seg) })
+
+	release := blockWorker(t, s)
+	order := make(chan string, 4)
+	for seg := range 2 {
+		s.submitPrefetch(full, scheduledFetch{run: func() { order <- "full" }, seg: seg})
+	}
+	for seg := range 2 {
+		s.submitPrefetch(starving, scheduledFetch{run: func() { order <- "starving" }, seg: seg})
+	}
+	release()
+
+	got := []string{<-order, <-order, <-order, <-order}
+	if want := []string{"starving", "starving", "full", "full"}; !slices.Equal(got, want) {
+		t.Fatalf("execution order = %v, want %v", got, want)
+	}
+}
+
+func TestFetchSchedulerAlternatesEqualLeads(t *testing.T) {
+	s := NewFetchScheduler(1)
+	t.Cleanup(s.Close)
+	a := s.newQueue(zeroLead)
+	b := s.newQueue(zeroLead)
+
+	release := blockWorker(t, s)
+	order := make(chan string, 6)
+	for range 3 {
+		s.submitPrefetch(a, scheduledFetch{run: func() { order <- "a" }})
+		s.submitPrefetch(b, scheduledFetch{run: func() { order <- "b" }})
+	}
+	release()
+
+	got := make([]string, 6)
+	for i := range got {
+		got[i] = <-order
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i] == got[i-1] {
+			t.Fatalf("execution order = %v, want queues to alternate", got)
 		}
 	}
 }
 
 func TestFetchSchedulerBoundsConcurrency(t *testing.T) {
 	const workers = 3
-	scheduler := NewFetchScheduler(workers)
-	t.Cleanup(scheduler.Close)
+	s := NewFetchScheduler(workers)
+	t.Cleanup(s.Close)
 
 	var active, peak atomic.Int32
 	release := make(chan struct{})
@@ -50,15 +101,19 @@ func TestFetchSchedulerBoundsConcurrency(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 12 {
 		wg.Add(1)
-		if !scheduler.submit(context.Background(), priorityDemand, func() {
-			n := active.Add(1)
-			for old := peak.Load(); n > old && !peak.CompareAndSwap(old, n); old = peak.Load() {
-			}
-			started <- struct{}{}
-			<-release
-			active.Add(-1)
-			wg.Done()
-		}, func() { wg.Done() }) {
+		task := scheduledFetch{
+			run: func() {
+				n := active.Add(1)
+				for old := peak.Load(); n > old && !peak.CompareAndSwap(old, n); old = peak.Load() {
+				}
+				started <- struct{}{}
+				<-release
+				active.Add(-1)
+				wg.Done()
+			},
+			drop: wg.Done,
+		}
+		if !s.submitDemand(task) {
 			t.Fatal("submit demand")
 		}
 	}
@@ -72,26 +127,69 @@ func TestFetchSchedulerBoundsConcurrency(t *testing.T) {
 	}
 }
 
+func TestFetchSchedulerKeepsAllQueuedPrefetch(t *testing.T) {
+	s := NewFetchScheduler(1)
+	t.Cleanup(s.Close)
+	q := s.newQueue(zeroLead)
+
+	release := blockWorker(t, s)
+	const tasks = 4096
+	var ran sync.WaitGroup
+	for seg := range tasks {
+		ran.Add(1)
+		if !s.submitPrefetch(q, scheduledFetch{run: ran.Done, seg: seg}) {
+			t.Fatalf("prefetch %d rejected", seg)
+		}
+	}
+	release()
+	ran.Wait()
+}
+
+func TestFetchSchedulerRemoveQueueDropsPending(t *testing.T) {
+	s := NewFetchScheduler(1)
+	t.Cleanup(s.Close)
+	q := s.newQueue(zeroLead)
+
+	release := blockWorker(t, s)
+	defer release()
+	var dropped atomic.Int32
+	for range 3 {
+		s.submitPrefetch(q, scheduledFetch{run: func() { t.Error("removed task ran") }, drop: func() { dropped.Add(1) }})
+	}
+	s.removeQueue(q)
+	if got := dropped.Load(); got != 3 {
+		t.Fatalf("dropped = %d, want 3", got)
+	}
+	if s.submitPrefetch(q, scheduledFetch{run: func() {}}) {
+		t.Fatal("submit to removed queue succeeded")
+	}
+}
+
 func TestFetchSchedulerCloseSettlesAcceptedTasks(t *testing.T) {
-	scheduler := NewFetchScheduler(2)
+	s := NewFetchScheduler(2)
+	q := s.newQueue(zeroLead)
 	var accepted, settled atomic.Int64
 	start := make(chan struct{})
 	var submitters sync.WaitGroup
-	for range 256 {
-		submitters.Add(1)
-		go func() {
-			defer submitters.Done()
+	for i := range 256 {
+		submitters.Go(func() {
 			<-start
-			if scheduler.submit(context.Background(), priorityPrefetch,
-				func() { settled.Add(1) }, func() { settled.Add(1) }) {
+			task := scheduledFetch{run: func() { settled.Add(1) }, drop: func() { settled.Add(1) }}
+			var ok bool
+			if i%2 == 0 {
+				ok = s.submitPrefetch(q, task)
+			} else {
+				ok = s.submitDemand(task)
+			}
+			if ok {
 				accepted.Add(1)
 			}
-		}()
+		})
 	}
 	close(start)
 	done := make(chan struct{})
 	go func() {
-		scheduler.Close()
+		s.Close()
 		close(done)
 	}()
 	submitters.Wait()

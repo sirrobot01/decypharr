@@ -62,9 +62,6 @@ func main() {
 
 	maxConcurrent := cfg.Usenet.ProcessingMaxConnections
 	if maxConcurrent <= 0 {
-		maxConcurrent = cfg.Usenet.MaxConnections
-	}
-	if maxConcurrent <= 0 {
 		maxConcurrent = 10
 	}
 	p := parser.NewParser(client, maxConcurrent, log)

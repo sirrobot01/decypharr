@@ -254,7 +254,6 @@ type Usenet struct {
 	logger                   zerolog.Logger
 	metadataDir              string
 	nzbStorage               *NZBStorage // File-based NZB metadata storage
-	maxConnections           int         // Provider-wide streaming scheduler width
 	processingMaxConnections int         // Connections allocated per file for parsing and NZB downloads
 	prefetchSize             int64       // Streaming prefetch size in bytes
 	failedFiles              *xsync.Map[string, error]
@@ -346,13 +345,24 @@ func New() (*Usenet, error) {
 		}
 	}
 
-	maxConns := usenetConfig.MaxConnections
-	if maxConns <= 0 {
-		maxConns = 10
+	// Streaming may use three quarters of the primary providers' connections.
+	// The rest stays free for imports, repairs, and health checks. Backups
+	// count only when no primary is configured.
+	var primaryConns, allConns int
+	for _, p := range usenetConfig.Providers {
+		allConns += p.MaxConnections
+		if !p.Backup {
+			primaryConns += p.MaxConnections
+		}
 	}
+	if primaryConns == 0 {
+		primaryConns = allConns
+	}
+	streamingWorkers := max(primaryConns-primaryConns/4, 1)
+
 	processingMaxConns := usenetConfig.ProcessingMaxConnections
 	if processingMaxConns <= 0 {
-		processingMaxConns = maxConns
+		processingMaxConns = 15
 	}
 
 	prefetchSize, err := config.ParseSize(usenetConfig.ReadAhead)
@@ -365,10 +375,9 @@ func New() (*Usenet, error) {
 		nzbStorage:               nzbStorage,
 		nntp:                     client,
 		analyzer:                 parser.NewParser(client, processingMaxConns, _logger.With().Str("component", "parser").Logger()),
-		fetchScheduler:           reader.NewFetchScheduler(maxConns),
+		fetchScheduler:           reader.NewFetchScheduler(streamingWorkers),
 		logger:                   _logger,
 		metadataDir:              metadataDir,
-		maxConnections:           maxConns,
 		processingMaxConnections: processingMaxConns,
 		prefetchSize:             prefetchSize,
 		fs:                       xsync.NewMap[string, *fsEntry](),
@@ -400,7 +409,6 @@ func (u *Usenet) createEntry(file *storage.NZBFile, prefetchSize int64, retentio
 	usenetFS, err := fs.NewFS(
 		fsCtx,
 		u.nntp,
-		u.maxConnections,
 		prefetchSize,
 		volumes,
 		u.logger,
