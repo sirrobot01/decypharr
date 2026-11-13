@@ -118,6 +118,10 @@ type Client struct {
 	streamBackupSpillovers atomic.Uint64
 
 	closed atomic.Bool
+
+	// link limits concurrent transfers so the user's internet link does not
+	// fill. See linkControl.
+	link *linkControl
 	// Speed test results storage
 	speedTestResults *xsync.Map[string, SpeedTestResult]
 
@@ -394,9 +398,11 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		}
 	}
 	cm.repairPool = cm.newRepairPool(cfg.Repair.NNTPConnectionPercent)
+	cm.link = newLinkControl(cm.TotalConnections())
 
 	// Start background reaper
 	go cm.reaper()
+	go cm.linkLoop()
 	return cm, nil
 }
 
@@ -969,6 +975,7 @@ func (c *Client) createConnection(ctx context.Context, provider config.UsenetPro
 		username: provider.Username,
 		password: provider.Password,
 		logger:   c.logger.With().Str("host", provider.Host).Logger(),
+		link:     c.link,
 	}
 	// bodyReader follows conn.reader, so this stays valid across the
 	// STARTTLS reader swap.
@@ -1280,6 +1287,7 @@ func (c *Client) Stats() map[string]any {
 		},
 		"admission":                      admissionStats,
 		"stream_backup_spillovers_total": c.streamBackupSpillovers.Load(),
+		"link":                           c.link.stats(),
 	}
 
 	stats["pool"] = poolStats

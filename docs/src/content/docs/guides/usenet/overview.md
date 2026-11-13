@@ -112,11 +112,24 @@ All streams share these connections. When a stream has less data ready ahead of 
 
 **Example:**
 
-- Global: `15`
 - Provider A: `20`
 - Provider B: `10`
+- `processing_max_connections`: `15`
 
-→ Up to 15 connections per file, split between providers based on priority
+→ Streaming uses up to 22 connections. Each import uses up to 15 connections.
+
+### Internet Link Protection
+
+Decypharr does not fill your internet link. It sets a link limit on the connections that transfer data at the same time. The link limit applies to streaming read-ahead, imports, repairs, and health checks. It does not apply to a read that a player waits for now.
+
+Decypharr changes the link limit automatically:
+
+- When work waits on the link limit, Decypharr increases it.
+- When more connections do not give more speed, your link is full. Decypharr goes back to the last limit.
+- When replies start to arrive later than on an empty link, your link is queueing data. Decypharr decreases the link limit by a quarter.
+- After a decrease, the link limit stays the same for 30 seconds. Then Decypharr tries a higher limit again.
+
+You do not configure the link limit. To see the current value, look at `link` in the NNTP pool statistics.
 
 ### Read-Ahead Buffer
 
