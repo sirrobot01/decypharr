@@ -156,8 +156,12 @@ func DefaultConfig() Config {
 func PrefetchAheadSegments(readAheadBytes int64, segments []SegmentMeta) int {
 	const (
 		fallbackSegBytes = 750 * 1024 // typical usenet segment
-		minAhead         = 16
-		maxAhead         = 256 // matches the prefetch channel depth
+		// minAhead keeps enough fetches in flight when segments are large.
+		// Each segment arrives whole on one connection, so a 64MB window of
+		// 4MB segments gives 16 connections; on a slow link that only matches
+		// playback and never builds a buffer.
+		minAhead = 32
+		maxAhead = 256
 	)
 	if readAheadBytes <= 0 {
 		return 0
@@ -166,11 +170,7 @@ func PrefetchAheadSegments(readAheadBytes int64, segments []SegmentMeta) int {
 	if len(segments) > 0 && segments[0].Bytes > 0 {
 		segBytes = segments[0].Bytes
 	}
-	ahead := max(int(readAheadBytes/segBytes), minAhead)
-	if ahead > maxAhead {
-		ahead = maxAhead
-	}
-	return ahead
+	return min(max(int(readAheadBytes/segBytes), minAhead), maxAhead)
 }
 
 // Option is a functional option for configuring StreamingReader.
