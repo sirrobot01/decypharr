@@ -1216,6 +1216,13 @@
             const idlePercent = maxConns > 0 ? (idle / maxConns) * 100 : 0;
             const utilizationPercent = maxConns > 0 ? (totalCreated / maxConns) * 100 : 0;
 
+            const link = pool.link || {};
+            const linkLimit = Number(link.limit) || 0;
+            const linkMax = Number(link.max_limit) || 0;
+            const linkState = link.holding ? 'Holding' : (link.slow_start ? 'Starting' : 'Adjusting');
+            const linkCap = Number(link.max_speed) || 0;
+            const linkQueueMs = Math.max((Number(link.recent_delay_ms) || 0) - (Number(link.base_delay_ms) || 0), 0);
+
             html += `
                 <div class="card bg-base-200">
                     <div class="card-body p-4">
@@ -1256,6 +1263,34 @@
                                     <span class="w-2 h-2 bg-primary/80 rounded"></span>
                                     Idle: ${idle}
                                 </span>
+                            </div>
+                        </div>
+
+                        <!-- Link -->
+                        <div class="stats stats-vertical sm:stats-horizontal mt-4 w-full bg-base-100">
+                            <div class="stat">
+                                <div class="stat-figure text-info">
+                                    <i class="bi bi-speedometer2 text-2xl"></i>
+                                </div>
+                                <div class="stat-title">Download Speed</div>
+                                <div class="stat-value text-info">${window.decypharrUtils.formatBytes(Number(link.speed) || 0)}/s</div>
+                                <div class="stat-desc">${linkCap > 0 ? `Cap: ${window.decypharrUtils.formatBytes(linkCap)}/s` : 'No speed cap'}</div>
+                            </div>
+                            <div class="stat">
+                                <div class="stat-figure text-primary">
+                                    <i class="bi bi-sliders text-2xl"></i>
+                                </div>
+                                <div class="stat-title">Link Limit</div>
+                                <div class="stat-value text-primary">${formatNumber(linkLimit)} / ${formatNumber(linkMax)}</div>
+                                <div class="stat-desc">${linkState} · ${formatNumber(active)} in use</div>
+                            </div>
+                            <div class="stat">
+                                <div class="stat-figure ${linkQueueMs > 100 ? 'text-warning' : 'text-success'}">
+                                    <i class="bi bi-stopwatch text-2xl"></i>
+                                </div>
+                                <div class="stat-title">Reply Delay</div>
+                                <div class="stat-value ${linkQueueMs > 100 ? 'text-warning' : 'text-success'}">${Math.round(Number(link.recent_delay_ms) || 0)} ms</div>
+                                <div class="stat-desc">Empty link: ${Math.round(Number(link.base_delay_ms) || 0)} ms</div>
                             </div>
                         </div>
 

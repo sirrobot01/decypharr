@@ -68,11 +68,11 @@ func (b *bodyReader) Read(p []byte) (int, error) {
 	n, err := b.c.reader.Read(p)
 	if n > 0 {
 		if l := b.c.link; l != nil {
-			l.bytes.Add(int64(n))
 			if b.c.bodySentNS != 0 {
 				l.sample(nanotimeNow() - b.c.bodySentNS)
 				b.c.bodySentNS = 0
 			}
+			l.received(n)
 		}
 		b.reads++
 		if b.reads >= progressUpdateStride {

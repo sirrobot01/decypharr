@@ -73,6 +73,9 @@ type Usenet struct {
 	// those sysctls too to actually get large windows. Defaults: 4MB / 1MB.
 	SocketReadBuffer  string `json:"socket_read_buffer,omitempty"`
 	SocketWriteBuffer string `json:"socket_write_buffer,omitempty"`
+	// MaxDownloadSpeed caps the bytes per second of all usenet downloads,
+	// e.g. "10MB". Empty or "0" leaves the cap to the automatic link limit.
+	MaxDownloadSpeed string `json:"max_download_speed,omitempty"`
 	// Processing timeout
 	ProcessingTimeout string `json:"processing_timeout,omitempty"` // Timeout for NZB processing e.g. "5m", "10m" (default: 10m). Mark as bad if exceeded.
 	// ConnIdleTimeout is how long an unused pooled NNTP connection is kept
@@ -111,7 +114,7 @@ func (u Usenet) UsesDiskBuffer() bool {
 }
 
 func (u Usenet) IsZero() bool {
-	return len(u.Providers) == 0 && u.ProcessingMaxConnections == 0 && u.ReadAhead == "" && u.BodyPipelineDepth == 0 && u.StreamBackupWait == "" && u.ProcessingTimeout == "" && !u.UsesDiskBuffer()
+	return len(u.Providers) == 0 && u.ProcessingMaxConnections == 0 && u.ReadAhead == "" && u.BodyPipelineDepth == 0 && u.StreamBackupWait == "" && u.ProcessingTimeout == "" && u.MaxDownloadSpeed == "" && !u.UsesDiskBuffer()
 }
 
 func (c *Config) updateUsenetConfig() {
@@ -220,6 +223,9 @@ func (c *Config) applyUsenetEnvVars() {
 		if v, err := strconv.Atoi(pipelineDepth); err == nil {
 			c.Usenet.BodyPipelineDepth = NormalizeBodyPipelineDepth(v)
 		}
+	}
+	if maxSpeed := getEnv("USENET__MAX_DOWNLOAD_SPEED"); maxSpeed != "" {
+		c.Usenet.MaxDownloadSpeed = maxSpeed
 	}
 	if streamBackupWait := getEnv("USENET__STREAM_BACKUP_WAIT"); streamBackupWait != "" {
 		c.Usenet.StreamBackupWait = streamBackupWait

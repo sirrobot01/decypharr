@@ -1,16 +1,19 @@
 package nntp
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 const (
 	// linkTick is one measurement period of the link limit.
 	linkTick = 2 * time.Second
 	// linkStartLimit is the first limit. It matches the read-ahead window a
-	// new stream opens with.
+	// new stream opens with. An idle link drifts back to it.
 	linkStartLimit = 16
 	// linkMinLimit keeps some throughput when the link is very slow.
 	linkMinLimit = 4
@@ -21,7 +24,7 @@ const (
 	// the throughput before it, to keep the step.
 	linkGainPercent = 110
 	// linkHold is how long the limit stays fixed after a step down, before
-	// the next probe for more capacity.
+	// the next probe for more capacity. A blocked read ends the hold early.
 	linkHold = 30 * time.Second
 	// linkMinSamples is how many first-byte delays a period needs before the
 	// delay can lower the limit.
@@ -44,21 +47,30 @@ const (
 //     step does not add linkGainPercent throughput, the link is full, and the
 //     limit goes back to the last step.
 //
-// After a drop the limit holds for linkHold, then probes up again. Streaming
-// demand (a blocked read) is never held by the limit, but its connections
-// count against it.
+// After a drop the limit holds for linkHold, then probes up again. A blocked
+// read ends the hold: a starving stream outweighs one flat measurement. When
+// no work waits, the limit drifts down to what is in use, so a later burst
+// cannot open every connection at once.
+//
+// Streaming demand (a blocked read) is never held by the limit, but its
+// connections count against it. An optional speed cap applies to all reads.
 type linkControl struct {
-	limit   atomic.Int32
-	bytes   atomic.Int64 // body bytes received in this period
-	limited atomic.Bool  // work waited on the limit in this period
+	limit    atomic.Int32
+	bytes    atomic.Int64 // body bytes received in this period
+	limited  atomic.Bool  // work waited on the limit in this period
+	demanded atomic.Bool  // a blocked read fetched in this period
+	speed    atomic.Int64 // bytes per second in the last period
+	capped   *rate.Limiter
 
-	mu       sync.Mutex
-	maxLimit int
-	recent   int64 // smallest first-byte delay in this period; 0 = none
-	samples  int
-	base     [linkBaseSlots]int64
-	baseIdx  int
-	baseAt   int64
+	mu         sync.Mutex
+	maxLimit   int
+	recent     int64 // smallest first-byte delay in this period; 0 = none
+	lastRecent int64
+	samples    int
+	base       [linkBaseSlots]int64
+	baseIdx    int
+	baseAt     int64
+	tickAt     int64
 	// Probe state.
 	slowStart bool
 	settle    bool // skip one period after the limit changes
@@ -67,11 +79,26 @@ type linkControl struct {
 	holdUntil int64
 }
 
-func newLinkControl(maxLimit int) *linkControl {
+// newLinkControl returns a link control for maxLimit connections. A positive
+// maxSpeed caps the bytes per second of all body reads.
+func newLinkControl(maxLimit int, maxSpeed int64) *linkControl {
 	maxLimit = max(maxLimit, 1)
 	l := &linkControl{maxLimit: maxLimit, slowStart: true}
 	l.limit.Store(int32(min(linkStartLimit, maxLimit)))
+	if maxSpeed > 0 {
+		// The burst must hold the largest single read of the connection
+		// reader, or WaitN fails.
+		l.capped = rate.NewLimiter(rate.Limit(maxSpeed), max(int(maxSpeed/4), 256<<10))
+	}
 	return l
+}
+
+// received records n body bytes and waits while they pass the speed cap.
+func (l *linkControl) received(n int) {
+	l.bytes.Add(int64(n))
+	if l.capped != nil {
+		_ = l.capped.WaitN(context.Background(), n)
+	}
 }
 
 // sample records the first-byte delay of one BODY reply.
@@ -95,15 +122,24 @@ func (l *linkControl) baseLocked() int64 {
 	return base
 }
 
-// tick closes one period and sets the limit for the next one.
-func (l *linkControl) tick(now int64) {
+// tick closes one period and sets the limit for the next one. inUse is the
+// number of connections held now.
+func (l *linkControl) tick(now int64, inUse int) {
 	bytes := l.bytes.Swap(0)
 	limited := l.limited.Swap(false)
+	demanded := l.demanded.Swap(false)
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if period := now - l.tickAt; l.tickAt != 0 && period > 0 {
+		l.speed.Store(bytes * int64(time.Second) / period)
+	}
+	l.tickAt = now
 	recent, samples := l.recent, l.samples
 	l.recent, l.samples = 0, 0
+	if recent > 0 {
+		l.lastRecent = recent
+	}
 
 	if now-l.baseAt >= int64(linkBaseSlot) {
 		l.baseIdx = (l.baseIdx + 1) % linkBaseSlots
@@ -123,9 +159,15 @@ func (l *linkControl) tick(now int64) {
 		l.slowStart = false
 		l.prevBytes = 0
 		l.holdUntil = now + int64(linkHold)
-	case !limited || now < l.holdUntil:
-		// The work fits under the limit, or the limit holds after a drop.
-		// There is nothing to measure.
+	case !limited:
+		// The work fits under the limit. Drift down to what is in use.
+		next = min(limit, max(linkStartLimit, inUse, limit*3/4))
+		if next <= linkStartLimit {
+			l.slowStart = true
+		}
+		l.prevBytes = 0
+		l.settle = false
+	case now < l.holdUntil && !demanded:
 		l.prevBytes = 0
 		l.settle = false
 	case l.settle:
@@ -134,6 +176,7 @@ func (l *linkControl) tick(now int64) {
 		l.settle = false
 		return
 	case l.prevBytes == 0 || bytes*100 >= l.prevBytes*linkGainPercent:
+		l.holdUntil = 0
 		l.prevLimit, l.prevBytes = limit, bytes
 		if l.slowStart {
 			next = min(l.maxLimit, limit*2)
@@ -153,18 +196,24 @@ func (l *linkControl) tick(now int64) {
 	}
 }
 
-// stats reports the limit and the delays it uses, for Client.Stats.
+// stats reports the limit and the signals it uses, for Client.Stats.
 func (l *linkControl) stats() map[string]any {
 	if l == nil {
 		return nil
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	var maxSpeed int64
+	if l.capped != nil {
+		maxSpeed = int64(l.capped.Limit())
+	}
 	return map[string]any{
 		"limit":           l.limit.Load(),
 		"max_limit":       l.maxLimit,
+		"speed":           l.speed.Load(),
+		"max_speed":       maxSpeed,
 		"base_delay_ms":   float64(l.baseLocked()) / 1e6,
-		"recent_delay_ms": float64(l.recent) / 1e6,
+		"recent_delay_ms": float64(l.lastRecent) / 1e6,
 		"slow_start":      l.slowStart,
 		"holding":         nanotimeNow() < l.holdUntil,
 	}
@@ -177,22 +226,23 @@ func (c *Client) linkLoop() {
 		if c.closed.Load() {
 			return
 		}
-		c.link.tick(nanotimeNow())
+		c.link.tick(nanotimeNow(), c.slotsInUse())
 	}
+}
+
+func (c *Client) slotsInUse() int {
+	inUse := 0
+	for _, pp := range c.orderedPools {
+		inUse += len(pp.slots)
+	}
+	return inUse
 }
 
 // overLinkLimit reports whether the held slots exceed the link limit. It
 // marks the period as limited when they do. A client without a link control
 // has no limit.
 func (c *Client) overLinkLimit() bool {
-	if c.link == nil {
-		return false
-	}
-	inUse := 0
-	for _, pp := range c.orderedPools {
-		inUse += len(pp.slots)
-	}
-	if inUse <= int(c.link.limit.Load()) {
+	if c.link == nil || c.slotsInUse() <= int(c.link.limit.Load()) {
 		return false
 	}
 	c.link.limited.Store(true)

@@ -1523,6 +1523,7 @@ class ConfigManager {
             providers: providers,
             processing_max_connections: parseInt(document.querySelector('[name="usenet.processing_max_connections"]')?.value) || 15,
             read_ahead: document.querySelector('[name="usenet.read_ahead"]').value || "16MB",
+            max_download_speed: document.querySelector('[name="usenet.max_download_speed"]')?.value.trim() || "",
             body_pipeline_depth: Math.min(4, Math.max(1,
                 parseInt(document.querySelector('[name="usenet.body_pipeline_depth"]')?.value, 10) || 2)),
             processing_timeout: document.querySelector('[name="usenet.processing_timeout"]')?.value || "5m",
@@ -2374,6 +2375,7 @@ class ConfigManager {
         const streamFields = {
             'processing_max_connections': usenet.processing_max_connections,
             'read_ahead': usenet.read_ahead,
+            'max_download_speed': usenet.max_download_speed,
             'body_pipeline_depth': usenet.body_pipeline_depth ?? 2,
             'processing_timeout': usenet.processing_timeout,
             'conn_idle_timeout': usenet.conn_idle_timeout,

@@ -163,6 +163,7 @@ Array of Debrid services:
 | `providers`                   | array  | NNTP server configurations      | `[]`                         |
 | `processing_max_connections`  | int    | Max connections per file for parsing and NZB downloads | `15` |
 | `read_ahead`                  | string | Prefetch buffer size            | `16MB`                       |
+| `max_download_speed`          | string | Speed cap per second for all usenet downloads, e.g. `10MB`; empty uses only the automatic link limit | `""` (no cap) |
 | `body_pipeline_depth`         | int    | Ordered read-ahead `BODY` commands per connection (`1` disables pipelining, range 1-4) | `2` |
 | `stream_backup_wait`          | string | Wait before urgent playback may use a busy-tier backup provider; `0` disables spillover | `0` |
 | `processing_timeout`          | string | Max time for NZB processing     | `10m`                        |
@@ -545,6 +546,7 @@ DEBRIDS__0__API_KEY=your_key
 USENET__PROCESSING_MAX_CONNECTIONS=20
 USENET__BODY_PIPELINE_DEPTH=2
 USENET__STREAM_BACKUP_WAIT=250ms
+USENET__MAX_DOWNLOAD_SPEED=10MB
 USENET__PROVIDERS__0__HOST=news.provider.com
 USENET__PROVIDERS__0__PORT=563
 USENET__PROVIDERS__0__BACKBONE=Omicron

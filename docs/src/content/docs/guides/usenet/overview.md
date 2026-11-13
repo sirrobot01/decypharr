@@ -127,9 +127,20 @@ Decypharr changes the link limit automatically:
 - When work waits on the link limit, Decypharr increases it.
 - When more connections do not give more speed, your link is full. Decypharr goes back to the last limit.
 - When replies start to arrive later than on an empty link, your link is queueing data. Decypharr decreases the link limit by a quarter.
-- After a decrease, the link limit stays the same for 30 seconds. Then Decypharr tries a higher limit again.
+- After a decrease, the link limit stays the same for 30 seconds. Then Decypharr tries a higher limit again. If a player waits for data, Decypharr tries a higher limit after 2 seconds.
+- When no work waits, the link limit decreases to the number of connections in use.
 
-You do not configure the link limit. To see the current value, look at `link` in the NNTP pool statistics.
+You do not configure the link limit. To see the link limit, the download speed, and the reply delay, open the **Usenet** tab on the stats page.
+
+To set a fixed speed cap, set `max_download_speed` in bytes per second. For example, `10MB` is 10 MB per second (80 Mbit/s). The cap applies to all usenet downloads, including the reads that a player waits for:
+
+```json
+{
+  "usenet": {
+    "max_download_speed": "10MB"
+  }
+}
+```
 
 ### Read-Ahead Buffer
 
