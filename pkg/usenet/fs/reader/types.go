@@ -124,9 +124,6 @@ type Config struct {
 	// connection. One disables pipelining (default: 2, maximum: 4).
 	BodyPipelineDepth int
 
-	// DownloadTimeout is the timeout for a single segment download (default: 60s).
-	DownloadTimeout time.Duration
-
 	// MaxRetries is the maximum retry attempts for failed downloads (default: 3).
 	MaxRetries int
 
@@ -140,7 +137,6 @@ func DefaultConfig() Config {
 		MaxConnections:    8,
 		PrefetchAhead:     8,
 		BodyPipelineDepth: appconfig.DefaultBodyPipelineDepth,
-		DownloadTimeout:   60 * time.Second,
 		MaxRetries:        3,
 		RetryDelay:        time.Second,
 		Retention:         RetentionWindow,
@@ -227,13 +223,6 @@ func WithPrefetchAhead(n int) Option {
 func WithBodyPipelineDepth(depth int) Option {
 	return func(c *Config) {
 		c.BodyPipelineDepth = appconfig.NormalizeBodyPipelineDepth(depth)
-	}
-}
-
-// WithDownloadTimeout sets the timeout for a single segment download.
-func WithDownloadTimeout(d time.Duration) Option {
-	return func(c *Config) {
-		c.DownloadTimeout = d
 	}
 }
 

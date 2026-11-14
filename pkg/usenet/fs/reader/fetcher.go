@@ -285,17 +285,15 @@ func (sf *SegmentFetcher) doFetchAttempt(ctx context.Context, segIdx int, worklo
 	}
 
 	messageID := seg.MessageID
-	timeout := sf.config.DownloadTimeout
-	if timeout <= 0 {
-		timeout = 60 * time.Second
-	}
 
-	downloadCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	// There is no total deadline: on a slow provider one article can take
+	// longer than any fixed budget, and the wait for a connection is not
+	// transfer time. The connection closes a body read that stops making
+	// progress (nntp StreamBodyTimeout).
 
 	// ExecuteWithFailover already retries across configured providers.
-	err := sf.client.ExecuteWithFailover(downloadCtx, workload, func(conn *nntp.Connection) error {
-		stopCancel := context.AfterFunc(downloadCtx, func() {
+	err := sf.client.ExecuteWithFailover(ctx, workload, func(conn *nntp.Connection) error {
+		stopCancel := context.AfterFunc(ctx, func() {
 			_ = conn.Close()
 		})
 		defer stopCancel()
@@ -318,12 +316,12 @@ func (sf *SegmentFetcher) doFetchAttempt(ctx context.Context, segIdx int, worklo
 		}
 		if err != nil {
 			writer.Discard()
-			if ctxErr := downloadCtx.Err(); ctxErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
 				return ctxErr
 			}
 			return err
 		}
-		if ctxErr := downloadCtx.Err(); ctxErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
 			writer.Discard()
 			return ctxErr
 		}
@@ -386,12 +384,12 @@ func (sf *SegmentFetcher) clearPrefetchQueued(segIdx int) {
 
 // QueuePrefetch submits speculative work without creating a per-file worker.
 func (sf *SegmentFetcher) QueuePrefetch(segIdx int) {
-	sf.queueSpeculative(segIdx, priorityPrefetch)
+	sf.queueSpeculativeBatch(segIdx, segIdx, priorityPrefetch)
 }
 
 func (sf *SegmentFetcher) QueueProbe(segIdx int) {
 	if sf.scheduler.workers > 1 {
-		sf.queueSpeculative(segIdx, priorityProbe)
+		sf.queueSpeculativeBatch(segIdx, segIdx, priorityProbe)
 	}
 }
 
@@ -406,7 +404,7 @@ func (sf *SegmentFetcher) queueSpeculativeRange(startSeg, endSeg int, priority f
 	segmentCount := endSeg - startSeg + 1
 	singleCount := sf.streamBodyPipelineSingleCount(segmentCount, priority)
 	for segIdx := startSeg; segIdx < startSeg+singleCount; segIdx++ {
-		sf.queueSpeculative(segIdx, priority)
+		sf.queueSpeculativeBatch(segIdx, segIdx, priority)
 	}
 	depth := sf.config.BodyPipelineDepth
 	for start := startSeg + singleCount; start <= endSeg; start += depth {
@@ -432,49 +430,6 @@ func (sf *SegmentFetcher) streamBodyPipelineSingleCount(segmentCount int, priori
 		return availableWorkers
 	}
 	return segmentCount
-}
-
-func (sf *SegmentFetcher) queueSpeculative(segIdx int, priority fetchPriority) {
-	state := sf.cache.GetState(segIdx)
-	if state == StateOnDisk || state == StateFetching || !sf.markPrefetchQueued(segIdx) {
-		return
-	}
-	gen := sf.prefetchGen.Load()
-	if !sf.submit(priority, segIdx, func() {
-		if gen != sf.prefetchGen.Load() {
-			return
-		}
-		defer func() {
-			if gen == sf.prefetchGen.Load() {
-				sf.clearPrefetchQueued(segIdx)
-			}
-		}()
-		sf.prefetchOne(segIdx)
-	}, func() {
-		if gen == sf.prefetchGen.Load() {
-			sf.clearPrefetchQueued(segIdx)
-		}
-	}) {
-		sf.clearPrefetchQueued(segIdx)
-		sf.stats.PrefetchMisses.Add(1)
-	}
-}
-
-func (sf *SegmentFetcher) prefetchOne(segIdx int) {
-	if sf.cache.GetState(segIdx) == StateOnDisk {
-		sf.stats.PrefetchHits.Add(1)
-		return
-	}
-	timeout := sf.config.DownloadTimeout
-	if timeout <= 0 {
-		timeout = 60 * time.Second
-	}
-	fetchCtx, cancel := context.WithTimeout(sf.ctx, timeout)
-	err := sf.fetchWithRetryDirect(fetchCtx, segIdx, nntp.WorkloadStreamPrefetch)
-	cancel()
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		sf.logger.Debug().Err(err).Int("segment", segIdx).Msg("prefetch failed")
-	}
 }
 
 func (sf *SegmentFetcher) queueSpeculativeBatch(startSeg, endSeg int, priority fetchPriority) {
@@ -687,23 +642,11 @@ func (sf *SegmentFetcher) fetchPrefetchBatch(ctx context.Context, segIndices []i
 	return firstErr
 }
 
+// prefetchBatch fetches read-ahead segments on one connection. It claims the
+// segments only after it holds a connection, so a read that reaches a segment
+// still waiting here fetches it as demand. Like doFetchAttempt it has no total
+// deadline; a stalled body read fails on its own.
 func (sf *SegmentFetcher) prefetchBatch(segIndices []int) {
-	timeout := sf.config.DownloadTimeout
-	if timeout <= 0 {
-		timeout = 60 * time.Second
-	}
-	// Preserve the existing per-article timeout budget now that one task may
-	// stream multiple ordered bodies.
-	const maxDuration = time.Duration(1<<63 - 1)
-	if count := time.Duration(len(segIndices)); count > 1 {
-		if timeout > maxDuration/count {
-			timeout = maxDuration
-		} else {
-			timeout *= count
-		}
-	}
-	fetchCtx, cancel := context.WithTimeout(sf.ctx, timeout)
-
 	maxAttempts := sf.config.MaxRetries
 	if maxAttempts < 1 {
 		maxAttempts = 3
@@ -713,23 +656,22 @@ retryLoop:
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			select {
-			case <-fetchCtx.Done():
-				err = fetchCtx.Err()
+			case <-sf.ctx.Done():
+				err = sf.ctx.Err()
 				break retryLoop
 			case <-time.After(sf.retryBackoff(attempt)):
 			}
 		}
-		if err = sf.fetchPrefetchBatch(fetchCtx, segIndices); err == nil {
+		if err = sf.fetchPrefetchBatch(sf.ctx, segIndices); err == nil {
 			break
 		}
-		if nntp.IsArticleNotFoundError(err) || nntp.IsYencDecodeError(err) || fetchCtx.Err() != nil {
+		if nntp.IsArticleNotFoundError(err) || nntp.IsYencDecodeError(err) || sf.ctx.Err() != nil {
 			break
 		}
 		if nntp.IsAllProvidersFailed(err) && attempt >= 1 {
 			break
 		}
 	}
-	cancel()
 
 	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 		sf.logger.Debug().Err(err).

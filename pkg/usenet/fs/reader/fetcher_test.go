@@ -177,7 +177,6 @@ func newPipelineTestFetcher(t *testing.T, depth int, present func(int) bool) (*n
 	cfg.DiskPath = t.TempDir()
 	cfg.MaxConnections = 2
 	cfg.BodyPipelineDepth = depth
-	cfg.DownloadTimeout = 5 * time.Second
 	stats := &ReaderStats{}
 	cache, err := NewSegmentCache(t.Context(), segments, cfg, stats, zerolog.Nop())
 	if err != nil {
@@ -260,5 +259,83 @@ func TestSeekAbandonedWindow(t *testing.T) {
 					tc.prevEnd, tc.startSeg, tc.endSeg, a, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestQueuedPrefetchDoesNotHoldSegment: read-ahead that waits for a
+// connection must leave its segment unclaimed, so a blocked read fetches it
+// at demand priority instead of waiting behind the read-ahead.
+func TestQueuedPrefetchDoesNotHoldSegment(t *testing.T) {
+	srv, err := nntpd.New(nntpd.Config{RTT: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	const segmentSize = 64 * 1024
+	messageID := "<queued-0@nntpd>"
+	srv.AddArticle(messageID, nntpd.Encode(nntpd.Pattern(0, segmentSize), "queued.bin", 1, segmentSize, 0))
+	segments := []SegmentMeta{{MessageID: messageID, Number: 1, Bytes: segmentSize, EndOffset: segmentSize - 1}}
+
+	host, port := srv.Addr()
+	client, err := nntp.NewClient(&config.Config{Usenet: config.Usenet{Providers: []config.UsenetProvider{{
+		Host: host, Port: port, MaxConnections: 1,
+	}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	cfg := DefaultConfig()
+	cfg.DiskPath = t.TempDir()
+	cfg.MaxConnections = 2
+	stats := &ReaderStats{}
+	cache, err := NewSegmentCache(t.Context(), segments, cfg, stats, zerolog.Nop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cache.Close() })
+	fetcher := NewSegmentFetcher(t.Context(), client, cache, cfg, stats, zerolog.Nop())
+	t.Cleanup(fetcher.Close)
+
+	// Hold the only connection.
+	held, release := make(chan struct{}), make(chan struct{})
+	go func() {
+		_ = client.ExecuteWithFailover(t.Context(), nntp.WorkloadDownload, func(*nntp.Connection) error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+
+	fetcher.QueuePrefetch(0)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		pool := client.Stats()["pool"].(map[string]any)
+		if pool["waiting"].(map[string]int)[nntp.WorkloadStreamPrefetch.String()] == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("prefetch never queued for a connection")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if state := cache.GetState(0); state != StateEmpty {
+		t.Fatalf("segment state while prefetch waits = %s, want Empty", state)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- fetcher.Fetch(t.Context(), 0) }()
+	close(release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("demand fetch: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("demand fetch did not finish")
+	}
+	if state := cache.GetState(0); state != StateOnDisk {
+		t.Fatalf("segment state = %s, want OnDisk", state)
 	}
 }
