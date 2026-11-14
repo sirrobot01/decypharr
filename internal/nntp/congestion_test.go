@@ -178,3 +178,30 @@ func TestLinkLimitHoldsPrefetchButNotDemand(t *testing.T) {
 		t.Fatalf("slots held = %d, want 2", got)
 	}
 }
+
+func TestLinkLimitHandoffMovesToFirstProvider(t *testing.T) {
+	first, second := newTestPool(4), newTestPool(4)
+	first.config.Host, second.config.Host = "first", "second"
+	c := newTieredAcquireTestClient(first, second, 0)
+	c.link = newLinkControl(8, 0)
+	c.link.limit.Store(1)
+
+	if !c.tryAcquireSlot(second, WorkloadStreamPrefetch) {
+		t.Fatal("slot on the second provider refused under the limit")
+	}
+	w := newSlotWaiter(WorkloadStreamPrefetch, []*ProviderPool{first, second})
+	c.register(w)
+	c.releaseSlot(second)
+
+	select {
+	case got := <-w.handoff:
+		if got != first {
+			t.Fatalf("handoff went to %s, want first", got.config.Host)
+		}
+	default:
+		t.Fatal("release did not hand off the slot")
+	}
+	if len(first.slots) != 1 || len(second.slots) != 0 {
+		t.Fatalf("slots held: first=%d second=%d, want 1 and 0", len(first.slots), len(second.slots))
+	}
+}

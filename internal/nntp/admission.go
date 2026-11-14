@@ -281,7 +281,27 @@ func (c *Client) handoffSlot(pp *ProviderPool) bool {
 			}
 			c.removeWaiterLocked(w)
 			c.admission[w.workload].handoffs.Add(1)
-			w.handoff <- pp
+			// Under the link limit the held total is fixed, so a slot handed
+			// back to pp would keep all transfers on whichever provider holds
+			// them. Move the slot to the waiter's first provider with room.
+			target := pp
+			for _, cand := range w.pools {
+				if cand == pp {
+					break
+				}
+				if cand.inDialCooldown() {
+					continue
+				}
+				select {
+				case cand.slots <- struct{}{}:
+					target = cand
+				default:
+					continue
+				}
+				<-pp.slots
+				break
+			}
+			w.handoff <- target
 			return true
 		}
 	}
