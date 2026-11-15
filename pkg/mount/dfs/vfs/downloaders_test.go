@@ -52,6 +52,7 @@ func TestEnsureDownloaderLocked_ExtendsMissByReadAhead(t *testing.T) {
 		chunkSize:     4 * testMiB,
 		readAheadSize: readAhead,
 		dls:           []*downloader{dl},
+		runEnd:        reqPos, // sequential from the start of the file
 	}
 
 	req := ranges.Range{Pos: reqPos, Size: reqSize}
@@ -94,10 +95,47 @@ func TestEnsureDownloaderLocked_CachedRequestPrefetchesGap(t *testing.T) {
 		t.Fatalf("ensureDownloaderLocked returned error: %v", err)
 	}
 
-	want := req.End() + readAhead
+	want := req.End() + minReadAhead // first read of a run
 	got := getMaxOffset(dl)
 	if got != want {
 		t.Fatalf("unexpected maxOffset: got %d, want %d", got, want)
+	}
+}
+
+func TestReadAheadGrowsWithSequentialRun(t *testing.T) {
+	const readAhead = 128 * testMiB
+	dls := &Downloaders{
+		item:          newTestItem(t, 1024*testMiB),
+		chunkSize:     16 * testMiB,
+		readAheadSize: readAhead,
+	}
+	window := func(pos int64) int64 {
+		r := ranges.Range{Pos: pos, Size: 128 * testKiB}
+		return dls.extendAndFindMissingRangeLocked(r).End() - r.End()
+	}
+
+	if got := window(0); got != minReadAhead {
+		t.Fatalf("window on the first read = %d, want %d", got, minReadAhead)
+	}
+	for pos := int64(0); pos < 8*testMiB; pos += testMiB {
+		window(pos)
+	}
+	if got, want := window(8*testMiB), readAheadRampFactor*(8*testMiB+128*testKiB); got != want {
+		t.Fatalf("window after an 8MB run = %d, want %d", got, want)
+	}
+	if got := window(100 * testMiB); got != minReadAhead {
+		t.Fatalf("window after a seek = %d, want %d", got, minReadAhead)
+	}
+	for pos := int64(100 * testMiB); pos < 140*testMiB; pos += testMiB {
+		window(pos)
+	}
+	if got := window(140 * testMiB); got != readAhead {
+		t.Fatalf("window after a 40MB run = %d, want %d", got, readAhead)
+	}
+
+	dls.item.opens.Store(2)
+	if got := window(500 * testMiB); got != readAhead {
+		t.Fatalf("window with two handles open = %d, want %d", got, readAhead)
 	}
 }
 

@@ -56,6 +56,12 @@ const (
 	// several times a second, so the frontier stays well ahead while most warm
 	// reads skip dls.mu entirely.
 	readAheadPokeInterval = 1 << 20
+	// minReadAhead is the read-ahead window at the start of a sequential run.
+	// A media probe reads a few MB and closes the file, so a full window on
+	// the first read only downloads data that nobody reads.
+	minReadAhead = 4 << 20
+	// readAheadRampFactor scales the window with the sequential run length.
+	readAheadRampFactor = 4
 )
 
 // Downloaders coordinates multiple concurrent downloads to a cache item
@@ -76,6 +82,10 @@ type Downloaders struct {
 	errorCount int
 	lastErr    error
 	closed     bool
+	// runStart and runEnd bound the current sequential read run. The
+	// read-ahead window grows with its length.
+	runStart int64
+	runEnd   int64
 	// stopping is true while StopAll() is tearing down the current session.
 	// It blocks the idle-restart path from spinning up a fresh kicker before
 	// the previous one has fully exited and the new ctx is installed.
@@ -641,6 +651,19 @@ func (dls *Downloaders) extendAndFindMissingRangeLocked(r ranges.Range) ranges.R
 	bufferWindow := dls.readAheadSize
 	if bufferWindow <= 0 {
 		bufferWindow = dls.chunkSize * 4
+	}
+
+	// Grow the window with the sequential run, so a probe that reads a few MB
+	// downloads a few MB and playback reaches the full window within seconds.
+	// With several handles open, the positions interleave and the run is not
+	// known, so the full window applies.
+	if r.Pos < dls.runStart || r.Pos > dls.runEnd+downloaderWindow {
+		dls.runStart, dls.runEnd = r.Pos, r.End()
+	}
+	dls.runEnd = max(dls.runEnd, r.End())
+	if dls.item.opens.Load() <= 1 {
+		run := dls.runEnd - dls.runStart
+		bufferWindow = min(bufferWindow, max(readAheadRampFactor*run, minReadAhead))
 	}
 
 	r.Size += bufferWindow
