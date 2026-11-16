@@ -5,6 +5,7 @@ package hanwen
 import (
 	"context"
 	"path"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -293,6 +294,16 @@ func (d *Dir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 
 	fuseEntries := make([]fuse.DirEntry, 0, len(entries))
 	for _, info := range entries {
+		// The kernel fails the whole readdir with EIO on one name it
+		// rejects, hiding every other entry. Skip such names instead.
+		if !validDirentName(info.Name()) {
+			event := d.logger.Warn()
+			if d.rlLogger != nil {
+				event = d.rlLogger.Rate("invalid-dirent:" + d.name + ":" + truncateForLog(info.Name())).Warn()
+			}
+			event.Str("dir", d.name).Int("bytes", len(info.Name())).Str("name", truncateForLog(info.Name())).Msg("Skipping entry with a name FUSE rejects")
+			continue
+		}
 		mode := uint32(fuse.S_IFREG | 0644)
 		if info.IsDir() {
 			mode = fuse.S_IFDIR | 0755
@@ -406,4 +417,22 @@ func (d *Dir) Rmdir(ctx context.Context, name string) syscall.Errno {
 	}
 
 	return 0
+}
+
+// maxDirentName is the kernel's FUSE_NAME_MAX.
+const maxDirentName = 1024
+
+// validDirentName reports whether the kernel accepts name in a FUSE
+// directory listing: non-empty, at most 1024 bytes, no '/' or NUL, and not
+// "." or "..".
+func validDirentName(name string) bool {
+	return name != "" && name != "." && name != ".." &&
+		len(name) <= maxDirentName && !strings.ContainsAny(name, "/\x00")
+}
+
+func truncateForLog(name string) string {
+	if len(name) > 120 {
+		return name[:120] + "…"
+	}
+	return name
 }

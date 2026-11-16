@@ -90,3 +90,45 @@ func TestStartupWithoutMigrationLeavesNoBackups(t *testing.T) {
 		}
 	}
 }
+
+// The migration status record shares the entries store; entry iteration must
+// not surface it as an entry with an empty name.
+func TestEntryIterationSkipsInternalKeys(t *testing.T) {
+	s, err := NewStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if err := s.AddOrUpdate(&Entry{InfoHash: "hash", Name: "folder", Files: map[string]*File{"file": {Name: "file", InfoHash: "hash", Size: 10}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveMigrationStatus(&SystemMigrationStatus{Completed: 1}); err != nil {
+		t.Fatal(err)
+	}
+	var metas, entries, batched int
+	if err := s.ForEachMeta(func(m *EntryMetaInfo) error {
+		if m.InfoHash != "hash" {
+			t.Errorf("ForEachMeta returned %q", m.InfoHash)
+		}
+		metas++
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ForEach(func(e *Entry) error { entries++; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ForEachBatch(10, func(b []*Entry) error { batched += len(b); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := s.List(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metas != 1 || entries != 1 || batched != 1 || len(listed) != 1 {
+		t.Fatalf("got meta=%d each=%d batch=%d list=%d, want 1 each", metas, entries, batched, len(listed))
+	}
+	if status, err := s.GetMigrationStatus(); err != nil || status.Completed != 1 {
+		t.Fatalf("migration status lost: %v, %v", status, err)
+	}
+}
