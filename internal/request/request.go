@@ -117,14 +117,10 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	}
 	c.headersMu.RUnlock()
 
-	// Apply rate limiting
-	if c.rateLimiter != nil {
-		select {
-		case <-req.Context().Done():
-			return nil, req.Context().Err()
-		default:
-			c.rateLimiter.Take()
-		}
+	// Rate limiting is applied per wire attempt by retryablehttp's
+	// RequestLogHook (configured in New), so retries are charged too.
+	if err := req.Context().Err(); err != nil {
+		return nil, err
 	}
 
 	// Convert to retryablehttp request
@@ -259,6 +255,16 @@ func New(options ...ClientOption) *Client {
 	retryClient.RetryWaitMax = 30 * time.Second
 	retryClient.Logger = nil
 	retryClient.Backoff = retryAfterBackoff
+	// Every attempt, including retries, is a real request against the
+	// provider's quota, so each one must spend a rate-limit token. Taking a
+	// single token before retryablehttp.Do let one logical request make up to
+	// RetryMax+1 provider calls while being counted once.
+	retryClient.RequestLogHook = func(_ retryablehttp.Logger, req *http.Request, _ int) {
+		if client.rateLimiter == nil || req.Context().Err() != nil {
+			return
+		}
+		client.rateLimiter.Take()
+	}
 
 	// Custom retry policy based on retryable status codes
 	retryClient.CheckRetry = func(ctx context.Context, resp *http.Response, err error) (bool, error) {
