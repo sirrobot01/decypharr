@@ -1,12 +1,14 @@
 // Package bandwidth enforces the download speed cap that all transfers share:
-// debrid and usenet, streams and imports.
+// debrid and usenet, streams and imports. It also measures their total speed.
 package bandwidth
 
 import (
 	"context"
 	"io"
 	"net/http"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/time/rate"
 )
@@ -14,7 +16,17 @@ import (
 // minBurst lets one network read of a typical size through without a wait.
 const minBurst = 256 << 10
 
+// speedWindow is the number of whole seconds that Speed averages.
+const speedWindow = 3
+
 var limiter atomic.Pointer[rate.Limiter]
+
+// meter holds the received bytes for each of the last seconds, in a ring
+// indexed by the Unix second.
+var meter struct {
+	mu   sync.Mutex
+	bins [speedWindow + 1]struct{ sec, bytes int64 }
+}
 
 // SetLimit sets the cap in bytes per second. Zero or less removes the cap.
 func SetLimit(bytesPerSecond int64) {
@@ -33,8 +45,36 @@ func Limit() int64 {
 	return 0
 }
 
-// Wait blocks until n received bytes fit under the cap, or until ctx ends.
+// Speed returns the received bytes per second of all transfers, averaged over
+// the last whole seconds.
+func Speed() int64 {
+	now := time.Now().Unix()
+	var total int64
+	meter.mu.Lock()
+	for _, b := range meter.bins {
+		if b.sec >= now-speedWindow && b.sec < now {
+			total += b.bytes
+		}
+	}
+	meter.mu.Unlock()
+	return total / speedWindow
+}
+
+// Wait counts n received bytes and blocks until they fit under the cap, or
+// until ctx ends.
 func Wait(ctx context.Context, n int) error {
+	if n <= 0 {
+		return nil
+	}
+	now := time.Now().Unix()
+	meter.mu.Lock()
+	b := &meter.bins[now%int64(len(meter.bins))]
+	if b.sec != now {
+		b.sec, b.bytes = now, 0
+	}
+	b.bytes += int64(n)
+	meter.mu.Unlock()
+
 	l := limiter.Load()
 	if l == nil {
 		return nil

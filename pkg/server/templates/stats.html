@@ -368,7 +368,13 @@
                             <i class="bi bi-broadcast text-success"></i>
                             Active Streams
                         </h2>
-                        <div class="badge badge-success" id="streams-count">0</div>
+                        <div class="flex items-center gap-3">
+                            <div class="text-right leading-tight">
+                                <div class="text-base font-mono" id="streams-speed" title="Download speed of all streams, imports and downloads">0 B/s</div>
+                                <div class="text-xs font-normal text-base-content/60" id="streams-cap">No speed cap</div>
+                            </div>
+                            <div class="badge badge-success" id="streams-count">0</div>
+                        </div>
                     </div>
                 </div>
                 <div class="card-body p-6 pt-3" id="streams-content">
@@ -996,6 +1002,10 @@
             const streamsContent = document.getElementById('streams-content');
 
             const count = activeStreamsData?.count || 0;
+            const speed = Number(activeStreamsData?.speed) || 0;
+            const cap = Number(activeStreamsData?.max_speed) || 0;
+            document.getElementById('streams-speed').textContent = `${window.decypharrUtils.formatBytes(speed)}/s`;
+            document.getElementById('streams-cap').textContent = cap > 0 ? `Cap: ${window.decypharrUtils.formatBytes(cap)}/s` : 'No speed cap';
 
             // Update both badges
             streamsCount.textContent = count;
@@ -1220,7 +1230,6 @@
             const linkLimit = Number(link.limit) || 0;
             const linkMax = Number(link.max_limit) || 0;
             const linkState = link.holding ? 'Holding' : (link.slow_start ? 'Starting' : 'Adjusting');
-            const linkCap = Number(link.max_speed) || 0;
             const linkQueueMs = Math.max((Number(link.recent_delay_ms) || 0) - (Number(link.base_delay_ms) || 0), 0);
 
             html += `
@@ -1272,9 +1281,9 @@
                                 <div class="stat-figure text-info">
                                     <i class="bi bi-speedometer2 text-2xl"></i>
                                 </div>
-                                <div class="stat-title">Download Speed</div>
+                                <div class="stat-title">Usenet Speed</div>
                                 <div class="stat-value text-info">${window.decypharrUtils.formatBytes(Number(link.speed) || 0)}/s</div>
-                                <div class="stat-desc">${linkCap > 0 ? `Cap: ${window.decypharrUtils.formatBytes(linkCap)}/s` : 'No speed cap'}</div>
+                                <div class="stat-desc">Total and cap: Streams tab</div>
                             </div>
                             <div class="stat">
                                 <div class="stat-figure text-primary">

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/sirrobot01/decypharr/internal/bandwidth"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/utils"
@@ -154,8 +155,10 @@ func (c *Collector) collect() *Snapshot {
 	// --- Active Streams ---
 	streams := c.mgr.GetActiveStreams()
 	snap.ActiveStreams = ActiveStreamStats{
-		Count:   len(streams),
-		Streams: streams,
+		Count:    len(streams),
+		Streams:  streams,
+		Speed:    bandwidth.Speed(),
+		MaxSpeed: bandwidth.Limit(),
 	}
 
 	// --- Storage ---

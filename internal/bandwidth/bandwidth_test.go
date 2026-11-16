@@ -45,3 +45,21 @@ func TestWaitStopsWithContext(t *testing.T) {
 		t.Fatal("wait for 64MB at 1MB/s returned without error after the context ended")
 	}
 }
+
+func TestSpeedCountsUncappedReads(t *testing.T) {
+	SetLimit(0)
+	meter.mu.Lock()
+	clear(meter.bins[:])
+	meter.mu.Unlock()
+	// Start just after a second ends, so the bytes land in one whole second.
+	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
+	r := Body(context.Background(), io.NopCloser(strings.NewReader(strings.Repeat("x", 3<<20))))
+	if _, err := io.Copy(io.Discard, r); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
+
+	if got, want := Speed(), int64(1<<20); got != want {
+		t.Fatalf("speed = %d, want %d (3MB over %d seconds)", got, want, speedWindow)
+	}
+}

@@ -199,7 +199,6 @@ func (l *linkControl) stats() map[string]any {
 		"limit":           l.limit.Load(),
 		"max_limit":       l.maxLimit,
 		"speed":           l.speed.Load(),
-		"max_speed":       bandwidth.Limit(),
 		"base_delay_ms":   float64(l.baseLocked()) / 1e6,
 		"recent_delay_ms": float64(l.lastRecent) / 1e6,
 		"slow_start":      l.slowStart,

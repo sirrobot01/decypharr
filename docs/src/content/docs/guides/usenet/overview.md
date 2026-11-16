@@ -130,7 +130,7 @@ Decypharr changes the link limit automatically:
 - After a decrease, the link limit stays the same for 30 seconds. Then Decypharr tries a higher limit again. If a player waits for data, Decypharr tries a higher limit after 2 seconds.
 - When no work waits, the link limit decreases to the number of connections in use.
 
-You do not configure the link limit. To see the link limit, the download speed, and the reply delay, open the **Usenet** tab on the stats page.
+You do not configure the link limit. To see the link limit, the usenet speed, and the reply delay, open the **Usenet** tab on the stats page. To see the total speed of all downloads and the speed cap, open the **Streams** tab.
 
 To set a fixed speed cap, set `max_download_speed` in the general settings. The cap applies to all downloads, debrid and usenet. Refer to [Downloads](../configuration/#downloads).
 

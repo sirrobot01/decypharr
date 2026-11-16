@@ -93,6 +93,10 @@ type MountStats struct {
 type ActiveStreamStats struct {
 	Count   int                     `json:"count"`
 	Streams []*manager.ActiveStream `json:"streams"`
+	// Speed is the received bytes per second of all downloads: streams,
+	// imports, debrid and usenet. MaxSpeed is the cap, or zero for no cap.
+	Speed    int64 `json:"speed"`
+	MaxSpeed int64 `json:"max_speed"`
 }
 
 type StorageStats struct {
