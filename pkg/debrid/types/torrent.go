@@ -32,6 +32,12 @@ type Torrent struct {
 	SizeDownloaded   int64 `json:"-"` // This is used for local download
 	DownloadUncached bool  `json:"-"`
 
+	// SummaryOnly marks rows from a lightweight provider list response that
+	// omits detail fields (TorBox's /torrents/mylist?files=false). They can
+	// reveal new hashes and changed provider IDs, but their status is not
+	// authoritative and must not mark an existing placement stale.
+	SummaryOnly bool `json:"-"`
+
 	sync.Mutex
 }
 
@@ -66,6 +72,7 @@ func (t *Torrent) Copy() *Torrent {
 		Seeders:          t.Seeders,
 		Links:            append([]string{}, t.Links...),
 		Debrid:           t.Debrid,
+		SummaryOnly:      t.SummaryOnly,
 	}
 }
 
