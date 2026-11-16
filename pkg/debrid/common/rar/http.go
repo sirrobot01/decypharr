@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/sirrobot01/decypharr/internal/bandwidth"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/retry"
 )
@@ -96,17 +97,18 @@ func (f *HttpFile) ReadAt(p []byte, off int64) (int, error) {
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrNetworkError, err)
 		}
-		defer resp.Body.Close()
+		body := bandwidth.Body(req.Context(), resp.Body)
+		defer body.Close()
 		switch resp.StatusCode {
 		case http.StatusPartialContent:
-			n, err = io.ReadFull(resp.Body, p)
+			n, err = io.ReadFull(body, p)
 			return err
 		case http.StatusOK:
 			// Skip the prefix when the server ignores the Range header.
-			if _, err := io.CopyN(io.Discard, resp.Body, off); err != nil {
+			if _, err := io.CopyN(io.Discard, body, off); err != nil {
 				return err
 			}
-			n, err = io.ReadFull(resp.Body, p)
+			n, err = io.ReadFull(body, p)
 			return err
 		case http.StatusRequestedRangeNotSatisfiable:
 			return io.EOF

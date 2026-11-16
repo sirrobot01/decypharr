@@ -277,7 +277,7 @@ class ConfigManager {
     populateGeneralSettings(config) {
         const fields = [
             'log_level', 'url_base', 'bind_address', 'port',
-            'min_file_size', 'max_file_size', 'folder_naming',
+            'min_file_size', 'max_file_size', 'max_download_speed', 'folder_naming',
             'refresh_dirs', 'disable_webdav', 'app_url'
         ];
 
@@ -1412,6 +1412,7 @@ class ConfigManager {
                 .split(',').map(ext => ext.trim()).filter(Boolean),
             min_file_size: document.querySelector('[name="min_file_size"]').value,
             max_file_size: document.querySelector('[name="max_file_size"]').value,
+            max_download_speed: document.querySelector('[name="max_download_speed"]').value.trim(),
             remove_stalled_after: document.querySelector('[name="remove_stalled_after"]').value || "10m",
             nzb_user_agent: document.querySelector('[name="nzb_user_agent"]').value,
             download_folder: document.querySelector('[name="download_folder"]').value,
@@ -1523,7 +1524,6 @@ class ConfigManager {
             providers: providers,
             processing_max_connections: parseInt(document.querySelector('[name="usenet.processing_max_connections"]')?.value) || 15,
             read_ahead: document.querySelector('[name="usenet.read_ahead"]').value || "16MB",
-            max_download_speed: document.querySelector('[name="usenet.max_download_speed"]')?.value.trim() || "",
             body_pipeline_depth: Math.min(4, Math.max(1,
                 parseInt(document.querySelector('[name="usenet.body_pipeline_depth"]')?.value, 10) || 2)),
             processing_timeout: document.querySelector('[name="usenet.processing_timeout"]')?.value || "5m",
@@ -2375,7 +2375,6 @@ class ConfigManager {
         const streamFields = {
             'processing_max_connections': usenet.processing_max_connections,
             'read_ahead': usenet.read_ahead,
-            'max_download_speed': usenet.max_download_speed,
             'body_pipeline_depth': usenet.body_pipeline_depth ?? 2,
             'processing_timeout': usenet.processing_timeout,
             'conn_idle_timeout': usenet.conn_idle_timeout,

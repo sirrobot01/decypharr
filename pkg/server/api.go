@@ -13,6 +13,7 @@ import (
 	json "github.com/bytedance/sonic"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/sirrobot01/decypharr/internal/bandwidth"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/utils"
 	"github.com/sirrobot01/decypharr/pkg/repair"
@@ -377,6 +378,9 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	if restarted {
 		go s.Restart()
 	} else {
+		if before.MaxDownloadSpeed != updated.MaxDownloadSpeed {
+			bandwidth.SetLimit(updated.GetMaxDownloadSpeed())
+		}
 		if before.AppURL != updated.AppURL || !reflect.DeepEqual(before.Strm, updated.Strm) {
 			s.manager.Strm().SweepAsync("config_change")
 		}

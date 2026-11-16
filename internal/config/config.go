@@ -271,6 +271,7 @@ type Config struct {
 	AllowSamples       bool     `json:"allow_samples,omitempty"`
 	MinFileSize        string   `json:"min_file_size,omitempty"`
 	MaxFileSize        string   `json:"max_file_size,omitempty"`
+	MaxDownloadSpeed   string   `json:"max_download_speed,omitempty"` // Cap per second for all downloads, e.g. "10MB"; empty sets no cap
 	RemoveStalledAfter string   `json:"remove_stalled_after,omitzero"`
 	EnableWebdavAuth   bool     `json:"enable_webdav_auth,omitempty"`
 	UseAuth            bool     `json:"use_auth,omitempty"`
@@ -386,6 +387,12 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	if c.MaxDownloadSpeed != "" {
+		if _, err := ParseSize(c.MaxDownloadSpeed); err != nil {
+			return fmt.Errorf("invalid max download speed %q: %w", c.MaxDownloadSpeed, err)
+		}
+	}
+
 	return nil
 }
 
@@ -404,6 +411,19 @@ func (c *Config) GetMinFileSize() int64 {
 		return 0
 	}
 	s, err := ParseSize(c.MinFileSize)
+	if err != nil {
+		return 0
+	}
+	return s
+}
+
+// GetMaxDownloadSpeed returns the download speed cap in bytes per second.
+// Zero means no cap.
+func (c *Config) GetMaxDownloadSpeed() int64 {
+	if c.MaxDownloadSpeed == "" {
+		return 0
+	}
+	s, err := ParseSize(c.MaxDownloadSpeed)
 	if err != nil {
 		return 0
 	}
@@ -778,6 +798,8 @@ func clearHotFields(c *Config) {
 	c.AllowSamples = false
 	c.MinFileSize = ""
 	c.MaxFileSize = ""
+	// The download speed cap is applied explicitly after a save.
+	c.MaxDownloadSpeed = ""
 	c.NZBUserAgent = ""
 	c.DownloadFolder = ""
 	c.SkipPreCache = false

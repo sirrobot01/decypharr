@@ -32,7 +32,7 @@ var (
 )
 
 func TestLinkControlDoublesWhileThroughputGrows(t *testing.T) {
-	l := newLinkControl(100, 0)
+	l := newLinkControl(100)
 	var now int64
 	if got := waiting.run(l, &now); got != 32 {
 		t.Fatalf("limit after first limited period = %d, want 32", got)
@@ -46,7 +46,7 @@ func TestLinkControlDoublesWhileThroughputGrows(t *testing.T) {
 }
 
 func TestLinkControlReturnsToLastStepOnPlateau(t *testing.T) {
-	l := newLinkControl(100, 0)
+	l := newLinkControl(100)
 	var now int64
 	waiting.run(l, &now) // 16 -> 32
 	waiting.run(l, &now) // settle
@@ -67,7 +67,7 @@ func TestLinkControlReturnsToLastStepOnPlateau(t *testing.T) {
 }
 
 func TestLinkControlBlockedReadEndsHold(t *testing.T) {
-	l := newLinkControl(100, 0)
+	l := newLinkControl(100)
 	var now int64
 	waiting.run(l, &now) // 16 -> 32
 	waiting.run(l, &now) // settle
@@ -83,7 +83,7 @@ func TestLinkControlBlockedReadEndsHold(t *testing.T) {
 }
 
 func TestLinkControlDropsWhenDelayRises(t *testing.T) {
-	l := newLinkControl(100, 0)
+	l := newLinkControl(100)
 	l.limit.Store(80)
 	var now int64
 	steady := idle
@@ -97,7 +97,7 @@ func TestLinkControlDropsWhenDelayRises(t *testing.T) {
 }
 
 func TestLinkControlDriftsDownWhenIdle(t *testing.T) {
-	l := newLinkControl(100, 0)
+	l := newLinkControl(100)
 	l.limit.Store(80)
 	l.slowStart = false
 	var now int64
@@ -118,7 +118,7 @@ func TestLinkControlDriftsDownWhenIdle(t *testing.T) {
 }
 
 func TestLinkControlNeverDropsBelowMinimum(t *testing.T) {
-	l := newLinkControl(100, 0)
+	l := newLinkControl(100)
 	l.limit.Store(linkMinLimit)
 	var now int64
 	idle.run(l, &now)
@@ -130,7 +130,7 @@ func TestLinkControlNeverDropsBelowMinimum(t *testing.T) {
 }
 
 func TestLinkControlReportsSpeed(t *testing.T) {
-	l := newLinkControl(100, 0)
+	l := newLinkControl(100)
 	var now int64
 	idle.run(l, &now) // first period has no start time
 	fast := idle
@@ -141,22 +141,10 @@ func TestLinkControlReportsSpeed(t *testing.T) {
 	}
 }
 
-func TestLinkControlCapsSpeed(t *testing.T) {
-	const speed = 1 << 20
-	l := newLinkControl(100, speed)
-	start := time.Now()
-	for range 6 {
-		l.received(256 << 10) // 1.5MB in all; the burst covers 256KB
-	}
-	if elapsed := time.Since(start); elapsed < time.Second {
-		t.Fatalf("1.5MB at a 1MB/s cap took %s, want at least 1s", elapsed)
-	}
-}
-
 func TestLinkLimitHoldsPrefetchButNotDemand(t *testing.T) {
 	pp := newTestPool(4)
 	c := newAcquireTestClient(pp)
-	c.link = newLinkControl(4, 0)
+	c.link = newLinkControl(4)
 	c.link.limit.Store(1)
 
 	if !c.tryAcquireSlot(pp, WorkloadStreamPrefetch) {
@@ -183,7 +171,7 @@ func TestLinkLimitHandoffMovesToFirstProvider(t *testing.T) {
 	first, second := newTestPool(4), newTestPool(4)
 	first.config.Host, second.config.Host = "first", "second"
 	c := newTieredAcquireTestClient(first, second, 0)
-	c.link = newLinkControl(8, 0)
+	c.link = newLinkControl(8)
 	c.link.limit.Store(1)
 
 	if !c.tryAcquireSlot(second, WorkloadStreamPrefetch) {

@@ -16,6 +16,7 @@ import (
 	"github.com/go-co-op/gocron/v2"
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/rs/zerolog"
+	"github.com/sirrobot01/decypharr/internal/bandwidth"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/logger"
 	"github.com/sirrobot01/decypharr/internal/utils"
@@ -130,6 +131,7 @@ var _ repair.Backend = (*Manager)(nil)
 func New() *Manager {
 	cfg := config.Get()
 	_logger := logger.New("manager")
+	bandwidth.SetLimit(cfg.GetMaxDownloadSpeed())
 
 	strg, err := storage.NewStorage(filepath.Join(config.GetMainPath(), "db"))
 	if err != nil {
@@ -167,7 +169,7 @@ func New() *Manager {
 
 	streamClient := &http.Client{
 		Timeout:   0,
-		Transport: transport,
+		Transport: bandwidth.Transport(transport),
 	}
 
 	usenetTimeout, err := utils.ParseDuration(cfg.Usenet.ProcessingTimeout)

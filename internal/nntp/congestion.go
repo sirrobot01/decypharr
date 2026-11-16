@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/time/rate"
+	"github.com/sirrobot01/decypharr/internal/bandwidth"
 )
 
 const (
@@ -53,14 +53,13 @@ const (
 // cannot open every connection at once.
 //
 // Streaming demand (a blocked read) is never held by the limit, but its
-// connections count against it. An optional speed cap applies to all reads.
+// connections count against it. The download speed cap applies to all reads.
 type linkControl struct {
 	limit    atomic.Int32
 	bytes    atomic.Int64 // body bytes received in this period
 	limited  atomic.Bool  // work waited on the limit in this period
 	demanded atomic.Bool  // a blocked read fetched in this period
 	speed    atomic.Int64 // bytes per second in the last period
-	capped   *rate.Limiter
 
 	mu         sync.Mutex
 	maxLimit   int
@@ -79,26 +78,19 @@ type linkControl struct {
 	holdUntil int64
 }
 
-// newLinkControl returns a link control for maxLimit connections. A positive
-// maxSpeed caps the bytes per second of all body reads.
-func newLinkControl(maxLimit int, maxSpeed int64) *linkControl {
+// newLinkControl returns a link control for maxLimit connections.
+func newLinkControl(maxLimit int) *linkControl {
 	maxLimit = max(maxLimit, 1)
 	l := &linkControl{maxLimit: maxLimit, slowStart: true}
 	l.limit.Store(int32(min(linkStartLimit, maxLimit)))
-	if maxSpeed > 0 {
-		// The burst must hold the largest single read of the connection
-		// reader, or WaitN fails.
-		l.capped = rate.NewLimiter(rate.Limit(maxSpeed), max(int(maxSpeed/4), 256<<10))
-	}
 	return l
 }
 
-// received records n body bytes and waits while they pass the speed cap.
+// received records n body bytes and waits while they pass the download speed
+// cap.
 func (l *linkControl) received(n int) {
 	l.bytes.Add(int64(n))
-	if l.capped != nil {
-		_ = l.capped.WaitN(context.Background(), n)
-	}
+	_ = bandwidth.Wait(context.Background(), n)
 }
 
 // sample records the first-byte delay of one BODY reply.
@@ -203,15 +195,11 @@ func (l *linkControl) stats() map[string]any {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	var maxSpeed int64
-	if l.capped != nil {
-		maxSpeed = int64(l.capped.Limit())
-	}
 	return map[string]any{
 		"limit":           l.limit.Load(),
 		"max_limit":       l.maxLimit,
 		"speed":           l.speed.Load(),
-		"max_speed":       maxSpeed,
+		"max_speed":       bandwidth.Limit(),
 		"base_delay_ms":   float64(l.baseLocked()) / 1e6,
 		"recent_delay_ms": float64(l.lastRecent) / 1e6,
 		"slow_start":      l.slowStart,

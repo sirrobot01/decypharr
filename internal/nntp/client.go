@@ -398,15 +398,7 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		}
 	}
 	cm.repairPool = cm.newRepairPool(cfg.Repair.NNTPConnectionPercent)
-	var maxSpeed int64
-	if value := cfg.Usenet.MaxDownloadSpeed; value != "" && value != "0" {
-		if n, err := config.ParseSize(value); err != nil || n <= 0 {
-			cm.logger.Warn().Str("max_download_speed", value).Msg("invalid max_download_speed, no speed cap")
-		} else {
-			maxSpeed = n
-		}
-	}
-	cm.link = newLinkControl(cm.TotalConnections(), maxSpeed)
+	cm.link = newLinkControl(cm.TotalConnections())
 
 	// Start background reaper
 	go cm.reaper()
