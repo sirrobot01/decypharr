@@ -421,6 +421,7 @@ func (tb *Torbox) updateTorrentWithClient(client *request.Client, t *types.Torre
 		t.InfoHash = data.Hash
 	}
 	t.Debrid = tb.config.Name
+	t.SummaryOnly = false
 
 	t.Files = make(map[string]types.File)
 
@@ -515,18 +516,15 @@ func (tb *Torbox) GetDownloadLink(ctx context.Context, id string, file *types.Fi
 }
 
 func (tb *Torbox) fetchDownloadLink(ctx context.Context, account *account.Account, id string, file *types.File) (types.DownloadLink, error) {
-	query := url.Values{}
-	query.Set("token", account.Token)
-	query.Set("torrent_id", id)
-	query.Set("file_id", file.Id)
-	query.Set("redirect", "true")
-
-	downloadURL := fmt.Sprintf("%s/api/torrents/requestdl?%s", tb.Host, query.Encode())
-
 	// Resolve the CDN URL once through the rate-limited client. Streaming the
 	// redirect URL makes every range read a requestdl call against the
-	// account-wide API limit. An expired CDN URL is refetched like any link;
-	// on failure the redirect URL still works.
+	// account-wide API limit. An expired CDN URL is refetched like any link.
+	//
+	// There is deliberately no fallback to the requestdl?redirect=true URL:
+	// every range read through it is another TorBox API call that bypasses the
+	// client's rate limiter, so a Plex scan during an API hiccup would turn one
+	// failed resolution into a burst of API calls. Return the error instead;
+	// the caller retries through the limiter.
 	client := account.Client()
 	if client == nil {
 		client = tb.client
@@ -538,21 +536,24 @@ func (tb *Torbox) fetchDownloadLink(ctx context.Context, account *account.Accoun
 		"file_id":    file.Id,
 		"redirect":   "false",
 	}, &res)
-	if err == nil && resp.StatusCode == http.StatusOK && res.Success && res.Data != nil && strings.HasPrefix(*res.Data, "http") {
-		downloadURL = *res.Data
-	} else {
-		tb.logger.Debug().Err(err).Str("torrent_id", id).Msg("requestdl redirect=false failed, using redirect URL")
+	if err != nil {
+		return types.DownloadLink{}, fmt.Errorf("torbox requestdl for torrent %s file %s: %w", id, file.Id, err)
+	}
+	if resp.StatusCode != http.StatusOK || !res.Success || res.Data == nil || !strings.HasPrefix(*res.Data, "http") {
+		return types.DownloadLink{}, fmt.Errorf("torbox requestdl for torrent %s file %s: status %d, error %v", id, file.Id, resp.StatusCode, res.Error)
 	}
 
 	now := time.Now()
 
 	// Always expires
 	dl := types.DownloadLink{
-		Filename:     file.Name,
-		Size:         file.Size,
-		Token:        tb.APIKey,
+		Filename: file.Name,
+		Size:     file.Size,
+		// The account that minted the link, so a link error disables that
+		// account (which may be a separate download key, not tb.APIKey).
+		Token:        account.Token,
 		Link:         file.Link,
-		DownloadLink: downloadURL,
+		DownloadLink: *res.Data,
 		Debrid:       tb.config.Name,
 		Id:           file.Id,
 		Generated:    now,
@@ -561,12 +562,16 @@ func (tb *Torbox) fetchDownloadLink(ctx context.Context, account *account.Accoun
 	return dl, nil
 }
 
+// torrentListPageLimit is the page size requested from /torrents/mylist. A
+// shorter page means the end of the list, so no extra empty request is made.
+const torrentListPageLimit = 1000
+
 func (tb *Torbox) GetTorrents() ([]*types.Torrent, error) {
 	offset := 0
 	allTorrents := make([]*types.Torrent, 0)
 
 	for {
-		torrents, err := tb.getTorrents(offset)
+		torrents, err := tb.getTorrents(offset, torrentListPageLimit)
 		if err != nil {
 			return nil, fmt.Errorf("get TorBox torrents at offset %d: %w", offset, err)
 		}
@@ -575,16 +580,25 @@ func (tb *Torbox) GetTorrents() ([]*types.Torrent, error) {
 		}
 		allTorrents = append(allTorrents, torrents...)
 		offset += len(torrents)
+		if len(torrents) < torrentListPageLimit {
+			break
+		}
 	}
 	return allTorrents, nil
 }
 
-func (tb *Torbox) getTorrents(offset int) ([]*types.Torrent, error) {
+func (tb *Torbox) getTorrents(offset, limit int) ([]*types.Torrent, error) {
 	var res TorrentsListResponse
 
 	resp, err := tb.doGet("/api/torrents/mylist", map[string]string{
 		"bypass_cache": "true",
-		"offset":       strconv.Itoa(offset),
+		// The refresh only needs torrent-level fields to detect new and
+		// changed torrents; those are then hydrated one by one through
+		// UpdateTorrent. Without files=false every refresh downloads the full
+		// file tree of every torrent on the account.
+		"files":  "false",
+		"limit":  strconv.Itoa(limit),
+		"offset": strconv.Itoa(offset),
 	}, &res)
 	if err != nil {
 		return nil, err
@@ -616,6 +630,7 @@ func (tb *Torbox) getTorrents(offset int) ([]*types.Torrent, error) {
 			Files:            make(map[string]types.File),
 			Added:            data.CreatedAt,
 			InfoHash:         data.Hash,
+			SummaryOnly:      true,
 		}
 
 		for _, f := range data.Files {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -81,6 +82,12 @@ func TestGetTorrentsBypassesTorboxCache(t *testing.T) {
 		if got := r.URL.Query().Get("bypass_cache"); got != "true" {
 			t.Errorf("bypass_cache = %q, want true", got)
 		}
+		if got := r.URL.Query().Get("files"); got != "false" {
+			t.Errorf("files = %q, want false", got)
+		}
+		if got := r.URL.Query().Get("limit"); got != strconv.Itoa(torrentListPageLimit) {
+			t.Errorf("limit = %q, want %d", got, torrentListPageLimit)
+		}
 
 		offset := r.URL.Query().Get("offset")
 		mu.Lock()
@@ -104,19 +111,66 @@ func TestGetTorrentsBypassesTorboxCache(t *testing.T) {
 	if len(torrents) != 1 || torrents[0].Id != "17" {
 		t.Fatalf("GetTorrents() = %#v, want torrent 17", torrents)
 	}
+	if !torrents[0].SummaryOnly {
+		t.Fatal("list rows must be marked SummaryOnly")
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
-	if !slices.Equal(offsets, []string{"0", "1"}) {
-		t.Fatalf("offsets = %v, want [0 1]", offsets)
+	// A page shorter than the limit is the last one; no empty request follows.
+	if !slices.Equal(offsets, []string{"0"}) {
+		t.Fatalf("offsets = %v, want [0]", offsets)
+	}
+}
+
+func TestGetTorrentsPagesUntilShortPage(t *testing.T) {
+	var (
+		mu      sync.Mutex
+		offsets []string
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+		mu.Lock()
+		offsets = append(offsets, r.URL.Query().Get("offset"))
+		mu.Unlock()
+
+		count := torrentListPageLimit
+		if offset > 0 {
+			count = 2
+		}
+		rows := make([]string, 0, count)
+		for i := range count {
+			rows = append(rows, fmt.Sprintf(`{"id":%d,"name":"T%d","hash":"H%d","created_at":"2026-01-02T03:04:05Z"}`, offset+i, offset+i, offset+i))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"success":true,"data":[%s]}`, strings.Join(rows, ","))
+	}))
+	t.Cleanup(server.Close)
+
+	torrents, err := testTorbox(server.URL).GetTorrents()
+	if err != nil {
+		t.Fatalf("GetTorrents() error = %v", err)
+	}
+	if len(torrents) != torrentListPageLimit+2 {
+		t.Fatalf("GetTorrents() returned %d torrents, want %d", len(torrents), torrentListPageLimit+2)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if want := []string{"0", strconv.Itoa(torrentListPageLimit)}; !slices.Equal(offsets, want) {
+		t.Fatalf("offsets = %v, want %v", offsets, want)
 	}
 }
 
 func TestGetTorrentsReturnsPaginationErrors(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("offset") == "0" {
+			// A full page, so GetTorrents asks for the next one.
+			rows := make([]string, 0, torrentListPageLimit)
+			for i := range torrentListPageLimit {
+				rows = append(rows, fmt.Sprintf(`{"id":%d,"name":"Release.mkv","created_at":"2026-01-02T03:04:05Z"}`, i))
+			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprint(w, `{"success":true,"data":[{"id":17,"name":"Release.mkv","created_at":"2026-01-02T03:04:05Z"}]}`)
+			_, _ = fmt.Fprintf(w, `{"success":true,"data":[%s]}`, strings.Join(rows, ","))
 			return
 		}
 		http.Error(w, "temporary failure", http.StatusInternalServerError)
@@ -131,7 +185,7 @@ func TestGetTorrentsReturnsPaginationErrors(t *testing.T) {
 	if torrents != nil {
 		t.Fatalf("GetTorrents() torrents = %#v, want nil after pagination error", torrents)
 	}
-	if got := err.Error(); !strings.Contains(got, "get TorBox torrents at offset 1:") {
+	if got := err.Error(); !strings.Contains(got, "get TorBox torrents at offset "+strconv.Itoa(torrentListPageLimit)+":") {
 		t.Fatalf("GetTorrents() error = %q, want offset context", got)
 	}
 }
@@ -281,17 +335,38 @@ func TestFetchDownloadLinkResolvesCDNURL(t *testing.T) {
 	}
 }
 
-func TestFetchDownloadLinkFallsBackToRedirectURL(t *testing.T) {
+func TestFetchDownloadLinkDoesNotFallBackToRedirectURL(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "busy", http.StatusTooManyRequests)
 	}))
 	t.Cleanup(server.Close)
 
 	dl, err := testTorbox(server.URL).fetchDownloadLink(t.Context(), &account.Account{Token: "key"}, "7", &types.File{Id: "3", Name: "a.mkv"})
+	if err == nil {
+		t.Fatalf("fetchDownloadLink() = %q, want an error", dl.DownloadLink)
+	}
+	if dl.DownloadLink != "" {
+		t.Fatalf("DownloadLink = %q, want none (streaming the redirect URL bypasses the rate limiter)", dl.DownloadLink)
+	}
+}
+
+func TestFetchDownloadLinkUsesTheMintingAccountToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("token"); got != "download-key" {
+			t.Errorf("token = %q, want download-key", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"success":true,"data":"https://store-1.tb-cdn.st/file?token=x"}`)
+	}))
+	t.Cleanup(server.Close)
+
+	tb := testTorbox(server.URL)
+	tb.APIKey = "main-key"
+	dl, err := tb.fetchDownloadLink(t.Context(), &account.Account{Token: "download-key"}, "7", &types.File{Id: "3", Name: "a.mkv"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(dl.DownloadLink, "/api/torrents/requestdl?") || !strings.Contains(dl.DownloadLink, "redirect=true") {
-		t.Fatalf("DownloadLink = %q, want the redirect URL", dl.DownloadLink)
+	if dl.Token != "download-key" {
+		t.Fatalf("Token = %q, want download-key so link errors disable the right account", dl.Token)
 	}
 }

@@ -235,6 +235,14 @@ func (p *ProviderEntry) NeedsUpdate(remote *debridTypes.Torrent) bool {
 	if p.ID != remote.Id {
 		return true // Re-added on debrid with a different ID
 	}
+	// A summary row omits files and its status can disagree with the
+	// torrent's real state (TorBox's files=false list reports some
+	// long-downloaded torrents as checking or incomplete). Treating either as a
+	// change re-fetched the same torrents through the rate limiter on every
+	// refresh and delayed new ones.
+	if remote.SummaryOnly {
+		return false
+	}
 	if p.Status != remote.Status {
 		return true // Status changed (e.g., downloading → downloaded)
 	}
