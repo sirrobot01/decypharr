@@ -190,13 +190,14 @@ func (m *Manager) performMount(ctx context.Context) error {
 	return nil
 }
 
-// unmount is the internal unmount function
-func (m *Manager) unmount(ctx context.Context) {
+// unmount is the internal unmount function. It reports whether the mount
+// was actually released.
+func (m *Manager) unmount(ctx context.Context) bool {
 	mountInfo := m.getMountInfo()
 
 	if mountInfo == nil || !mountInfo.Mounted {
 		m.logger.Info().Msg("Mount not found or already unmounted")
-		return
+		return true
 	}
 
 	m.logger.Info().Msg("Unmounting")
@@ -206,11 +207,14 @@ func (m *Manager) unmount(ctx context.Context) {
 	err := m.client.Unmount(context.Background(), mountInfo.LocalPath)
 
 	// If RC unmount fails or server is not ready, try force unmount
+	released := err == nil
 	if err != nil {
 		m.logger.Warn().Err(err).Msg("RC unmount failed, trying force unmount")
 		if err := m.forceUnmount(ctx); err != nil {
 			m.logger.Error().Err(err).Msg("Force unmount failed")
 			// Don't return error here, update the state anyway
+		} else {
+			released = true
 		}
 	}
 
@@ -221,6 +225,7 @@ func (m *Manager) unmount(ctx context.Context) {
 		mountInfo.Error = err.Error()
 	}
 	m.logger.Info().Msg("Unmount completed")
+	return released
 }
 
 // createConfig creates an rclone config entry for the provider
