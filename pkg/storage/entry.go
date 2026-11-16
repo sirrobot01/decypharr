@@ -240,6 +240,68 @@ func (s *Storage) MigrateMetadata() (int, error) {
 	return migrated, nil
 }
 
+// BackfillAddedOn gives a stored time to entries that have none. Old imports
+// saved entries without AddedOn, and a mount then shows a different mtime for
+// them each time it rebuilds the node. Media servers read that as a modified
+// file and analyze it again. The entry and its files in the name index take
+// the first time the entry has: CreatedAt, then UpdatedAt.
+// Returns the number of entries changed.
+func (s *Storage) BackfillAddedOn() (int, error) {
+	var keys []string
+	_ = s.entries.ForEachMetadata(func(key string, meta *appendstore.Metadata) error {
+		if !strings.HasPrefix(key, "__") && metadataInt64(meta, attributeAddedOn) <= 0 {
+			keys = append(keys, key)
+		}
+		return nil
+	})
+
+	changed := 0
+	for _, key := range keys {
+		entry, err := s.Get(key)
+		if err != nil || !entry.AddedOn.IsZero() {
+			continue
+		}
+		addedOn := entry.CreatedAt
+		if addedOn.IsZero() {
+			addedOn = entry.UpdatedAt
+		}
+		if addedOn.IsZero() {
+			continue
+		}
+		entry.AddedOn = addedOn
+		for _, f := range entry.Files {
+			if f.AddedOn.IsZero() {
+				f.AddedOn = addedOn
+			}
+		}
+		data, err := proto.Marshal(EntryToProto(entry))
+		if err != nil {
+			return changed, fmt.Errorf("encode entry %q: %w", key, err)
+		}
+		if err := s.entries.Put(key, data, entryPutOptions(entry)); err != nil {
+			return changed, fmt.Errorf("save entry %q: %w", key, err)
+		}
+
+		item, err := s.GetEntryItem(entry.GetFolder())
+		if err == nil {
+			for _, f := range item.Files {
+				if f.AddedOn.IsZero() {
+					f.AddedOn = addedOn
+				}
+			}
+			data, err := proto.Marshal(EntryItemToProto(item))
+			if err != nil {
+				return changed, fmt.Errorf("encode name index %q: %w", item.Name, err)
+			}
+			if err := s.entryItems.Put(item.Name, data, nil); err != nil {
+				return changed, fmt.Errorf("save name index %q: %w", item.Name, err)
+			}
+		}
+		changed++
+	}
+	return changed, nil
+}
+
 // Delete removes an entry.
 func (s *Storage) Delete(infohash string) error {
 	entry, err := s.Get(infohash)

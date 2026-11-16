@@ -19,17 +19,22 @@ func TestNewFileUsesMetadataModificationTime(t *testing.T) {
 	info := managerInstance.RootInfo()
 	file := NewFile(nil, &config.FuseConfig{}, info, &logger.RateLimitedLogger{})
 
-	if !file.createdAt.Equal(info.ModTime()) {
-		t.Fatalf("file timestamp = %v, want metadata timestamp %v", file.createdAt, info.ModTime())
+	if got := file.modTime(info); !got.Equal(info.ModTime()) {
+		t.Fatalf("file timestamp = %v, want metadata timestamp %v", got, info.ModTime())
 	}
 }
 
-func TestNewFileChoosesStableFallbackTime(t *testing.T) {
+// A node rebuilt for an entry without a stored time must keep its mtime, or
+// media servers analyze the file again.
+func TestRebuiltFileKeepsFallbackTime(t *testing.T) {
 	info := &manager.FileInfo{}
-	file := NewFile(nil, &config.FuseConfig{}, info, &logger.RateLimitedLogger{})
+	var first, second fuse.AttrOut
+	NewFile(nil, &config.FuseConfig{}, info, &logger.RateLimitedLogger{}).Getattr(context.Background(), nil, &first)
+	time.Sleep(1100 * time.Millisecond)
+	NewFile(nil, &config.FuseConfig{}, info, &logger.RateLimitedLogger{}).Getattr(context.Background(), nil, &second)
 
-	if file.createdAt.IsZero() {
-		t.Fatal("file timestamp must be initialized when metadata has no modification time")
+	if first.Mtime != second.Mtime {
+		t.Fatalf("mtime changed when the node was rebuilt: %d, then %d", first.Mtime, second.Mtime)
 	}
 }
 

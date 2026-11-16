@@ -99,7 +99,7 @@ func (d *Dir) newNode(info *manager.FileInfo) fs.InodeEmbedder {
 	if info.IsDir() {
 		modTime := info.ModTime()
 		if modTime.IsZero() {
-			modTime = time.Now()
+			modTime = fallbackModTime
 		}
 		node = newDir(d.vfs, info.Name(), d.childPath(info.Name()), d.level+1, uint64(modTime.Unix()), d.config, d.logger, d.rlLogger)
 	} else {
@@ -200,7 +200,7 @@ func (d *Dir) nodeModTime(info *manager.FileInfo, node fs.InodeEmbedder) uint64 
 
 	switch node := node.(type) {
 	case *File:
-		return uint64(node.createdAt.Unix())
+		return uint64(fallbackModTime.Unix())
 	case *Dir:
 		return node.modTime.Load()
 	default:

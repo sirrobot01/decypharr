@@ -21,11 +21,10 @@ import (
 // File implements a FUSE file with RFS streaming
 type File struct {
 	fs.Inode
-	config    *config.FuseConfig
-	rl        *logger.RateLimitedLogger
-	info      atomic.Pointer[manager.FileInfo]
-	createdAt time.Time
-	vfs       *vfs.Manager
+	config *config.FuseConfig
+	rl     *logger.RateLimitedLogger
+	info   atomic.Pointer[manager.FileInfo]
+	vfs    *vfs.Manager
 }
 
 var (
@@ -33,20 +32,17 @@ var (
 	_ = (fs.NodeGetattrer)((*File)(nil))
 )
 
+// fallbackModTime is the mtime of a node whose entry has no stored time. It
+// must be the same each time the node is built: media servers read a new
+// mtime as a modified file and analyze it again.
+var fallbackModTime = time.Unix(0, 0)
+
 // NewFile creates a new file
 func NewFile(vfsManager *vfs.Manager, config *config.FuseConfig, info *manager.FileInfo, rl *logger.RateLimitedLogger) *File {
-	createdAt := info.ModTime()
-	if createdAt.IsZero() {
-		// Choose the fallback once when the node is created. Recomputing it in
-		// Getattr would change ctime and mtime whenever the attr cache expires.
-		createdAt = time.Now()
-	}
-
 	file := &File{
-		config:    config,
-		rl:        rl,
-		vfs:       vfsManager,
-		createdAt: createdAt,
+		config: config,
+		rl:     rl,
+		vfs:    vfsManager,
 	}
 	file.info.Store(info)
 	return file
@@ -60,7 +56,7 @@ func (f *File) modTime(info *manager.FileInfo) time.Time {
 	if modTime := info.ModTime(); !modTime.IsZero() {
 		return modTime
 	}
-	return f.createdAt
+	return fallbackModTime
 }
 
 func (f *File) infoForHandle(fh fs.FileHandle) *manager.FileInfo {

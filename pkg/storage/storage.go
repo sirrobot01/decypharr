@@ -120,6 +120,11 @@ func NewStorage(dbPath string) (*Storage, error) {
 	} else if count > 0 {
 		log.Info().Int("count", count).Msg("Migrated entry metadata to new format")
 	}
+	if count, err := s.BackfillAddedOn(); err != nil {
+		log.Warn().Err(err).Msg("Added-on time backfill failed")
+	} else if count > 0 {
+		log.Info().Int("count", count).Msg("Gave a stored added-on time to entries without one")
+	}
 
 	return s, nil
 }
