@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
@@ -26,7 +27,21 @@ func (m *Manager) AddNewTorrent(ctx context.Context, importReq *ImportRequest) e
 		return fmt.Errorf("arr is required")
 	}
 
-	return m.torrentSubmissions.Do(ctx, torrentSubmissionKey(importReq), func() error {
+	key := torrentSubmissionKey(importReq)
+	// A hash submitted within the dedup window is not resubmitted (#308). While
+	// it is still queued, the duplicate add is an idempotent success below. If
+	// it has been deleted since, nothing would be queued, so a success would
+	// report a torrent the client can never find: refuse with a retryable
+	// error instead. The window still slides, exactly as for a suppressed
+	// duplicate, so an Arr re-grab loop gains nothing from deleting first.
+	if _, err := m.queue.GetTorrent(importReq.Magnet.InfoHash); err != nil && m.torrentSubmissions.suppressed(key) {
+		return customerror.NewError(
+			fmt.Errorf("%s was submitted less than %s ago and has been removed since; not resubmitting yet", importReq.Magnet.InfoHash, torrentSubmissionDedupWindow),
+			http.StatusConflict, "recently_submitted", false, false,
+		).Retryable()
+	}
+
+	return m.torrentSubmissions.Do(ctx, key, func() error {
 		// qBittorrent treats adding an existing hash as an idempotent success.
 		// Check again inside the singleflight call so concurrent requests cannot
 		// both pass the lookup and submit the same hash to a provider.
