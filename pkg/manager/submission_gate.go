@@ -74,6 +74,15 @@ func (g *torrentSubmissionGate) Do(ctx context.Context, key string, submit func(
 	}
 }
 
+// suppressed reports whether key was submitted within the window, and slides
+// the window when it was - the same effect a suppressed Do call has.
+func (g *torrentSubmissionGate) suppressed(key string) bool {
+	if key == "" {
+		return false
+	}
+	return g.touchRecent(key, g.now())
+}
+
 func (g *torrentSubmissionGate) now() time.Time {
 	if g.clock == nil {
 		return time.Now()
