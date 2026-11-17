@@ -7,6 +7,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/rs/zerolog"
 	appconfig "github.com/sirrobot01/decypharr/internal/config"
@@ -120,6 +121,11 @@ type Cursor struct {
 	// window.
 	runStart atomic.Int64
 
+	// aheadEnd is the offset that a cache above the reader asked to fetch
+	// to, or 0. The cache owns the read-ahead then, and the cursor's own
+	// window does not apply.
+	aheadEnd atomic.Int64
+
 	closed atomic.Bool
 }
 
@@ -163,6 +169,15 @@ func (c *Cursor) ReadAtContext(ctx context.Context, p []byte, off int64) (int, e
 
 func (c *Cursor) Prefetch(ctx context.Context, off, length int64) {
 	c.sr.Prefetch(ctx, off, length)
+}
+
+// SetReadAhead gives the read-ahead to a cache above the reader. pos and rate
+// are the position and bytes per second of the cache's own reader, and end is
+// how far to fetch. It is optional on ReadCursor.
+func (c *Cursor) SetReadAhead(pos, end, rate int64) {
+	c.aheadEnd.Store(end)
+	c.sr.cache.playPos.Store(pos)
+	c.sr.cache.playRate.Store(rate)
 }
 
 // ReleaseCachedRange acknowledges that a persistent downstream cache owns an
@@ -284,6 +299,9 @@ const (
 	minReadAheadSegments = 16
 	// readAheadRampFactor scales the window with the sequential run length.
 	readAheadRampFactor = 4
+	// readAheadTime is how much playback the window holds once the consume
+	// rate is known. The DFS read-ahead uses the same time.
+	readAheadTime = 60 * time.Second
 )
 
 // seekAbandonedWindow reports whether a read landing on [startSeg, endSeg]
@@ -396,14 +414,26 @@ func (sr *StreamingReader) readAtPlain(ctx context.Context, cur *Cursor, p []byt
 	waitRequired := sr.fetcher.PrepareSegments(ctx, startSeg, endSeg)
 
 	// Queue read-ahead hints for the part of the window this cursor hasn't
-	// already hinted (non-blocking). The window grows with the sequential
-	// run so far, so it reaches full depth only for a real stream. The depth is
-	// clamped to what the cache can actually hold: reading further ahead than
-	// the RAM budget allows only downloads segments that get dropped before
-	// the player reaches them.
-	run := endSeg - int(cur.runStart.Load()) + 1
-	ahead := min(sr.config.PrefetchAhead, sr.cache.MaxPrefetchSegments(), max(readAheadRampFactor*run, minReadAheadSegments))
-	prefetchEnd := min(endSeg+ahead, sr.segCount-1)
+	// already hinted (non-blocking). When a cache above sets the read-ahead,
+	// fetch to its end. Otherwise the window grows with the sequential run so
+	// far, so it reaches full depth only for a real stream, and holds about
+	// readAheadTime of the measured consume rate. The depth is clamped to what
+	// the cache can actually hold: reading further ahead than the RAM budget
+	// allows only downloads segments that get dropped before the player
+	// reaches them.
+	var prefetchEnd int
+	if end := cur.aheadEnd.Load(); end > 0 && sr.config.PrefetchAhead > 0 {
+		_, last := sr.cache.SegmentsForRange(end-1, 1)
+		prefetchEnd = min(last, endSeg+sr.cache.MaxPrefetchSegments(), sr.segCount-1)
+	} else {
+		run := endSeg - int(cur.runStart.Load()) + 1
+		ahead := min(sr.config.PrefetchAhead, sr.cache.MaxPrefetchSegments(), max(readAheadRampFactor*run, minReadAheadSegments))
+		if rate := sr.cache.consumeRate.Load(); rate > 0 && sr.cache.segBytesHint > 0 {
+			timed := int(rate * int64(readAheadTime/time.Second) / sr.cache.segBytesHint)
+			ahead = min(ahead, max(timed, minReadAheadSegments))
+		}
+		prefetchEnd = min(endSeg+ahead, sr.segCount-1)
+	}
 	if prefetchEnd > endSeg {
 		qStart := max(endSeg+1, int(cur.queuedThrough.Load())+1)
 		if qStart <= prefetchEnd {

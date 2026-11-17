@@ -120,7 +120,7 @@ All streams share these connections. When a stream has less data ready ahead of 
 
 ### Download Speed Cap
 
-To set a speed cap, set `max_download_speed` in the general settings. The cap applies to all downloads, debrid and usenet. Refer to [Downloads](../configuration/#downloads).
+To set a speed cap, set `max_download_speed` in the general settings. The cap applies to all downloads, debrid and usenet. Refer to [Downloads](../../configuration/#downloads).
 
 To see the total speed of all downloads and the speed cap, open the **Streams** tab on the stats page.
 
@@ -135,7 +135,9 @@ To see the total speed of all downloads and the speed cap, open the **Streams** 
 }
 ```
 
-Prefetch buffer for smoother playback. Higher = smoother but more memory.
+`read_ahead` is the largest read-ahead for WebDAV, NFS, SMB, and STRM streams. When Decypharr knows the read speed, the read-ahead holds 60 seconds of playback, up to this size. A larger value uses more memory.
+
+The DFS mount sets its own read-ahead, and Usenet downloads only that range. For the DFS mount, `read_ahead` sets only the memory that Usenet can use for each stream (three times `read_ahead`). Refer to [DFS read-ahead](../../mounting/dfs/#read-ahead).
 Read-ahead bodies use an NNTP pipeline after enough work is queued to keep the
 available prefetch workers occupied; shorter ranges retain full connection
 parallelism. `body_pipeline_depth` accepts 1-4: 1 disables pipelining, 2 is the
@@ -237,7 +239,7 @@ See [Sabnzbd Integration](./sabnzbd/) for details.
 ### Slow Streaming
 
 1. Increase `max_connections` for each provider. This also increases the streaming connections.
-2. Increase `read_ahead`.
+2. Increase the read-ahead: `read_ahead_size` for the DFS mount, or `read_ahead` for WebDAV, NFS, SMB, and STRM.
 
 ### Processing Timeouts
 

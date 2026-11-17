@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 )
@@ -212,5 +213,53 @@ func TestReadAheadRampsWithSequentialRun(t *testing.T) {
 	}
 	if got := sr.fetcher.pendingPrefetch(); got != minReadAheadSegments {
 		t.Fatalf("after a seek: %d hints, want %d", got, minReadAheadSegments)
+	}
+}
+
+// A cache above the reader that sets the read-ahead replaces the cursor's own
+// window: the reader fetches to the cache's end, no more and no less.
+func TestCacheReadAheadReplacesWindow(t *testing.T) {
+	sr := newTestReader(t, 300)
+	sr.config.PrefetchAhead = 64
+	prefillSegments(t, sr, 100)
+	cur := sr.newCursor()
+	defer cur.Close()
+
+	cur.SetReadAhead(100*1000, 131*1000, 2000)
+	if _, err := cur.ReadAtContext(context.Background(), make([]byte, 1000), 100*1000); err != nil {
+		t.Fatal(err)
+	}
+	// Segments 101-130; the first-read window alone would be 16.
+	if got := sr.fetcher.pendingPrefetch(); got != 30 {
+		t.Fatalf("hints = %d, want 30", got)
+	}
+	if got := sr.fetcher.lead(130); got != 15*time.Second {
+		t.Fatalf("lead of segment 130 = %s, want 15s (30KB at 2KB/s)", got)
+	}
+}
+
+// Without a cache above, the window holds readAheadTime at the consume rate.
+func TestReadAheadHoldsTimeAtTheConsumeRate(t *testing.T) {
+	sr := newTestReader(t, 300)
+	sr.config.PrefetchAhead = 64
+	prefillSegments(t, sr, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110)
+	cur := sr.newCursor()
+	defer cur.Close()
+
+	buf := make([]byte, 1000)
+	for seg := 100; seg <= 109; seg++ {
+		if _, err := cur.ReadAtContext(context.Background(), buf, int64(seg)*1000); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 500 B/s for 60s is 30 segments of 1000 bytes; the run alone allows 44.
+	sr.cache.consumeRate.Store(500)
+	cur.queuedThrough.Store(-1)
+	sr.fetcher.CancelPendingPrefetch()
+	if _, err := cur.ReadAtContext(context.Background(), buf, 110*1000); err != nil {
+		t.Fatal(err)
+	}
+	if got := sr.fetcher.pendingPrefetch(); got != 30 {
+		t.Fatalf("hints = %d, want 30", got)
 	}
 }

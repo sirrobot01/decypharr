@@ -67,6 +67,14 @@ type CacheRangeAcknowledger interface {
 	AcknowledgeCachedRange(off, length int64)
 }
 
+// ReadAheadSetter is an optional capability of protocol sessions whose
+// source reads ahead on its own. A cache above the session that owns the
+// read-ahead reports its reader's position and bytes per second, and how far
+// to fetch, so the source does not keep a second read-ahead window.
+type ReadAheadSetter interface {
+	SetReadAhead(pos, end, rate int64)
+}
+
 type cachedRangeReleaser interface {
 	ReleaseCachedRange(off, length int64)
 }
@@ -149,6 +157,14 @@ func (s *session) AcknowledgeCachedRange(off, length int64) {
 	s.mu.Unlock()
 	if releaser != nil {
 		releaser.ReleaseCachedRange(off, length)
+	}
+}
+
+// SetReadAhead forwards to transports that read ahead on their own. It does
+// not take s.mu, so a caller can use it while a Read is in progress.
+func (s *session) SetReadAhead(pos, end, rate int64) {
+	if setter, ok := s.t.(ReadAheadSetter); ok {
+		setter.SetReadAhead(pos, end, rate)
 	}
 }
 
@@ -579,6 +595,16 @@ type usenetTransport struct {
 	onArticleNotFound func()
 	irrecoverable     atomic.Bool
 	notifyOnce        sync.Once
+
+	// aheadPos, aheadEnd and aheadRate hold the last SetReadAhead. Each body
+	// read passes them to the reader. aheadEnd 0 = not set.
+	aheadPos, aheadEnd, aheadRate atomic.Int64
+}
+
+func (t *usenetTransport) SetReadAhead(pos, end, rate int64) {
+	t.aheadPos.Store(pos)
+	t.aheadRate.Store(rate)
+	t.aheadEnd.Store(end)
 }
 
 // DirectReader is a protocol-native random-access reader. The opener selects
@@ -598,6 +624,7 @@ const (
 )
 
 type usenetBody struct {
+	t       *usenetTransport
 	h       DirectReader
 	ctx     context.Context
 	pos     int64
@@ -611,6 +638,11 @@ func (b *usenetBody) Read(p []byte) (int, error) {
 	}
 	if int64(len(p)) > b.size-b.pos {
 		p = p[:b.size-b.pos]
+	}
+	if end := b.t.aheadEnd.Load(); end > 0 {
+		if setter, ok := b.h.(ReadAheadSetter); ok {
+			setter.SetReadAhead(b.t.aheadPos.Load(), end, b.t.aheadRate.Load())
+		}
 	}
 	n, err := b.h.ReadAtContext(b.ctx, p, b.pos)
 	b.pos += int64(n)
@@ -657,6 +689,7 @@ func (t *usenetTransport) open(ctx context.Context, pos int64) (io.ReadCloser, e
 		return nil, fmt.Errorf("usenet stream prime at offset %d read %d bytes, want %d: %w", pos, n, len(probe), io.ErrUnexpectedEOF)
 	}
 	return &usenetBody{
+		t:    t,
 		h:    h,
 		ctx:  ctx,
 		pos:  pos,

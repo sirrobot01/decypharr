@@ -58,6 +58,11 @@ type SegmentCache struct {
 	consumeRate atomic.Int64
 	rateOff     atomic.Int64
 	rateAt      atomic.Int64
+	// playPos and playRate are the position and bytes per second of the
+	// reader of a cache above this one, when that cache reports them. They
+	// are closer to the player than the consumed floor. 0 = not reported.
+	playPos  atomic.Int64
+	playRate atomic.Int64
 	// deliveryMode belongs to a persistent downstream cache. idleDelivery is
 	// set once its last handle closes so late speculative fetches are discarded
 	// instead of rebuilding a cache nobody is consuming.

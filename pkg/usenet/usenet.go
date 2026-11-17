@@ -919,6 +919,14 @@ func (h *FileHandle) Prefetch(ctx context.Context, off, length int64) {
 	h.cursor.Prefetch(ctx, off, length)
 }
 
+// SetReadAhead gives the read-ahead to a downstream cache: pos and rate are
+// its reader's position and bytes per second, and end is how far to fetch.
+func (h *FileHandle) SetReadAhead(pos, end, rate int64) {
+	if c, ok := h.cursor.(interface{ SetReadAhead(int64, int64, int64) }); ok {
+		c.SetReadAhead(pos, end, rate)
+	}
+}
+
 // ReleaseCachedRange acknowledges that a downstream persistent cache has
 // accepted an independent copy. It remains valid during the narrow interval
 // between a body closing and its session publishing the final write.

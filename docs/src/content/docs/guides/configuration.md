@@ -165,7 +165,7 @@ Array of Debrid services:
 |-------------------------------|--------|---------------------------------|------------------------------|
 | `providers`                   | array  | NNTP server configurations      | `[]`                         |
 | `processing_max_connections`  | int    | Max connections per file for parsing and NZB downloads | `15` |
-| `read_ahead`                  | string | Prefetch buffer size            | `16MB`                       |
+| `read_ahead`                  | string | Largest read-ahead for WebDAV, NFS, SMB, and STRM streams. The DFS mount sets its own read-ahead. | `16MB` |
 | `body_pipeline_depth`         | int    | Ordered read-ahead `BODY` commands per connection (`1` disables pipelining, range 1-4) | `2` |
 | `stream_backup_wait`          | string | Wait before urgent playback may use a busy-tier backup provider; `0` disables spillover | `0` |
 | `processing_timeout`          | string | Max time for NZB processing     | `10m`                        |

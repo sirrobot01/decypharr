@@ -425,6 +425,15 @@ type fakeUsenetHandle struct {
 	closed         atomic.Bool
 	releasedOff    atomic.Int64
 	releasedLength atomic.Int64
+	aheadPos       atomic.Int64
+	aheadEnd       atomic.Int64
+	aheadRate      atomic.Int64
+}
+
+func (h *fakeUsenetHandle) SetReadAhead(pos, end, rate int64) {
+	h.aheadPos.Store(pos)
+	h.aheadEnd.Store(end)
+	h.aheadRate.Store(rate)
 }
 
 func (h *fakeUsenetHandle) ReadAtContext(_ context.Context, p []byte, off int64) (int, error) {
@@ -741,5 +750,27 @@ func TestByteRangedWindowsStayInsideTheSlice(t *testing.T) {
 	}
 	if ranges := cdn.ranges(); ranges[len(ranges)-1] != "bytes=5120-13311" {
 		t.Fatalf("ranges = %v", ranges)
+	}
+}
+
+// A cache above the session sets the read-ahead, and the next body read
+// passes it to the usenet handle.
+func TestUsenetSessionPassesReadAheadToHandle(t *testing.T) {
+	data := testPattern(32 << 10)
+	h := &fakeUsenetHandle{data: data, failAt: -1}
+	tr := &usenetTransport{
+		size:     int64(len(data)),
+		openFile: func(context.Context) (DirectReader, error) { return h, nil },
+	}
+	s := newTestSession(t, tr, int64(len(data)))
+	t.Cleanup(func() { _ = s.Close() })
+
+	s.SetReadAhead(1000, 20000, 500)
+	if _, err := s.Read(make([]byte, 1024)); err != nil {
+		t.Fatal(err)
+	}
+	if h.aheadPos.Load() != 1000 || h.aheadEnd.Load() != 20000 || h.aheadRate.Load() != 500 {
+		t.Fatalf("handle read-ahead = (%d, %d, %d), want (1000, 20000, 500)",
+			h.aheadPos.Load(), h.aheadEnd.Load(), h.aheadRate.Load())
 	}
 }

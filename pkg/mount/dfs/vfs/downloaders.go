@@ -62,6 +62,12 @@ const (
 	minReadAhead = 4 << 20
 	// readAheadRampFactor scales the window with the sequential run length.
 	readAheadRampFactor = 4
+	// readAheadTime is how much playback the window holds once the read rate
+	// is known, so a small episode does not pull the full read_ahead_size on
+	// a pause. The usenet reader uses the same time.
+	readAheadTime = 60 * time.Second
+	// readRatePeriod is the shortest time between two read rate measurements.
+	readRatePeriod = time.Second
 )
 
 // Downloaders coordinates multiple concurrent downloads to a cache item
@@ -86,6 +92,16 @@ type Downloaders struct {
 	// read-ahead window grows with its length.
 	runStart int64
 	runEnd   int64
+	// rate is the bytes per second at which reads move through the run, or
+	// 0 before the first measurement. rateOff and rateAt are the run end and
+	// time of the last measurement.
+	rate    int64
+	rateOff int64
+	rateAt  time.Time
+	// playPos and playRate copy runEnd and rate for downloaders, which pass
+	// them to a source that reads ahead on its own.
+	playPos  atomic.Int64
+	playRate atomic.Int64
 	// stopping is true while StopAll() is tearing down the current session.
 	// It blocks the idle-restart path from spinning up a fresh kicker before
 	// the previous one has fully exited and the new ctx is installed.
@@ -655,15 +671,35 @@ func (dls *Downloaders) extendAndFindMissingRangeLocked(r ranges.Range) ranges.R
 
 	// Grow the window with the sequential run, so a probe that reads a few MB
 	// downloads a few MB and playback reaches the full window within seconds.
-	// With several handles open, the positions interleave and the run is not
-	// known, so the full window applies.
+	// Once the read rate is known, hold readAheadTime of it. With several
+	// handles open, the positions interleave and the run is not known, so the
+	// full window applies.
+	now := time.Now()
 	if r.Pos < dls.runStart || r.Pos > dls.runEnd+downloaderWindow {
+		// A seek keeps the rate: the file plays at the same bitrate.
 		dls.runStart, dls.runEnd = r.Pos, r.End()
+		dls.rateOff, dls.rateAt = dls.runEnd, now
+	}
+	if dls.rateAt.IsZero() {
+		dls.rateOff, dls.rateAt = dls.runEnd, now
 	}
 	dls.runEnd = max(dls.runEnd, r.End())
+	if elapsed := now.Sub(dls.rateAt); elapsed >= readRatePeriod {
+		rate := (dls.runEnd - dls.rateOff) * int64(time.Second) / int64(elapsed)
+		if dls.rate > 0 {
+			rate = (3*dls.rate + rate) / 4
+		}
+		dls.rate, dls.rateOff, dls.rateAt = rate, dls.runEnd, now
+	}
+	dls.playPos.Store(dls.runEnd)
+	dls.playRate.Store(dls.rate)
 	if dls.item.opens.Load() <= 1 {
 		run := dls.runEnd - dls.runStart
-		bufferWindow = min(bufferWindow, max(readAheadRampFactor*run, minReadAhead))
+		window := max(readAheadRampFactor*run, minReadAhead)
+		if dls.rate > 0 {
+			window = min(window, max(dls.rate*int64(readAheadTime/time.Second), minReadAhead))
+		}
+		bufferWindow = min(bufferWindow, window)
 	}
 
 	r.Size += bufferWindow
@@ -1397,6 +1433,10 @@ func (dl *downloader) streamChunk(start, end int64) (int64, error) {
 		}
 		return 0, err
 	}
+	dl.mu.Lock()
+	aheadEnd := dl.maxOffset
+	dl.mu.Unlock()
+	dl.setReadAhead(stream, aheadEnd)
 	// Only NZB sources own disposable decoded extents. Avoid putting even a
 	// no-op acknowledgement/mutex on the HTTP/debrid hot path.
 	if dl.dls.item.entry != nil && dl.dls.item.entry.Protocol == config.ProtocolNZB {
@@ -1472,6 +1512,14 @@ func (dl *downloader) streamChunk(start, end int64) (int64, error) {
 	return writer.written, nil
 }
 
+// setReadAhead tells a source that reads ahead on its own to fetch to end, so
+// the DFS window is the only read-ahead.
+func (dl *downloader) setReadAhead(s manager.StreamReader, end int64) {
+	if setter, ok := s.(manager.ReadAheadSetter); ok {
+		setter.SetReadAhead(dl.dls.playPos.Load(), end, dl.dls.playRate.Load())
+	}
+}
+
 // setMaxOffset extends the download range
 func (dl *downloader) setMaxOffset(max int64) {
 	dl.mu.Lock()
@@ -1479,7 +1527,11 @@ func (dl *downloader) setMaxOffset(max int64) {
 	if advanced {
 		dl.maxOffset = max
 	}
+	session := dl.session
 	dl.mu.Unlock()
+	if advanced && session != nil {
+		dl.setReadAhead(session, max)
+	}
 
 	// A no-advance call is just a keepalive; rate-limit those kicks so
 	// cached reads don't wake the downloader each time. One per second still

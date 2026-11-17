@@ -313,9 +313,9 @@ Actual usage depends on your viewing patterns.
    ```json
    {"dfs": {"chunk_size": "20MB"}}
    ```
-2. Increase read-ahead (Usenet):
+2. Increase the read-ahead. For the DFS mount, set `read_ahead_size`. For WebDAV, NFS, SMB, and STRM, set `read_ahead` in the Usenet settings:
    ```json
-   {"usenet": {"read_ahead": "32MB"}}
+   {"mount": {"dfs": {"read_ahead_size": "256MB"}}, "usenet": {"read_ahead": "32MB"}}
    ```
 3. Check Debrid provider performance
 4. Verify network bandwidth

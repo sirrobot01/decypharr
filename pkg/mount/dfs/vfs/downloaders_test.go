@@ -237,3 +237,51 @@ func TestCacheItemReleaseStopsDownloadersOnZeroOpens(t *testing.T) {
 // Stall detection now lives in the manager stream session (see
 // TestSessionStallWatchdogRecovers); the downloader no longer runs its own
 // no-progress watchdog.
+
+// Once the read rate is known, the window holds readAheadTime of playback, not
+// the full read_ahead_size.
+func TestReadAheadHoldsTimeAtTheReadRate(t *testing.T) {
+	const readAhead = 128 * testMiB
+	dls := &Downloaders{
+		item:          newTestItem(t, 1024*testMiB),
+		chunkSize:     16 * testMiB,
+		readAheadSize: readAhead,
+	}
+	window := func(pos int64) int64 {
+		r := ranges.Range{Pos: pos, Size: 128 * testKiB}
+		return dls.extendAndFindMissingRangeLocked(r).End() - r.End()
+	}
+	for pos := int64(0); pos < 40*testMiB; pos += testMiB {
+		window(pos)
+	}
+	if got := window(40 * testMiB); got != readAhead {
+		t.Fatalf("window before the rate is known = %d, want %d", got, readAhead)
+	}
+
+	// 500KB/s, about a 4 Mbit/s episode: 60 seconds is about 29MB.
+	const rate = 500 * testKiB
+	dls.rate = rate
+	if got, want := window(41*testMiB), int64(rate*int64(readAheadTime/time.Second)); got != want {
+		t.Fatalf("window at %d B/s = %d, want %d", rate, got, want)
+	}
+	if got := dls.playRate.Load(); got != rate {
+		t.Fatalf("play rate for the source = %d, want %d", got, rate)
+	}
+}
+
+func TestReadRateFollowsReads(t *testing.T) {
+	dls := &Downloaders{
+		item:          newTestItem(t, 1024*testMiB),
+		chunkSize:     16 * testMiB,
+		readAheadSize: 128 * testMiB,
+	}
+	dls.extendAndFindMissingRangeLocked(ranges.Range{Pos: 0, Size: testMiB})
+	// Move the measurement start two seconds back instead of sleeping.
+	dls.rateAt = dls.rateAt.Add(-2 * time.Second)
+	dls.extendAndFindMissingRangeLocked(ranges.Range{Pos: testMiB, Size: 3 * testMiB})
+
+	// The measurement starts before the first read: 4MB over 2s.
+	if got := dls.rate; got < 2*testMiB*9/10 || got > 2*testMiB {
+		t.Fatalf("rate = %d B/s, want about %d", got, 2*testMiB)
+	}
+}

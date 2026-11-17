@@ -44,9 +44,21 @@ In `config.json`:
 | Setting           | Purpose                                                               |
 |-------------------|-----------------------------------------------------------------------|
 | `chunk_size`      | Initial read chunk size (starts at 10MB, doubles on sequential reads) |
+| `read_ahead_size` | Largest read-ahead for one file (default `128MB`)                     |
 | `disk_cache_size` | Max local cache before cleanup                                        |
 | `cache_expiry`    | Remove unused chunks after duration                                   |
 | `daemon_timeout`  | Unmount after idle time (empty = stay mounted)                        |
+
+### Read-Ahead
+
+The DFS mount controls the read-ahead for each file. Usenet does not add a second read-ahead window.
+
+- At the start of a read, the read-ahead is 4MB. A media scan reads a small part of a file and stops, so it downloads only a small part.
+- While the reads continue in sequence, the read-ahead increases.
+- When Decypharr knows the read speed, the read-ahead holds 60 seconds of playback. A file with a low bitrate gets a small read-ahead. A file with a high bitrate gets more.
+- The read-ahead is never more than `read_ahead_size`.
+
+When you pause, Decypharr downloads to the end of the read-ahead and then stops.
 
 ## Performance Tuning
 

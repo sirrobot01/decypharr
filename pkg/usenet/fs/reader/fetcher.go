@@ -99,15 +99,22 @@ func NewSegmentFetcher(
 // read for a full measurement period yet: about a 1080p stream.
 const defaultConsumeRate = 2 << 20
 
-// lead reports how long the slowest consumer takes to reach segIdx at its
-// consume rate. The scheduler calls it under its lock, so it must stay
-// lock-free.
+// lead reports how long the player takes to reach segIdx. It uses the
+// position and rate that a cache above reports, and else the slowest
+// consumer and its consume rate. The scheduler calls it under its lock, so it
+// must stay lock-free.
 func (sf *SegmentFetcher) lead(segIdx int) time.Duration {
-	ahead := max(sf.cache.SegmentOffset(segIdx)-sf.cache.consumedFloor.Load(), 0)
-	rate := sf.cache.consumeRate.Load()
+	pos, rate := sf.cache.playPos.Load(), sf.cache.playRate.Load()
+	if pos <= 0 {
+		pos = sf.cache.consumedFloor.Load()
+	}
+	if rate <= 0 {
+		rate = sf.cache.consumeRate.Load()
+	}
 	if rate <= 0 {
 		rate = defaultConsumeRate
 	}
+	ahead := max(sf.cache.SegmentOffset(segIdx)-pos, 0)
 	return time.Duration(float64(ahead) / float64(rate) * float64(time.Second))
 }
 
