@@ -95,10 +95,20 @@ func NewSegmentFetcher(
 	return sf
 }
 
-// lead reports the bytes between the slowest consumer and segIdx. The
-// scheduler calls it under its lock, so it must stay lock-free.
-func (sf *SegmentFetcher) lead(segIdx int) int64 {
-	return max(sf.cache.SegmentOffset(segIdx)-sf.cache.consumedFloor.Load(), 0)
+// defaultConsumeRate stands in for the consume rate of a reader that has not
+// read for a full measurement period yet: about a 1080p stream.
+const defaultConsumeRate = 2 << 20
+
+// lead reports how long the slowest consumer takes to reach segIdx at its
+// consume rate. The scheduler calls it under its lock, so it must stay
+// lock-free.
+func (sf *SegmentFetcher) lead(segIdx int) time.Duration {
+	ahead := max(sf.cache.SegmentOffset(segIdx)-sf.cache.consumedFloor.Load(), 0)
+	rate := sf.cache.consumeRate.Load()
+	if rate <= 0 {
+		rate = defaultConsumeRate
+	}
+	return time.Duration(float64(ahead) / float64(rate) * float64(time.Second))
 }
 
 // Fetch schedules a foreground download and waits for it. Provider concurrency

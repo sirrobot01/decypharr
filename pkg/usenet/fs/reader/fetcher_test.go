@@ -339,3 +339,36 @@ func TestQueuedPrefetchDoesNotHoldSegment(t *testing.T) {
 		t.Fatalf("segment state = %s, want OnDisk", state)
 	}
 }
+
+// A fast consumer with the same bytes ahead as a slow one is closer to a
+// stall, so its lead is shorter.
+func TestLeadUsesConsumeRate(t *testing.T) {
+	slow := newTestFetcher(t, 10)
+	fast := newTestFetcher(t, 10)
+	slow.cache.consumeRate.Store(1000)
+	fast.cache.consumeRate.Store(4000)
+
+	if got, want := slow.lead(4), 4*time.Second; got != want {
+		t.Fatalf("slow lead = %s, want %s", got, want)
+	}
+	if got, want := fast.lead(4), time.Second; got != want {
+		t.Fatalf("fast lead = %s, want %s", got, want)
+	}
+}
+
+func TestConsumedFloorMeasuresRate(t *testing.T) {
+	sf := newTestFetcher(t, 10)
+	sf.cache.SetConsumedFloor(0)
+	// Move the last measurement two seconds back instead of sleeping.
+	sf.cache.rateAt.Add(-int64(2 * time.Second))
+	sf.cache.SetConsumedFloor(4000)
+
+	if got := sf.cache.consumeRate.Load(); got < 1900 || got > 2000 {
+		t.Fatalf("rate = %d B/s, want about 2000", got)
+	}
+	// A seek back starts a new measurement and keeps the last rate.
+	sf.cache.SetConsumedFloor(1000)
+	if got := sf.cache.consumeRate.Load(); got < 1900 || got > 2000 {
+		t.Fatalf("rate after seek = %d B/s, want it kept", got)
+	}
+}

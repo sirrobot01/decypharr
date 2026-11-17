@@ -5,9 +5,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
-func zeroLead(int) int64 { return 0 }
+func zeroLead(int) time.Duration { return 0 }
 
 // blockWorker occupies the scheduler's only worker until the returned func
 // is called, so later submissions queue up.
@@ -45,9 +46,9 @@ func TestFetchSchedulerRunsDemandBeforeQueuedPrefetch(t *testing.T) {
 func TestFetchSchedulerServesSmallestLeadFirst(t *testing.T) {
 	s := NewFetchScheduler(1)
 	t.Cleanup(s.Close)
-	// The "full" reader has 100MB buffered ahead; the "starving" reader has 1MB.
-	full := s.newQueue(func(seg int) int64 { return 100<<20 + int64(seg) })
-	starving := s.newQueue(func(seg int) int64 { return 1<<20 + int64(seg) })
+	// The "full" reader has a minute buffered ahead; the "starving" reader a second.
+	full := s.newQueue(func(seg int) time.Duration { return time.Minute + time.Duration(seg) })
+	starving := s.newQueue(func(seg int) time.Duration { return time.Second + time.Duration(seg) })
 
 	release := blockWorker(t, s)
 	order := make(chan string, 4)

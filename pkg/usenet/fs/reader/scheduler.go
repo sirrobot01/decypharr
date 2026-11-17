@@ -2,6 +2,7 @@ package reader
 
 import (
 	"sync"
+	"time"
 )
 
 type fetchPriority uint8
@@ -21,9 +22,9 @@ type scheduledFetch struct {
 // prefetchQueue holds one reader's pending read-ahead tasks.
 type prefetchQueue struct {
 	tasks []scheduledFetch
-	// lead reports how many bytes of the file lie between the reader's
-	// consumer and seg. A small lead means the consumer is close to a stall.
-	lead       func(seg int) int64
+	// lead reports how long the reader's consumer takes to reach seg. A short
+	// lead means the consumer is close to a stall.
+	lead       func(seg int) time.Duration
 	lastServed uint64
 	removed    bool
 }
@@ -32,8 +33,10 @@ type prefetchQueue struct {
 //
 // Demand fetches (a read that is blocked now) run first, in arrival order.
 // Read-ahead waits in one queue per reader. A free worker takes the next task
-// of the reader whose consumer is closest to its next missing segment, so a
-// stream near a stall is served before a stream with a full buffer. One
+// of the reader whose consumer reaches its next missing segment soonest, so a
+// stream near a stall is served before a stream with a full buffer. Lead is
+// time, not bytes: 60MB is seconds of a 4K remux but minutes of a small
+// episode. One
 // reader alone can use every worker; several readers share them by need.
 type FetchScheduler struct {
 	mu sync.Mutex
@@ -105,7 +108,7 @@ func (s *FetchScheduler) next(prefetch bool) (scheduledFetch, bool) {
 // queue served least recently, so equal streams take turns.
 func (s *FetchScheduler) mostUrgentLocked() *prefetchQueue {
 	var best *prefetchQueue
-	var bestLead int64
+	var bestLead time.Duration
 	for _, q := range s.queues {
 		if len(q.tasks) == 0 {
 			continue
@@ -144,7 +147,7 @@ func (s *FetchScheduler) submitPrefetch(q *prefetchQueue, task scheduledFetch) b
 }
 
 // newQueue registers a read-ahead queue for one reader.
-func (s *FetchScheduler) newQueue(lead func(seg int) int64) *prefetchQueue {
+func (s *FetchScheduler) newQueue(lead func(seg int) time.Duration) *prefetchQueue {
 	q := &prefetchQueue{lead: lead}
 	s.mu.Lock()
 	s.queues = append(s.queues, q)

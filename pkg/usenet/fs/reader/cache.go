@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -51,6 +52,12 @@ type SegmentCache struct {
 
 	// consumedFloor steers extent eviction away from active playback.
 	consumedFloor atomic.Int64
+	// consumeRate is the bytes per second at which the floor moves, or 0
+	// before the first measurement. rateOff and rateAt (Unix nanoseconds) are
+	// the floor and time of the last measurement.
+	consumeRate atomic.Int64
+	rateOff     atomic.Int64
+	rateAt      atomic.Int64
 	// deliveryMode belongs to a persistent downstream cache. idleDelivery is
 	// set once its last handle closes so late speculative fetches are discarded
 	// instead of rebuilding a cache nobody is consuming.
@@ -904,12 +911,35 @@ func (sc *SegmentCache) wakeWaiters(segIdx int) {
 	sc.shardMu[shardIdx].Unlock()
 }
 
-// SetConsumedFloor publishes the slowest consumer's delivered offset.
+// consumeRatePeriod is the shortest time between two rate measurements.
+const consumeRatePeriod = time.Second
+
+// SetConsumedFloor publishes the slowest consumer's delivered offset and
+// updates the consume rate.
 func (sc *SegmentCache) SetConsumedFloor(off int64) {
 	if off < 0 {
 		return
 	}
 	sc.consumedFloor.Store(off)
+
+	now := time.Now().UnixNano()
+	at := sc.rateAt.Load()
+	if at == 0 || off < sc.rateOff.Load() {
+		// First delivery, or a seek back: start a new measurement.
+		if sc.rateAt.CompareAndSwap(at, now) {
+			sc.rateOff.Store(off)
+		}
+		return
+	}
+	elapsed := now - at
+	if elapsed < int64(consumeRatePeriod) || !sc.rateAt.CompareAndSwap(at, now) {
+		return
+	}
+	rate := (off - sc.rateOff.Swap(off)) * int64(time.Second) / elapsed
+	if old := sc.consumeRate.Load(); old > 0 {
+		rate = (3*old + rate) / 4
+	}
+	sc.consumeRate.Store(rate)
 }
 
 // SegmentsForRange returns the segment indices covering [offset, offset+length).
