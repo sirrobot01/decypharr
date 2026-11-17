@@ -17,9 +17,6 @@ func (c *Client) ExecuteWithFailover(ctx context.Context, workload Workload, fn 
 	if !workload.valid() {
 		return fmt.Errorf("invalid NNTP workload: %s", workload)
 	}
-	if workload == WorkloadStreamDemand && c.link != nil {
-		c.link.demanded.Store(true)
-	}
 	var lastErr error
 	var exclusions providerExclusions
 	var previousHost string

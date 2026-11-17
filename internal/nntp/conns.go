@@ -3,6 +3,7 @@ package nntp
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/sirrobot01/decypharr/internal/bandwidth"
 	nntpyenc "github.com/sirrobot01/decypharr/internal/nntp/yenc"
 )
 
@@ -67,13 +69,7 @@ const progressUpdateStride = 4
 func (b *bodyReader) Read(p []byte) (int, error) {
 	n, err := b.c.reader.Read(p)
 	if n > 0 {
-		if l := b.c.link; l != nil {
-			if b.c.bodySentNS != 0 {
-				l.sample(nanotimeNow() - b.c.bodySentNS)
-				b.c.bodySentNS = 0
-			}
-			l.received(n)
-		}
+		_ = bandwidth.Wait(context.Background(), n)
 		b.reads++
 		if b.reads >= progressUpdateStride {
 			b.c.lastProgressNS.Store(nanotimeNow())
@@ -250,12 +246,6 @@ type Connection struct {
 	// single goroutine that owns the connection (it holds a pool slot and
 	// the entry is out of the pool), so no synchronisation is needed.
 	writeTimeout time.Duration
-
-	// link receives body throughput and first-byte delays. bodySentNS is
-	// when the BODY that heads the reply stream was sent; 0 once its first
-	// byte arrived. Only the owning goroutine touches it.
-	link       *linkControl
-	bodySentNS int64
 }
 
 func (c *Connection) Close() error {
@@ -461,7 +451,6 @@ func (c *Connection) requestBodyBuffered(messageID string, dst []byte, source Bo
 	if err := c.sendCommandArg("BODY", messageID); err != nil {
 		return nntpyenc.BodyResult{}, NewConnectionError(fmt.Errorf("failed to send BODY command: %w", err))
 	}
-	c.bodySentNS = nanotimeNow()
 	return c.readBodyBuffered(dst, source, pooled)
 }
 
@@ -662,8 +651,6 @@ func (c *Connection) PipelineBodies(messageIDs []string, destinations []BodyDest
 		return results, NewConnectionError(fmt.Errorf("flush BODY pipeline: %w", err))
 	}
 	_ = c.conn.SetWriteDeadline(time.Time{})
-	// Only the first reply measures delay: later replies wait behind it.
-	c.bodySentNS = nanotimeNow()
 
 	var firstArticleErr error
 	for i := range messageIDs {

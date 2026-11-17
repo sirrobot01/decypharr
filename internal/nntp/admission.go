@@ -235,13 +235,13 @@ func (pp *ProviderPool) higherPriorityWaiting(workload Workload) bool {
 
 // tryAcquireSlot takes a provider semaphore slot without blocking. After a
 // lower-priority caller succeeds, it checks whether a higher-priority waiter
-// already registered, or whether the slot passes the link limit. If so, it
-// immediately gives back the slot and reports failure. This post-acquisition check defines a clean ordering boundary and
+// already registered. If so, it immediately hands over the slot and reports
+// failure. This post-acquisition check defines a clean ordering boundary and
 // keeps the latency-sensitive stream path to the original semaphore send.
 func (c *Client) tryAcquireSlot(pp *ProviderPool, workload Workload) bool {
 	select {
 	case pp.slots <- struct{}{}:
-		if workload != WorkloadStreamDemand && (pp.higherPriorityWaiting(workload) || c.overLinkLimit()) {
+		if workload != WorkloadStreamDemand && pp.higherPriorityWaiting(workload) {
 			c.releaseSlot(pp)
 			return false
 		}
@@ -271,37 +271,13 @@ func (c *Client) handoffSlot(pp *ProviderPool) bool {
 	c.waitMu.Lock()
 	defer c.waitMu.Unlock()
 	for workload := WorkloadStreamDemand; workload < workloadCount; workload++ {
-		if workload != WorkloadStreamDemand && c.waiters[workload].len > 0 && c.overLinkLimit() {
-			// Only a blocked read may pass the link limit.
-			return false
-		}
 		for w := c.waiters[workload].head; w != nil; w = w.next {
 			if !slices.Contains(w.pools, pp) {
 				continue
 			}
 			c.removeWaiterLocked(w)
 			c.admission[w.workload].handoffs.Add(1)
-			// Under the link limit the held total is fixed, so a slot handed
-			// back to pp would keep all transfers on whichever provider holds
-			// them. Move the slot to the waiter's first provider with room.
-			target := pp
-			for _, cand := range w.pools {
-				if cand == pp {
-					break
-				}
-				if cand.inDialCooldown() {
-					continue
-				}
-				select {
-				case cand.slots <- struct{}{}:
-					target = cand
-				default:
-					continue
-				}
-				<-pp.slots
-				break
-			}
-			w.handoff <- target
+			w.handoff <- pp
 			return true
 		}
 	}

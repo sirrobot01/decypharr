@@ -118,21 +118,11 @@ All streams share these connections. When a stream has less data ready ahead of 
 
 → Streaming uses up to 22 connections. Each import uses up to 15 connections.
 
-### Internet Link Protection
+### Download Speed Cap
 
-Decypharr does not fill your internet link. It sets a link limit on the connections that transfer data at the same time. The link limit applies to streaming read-ahead, imports, repairs, and health checks. It does not apply to a read that a player waits for now.
+To set a speed cap, set `max_download_speed` in the general settings. The cap applies to all downloads, debrid and usenet. Refer to [Downloads](../configuration/#downloads).
 
-Decypharr changes the link limit automatically:
-
-- When work waits on the link limit, Decypharr increases it.
-- When more connections do not give more speed, your link is full. Decypharr goes back to the last limit.
-- When replies start to arrive later than on an empty link, your link is queueing data. Decypharr decreases the link limit by a quarter.
-- After a decrease, the link limit stays the same for 30 seconds. Then Decypharr tries a higher limit again. If a player waits for data, Decypharr tries a higher limit after 2 seconds.
-- When no work waits, the link limit decreases to the number of connections in use.
-
-You do not configure the link limit. To see the link limit and the reply delay, open the **Usenet** tab on the stats page. To see the total speed of all downloads and the speed cap, open the **Streams** tab.
-
-To set a fixed speed cap, set `max_download_speed` in the general settings. The cap applies to all downloads, debrid and usenet. Refer to [Downloads](../configuration/#downloads).
+To see the total speed of all downloads and the speed cap, open the **Streams** tab on the stats page.
 
 ### Read-Ahead Buffer
 

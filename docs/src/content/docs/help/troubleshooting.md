@@ -404,8 +404,6 @@ For Rclone:
 }
 ```
 
-Decypharr does not use more connections than your internet link can carry. If streams buffer while the link limit is low, your link is full. More connections will not help. For more information, see [Internet Link Protection](../../guides/usenet/overview/#internet-link-protection).
-
 **Check provider performance:**
 
 - Test speed from Debrid website
