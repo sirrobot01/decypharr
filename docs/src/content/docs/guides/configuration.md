@@ -80,7 +80,7 @@ variables:
 
 `max_active_downloads` is the shared active-processing limit for torrent and NZB downloads. Additional imports remain queued until an active download completes.
 
-`max_download_speed` is a speed cap in bytes per second for all downloads. The cap applies to debrid and usenet, and to streams and imports. For example, `10MB` is 10 MB per second (80 Mbit/s). The cap also applies to the reads that a player waits for. Leave it empty for no cap. A change applies without a restart.
+`max_download_speed` is a speed cap in bytes per second for all downloads. The cap applies to debrid and usenet, and to streams and imports. For example, `10MB` is 10 MB per second (80 Mbit/s). The cap also counts usenet reads that a player waits for, but these reads do not wait. Read-ahead waits for them. Leave it empty for no cap. A change applies without a restart.
 
 ## Debrid Providers
 

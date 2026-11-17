@@ -60,12 +60,8 @@ func Speed() int64 {
 	return total / speedWindow
 }
 
-// Wait counts n received bytes and blocks until they fit under the cap, or
-// until ctx ends.
-func Wait(ctx context.Context, n int) error {
-	if n <= 0 {
-		return nil
-	}
+// count adds n received bytes to the meter.
+func count(n int) {
 	now := time.Now().Unix()
 	meter.mu.Lock()
 	b := &meter.bins[now%int64(len(meter.bins))]
@@ -74,7 +70,36 @@ func Wait(ctx context.Context, n int) error {
 	}
 	b.bytes += int64(n)
 	meter.mu.Unlock()
+}
 
+// Take counts n received bytes and takes them from the cap without waiting.
+// A read that a player waits for uses it: the transfers that wait next pay
+// for the bytes, so the cap delays read-ahead and not playback.
+func Take(n int) {
+	if n <= 0 {
+		return
+	}
+	count(n)
+	l := limiter.Load()
+	if l == nil {
+		return
+	}
+	now := time.Now()
+	for n > 0 {
+		// ReserveN refuses more than the burst at once.
+		chunk := min(n, l.Burst())
+		l.ReserveN(now, chunk)
+		n -= chunk
+	}
+}
+
+// Wait counts n received bytes and blocks until they fit under the cap, or
+// until ctx ends.
+func Wait(ctx context.Context, n int) error {
+	if n <= 0 {
+		return nil
+	}
+	count(n)
 	l := limiter.Load()
 	if l == nil {
 		return nil

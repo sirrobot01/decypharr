@@ -69,7 +69,11 @@ const progressUpdateStride = 4
 func (b *bodyReader) Read(p []byte) (int, error) {
 	n, err := b.c.reader.Read(p)
 	if n > 0 {
-		_ = bandwidth.Wait(context.Background(), n)
+		if b.c.demand {
+			bandwidth.Take(n)
+		} else {
+			_ = bandwidth.Wait(context.Background(), n)
+		}
 		b.reads++
 		if b.reads >= progressUpdateStride {
 			b.c.lastProgressNS.Store(nanotimeNow())
@@ -246,6 +250,10 @@ type Connection struct {
 	// single goroutine that owns the connection (it holds a pool slot and
 	// the entry is out of the pool), so no synchronisation is needed.
 	writeTimeout time.Duration
+
+	// demand is true while the connection serves a read that a player
+	// waits for. Its bytes skip the wait for the download speed cap.
+	demand bool
 }
 
 func (c *Connection) Close() error {

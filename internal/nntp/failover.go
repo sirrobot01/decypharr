@@ -43,7 +43,9 @@ func (c *Client) ExecuteWithFailover(ctx context.Context, workload Workload, fn 
 			lastErr = err
 			break
 		}
+		conn.demand = workload == WorkloadStreamDemand
 		err = c.safeExecute(conn, fn)
+		conn.demand = false
 		transient, excludeArticle, discard := false, false, false
 		if typed, ok := errors.AsType[*Error](err); ok {
 			switch typed.Type {

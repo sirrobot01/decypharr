@@ -63,3 +63,21 @@ func TestSpeedCountsUncappedReads(t *testing.T) {
 		t.Fatalf("speed = %d, want %d (3MB over %d seconds)", got, want, speedWindow)
 	}
 }
+
+func TestTakeSkipsTheWaitAndDelaysTheNextWait(t *testing.T) {
+	SetLimit(1 << 20)
+	t.Cleanup(func() { SetLimit(0) })
+
+	start := time.Now()
+	Take(1 << 20)
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		t.Fatalf("Take waited %s", elapsed)
+	}
+	// The burst covers 256KB of the 1MB, so the next byte waits about 0.75s.
+	if err := Wait(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed < 500*time.Millisecond {
+		t.Fatalf("Wait after Take returned in %s, want the taken bytes paid first", elapsed)
+	}
+}
