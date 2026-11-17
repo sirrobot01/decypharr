@@ -295,3 +295,65 @@ func TestFetchDownloadLinkFallsBackToRedirectURL(t *testing.T) {
 		t.Fatalf("DownloadLink = %q, want the redirect URL", dl.DownloadLink)
 	}
 }
+
+func TestTorrentStatusWaitsForFinishedFiles(t *testing.T) {
+	file := func(name string) []byte {
+		return []byte(fmt.Sprintf(`[{"id":1,"name":%q,"absolute_path":%q,"size":100}]`, name, name))
+	}
+	tests := map[string]struct {
+		state    string
+		finished bool
+		files    []byte
+		want     types.TorrentStatus
+	}{
+		"finished with files": {state: "completed", finished: true, files: file("a.epub"), want: types.TorrentStatusDownloaded},
+		"cached and finished": {state: "cached", finished: true, files: file("a.epub"), want: types.TorrentStatusDownloaded},
+		// The uncached case: fetched from the swarm, still moving into
+		// TorBox storage. Files may be listed, but none has a link yet.
+		"uploading, not finished":  {state: "uploading", finished: false, files: file("a.epub"), want: types.TorrentStatusDownloading},
+		"completed, not finished":  {state: "completed", finished: false, files: file("a.epub"), want: types.TorrentStatusDownloading},
+		"finished without files":   {state: "completed", finished: true, want: types.TorrentStatusDownloading},
+		"downloading":              {state: "downloading", finished: false, want: types.TorrentStatusDownloading},
+		"error state is untouched": {state: "error", finished: false, want: types.TorrentStatusError},
+	}
+	tb := &Torbox{}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			data := &torboxInfo{DownloadState: tt.state, DownloadFinished: tt.finished}
+			if tt.files != nil {
+				if err := json.Unmarshal(tt.files, &data.Files); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := tb.torrentStatus(data); got != tt.want {
+				t.Errorf("torrentStatus() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckStatusKeepsUploadingTorrentPending(t *testing.T) {
+	config.SetConfigPath(t.TempDir())
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"success":true,"data":{"id":17,"name":"Book","size":100,"progress":1,"download_state":"uploading","download_finished":false,"created_at":"2026-01-02T03:04:05Z","hash":"ABC","files":[{"id":1,"name":"Book/Book.epub","absolute_path":"Book/Book.epub","size":100}]}}`)
+	}))
+	t.Cleanup(server.Close)
+
+	// DownloadUncached false on purpose: a torrent fetched in full but not
+	// yet linkable must stay pending, not be reported as not cached.
+	torrent := &types.Torrent{Id: "17", DownloadUncached: false}
+	got, err := testTorbox(server.URL).CheckStatus(torrent)
+	if err != nil {
+		t.Fatalf("CheckStatus() error = %v, want pending", err)
+	}
+	if got.Status != types.TorrentStatusDownloading {
+		t.Fatalf("CheckStatus() status = %q, want %q", got.Status, types.TorrentStatusDownloading)
+	}
+	for _, f := range got.Files {
+		if f.Link != "" {
+			t.Fatalf("file %s has link %q before download_finished", f.Name, f.Link)
+		}
+	}
+}
