@@ -184,6 +184,9 @@ func (p *NZBParser) Parse(ctx context.Context, filename string, content []byte) 
 	// Group files by base Name and type
 	fileGroups := p.groupFiles(ctx, raw.Files)
 
+	// PAR2 FileDesc hashes provide reliable identities for obfuscated RAR volumes.
+	p.orderObfuscatedRARGroups(ctx, fileGroups, raw.Files)
+
 	if len(fileGroups) == 0 {
 		return nil, nil, fmt.Errorf("no valid file groups found in NZB")
 	}
