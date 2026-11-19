@@ -17,7 +17,9 @@ import (
 const (
 	par2PacketMagic = "PAR2\x00PKT"
 	par2PrefixSize  = 16 * 1024
-	par2MaxProbe    = 64 * 1024
+	// Probe far enough into the first PAR2 article to scan past large recovery
+	// packets that can appear between FileDesc packets.
+	par2MaxProbe    = 1024 * 1024
 )
 
 type par2FileDesc struct {

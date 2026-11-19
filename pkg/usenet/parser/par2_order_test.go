@@ -32,6 +32,39 @@ func TestParsePAR2FileDescAndVerifyHash(t *testing.T) {
 	}
 }
 
+func TestParsePAR2FileDescsAfterLargeRecoveryPacket(t *testing.T) {
+	var data []byte
+	for i := 0; i < 41; i++ {
+		hash := [16]byte{byte(i + 1)}
+		data = append(data, makePAR2FileDescPacket(hash, int64(i+1), "movie.part01.rar", false)...)
+	}
+
+	// A recovery packet larger than the old 64 KiB probe can interrupt the
+	// FileDesc scan. Its body is intentionally opaque; the parser only needs
+	// the declared packet length to skip it.
+	recoveryPacket := make([]byte, 72*1024)
+	copy(recoveryPacket, par2PacketMagic)
+	binary.LittleEndian.PutUint64(recoveryPacket[8:16], uint64(len(recoveryPacket)))
+	data = append(data, recoveryPacket...)
+
+	for i := 41; i < 71; i++ {
+		hash := [16]byte{byte(i + 1)}
+		data = append(data, makePAR2FileDescPacket(hash, int64(i+1), "movie.part01.rar", false)...)
+	}
+
+	const oldProbe = 64 * 1024
+	if got := parsePAR2FileDescs(data[:oldProbe]); len(got) != 41 {
+		t.Fatalf("old probe found %d descriptions, want 41", len(got))
+	}
+	if par2MaxProbe < len(data) {
+		t.Fatalf("PAR2 probe limit is %d bytes, want at least %d", par2MaxProbe, len(data))
+	}
+	probe := data[:min(len(data), par2MaxProbe)]
+	if got := parsePAR2FileDescs(probe); len(got) != 71 {
+		t.Fatalf("expanded probe found %d descriptions, want 71", len(got))
+	}
+}
+
 func TestOrderObfuscatedRARFilesFromPAR2(t *testing.T) {
 	partOne := bytesOf(0x11, par2PrefixSize)
 	partTwo := bytesOf(0x22, par2PrefixSize)
