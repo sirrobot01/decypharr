@@ -26,6 +26,16 @@ func (m *Manager) AddNewTorrent(ctx context.Context, importReq *ImportRequest) e
 		return fmt.Errorf("arr is required")
 	}
 
+	// A failed queue entry is never processed again. Drop it (and its
+	// submission-gate key) so the arr's re-grab of the same hash starts over
+	// instead of being swallowed as a duplicate until restart.
+	if existing, err := m.queue.GetTorrent(importReq.Magnet.InfoHash); err == nil && existing.State == storage.EntryStateError {
+		if err := m.queue.Delete(existing.InfoHash, false, nil); err != nil {
+			return fmt.Errorf("failed to remove failed queue entry: %w", err)
+		}
+		m.torrentSubmissions.forget(torrentSubmissionKey(importReq))
+	}
+
 	return m.torrentSubmissions.Do(ctx, torrentSubmissionKey(importReq), func() error {
 		// qBittorrent treats adding an existing hash as an idempotent success.
 		// Check again inside the singleflight call so concurrent requests cannot
