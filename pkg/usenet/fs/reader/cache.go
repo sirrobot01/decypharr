@@ -63,6 +63,12 @@ type SegmentCache struct {
 	// are closer to the player than the consumed floor. 0 = not reported.
 	playPos  atomic.Int64
 	playRate atomic.Int64
+
+	// holes are the segments served as zeros because no provider has them,
+	// and holeBytes is their size. Guarded by holeMu.
+	holeMu    sync.Mutex
+	holes     map[int]bool
+	holeBytes int64
 	// deliveryMode belongs to a persistent downstream cache. idleDelivery is
 	// set once its last handle closes so late speculative fetches are discarded
 	// instead of rebuilding a cache nobody is consuming.

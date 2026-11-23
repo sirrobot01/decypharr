@@ -264,6 +264,9 @@ type ReaderStats struct {
 	PrefetchHits      atomic.Int64
 	PrefetchMisses    atomic.Int64
 	PrefetchCancelled atomic.Int64 // hints dropped because a seek abandoned their window
+
+	// FilledHoles counts missing articles served as zeros.
+	FilledHoles atomic.Int64
 }
 
 // Snapshot returns a copy of the current stats.
@@ -284,6 +287,7 @@ func (s *ReaderStats) Snapshot() map[string]int64 {
 		"prefetch_hits":      s.PrefetchHits.Load(),
 		"prefetch_misses":    s.PrefetchMisses.Load(),
 		"prefetch_cancelled": s.PrefetchCancelled.Load(),
+		"filled_holes":       s.FilledHoles.Load(),
 	}
 }
 

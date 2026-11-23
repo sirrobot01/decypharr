@@ -213,13 +213,25 @@ grabs a replacement release. The check reads one article per video file.
 
 The default empty `disk_path` keeps the bounded streaming window in memory. Set a path to enable disk-backed rewind buffering, and ensure that location has sufficient free space.
 
+## Missing Articles
+
+Providers sometimes remove articles after a release is posted, for example after a takedown. When no provider has an article, Decypharr can still stream the file:
+
+- Decypharr sends zeros for the missing part. The player shows a short glitch and continues.
+- Decypharr does this only for a small gap: at most 4 articles in a row, at most 64 articles in a file, and at most 2% of the file.
+- Decypharr never sends zeros in the first or last 8MB of a file. Media files keep their headers and indexes there. A media scanner gets an error instead.
+
+When a gap is larger than these limits, the file is broken. The read fails, and Decypharr asks the Arr to grab the release again. Decypharr tries a failed file again after 30 minutes, because a provider can miss an article for a short time.
+
+To find files with gaps, look for the log message `Article missing on all providers; serving zeros`.
+
 ## Health Checks and Replacement
 
 The health checker samples NZB article availability and can optionally validate
 each media file's container signature. If a file is definitively broken and is
 linked to an Arr item, `auto_repair` deletes it through Arr and triggers a
 replacement search. Connection and provider errors remain inconclusive and do
-not trigger replacement. See the [Health Checker & Repair guide](../repair/) for
+not trigger replacement. See the [Health Checker & Repair guide](../../repair/) for
 configuration and API details.
 
 ## Arr Integration

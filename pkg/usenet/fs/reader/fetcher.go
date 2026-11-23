@@ -95,6 +95,79 @@ func NewSegmentFetcher(
 	return sf
 }
 
+// Missing-article limits. A gap inside them is served as zeros, and a player
+// shows a short glitch and continues. Past them the file is broken, and the
+// read fails so that the release is grabbed again.
+const (
+	// maxHoleRun is the most missing segments in a row.
+	maxHoleRun = 4
+	// maxHoles is the most missing segments in one file.
+	maxHoles = 64
+	// maxHolePercent is the most of the file's bytes that may be missing.
+	maxHolePercent = 2
+	// holeEdgeBytes at the head and the tail are never filled. Containers
+	// keep their headers and indexes there, and a media scanner must get a
+	// clean error, not zeros.
+	holeEdgeBytes = 8 << 20
+)
+
+// fillHole serves a segment that no provider has as zeros, if the gap stays
+// inside the missing-article limits. It reports whether it filled the
+// segment. Streams carry only plain files and stored archives, so the zeros
+// reach the player as they are; an encrypted stream loses one more cipher
+// block.
+func (sf *SegmentFetcher) fillHole(segIdx int, err error) bool {
+	if !nntp.IsArticleNotFoundError(err) {
+		return false
+	}
+	sc := sf.cache
+	off, size, total := sc.SegmentOffset(segIdx), sc.SegmentDataSize(segIdx), sc.TotalSize()
+	if off < holeEdgeBytes || off+size > total-holeEdgeBytes {
+		return false
+	}
+
+	sc.holeMu.Lock()
+	run := 1
+	for i := segIdx - 1; sc.holes[i]; i-- {
+		run++
+	}
+	for i := segIdx + 1; sc.holes[i]; i++ {
+		run++
+	}
+	fits := !sc.holes[segIdx] && run <= maxHoleRun && len(sc.holes) < maxHoles &&
+		(sc.holeBytes+size)*100 <= total*maxHolePercent
+	if fits {
+		if sc.holes == nil {
+			sc.holes = make(map[int]bool)
+		}
+		sc.holes[segIdx] = true
+		sc.holeBytes += size
+	}
+	holes := len(sc.holes)
+	sc.holeMu.Unlock()
+	if !fits {
+		return false
+	}
+
+	writer := sc.StreamWriter(segIdx)
+	if writer == nil {
+		return false
+	}
+	// The writer takes a decoded article and skips its yEnc data start.
+	if _, werr := writer.Write(make([]byte, sc.segments[segIdx].SegmentDataStart+size)); werr != nil {
+		writer.Discard()
+		return false
+	}
+	writer.Finalize()
+	sf.stats.FilledHoles.Add(1)
+	sf.logger.Warn().Err(err).
+		Int("segment", segIdx).
+		Int64("offset", off).
+		Int("holes", holes).
+		Msg("Article missing on all providers; serving zeros")
+	return true
+}
+
 // defaultConsumeRate stands in for the consume rate of a reader that has not
 // read for a full measurement period yet: about a 1080p stream.
 const defaultConsumeRate = 2 << 20
@@ -365,6 +438,9 @@ func (sf *SegmentFetcher) doFetchAttempt(ctx context.Context, segIdx int, worklo
 			sf.cache.ReleaseFetching(segIdx)
 			return err
 		}
+		if sf.fillHole(segIdx, err) {
+			return nil
+		}
 		sf.cache.MarkFailed(segIdx, err)
 		return err
 	}
@@ -514,6 +590,9 @@ func (sf *SegmentFetcher) claimPrefetch(segIdx int) (prefetchClaim, bool) {
 }
 
 func (sf *SegmentFetcher) finishPrefetchClaim(claim prefetchClaim, err error) {
+	if err != nil && sf.fillHole(claim.segIdx, err) {
+		err = nil
+	}
 	if err == nil {
 		sf.stats.Downloads.Add(1)
 	} else {
