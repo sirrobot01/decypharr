@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -45,8 +46,8 @@ func linkEntry() *storage.Entry {
 }
 
 func TestThrottledValidationKeepsTheLink(t *testing.T) {
-	for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
-		t.Run(http.StatusText(status), func(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable, http.StatusBadGateway, 520} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
 			var healthy atomic.Bool
 			cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if healthy.Load() {

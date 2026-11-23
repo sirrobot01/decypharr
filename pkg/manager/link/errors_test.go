@@ -19,6 +19,14 @@ func TestErrorCodeToLinkErrorRefetchesExpiredLinks(t *testing.T) {
 	}
 }
 
+func TestErrorCodeToLinkErrorRetriesServerAndUnknownCodes(t *testing.T) {
+	for _, code := range []string{"500", "502", "504", "520", "525", "418", "some_new_code"} {
+		if err := ErrorCodeToLinkError(code); !err.ShouldRetry() {
+			t.Errorf("code %s: category = %v, want retryable", code, err.Category)
+		}
+	}
+}
+
 func TestThrottledErrorsKeepTheirWait(t *testing.T) {
 	err := fmt.Errorf("get link: %w", &request.ThrottledError{RetryAfter: 5 * time.Minute})
 	got := ClassifyTransportError(err)
