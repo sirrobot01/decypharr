@@ -5,7 +5,9 @@ import (
 	"math"
 	"path"
 	"path/filepath"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/utils"
@@ -457,12 +459,28 @@ func (e *Entry) MarkAsCompleted(contentPath string) {
 	e.UpdatedAt = now
 }
 
+// maxErrorMessageRunes caps the stored error text. A corrupt archive can produce
+// an error that is tens of kilobytes long.
+const maxErrorMessageRunes = 1024
+
 // MarkAsError marks the torrent as errored
 func (e *Entry) MarkAsError(err error) {
 	e.State = EntryStateError
 	e.Status = debridTypes.TorrentStatusError
 	e.IsDownloading = false
-	e.LastError = err.Error()
+	// The Arrs store this text as the fail message. Archive headers can put raw
+	// bytes into it, and a NUL makes a PostgreSQL-backed Arr reject the row, so
+	// it never blocklists the release and grabs it again.
+	msg := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, strings.ToValidUTF8(err.Error(), "\uFFFD"))
+	if runes := []rune(msg); len(runes) > maxErrorMessageRunes {
+		msg = string(runes[:maxErrorMessageRunes]) + "..."
+	}
+	e.LastError = msg
 	e.ErrorCount++
 	now := time.Now()
 	e.LastErrorTime = &now

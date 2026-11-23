@@ -2,7 +2,10 @@ package storage
 
 import (
 	"errors"
+	"strings"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 
 	debridTypes "github.com/sirrobot01/decypharr/pkg/debrid/types"
 )
@@ -37,6 +40,20 @@ func TestEntryPhase(t *testing.T) {
 		if got := tt.entry.Phase(); got != tt.want {
 			t.Errorf("%s: got %q, want %q", tt.name, got, tt.want)
 		}
+	}
+}
+
+func TestMarkAsErrorStoresCleanText(t *testing.T) {
+	e := &Entry{}
+	e.MarkAsError(errors.New("no segments built for file a\x00b\x01c\xff" + strings.Repeat("x", 2*maxErrorMessageRunes)))
+	if !utf8.ValidString(e.LastError) || strings.ContainsFunc(e.LastError, unicode.IsControl) {
+		t.Fatalf("LastError has invalid or control characters: %q", e.LastError[:64])
+	}
+	if !strings.HasPrefix(e.LastError, "no segments built for file a b c\uFFFD") {
+		t.Fatalf("LastError = %q", e.LastError[:64])
+	}
+	if n := utf8.RuneCountInString(e.LastError); n > maxErrorMessageRunes+3 {
+		t.Fatalf("LastError has %d runes, want at most %d", n, maxErrorMessageRunes+3)
 	}
 }
 

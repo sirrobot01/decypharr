@@ -982,7 +982,7 @@ func (p *RARParser) buildSegmentsForFile(
 	volumeOffsetMap map[int]int64,
 ) ([]storage.NZBSegment, error) {
 	if len(rarFile.VolumeParts) == 0 {
-		return nil, fmt.Errorf("no volume parts for file %s", rarFile.Name)
+		return nil, fmt.Errorf("no volume parts for file %q", rarFile.Name)
 	}
 
 	// Ensure volume parts are ordered by volume index and data offset.
@@ -1019,11 +1019,11 @@ func (p *RARParser) buildSegmentsForFile(
 		// part.UnpackedSize = how many bytes of the file are in this part (this is what we stream!)
 		partSegments, err := p.buildSegmentsForIndexedVolumePart(part, segmentIndex, volumeOffsetMap)
 		if err != nil {
-			return nil, fmt.Errorf("map volume part %d of %s: %w", part.PartNumber, rarFile.Name, err)
+			return nil, fmt.Errorf("map volume part %d of %q: %w", part.PartNumber, rarFile.Name, err)
 		}
 
 		if len(partSegments) == 0 {
-			return nil, fmt.Errorf("volume part %d of %s has no source segments", part.PartNumber, rarFile.Name)
+			return nil, fmt.Errorf("volume part %d of %q has no source segments", part.PartNumber, rarFile.Name)
 		}
 
 		// Append with correct file offsets
@@ -1036,7 +1036,7 @@ func (p *RARParser) buildSegmentsForFile(
 	}
 
 	if len(fileSegments) == 0 {
-		return nil, fmt.Errorf("no segments built for file %s", rarFile.Name)
+		return nil, fmt.Errorf("no segments built for file %q", rarFile.Name)
 	}
 
 	// Ensure segments are ordered by output offsets for streaming correctness.
