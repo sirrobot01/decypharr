@@ -36,9 +36,12 @@ jobs:
             echo "channel=stable" >> "$GITHUB_OUTPUT"
           fi
 
-  # Build Linux binaries (CGO required for FUSE + rapidyenc)
+  # Build Linux binaries (CGO required for FUSE + rapidyenc).
+  # The runner is pinned: a newer ubuntu-latest image made v2.7.2 need
+  # x86-64-v3 (#479). The amd64 build targets the x86-64 baseline, and the
+  # check step below fails the release if the binary needs more.
   build-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: prepare
     strategy:
       matrix:
@@ -46,9 +49,11 @@ jobs:
           - arch: amd64
             cc: gcc
             cxx: g++
+            cflags: -O2 -g -march=x86-64 -mtune=generic
           - arch: arm64
             cc: zig cc -target aarch64-linux-gnu
             cxx: zig c++ -target aarch64-linux-gnu
+            cflags: -O2 -g
     steps:
       - uses: actions/checkout@v5
 
@@ -72,8 +77,11 @@ jobs:
           CGO_ENABLED: 1
           GOOS: linux
           GOARCH: ${{ matrix.arch }}
+          GOAMD64: v1
           CC: ${{ matrix.cc }}
           CXX: ${{ matrix.cxx }}
+          CGO_CFLAGS: ${{ matrix.cflags }}
+          CGO_CXXFLAGS: ${{ matrix.cflags }}
           VERSION: ${{ needs.prepare.outputs.version }}
           CHANNEL: ${{ needs.prepare.outputs.channel }}
         run: |
@@ -81,6 +89,15 @@ jobs:
           go build -trimpath \
             -ldflags="-s -w -X ${LDFLAGS_PKG}.Version=${VERSION} -X ${LDFLAGS_PKG}.Channel=${CHANNEL}" \
             -o dist/decypharr
+
+      - name: Check CPU level
+        if: matrix.arch == 'amd64'
+        run: |
+          readelf -n dist/decypharr | grep -i "ISA needed" || true
+          if readelf -n dist/decypharr | grep -iE "ISA needed:.*x86-64-v[234]"; then
+            echo "::error::dist/decypharr needs a newer CPU than x86-64 baseline (#479)"
+            exit 1
+          fi
 
       - name: Package
         run: |
