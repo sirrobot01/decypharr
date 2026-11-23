@@ -95,8 +95,9 @@
                                class="input w-full"
                                id="arr"
                                name="arr"
-                               placeholder="sonarr, radarr, etc.">
-                        <span class="text-sm opacity-70">Optional: Specify which Arr service should handle this</span>
+                               placeholder="sonarr, radarr, etc."
+                               required>
+                        <span class="text-sm opacity-70">Required: the Arr or category that handles this download</span>
                     </div>
 
                     {{ if .HasMultiDebrid }}
