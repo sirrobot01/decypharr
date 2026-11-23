@@ -2,10 +2,10 @@ package webdav
 
 import (
 	"fmt"
+	"net/http"
 	"path"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/sirrobot01/decypharr/pkg/manager"
 	"github.com/stanNthe5/stringbuf"
@@ -139,7 +139,7 @@ func convertToXML(cleanPath string, currentInfo *manager.FileInfo, children []ma
 			escName: xmlEscape(currentInfo.Name()),
 			isDir:   currentInfo.IsDir(),
 			size:    currentInfo.Size(),
-			modTime: currentInfo.ModTime().Format(time.RFC3339),
+			modTime: currentInfo.ModTime().UTC().Format(http.TimeFormat),
 		})
 	}
 
@@ -157,7 +157,7 @@ func convertToXML(cleanPath string, currentInfo *manager.FileInfo, children []ma
 			escName: xmlEscape(nm),
 			isDir:   info.IsDir(),
 			size:    info.Size(),
-			modTime: info.ModTime().Format(time.RFC3339),
+			modTime: info.ModTime().UTC().Format(http.TimeFormat),
 		})
 	}
 
