@@ -10,36 +10,74 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
-func TestPreStreamChecksPreservesArticleNotFoundClassification(t *testing.T) {
-	client := &Usenet{failedFiles: xsync.NewMap[string, failedFile]()}
+var notFound = &nntp.Error{Type: nntp.ErrorTypeArticleNotFound}
+
+func newFailureTestClient() (*Usenet, *storage.NZBFile, string) {
 	file := &storage.NZBFile{
 		NzbID:    "download-1",
 		Name:     "movie.mkv",
 		Segments: []storage.NZBSegment{{MessageID: "segment-1"}},
 	}
-	client.failedFiles.Store(fsKey(file.NzbID, file.Name), failedFile{err: &nntp.Error{Type: nntp.ErrorTypeArticleNotFound}, at: time.Now()})
+	return &Usenet{failedFiles: xsync.NewMap[string, failedFile]()}, file, fsKey(file.NzbID, file.Name)
+}
+
+// endWait moves the end of the current wait back by d past now.
+func endWait(u *Usenet, key string, d time.Duration) {
+	failed, _ := u.failedFiles.Load(key)
+	failed.until = time.Now().Add(-d)
+	u.failedFiles.Store(key, failed)
+}
+
+func TestPreStreamChecksPreservesArticleNotFoundClassification(t *testing.T) {
+	client, file, key := newFailureTestClient()
+	client.markFailed(key, notFound)
 
 	if err := client.preStreamChecks(file); !customerror.IsArticleNotFoundError(err) {
 		t.Fatalf("error = %v, want typed article-not-found", err)
 	}
 }
 
-func TestPreStreamChecksRetriesAfterFailedFileRetry(t *testing.T) {
-	client := &Usenet{failedFiles: xsync.NewMap[string, failedFile]()}
-	file := &storage.NZBFile{
-		NzbID:    "download-1",
-		Name:     "movie.mkv",
-		Segments: []storage.NZBSegment{{MessageID: "segment-1"}},
+func TestFailedFileRetryDoublesUpToMax(t *testing.T) {
+	client, file, key := newFailureTestClient()
+	want := failedFileRetry
+	for range 8 {
+		client.markFailed(key, notFound)
+		if got, _ := client.failedFiles.Load(key); got.wait != want {
+			t.Fatalf("wait = %s, want %s", got.wait, want)
+		}
+		endWait(client, key, time.Second)
+		if err := client.preStreamChecks(file); err != nil {
+			t.Fatalf("error after the wait = %v, want a new try", err)
+		}
+		want = min(want*2, failedFileMaxRetry)
 	}
-	client.failedFiles.Store(fsKey(file.NzbID, file.Name), failedFile{
-		err: &nntp.Error{Type: nntp.ErrorTypeArticleNotFound},
-		at:  time.Now().Add(-failedFileRetry),
-	})
+}
 
-	if err := client.preStreamChecks(file); err != nil {
-		t.Fatalf("error = %v, want a new try after %s", err, failedFileRetry)
+func TestFailedFileSecondFailureInSameWaitKeepsWait(t *testing.T) {
+	client, _, key := newFailureTestClient()
+	client.markFailed(key, notFound)
+	client.markFailed(key, notFound)
+	if got, _ := client.failedFiles.Load(key); got.wait != failedFileRetry {
+		t.Fatalf("wait = %s, want %s", got.wait, failedFileRetry)
 	}
-	if _, ok := client.failedFiles.Load(fsKey(file.NzbID, file.Name)); ok {
-		t.Fatal("expired failure was kept")
+}
+
+func TestOldFailedFileStartsAgain(t *testing.T) {
+	client, file, key := newFailureTestClient()
+	client.markFailed(key, notFound)
+	client.markFailed(key, notFound)
+	endWait(client, key, time.Second)
+	client.markFailed(key, notFound) // wait is now an hour
+
+	endWait(client, key, failedFileMaxRetry)
+	if err := client.preStreamChecks(file); err != nil {
+		t.Fatalf("error = %v, want a new try", err)
+	}
+	if _, ok := client.failedFiles.Load(key); ok {
+		t.Fatal("old failure was kept")
+	}
+	client.markFailed(key, notFound)
+	if got, _ := client.failedFiles.Load(key); got.wait != failedFileRetry {
+		t.Fatalf("wait = %s, want %s", got.wait, failedFileRetry)
 	}
 }

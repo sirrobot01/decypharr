@@ -829,15 +829,39 @@ func (u *Usenet) getFile(nzoID, filename string) (*storage.NZBFile, error) {
 	return file, nil
 }
 
-// failedFileRetry is how long a file that failed on a missing article stays
-// failed. After it, the next open tries the articles again: a provider can
-// miss an article for a short time, for example on a new post.
-const failedFileRetry = 30 * time.Minute
+// A file that failed on a missing article stays failed for failedFileRetry.
+// After it, the next open tries the articles again: a provider can miss an
+// article for a short time, for example on a new post. Each failure on a
+// retry doubles the wait, up to failedFileMaxRetry. A failure that comes more
+// than failedFileMaxRetry after the last wait ended starts again at
+// failedFileRetry.
+const (
+	failedFileRetry    = 30 * time.Minute
+	failedFileMaxRetry = 24 * time.Hour
+)
 
-// failedFile is a file that failed on a missing article, and when.
+// failedFile is a file that failed on a missing article, the current wait,
+// and the time the wait ends.
 type failedFile struct {
-	err error
-	at  time.Time
+	err   error
+	wait  time.Duration
+	until time.Time
+}
+
+// markFailed records a failure of the file at key and sets its next wait.
+func (u *Usenet) markFailed(key string, err error) {
+	now := time.Now()
+	u.failedFiles.Compute(key, func(old failedFile, loaded bool) (failedFile, xsync.ComputeOp) {
+		wait := failedFileRetry
+		if loaded && now.Before(old.until.Add(failedFileMaxRetry)) {
+			wait = min(old.wait*2, failedFileMaxRetry)
+			if now.Before(old.until) {
+				// A second reader failed during the same wait.
+				wait = old.wait
+			}
+		}
+		return failedFile{err: err, wait: wait, until: now.Add(wait)}, xsync.UpdateOp
+	})
 }
 
 func (u *Usenet) preStreamChecks(file *storage.NZBFile) error {
@@ -849,8 +873,13 @@ func (u *Usenet) preStreamChecks(file *storage.NZBFile) error {
 	// Check if file was marked as failed previously
 	key := fsKey(file.NzbID, file.Name)
 	if failed, ok := u.failedFiles.Load(key); ok {
-		if time.Since(failed.at) >= failedFileRetry {
-			u.failedFiles.Delete(key)
+		now := time.Now()
+		if !now.Before(failed.until) {
+			// The wait ended: try again. Keep the entry, so that a new failure
+			// waits longer, until it is too old to count.
+			if !now.Before(failed.until.Add(failedFileMaxRetry)) {
+				u.failedFiles.Delete(key)
+			}
 			return nil
 		}
 		cause := failed.err
@@ -919,7 +948,7 @@ func (h *FileHandle) ReadAtContext(ctx context.Context, p []byte, off int64) (in
 		return n, ctx.Err()
 	}
 	if err != nil && nntp.IsArticleNotFoundError(err) {
-		h.u.failedFiles.Store(h.failureKey, failedFile{err: err, at: time.Now()})
+		h.u.markFailed(h.failureKey, err)
 		return n, customerror.NewArticleNotFoundError(err)
 	}
 	return n, err
@@ -1038,7 +1067,7 @@ func (u *Usenet) Stream(ctx context.Context, nzoID, filename string, start, end 
 
 	// Mark file as failed if article not found (permanent error)
 	if err != nil && nntp.IsArticleNotFoundError(err) {
-		u.failedFiles.Store(fsKey(nzoID, filename), failedFile{err: err, at: time.Now()})
+		u.markFailed(fsKey(nzoID, filename), err)
 		// Wrap error to mark as permanent
 		return customerror.NewArticleNotFoundError(err)
 	}

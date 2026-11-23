@@ -221,7 +221,7 @@ Providers sometimes remove articles after a release is posted, for example after
 - Decypharr does this only for a small gap: at most 4 articles in a row, at most 64 articles in a file, and at most 2% of the file.
 - Decypharr never sends zeros in the first or last 8MB of a file. Media files keep their headers and indexes there. A media scanner gets an error instead.
 
-When a gap is larger than these limits, the file is broken. The read fails, and Decypharr asks the Arr to grab the release again. Decypharr tries a failed file again after 30 minutes, because a provider can miss an article for a short time.
+When a gap is larger than these limits, the file is broken. The read fails, and Decypharr asks the Arr to grab the release again. Decypharr tries a failed file again after 30 minutes, because a provider can miss an article for a short time. Each time the file fails again, the wait doubles, up to 24 hours. Decypharr does not check failed files in the background. It tries again only when a client opens the file.
 
 To find files with gaps, look for the log message `Article missing on all providers; serving zeros`.
 
