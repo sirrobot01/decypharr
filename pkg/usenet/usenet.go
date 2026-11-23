@@ -256,7 +256,7 @@ type Usenet struct {
 	nzbStorage               *NZBStorage // File-based NZB metadata storage
 	processingMaxConnections int         // Connections allocated per file for parsing and NZB downloads
 	prefetchSize             int64       // Streaming prefetch size in bytes
-	failedFiles              *xsync.Map[string, error]
+	failedFiles              *xsync.Map[string, failedFile]
 	cleanupStop              chan struct{}
 	cleanupWg                sync.WaitGroup
 	closeOnce                sync.Once
@@ -381,7 +381,7 @@ func New() (*Usenet, error) {
 		processingMaxConnections: processingMaxConns,
 		prefetchSize:             prefetchSize,
 		fs:                       xsync.NewMap[string, *fsEntry](),
-		failedFiles:              xsync.NewMap[string, error](),
+		failedFiles:              xsync.NewMap[string, failedFile](),
 		cleanupStop:              make(chan struct{}),
 	}
 
@@ -829,6 +829,17 @@ func (u *Usenet) getFile(nzoID, filename string) (*storage.NZBFile, error) {
 	return file, nil
 }
 
+// failedFileRetry is how long a file that failed on a missing article stays
+// failed. After it, the next open tries the articles again: a provider can
+// miss an article for a short time, for example on a new post.
+const failedFileRetry = 30 * time.Minute
+
+// failedFile is a file that failed on a missing article, and when.
+type failedFile struct {
+	err error
+	at  time.Time
+}
+
 func (u *Usenet) preStreamChecks(file *storage.NZBFile) error {
 	// Check if we have Segments
 	if len(file.Segments) == 0 {
@@ -836,7 +847,13 @@ func (u *Usenet) preStreamChecks(file *storage.NZBFile) error {
 	}
 
 	// Check if file was marked as failed previously
-	if cause, ok := u.failedFiles.Load(fsKey(file.NzbID, file.Name)); ok {
+	key := fsKey(file.NzbID, file.Name)
+	if failed, ok := u.failedFiles.Load(key); ok {
+		if time.Since(failed.at) >= failedFileRetry {
+			u.failedFiles.Delete(key)
+			return nil
+		}
+		cause := failed.err
 		if nntp.IsArticleNotFoundError(cause) || customerror.IsArticleNotFoundError(cause) {
 			return customerror.NewArticleNotFoundError(cause)
 		}
@@ -902,7 +919,7 @@ func (h *FileHandle) ReadAtContext(ctx context.Context, p []byte, off int64) (in
 		return n, ctx.Err()
 	}
 	if err != nil && nntp.IsArticleNotFoundError(err) {
-		h.u.failedFiles.Store(h.failureKey, err)
+		h.u.failedFiles.Store(h.failureKey, failedFile{err: err, at: time.Now()})
 		return n, customerror.NewArticleNotFoundError(err)
 	}
 	return n, err
@@ -1021,7 +1038,7 @@ func (u *Usenet) Stream(ctx context.Context, nzoID, filename string, start, end 
 
 	// Mark file as failed if article not found (permanent error)
 	if err != nil && nntp.IsArticleNotFoundError(err) {
-		u.failedFiles.Store(fsKey(nzoID, filename), err)
+		u.failedFiles.Store(fsKey(nzoID, filename), failedFile{err: err, at: time.Now()})
 		// Wrap error to mark as permanent
 		return customerror.NewArticleNotFoundError(err)
 	}
