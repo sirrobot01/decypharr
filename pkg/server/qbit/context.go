@@ -238,9 +238,11 @@ func hashesContext(next http.Handler) http.Handler {
 			hashes = strings.Split(_hashes, "|")
 		}
 		if hashes == nil {
-			// GetReader hashes from form
+			// qBittorrent separates hashes with "|" in query and form values too.
 			_ = r.ParseForm()
-			hashes = r.Form["hashes"]
+			for _, value := range r.Form["hashes"] {
+				hashes = append(hashes, strings.Split(value, "|")...)
+			}
 		}
 		for i, hash := range hashes {
 			hashes[i] = strings.TrimSpace(hash)

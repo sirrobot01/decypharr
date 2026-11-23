@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/sirrobot01/decypharr/internal/config"
@@ -25,6 +26,20 @@ func newAuthenticationTestQBit(t *testing.T) *QBit {
 		}
 	})
 	return &QBit{manager: mgr}
+}
+
+func TestHashesContextSplitsQueryValues(t *testing.T) {
+	var got []string
+	handler := hashesContext(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got = getHashes(r.Context())
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/torrents/info?hashes=aaa|bbb&hashes=ccc", nil)
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	want := []string{"aaa", "bbb", "ccc"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("hashes = %q, want %q", got, want)
+	}
 }
 
 func TestAuthenticateDoesNotOverwriteArrWithClientCredentials(t *testing.T) {
