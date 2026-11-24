@@ -106,11 +106,22 @@ func (s *Storage) Get(infohash string) (*Entry, error) {
 	return ProtoToEntry(&pb), nil
 }
 
+// isInternalKey reports whether key holds Decypharr's own bookkeeping rather
+// than an entry. The entries store also keeps "__migration_status__"; read as
+// an entry it has an empty name, and an empty name in a FUSE directory listing
+// fails the whole readdir with EIO.
+func isInternalKey(key string) bool {
+	return strings.HasPrefix(key, "__")
+}
+
 // List retrieves all cached entries with optional filtering
 func (s *Storage) List(filter func(*Entry) bool) ([]*Entry, error) {
 	var entries []*Entry
 
 	err := s.entries.ForEach(func(key string, value []byte) error {
+		if isInternalKey(key) {
+			return nil
+		}
 		var pb EntryProto
 		if err := proto.Unmarshal(value, &pb); err != nil {
 			return nil
@@ -128,6 +139,9 @@ func (s *Storage) List(filter func(*Entry) bool) ([]*Entry, error) {
 // ForEach iterates over entries
 func (s *Storage) ForEach(fn func(*Entry) error) error {
 	return s.entries.ForEach(func(key string, value []byte) error {
+		if isInternalKey(key) {
+			return nil
+		}
 		var pb EntryProto
 		if err := proto.Unmarshal(value, &pb); err != nil {
 			return nil
@@ -148,6 +162,9 @@ func (s *Storage) ForEachBatch(batchSize int, fn func([]*Entry) error) error {
 	// before the next Unmarshal, leaving the prior entry's slice untouched).
 	var pb EntryProto
 	err := s.entries.ForEach(func(key string, value []byte) error {
+		if isInternalKey(key) {
+			return nil
+		}
 		proto.Reset(&pb)
 		if err := proto.Unmarshal(value, &pb); err != nil {
 			return nil
@@ -185,6 +202,9 @@ type EntryMetaInfo struct {
 // This is O(n) in-memory only - no disk reads, no protobuf deserialization.
 func (s *Storage) ForEachMeta(fn func(*EntryMetaInfo) error) error {
 	return s.entries.ForEachMetadata(func(key string, meta *appendstore.Metadata) error {
+		if isInternalKey(key) {
+			return nil
+		}
 		return fn(&EntryMetaInfo{
 			InfoHash: key,
 			Name:     meta.Attribute(attributeName),
