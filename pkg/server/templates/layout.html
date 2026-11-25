@@ -128,6 +128,11 @@
                     Loading...
                 </div>
             </div>
+            {{ if .UseAuth }}
+            <form method="post" action="{{.URLBase}}logout">
+                <button type="submit" class="btn btn-ghost btn-sm">Sign out</button>
+            </form>
+            {{ end }}
         </div>
     </div>
 </header>
