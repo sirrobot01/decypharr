@@ -2,6 +2,7 @@ package arr
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -147,6 +148,87 @@ func TestManualImportRejectsIncompleteCandidates(t *testing.T) {
 			}
 			if got := posts.Load(); got != 0 {
 				t.Fatalf("command submissions = %d, want 0", got)
+			}
+		})
+	}
+}
+
+func TestManualImportSkipsPermanentlyRejectedFiles(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		response  string
+		wantPaths []any
+		wantErr   error
+	}{
+		{
+			name: "already imported file left out",
+			response: `[
+				{"path":"/downloads/Pack/S05E01.mkv","series":{"id":7},"episodes":[{"id":1}],"quality":{"quality":{"id":3}},"rejections":[{"reason":"Episode file already imported at 11/10/2026 11:49:50","type":"permanent"}]},
+				{"path":"/downloads/Pack/S05E02.mkv","series":{"id":7},"episodes":[{"id":2}],"quality":{"quality":{"id":3}},"rejections":[]}
+			]`,
+			wantPaths: []any{"/downloads/Pack/S05E02.mkv"},
+		},
+		{
+			name: "temporary rejection still submitted",
+			response: `[
+				{"path":"/downloads/Pack/S05E03.mkv","series":{"id":7},"episodes":[{"id":3}],"quality":{"quality":{"id":3}},"rejections":[{"reason":"Not enough free space","type":"temporary"}]}
+			]`,
+			wantPaths: []any{"/downloads/Pack/S05E03.mkv"},
+		},
+		{
+			name: "everything already imported",
+			response: `[
+				{"path":"/downloads/Pack/S05E01.mkv","series":{"id":7},"episodes":[{"id":1}],"quality":{"quality":{"id":3}},"rejections":[{"reason":"Episode file already imported","type":"permanent"}]},
+				{"path":"/downloads/Pack/Unparsed.mkv","series":{"id":7},"rejections":[{"reason":"Unable to determine if file is a sample","type":"permanent"}]}
+			]`,
+			wantErr: ErrNothingToImport,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var posts atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method + " " + r.URL.Path {
+				case "GET /api/v3/manualimport":
+					_, _ = fmt.Fprint(w, tc.response)
+				case "POST /api/v3/command":
+					posts.Add(1)
+					var command struct {
+						Files []map[string]any `json:"files"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&command); err != nil {
+						t.Error(err)
+					}
+					var paths []any
+					for _, file := range command.Files {
+						paths = append(paths, file["path"])
+					}
+					if !reflect.DeepEqual(paths, tc.wantPaths) {
+						t.Errorf("submitted paths = %v, want %v", paths, tc.wantPaths)
+					}
+					w.WriteHeader(http.StatusCreated)
+					_, _ = fmt.Fprint(w, `{"id":31,"status":"queued"}`)
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+			s := testService(Arr{Host: server.URL, Token: "secret", Type: Sonarr})
+			err := s.ManualImport(t.Context(), "arr", "download-1")
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("ManualImport error = %v, want %v", err, tc.wantErr)
+				}
+				if got := posts.Load(); got != 0 {
+					t.Fatalf("command submissions = %d, want 0", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := posts.Load(); got != 1 {
+				t.Fatalf("command submissions = %d, want 1", got)
 			}
 		})
 	}

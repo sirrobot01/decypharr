@@ -2,12 +2,14 @@ package arr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sirrobot01/decypharr/internal/config"
 )
@@ -144,12 +146,61 @@ func (s *Service) CleanupQueue(ctx context.Context, name string) error {
 			s.logger.Error().Err(err).Str("arr", name).Msg("Queue cleanup: blocklist failed")
 		}
 	}
+	s.pruneImportBackoff(name, manualImports)
 	for _, downloadID := range manualImports {
-		if err := s.ManualImport(ctx, name, downloadID); err != nil {
+		if s.importBackedOff(name, downloadID) {
+			continue
+		}
+		err := s.ManualImport(ctx, name, downloadID)
+		switch {
+		case err == nil:
+		case errors.Is(err, ErrNothingToImport), errors.Is(err, ErrIncompleteCandidate):
+			// Retrying every pass changes nothing and costs the Arr a full
+			// manual import scan of the download each time.
+			s.backOffImport(name, downloadID)
+			s.logger.Info().Err(err).Str("arr", name).Str("download_id", downloadID).
+				Dur("retry_in", importBackoff).Msg("Queue cleanup: nothing importable, backing off")
+		default:
 			s.logger.Error().Err(err).Str("arr", name).Msg("Queue cleanup: manual import failed")
 		}
 	}
 	return nil
+}
+
+// importBackoff is how long queue cleanup leaves a download alone after a
+// manual import found nothing it could submit.
+const importBackoff = 6 * time.Hour
+
+func importBackoffKey(name, downloadID string) string {
+	return name + "\x00" + downloadID
+}
+
+func (s *Service) importBackedOff(name, downloadID string) bool {
+	s.importMu.Lock()
+	defer s.importMu.Unlock()
+	until, ok := s.importBackoff[importBackoffKey(name, downloadID)]
+	return ok && time.Now().Before(until)
+}
+
+func (s *Service) backOffImport(name, downloadID string) {
+	s.importMu.Lock()
+	defer s.importMu.Unlock()
+	if s.importBackoff == nil {
+		s.importBackoff = make(map[string]time.Time)
+	}
+	s.importBackoff[importBackoffKey(name, downloadID)] = time.Now().Add(importBackoff)
+}
+
+// pruneImportBackoff forgets downloads of this Arr that left the queue.
+func (s *Service) pruneImportBackoff(name string, queued []string) {
+	s.importMu.Lock()
+	defer s.importMu.Unlock()
+	prefix := name + "\x00"
+	for key := range s.importBackoff {
+		if strings.HasPrefix(key, prefix) && !slices.Contains(queued, strings.TrimPrefix(key, prefix)) {
+			delete(s.importBackoff, key)
+		}
+	}
 }
 
 // resolveQueueAction picks what to do with one queue item. Only failed items

@@ -3,9 +3,11 @@ package arr
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -67,7 +69,30 @@ type ManualImportFile struct {
 	} `json:"rejections"`
 }
 
+// ErrNothingToImport means every file the Arr offered for a download carries
+// a permanent rejection, such as "Episode file already imported". Retrying
+// will not change that until something else changes in the Arr.
+var ErrNothingToImport = errors.New("nothing left to import")
+
+// ErrIncompleteCandidate means the Arr could not identify a file (no movie,
+// no quality), so the import needs a human to map it.
+var ErrIncompleteCandidate = errors.New("incomplete import candidate")
+
+// rejectedPermanently reports whether the Arr will not import this file as
+// offered. The Arr's own Manual Import screen leaves these files unticked.
+func rejectedPermanently(candidate ImportResponseSchema) bool {
+	for _, rejection := range candidate.Rejections {
+		if strings.EqualFold(rejection.Type, "permanent") {
+			return true
+		}
+	}
+	return false
+}
+
 // ManualImport asks the Arr to import a finished download it did not pick up.
+// Files the Arr rejects permanently are left out: submitting them anyway makes
+// Sonarr treat an already imported episode as an upgrade of itself, deleting
+// and recreating the library file on every cleanup pass.
 func (s *Service) ManualImport(ctx context.Context, name, downloadID string) error {
 	instance, err := s.instance(name)
 	if err != nil {
@@ -89,11 +114,14 @@ func (s *Service) ManualImport(ctx context.Context, name, downloadID string) err
 
 	files := make([]ManualImportFile, 0, len(candidates))
 	for _, candidate := range candidates {
+		if rejectedPermanently(candidate) {
+			continue
+		}
 		if instance.Type == Radarr && candidate.Movie.Id <= 0 {
-			return fmt.Errorf("manual import: no movie matched for %q", candidate.Path)
+			return fmt.Errorf("manual import: no movie matched for %q: %w", candidate.Path, ErrIncompleteCandidate)
 		}
 		if len(candidate.Quality) == 0 || string(candidate.Quality) == "null" {
-			return fmt.Errorf("manual import: no quality returned for %q", candidate.Path)
+			return fmt.Errorf("manual import: no quality returned for %q: %w", candidate.Path, ErrIncompleteCandidate)
 		}
 		episodeIDs := make([]int, 0, len(candidate.Episodes))
 		for _, episode := range candidate.Episodes {
@@ -116,6 +144,10 @@ func (s *Service) ManualImport(ctx context.Context, name, downloadID string) err
 			ReleaseType:       candidate.ReleaseType,
 			Rejections:        candidate.Rejections,
 		})
+	}
+
+	if len(files) == 0 {
+		return fmt.Errorf("manual import: download %q: %w", downloadID, ErrNothingToImport)
 	}
 
 	_, err = s.command(ctx, instance, struct {
