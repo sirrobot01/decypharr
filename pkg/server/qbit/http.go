@@ -65,11 +65,26 @@ func (q *QBit) handleShutdown(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// normalizeStateFilter maps qBittorrent's `filter` query parameter onto a
+// storage.TorrentState.
+//
+// qBittorrent's filter defaults to "all", meaning unfiltered. "all" is not a
+// TorrentState, so forwarding it as one matched no entry and returned an empty
+// list to any client that sent it explicitly. The previous
+// strings.Trim(value, "") was also a no-op — an empty cutset trims nothing.
+func normalizeStateFilter(raw string) string {
+	state := strings.TrimSpace(raw)
+	if strings.EqualFold(state, "all") {
+		return ""
+	}
+	return state
+}
+
 func (q *QBit) handleTorrentsInfo(w http.ResponseWriter, r *http.Request) {
 	//log all url params
 	ctx := r.Context()
 	category := getCategory(ctx)
-	state := strings.Trim(r.URL.Query().Get("filter"), "")
+	state := normalizeStateFilter(r.URL.Query().Get("filter"))
 	hashes := getHashes(ctx)
 
 	// Convert hashes to filter function
