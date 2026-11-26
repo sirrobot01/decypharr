@@ -68,18 +68,18 @@ func (s *Server) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Error saving session", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, cfg.URLBase, http.StatusSeeOther)
 }
 
 func (s *Server) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	session, _ := s.cookie.Get(r, "auth-session")
-	session.Values["authenticated"] = false
+	clear(session.Values)
 	session.Options.MaxAge = -1
-	err := session.Save(r, w)
-	if err != nil {
+	if err := session.Save(r, w); err != nil {
+		http.Error(w, "Error clearing session", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/login", http.StatusSeeOther)
+	http.Redirect(w, r, s.urlBase+"login", http.StatusSeeOther)
 }
 
 func (s *Server) RegisterHandler(w http.ResponseWriter, r *http.Request) {
@@ -149,6 +149,7 @@ func (s *Server) IndexHandler(w http.ResponseWriter, r *http.Request) {
 		"URLBase":    cfg.URLBase,
 		"Page":       "index",
 		"Title":      "Queues",
+		"UseAuth":    cfg.UseAuth,
 		"SetupError": cfg.SetupError(),
 	}
 	err := s.templates.ExecuteTemplate(w, "layout", data)
@@ -167,6 +168,7 @@ func (s *Server) DownloadHandler(w http.ResponseWriter, r *http.Request) {
 		"URLBase":                 cfg.URLBase,
 		"Page":                    "download",
 		"Title":                   "Download",
+		"UseAuth":                 cfg.UseAuth,
 		"Debrids":                 debrids,
 		"HasMultiDebrid":          len(debrids) > 1,
 		"downloadFolder":          cfg.DownloadFolder,
@@ -185,6 +187,7 @@ func (s *Server) RepairHandler(w http.ResponseWriter, r *http.Request) {
 		"URLBase":    cfg.URLBase,
 		"Page":       "repair",
 		"Title":      "Repair",
+		"UseAuth":    cfg.UseAuth,
 		"SetupError": cfg.SetupError(),
 	}
 	err := s.templates.ExecuteTemplate(w, "layout", data)
@@ -199,6 +202,7 @@ func (s *Server) ReacquireHandler(w http.ResponseWriter, r *http.Request) {
 		"URLBase":    cfg.URLBase,
 		"Page":       "reacquire",
 		"Title":      "Reacquire",
+		"UseAuth":    cfg.UseAuth,
 		"SetupError": cfg.SetupError(),
 	}
 	if err := s.templates.ExecuteTemplate(w, "layout", data); err != nil {
@@ -212,6 +216,7 @@ func (s *Server) ConfigHandler(w http.ResponseWriter, r *http.Request) {
 		"URLBase":    cfg.URLBase,
 		"Page":       "config",
 		"Title":      "Config",
+		"UseAuth":    cfg.UseAuth,
 		"SetupError": cfg.SetupError(),
 	}
 	err := s.templates.ExecuteTemplate(w, "layout", data)
@@ -226,6 +231,7 @@ func (s *Server) StatsHandler(w http.ResponseWriter, r *http.Request) {
 		"URLBase": cfg.URLBase,
 		"Page":    "stats",
 		"Title":   "Statistics",
+		"UseAuth": cfg.UseAuth,
 	}
 	err := s.templates.ExecuteTemplate(w, "layout", data)
 	if err != nil {
@@ -239,6 +245,7 @@ func (s *Server) BrowseHandler(w http.ResponseWriter, r *http.Request) {
 		"URLBase":    cfg.URLBase,
 		"Page":       "browse",
 		"Title":      "Browse Torrents",
+		"UseAuth":    cfg.UseAuth,
 		"SetupError": cfg.SetupError(),
 	}
 	err := s.templates.ExecuteTemplate(w, "layout", data)

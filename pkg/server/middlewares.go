@@ -46,7 +46,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			if isAPI {
 				s.sendJSONError(w, "Authentication required. Please provide a valid API token in the Authorization header (Bearer <token>) or authenticate via session cookies.", http.StatusUnauthorized)
 			} else {
-				http.Redirect(w, r, "/login", http.StatusSeeOther)
+				http.Redirect(w, r, s.urlBase+"login", http.StatusSeeOther)
 			}
 			return
 		}

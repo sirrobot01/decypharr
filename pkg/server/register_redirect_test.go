@@ -22,6 +22,8 @@ func newTestServer(t *testing.T) *Server {
 			"templates/index.html",
 			"templates/download.html",
 			"templates/repair.html",
+			"templates/reacquire.html",
+			"templates/repair_tabs.html",
 			"templates/stats.html",
 			"templates/config.html",
 			"templates/browse.html",

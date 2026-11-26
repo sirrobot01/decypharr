@@ -35,6 +35,7 @@ func (s *Server) WebRoutes() http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(s.authMiddleware)
 		// Web pages
+		r.Post("/logout", s.LogoutHandler)
 		r.Get("/", s.IndexHandler)
 		r.Get("/browse", s.BrowseHandler)
 		r.Get("/download", s.DownloadHandler)
