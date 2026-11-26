@@ -36,6 +36,36 @@ func TestQueueDeleteRemovesFilesWhenRequested(t *testing.T) {
 	}
 }
 
+func TestQueueDeleteStalledRemovesStagedNZB(t *testing.T) {
+	config.Reset()
+	config.SetConfigPath(t.TempDir())
+	t.Cleanup(config.Reset)
+	queue, entry, _ := newQueueDeleteTest(t)
+	queue.removeStalledAfter = time.Hour
+	staged := filepath.Join(t.TempDir(), entry.InfoHash+".queued")
+	if err := os.WriteFile(staged, []byte("<nzb/>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entry.Protocol = config.ProtocolNZB
+	entry.Magnet = staged
+	entry.State = storage.EntryStateError
+	entry.Status = debridTypes.TorrentStatusError
+	entry.AddedOn = time.Now().Add(-2 * time.Hour)
+	if err := queue.Update(entry); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := queue.DeleteStalled(func(string) bool { return false }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queue.GetTorrent(entry.InfoHash); err == nil {
+		t.Fatal("stalled entry was kept")
+	}
+	if _, err := os.Stat(staged); !os.IsNotExist(err) {
+		t.Fatalf("staged NZB was kept: %v", err)
+	}
+}
+
 func newQueueDeleteTest(t *testing.T) (*Queue, *storage.Entry, string) {
 	t.Helper()
 

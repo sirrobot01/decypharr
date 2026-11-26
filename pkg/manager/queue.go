@@ -119,11 +119,20 @@ func (q *Queue) GetTorrent(infohash string) (*storage.Entry, error) {
 	return q.storage.GetQueued(infohash)
 }
 
+// removeStagedNZB removes the NZB source of an entry that was not parsed.
+func removeStagedNZB(entry *storage.Entry) error {
+	if !entry.IsNZB() || entry.Magnet == "" {
+		return nil
+	}
+	if err := os.Remove(entry.Magnet); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove staged NZB %q: %w", entry.Magnet, err)
+	}
+	return nil
+}
+
 func (q *Queue) deleteEntryFiles(entry *storage.Entry) error {
-	if entry.IsNZB() && entry.Magnet != "" {
-		if err := os.Remove(entry.Magnet); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("remove staged NZB %q: %w", entry.Magnet, err)
-		}
+	if err := removeStagedNZB(entry); err != nil {
+		return err
 	}
 	downloadedPath := entry.DownloadPath()
 	if downloadedPath == "" {
@@ -189,7 +198,7 @@ func (q *Queue) DeleteStalled(pending func(infoHash string) bool) error {
 			return true
 		}
 		return false
-	}, nil)
+	}, removeStagedNZB)
 }
 
 func (q *Queue) Update(torrent *storage.Entry) error {
