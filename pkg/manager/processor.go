@@ -28,6 +28,16 @@ func (m *Manager) AddNewTorrent(ctx context.Context, importReq *ImportRequest) e
 	}
 
 	key := torrentSubmissionKey(importReq)
+	// A failed queue entry is never processed again. Drop it (and its
+	// submission-gate key) so the arr's re-grab of the same hash starts over
+	// instead of being swallowed as a duplicate until restart.
+	if existing, err := m.queue.GetTorrent(importReq.Magnet.InfoHash); err == nil && existing.State == storage.EntryStateError {
+		if err := m.queue.Delete(existing.InfoHash, false, nil); err != nil {
+			return fmt.Errorf("failed to remove failed queue entry: %w", err)
+		}
+		m.torrentSubmissions.forget(key)
+	}
+
 	// A hash submitted within the dedup window is not resubmitted (#308). While
 	// it is still queued, the duplicate add is an idempotent success below. If
 	// it has been deleted since, nothing would be queued, so a success would

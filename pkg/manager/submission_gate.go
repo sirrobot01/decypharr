@@ -102,6 +102,13 @@ func (g *torrentSubmissionGate) touchRecent(key string, now time.Time) bool {
 	return true
 }
 
+// forget drops key from the dedup window, so the next submission goes through.
+func (g *torrentSubmissionGate) forget(key string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.recent, key)
+}
+
 func (g *torrentSubmissionGate) mark(key string, now time.Time) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
