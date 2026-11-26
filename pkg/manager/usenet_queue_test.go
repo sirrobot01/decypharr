@@ -130,3 +130,55 @@ func TestAddNewNZBQueuesBeforeNetworkParsing(t *testing.T) {
 		t.Fatalf("invalid NZB state = %q, want error", failed.State)
 	}
 }
+
+func TestRemoveOrphanStagedNZBs(t *testing.T) {
+	oldPath := config.GetMainPath()
+	config.SetConfigPath(t.TempDir())
+	t.Cleanup(func() { config.SetConfigPath(oldPath) })
+
+	cfg := config.Get()
+	oldUsenet := cfg.Usenet
+	cfg.Usenet = config.Usenet{
+		Providers:                []config.UsenetProvider{{Host: "127.0.0.1", Port: 1, MaxConnections: 1}},
+		ProcessingMaxConnections: 1,
+	}
+	t.Cleanup(func() { cfg.Usenet = oldUsenet })
+
+	usenetClient, err := usenet.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = usenetClient.Close() })
+	store, err := storage.NewStorage(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	m := &Manager{usenet: usenetClient, queue: newQueue(store, ""), logger: zerolog.Nop()}
+
+	old := time.Now().Add(-2 * orphanStagedNZBAge)
+	stage := func(id string, mtime time.Time) string {
+		path, err := usenetClient.StageNZB(id, []byte("<nzb/>"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	queued := stage("queued", old)
+	orphan := stage("orphan", old)
+	fresh := stage("fresh", time.Now())
+	if err := m.queue.Add(&storage.Entry{InfoHash: "queued", Protocol: config.ProtocolNZB, Magnet: queued}); err != nil {
+		t.Fatal(err)
+	}
+
+	m.removeOrphanStagedNZBs()
+
+	for path, want := range map[string]bool{queued: true, orphan: false, fresh: true} {
+		if _, err := os.Stat(path); (err == nil) != want {
+			t.Errorf("%s exists = %v, want %v", filepath.Base(path), err == nil, want)
+		}
+	}
+}

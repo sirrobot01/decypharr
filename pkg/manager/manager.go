@@ -360,6 +360,7 @@ func (m *Manager) initJobQueue() {
 		}()
 		defer m.queueRestored.Store(true)
 		m.restoreActiveDownloadJobs()
+		m.removeOrphanStagedNZBs()
 	})
 }
 

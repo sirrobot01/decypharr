@@ -1297,6 +1297,11 @@ func (u *Usenet) StageNZB(id string, content []byte) (string, error) {
 	return path, nil
 }
 
+// StagedNZBs returns the paths of all staged NZB files.
+func (u *Usenet) StagedNZBs() ([]string, error) {
+	return filepath.Glob(filepath.Join(u.metadataDir, "*.queued"))
+}
+
 // RemoveStagedNZB removes a queued source file after it has been parsed.
 func (u *Usenet) RemoveStagedNZB(path string) {
 	if path != "" {

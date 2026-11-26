@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/utils"
@@ -13,6 +14,44 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/storage"
 	"github.com/sirrobot01/decypharr/pkg/usenet"
 )
+
+// orphanStagedNZBAge keeps new staged files that AddNewNZB has not put into
+// the queue yet.
+const orphanStagedNZBAge = time.Hour
+
+// removeOrphanStagedNZBs removes staged NZB files that no queue entry uses.
+// Older releases removed stalled entries but kept their staged files.
+func (m *Manager) removeOrphanStagedNZBs() {
+	if m.usenet == nil {
+		return
+	}
+	paths, err := m.usenet.StagedNZBs()
+	if err != nil || len(paths) == 0 {
+		return
+	}
+	entries, err := m.queue.storage.FilterQueued(func(e *storage.Entry) bool { return e.IsNZB() && e.Magnet != "" })
+	if err != nil {
+		m.logger.Error().Err(err).Msg("Failed to list the queue for staged NZB cleanup")
+		return
+	}
+	used := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		used[filepath.Base(e.Magnet)] = true
+	}
+	removed := 0
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil || used[filepath.Base(path)] || time.Since(info.ModTime()) < orphanStagedNZBAge {
+			continue
+		}
+		if err := os.Remove(path); err == nil {
+			removed++
+		}
+	}
+	if removed > 0 {
+		m.logger.Info().Int("removed", removed).Msg("Removed staged NZB files with no queue entry")
+	}
+}
 
 func (m *Manager) restoreActiveDownloadJobs() {
 	entries, err := m.queue.ListFilter("", config.ProtocolAll, storage.EntryStateDownloading, nil, "", false)
