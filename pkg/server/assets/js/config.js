@@ -46,10 +46,10 @@ class ConfigManager {
         this.refs.configForm.addEventListener('submit', (e) => this.saveConfiguration(e));
 
         // Add buttons
-        this.refs.addDebridBtn.addEventListener('click', () => this.addDebridConfig());
-        this.refs.addArrBtn.addEventListener('click', () => this.addArrConfig());
+        this.refs.addDebridBtn.addEventListener('click', () => this.addDebridConfig({}, true));
+        this.refs.addArrBtn.addEventListener('click', () => this.addArrConfig({}, true));
         this.refs.addVirtualFolderBtn.addEventListener('click', () => this.addVirtualFolder());
-        this.refs.addUsenetProviderBtn.addEventListener('click', () => this.addUsenetProvider());
+        this.refs.addUsenetProviderBtn.addEventListener('click', () => this.addUsenetProvider({}, true));
 
 		this.refs.virtualFoldersContainer.addEventListener('input', (event) => this.handleVirtualFolderInput(event));
 		this.refs.virtualFoldersContainer.addEventListener('change', (event) => this.handleVirtualFolderInput(event));
@@ -526,12 +526,14 @@ class ConfigManager {
         });
     }
 
-    addDebridConfig(data = {}) {
+    // A card the user adds goes on top, so it is in view. Save sorts the
+    // cards by index, so the config keeps it at the end.
+    addDebridConfig(data = {}, isNew = false) {
         const debridHtml = this.getDebridTemplate(this.debridCount, data);
-        this.refs.debridConfigs.insertAdjacentHTML('beforeend', debridHtml);
+        this.refs.debridConfigs.insertAdjacentHTML(isNew ? 'afterbegin' : 'beforeend', debridHtml);
 
         // Initialize WebDAV toggle for this debrid
-        const newDebrid = this.refs.debridConfigs.lastElementChild;
+        const newDebrid = this.refs.debridConfigs.querySelector(`.debrid-config[data-index="${this.debridCount}"]`);
 
         // Add event listener to name input for real-time updates
         const nameInput = newDebrid.querySelector(`[name="debrid[${this.debridCount}].name"]`);
@@ -572,6 +574,10 @@ class ConfigManager {
                     });
                 }
             });
+        }
+
+        if (isNew) {
+            newDebrid.querySelector('input, select')?.focus();
         }
 
         this.debridCount++;
@@ -1094,7 +1100,7 @@ class ConfigManager {
     getDebridOptions() {
         // Collect all debrid names from the form
         const debridNames = [];
-        const debridConfigs = document.querySelectorAll('.debrid-config');
+        const debridConfigs = [...document.querySelectorAll('.debrid-config')].sort((a, b) => a.dataset.index - b.dataset.index);
 
         debridConfigs.forEach((config) => {
             const index = config.getAttribute('data-index');
@@ -1132,9 +1138,12 @@ class ConfigManager {
         });
     }
 
-    addArrConfig(data = {}) {
+    addArrConfig(data = {}, isNew = false) {
         const arrHtml = this.getArrTemplate(this.arrCount, data);
-        this.refs.arrConfigs.insertAdjacentHTML('beforeend', arrHtml);
+        this.refs.arrConfigs.insertAdjacentHTML(isNew ? 'afterbegin' : 'beforeend', arrHtml);
+        if (isNew) {
+            this.refs.arrConfigs.querySelector(`.arr-config[data-index="${this.arrCount}"]`)?.querySelector('input, select')?.focus();
+        }
 
         // Populate data if provided
         if (Object.keys(data).length > 0) {
@@ -1482,7 +1491,7 @@ class ConfigManager {
     collectUsenetConfig() {
         const providers = [];
 
-        this.refs.usenetProviders.querySelectorAll('.usenet-provider').forEach((providerCard) => {
+        [...this.refs.usenetProviders.querySelectorAll('.usenet-provider')].sort((a, b) => a.dataset.index - b.dataset.index).forEach((providerCard) => {
             const index = providerCard.getAttribute('data-index');
             const getField = (field) => providerCard.querySelector(`[name="usenet.providers[${index}].${field}"]`);
 
@@ -1538,7 +1547,7 @@ class ConfigManager {
     collectDebridConfigs() {
         const debrids = [];
 
-        this.refs.debridConfigs.querySelectorAll('.debrid-config').forEach((debridCard) => {
+        [...this.refs.debridConfigs.querySelectorAll('.debrid-config')].sort((a, b) => a.dataset.index - b.dataset.index).forEach((debridCard) => {
             const index = debridCard.getAttribute('data-index');
             const getField = (field) => debridCard.querySelector(`[name="debrid[${index}].${field}"]`);
 
@@ -1603,7 +1612,7 @@ class ConfigManager {
     collectArrConfigs() {
         const arrs = [];
 
-        this.refs.arrConfigs.querySelectorAll('.arr-config').forEach((arrCard) => {
+        [...this.refs.arrConfigs.querySelectorAll('.arr-config')].sort((a, b) => a.dataset.index - b.dataset.index).forEach((arrCard) => {
             const index = arrCard.getAttribute('data-index');
             const getField = (field) => arrCard.querySelector(`[name="arr[${index}].${field}"]`);
 
@@ -2158,7 +2167,7 @@ class ConfigManager {
                     <div class="hidden rounded-box bg-base-200 p-4 text-sm" data-vf-preview-result role="status" aria-live="polite"></div>
                 </div>
             </article>`;
-        this.refs.virtualFoldersContainer.insertAdjacentHTML('beforeend', folderHtml);
+        this.refs.virtualFoldersContainer.insertAdjacentHTML(isNewFolder ? 'afterbegin' : 'beforeend', folderHtml);
         const folder = this.refs.virtualFoldersContainer.querySelector(`[data-virtual-folder="${id}"]`);
         if (shouldFocus) {
             folder?.querySelector('[data-vf-name]')?.focus();
@@ -2293,6 +2302,7 @@ class ConfigManager {
 
     collectVirtualFolders() {
         return Array.from(this.refs.virtualFoldersContainer.querySelectorAll('[data-virtual-folder]'))
+            .sort((a, b) => a.dataset.virtualFolder - b.dataset.virtualFolder)
             .map(folder => this.collectVirtualFolder(folder));
     }
 
@@ -2396,9 +2406,17 @@ class ConfigManager {
         });
     }
 
-    addUsenetProvider(data = {}) {
+    addUsenetProvider(data = {}, isNew = false) {
+        if (isNew) {
+            // A new provider comes after the existing ones.
+            const priorities = [...this.refs.usenetProviders.querySelectorAll('[name$=".priority"]')].map(input => parseInt(input.value) || 0);
+            data = {priority: priorities.length ? Math.max(...priorities) + 1 : 1, ...data};
+        }
         const providerHtml = this.getUsenetProviderTemplate(this.usenetProviderCount, data);
-        this.refs.usenetProviders.insertAdjacentHTML('beforeend', providerHtml);
+        this.refs.usenetProviders.insertAdjacentHTML(isNew ? 'afterbegin' : 'beforeend', providerHtml);
+        if (isNew) {
+            this.refs.usenetProviders.querySelector(`.usenet-provider[data-index="${this.usenetProviderCount}"]`)?.querySelector('input')?.focus();
+        }
 
         // Populate data if provided
         if (Object.keys(data).length > 0) {
