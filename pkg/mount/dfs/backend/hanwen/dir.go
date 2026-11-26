@@ -4,6 +4,7 @@ package hanwen
 
 import (
 	"context"
+	"errors"
 	"path"
 	"sync/atomic"
 	"syscall"
@@ -385,6 +386,8 @@ func (d *Dir) Unlink(ctx context.Context, name string) syscall.Errno {
 		d.logger.Error().Err(err).Str("dir", d.name).Str("file", info.Name()).Msg("Failed to remove file from source")
 		return syscall.EIO
 	}
+	// Lookups must not answer from a listing that still holds the file.
+	d.listing.Store(nil)
 
 	return 0
 }
@@ -400,7 +403,10 @@ func (d *Dir) Rmdir(ctx context.Context, name string) syscall.Errno {
 		return syscall.ENOENT
 	}
 
-	if err := d.vfs.GetManager().RemoveEntry(info); err != nil {
+	if err := d.vfs.GetManager().RemoveEmptyEntry(info); err != nil {
+		if errors.Is(err, manager.ErrFolderNotEmpty) {
+			return syscall.ENOTEMPTY
+		}
 		d.logger.Error().Err(err).Str("dir", d.name).Str("torrent", name).Msg("Failed to remove torrent from source")
 		return syscall.EIO
 	}
