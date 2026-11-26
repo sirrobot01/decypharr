@@ -147,7 +147,12 @@ func (m *Manager) Start(ctx context.Context) error {
 			args = append(args, "--cache-dir", cfg.Rclone.CacheDir)
 		}
 	}
-	m.cmd = exec.CommandContext(ctx, "rclone", args...)
+	// Not CommandContext: cancelling the caller's context on shutdown
+	// SIGKILLed rclone while /mnt was still mounted, so the RC unmount got
+	// "connection refused" and the host was left with a dead FUSE endpoint
+	// ("transport endpoint is not connected") that blocked the next container
+	// start. Stop owns the process lifecycle and unmounts first.
+	m.cmd = exec.Command("rclone", args...)
 
 	// Route rclone output through lumberjack for rotation
 	m.cmd.Stdout = rotatingLog
@@ -208,11 +213,9 @@ func (m *Manager) Stop() error {
 	}
 
 	m.logger.Info().Msg("Stopping rclone RC server")
-	// Cancel context and stop process
-	m.cancel()
-
-	// Stopping mount
+	// Unmount while the RC server is still up, then cancel and stop it.
 	m.stopMount()
+	m.cancel()
 
 	if m.cmd != nil && m.cmd.Process != nil {
 		// Try graceful shutdown first
@@ -288,8 +291,11 @@ func (m *Manager) stopMount() {
 
 	m.logger.Info().Msg("Unmounting via RC")
 
-	m.unmount(m.ctx)
-	m.logger.Info().Msgf("Successfully unmounted %s", m.getMountInfo().LocalPath)
+	// m.ctx may already be cancelled by the time we shut down; a cancelled
+	// context kills every force-unmount command before it runs.
+	if m.unmount(context.Background()) {
+		m.logger.Info().Msgf("Successfully unmounted %s", m.getMountInfo().LocalPath)
+	}
 }
 
 // IsReady returns true if the RC server is ready
