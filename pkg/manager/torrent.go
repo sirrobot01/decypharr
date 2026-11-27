@@ -141,6 +141,13 @@ func (m *Manager) detectTorrentChanges(provider string, remoteTorrentsByHash map
 			oldPlacement, placementOnDebrid := entry.Providers[provider]
 
 			if placementOnDebrid {
+				if !onRemote && addedRecently(entry, oldPlacement, time.Now()) {
+					// The provider's list can lag a fresh add by minutes; deleting
+					// now would 404 its files until the next refresh re-added it.
+					m.logger.Debug().Str("debrid", provider).Str("infohash", entry.InfoHash).Str("name", entry.Name).
+						Msg("Torrent refresh: recently added entry missing from provider list; keeping it for now")
+					continue
+				}
 				if !onRemote {
 					entry.RemoveProvider(provider, nil)
 					if len(entry.Providers) == 0 {
@@ -475,4 +482,16 @@ func isComplete(files map[string]types.File) bool {
 		}
 	}
 	return true
+}
+
+// refreshMissingGrace is how long after an entry is added that the refresh
+// keeps it even if the provider's torrent list does not include it yet.
+// TorBox's list missed a pack added 3.5 minutes earlier (2026-10-30).
+const refreshMissingGrace = 30 * time.Minute
+
+// addedRecently reports whether the entry or its placement on this provider
+// was created within refreshMissingGrace of now.
+func addedRecently(entry *storage.Entry, placement *storage.ProviderEntry, now time.Time) bool {
+	recent := func(t time.Time) bool { return !t.IsZero() && now.Sub(t) < refreshMissingGrace }
+	return recent(entry.CreatedAt) || (placement != nil && recent(placement.AddedAt))
 }
