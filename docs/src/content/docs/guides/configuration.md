@@ -122,6 +122,7 @@ Array of Debrid services:
 | `download_rate_limit`             | string | Separate limit for downloads                                                   | Same as `rate_limit`            |
 | `proxy`                           | string | HTTP(S) proxy URL                                                              | `""`                            |
 | `unpack_rar`                      | bool   | Auto-extract RAR archives                                                      | `true`                          |
+| `seed_private_torrents`           | bool   | TorBox only: ask TorBox to seed private `.torrent` uploads (`seed=2`)          | `false`                         |
 | `minimum_free_slot`               | int    | Minimum free torrent slots to use this provider                                | `0`                             |
 | `limit`                           | int    | Max torrents allowed on this provider                                          | `0` (unlimited)                 |
 | `workers`                         | int    | Concurrent API workers                                                         | Auto (CPU * 50 / num_providers) |

@@ -804,6 +804,17 @@ class ConfigManager {
                             </div>
                         </label>
                     </div>
+
+                    <div>
+                        <label class="label cursor-pointer justify-start gap-2">
+                            <input type="checkbox" class="checkbox checkbox-primary"
+                                   name="debrid[${index}].seed_private_torrents" id="debrid[${index}].seed_private_torrents">
+                             <div>
+                                <span class="font-medium">Seed Private Torrents</span>
+                                <div class="label-text-alt">TorBox only: seed private .torrent files back to their tracker</div>
+                            </div>
+                        </label>
+                    </div>
                 </div>
         </div>
     `;
@@ -1562,6 +1573,7 @@ class ConfigManager {
             const downloadUncachedInput = getField('download_uncached');
             const unpackRarInput = getField('unpack_rar');
             const addSamplesInput = getField('add_samples');
+            const seedPrivateTorrentsInput = getField('seed_private_torrents');
             const userAgentInput = getField('user_agent');
             const downloadKeysTextarea = getField('download_api_keys');
             const torrentsRefreshIntervalInput = getField('torrents_refresh_interval');
@@ -1586,6 +1598,7 @@ class ConfigManager {
                 download_uncached: downloadUncachedInput.checked,
                 unpack_rar: unpackRarInput.checked,
                 add_samples: addSamplesInput.checked,
+                seed_private_torrents: seedPrivateTorrentsInput?.checked || false,
                 user_agent: userAgentInput.value
             };
 

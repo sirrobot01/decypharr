@@ -28,6 +28,8 @@ type Magnet struct {
 	Size     int64  `json:"size"`
 	Link     string `json:"link"`
 	File     []byte `json:"-"`
+	// Private is the .torrent's private flag. A magnet link doesn't carry it.
+	Private bool `json:"private,omitempty"`
 }
 
 func (m *Magnet) IsTorrent() bool {
@@ -103,6 +105,7 @@ func GetMagnetFromBytes(torrentData []byte, rmTrackerUrls bool) (*Magnet, error)
 		Size:     info.Length,
 		Link:     magnetMeta.String(),
 		File:     torrentData,
+		Private:  info.Private != nil && *info.Private,
 	}
 	return magnet, nil
 }
