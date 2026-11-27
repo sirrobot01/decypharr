@@ -206,3 +206,32 @@ func TestDecodeAuthHeader(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthenticateInheritsDownloadActionFromConfig(t *testing.T) {
+	q := newAuthenticationTestQBit(t)
+	if _, err := config.Update(func(c *config.Config) error {
+		c.Arrs = []config.Arr{{Name: "tv", DownloadAction: config.DownloadActionDownload}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := q.authenticate(t.Context(), "tv", "", "")
+	if err != nil {
+		t.Fatalf("authenticate: %v", err)
+	}
+	if got.DownloadAction != config.DownloadActionDownload {
+		t.Fatalf("DownloadAction = %q, want the value from the configured arr", got.DownloadAction)
+	}
+	if action := got.EffectiveDownloadAction(config.Get().DefaultDownloadAction); action != config.DownloadActionDownload {
+		t.Fatalf("effective action = %q, want %q", action, config.DownloadActionDownload)
+	}
+
+	other, err := q.authenticate(t.Context(), "movies", "", "")
+	if err != nil {
+		t.Fatalf("authenticate: %v", err)
+	}
+	if action := other.EffectiveDownloadAction(config.Get().DefaultDownloadAction); action != config.DownloadActionSymlink {
+		t.Fatalf("arr without its own setting resolved to %q, want the global default %q", action, config.DownloadActionSymlink)
+	}
+}

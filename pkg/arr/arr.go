@@ -33,14 +33,24 @@ const (
 // Arr is one configured Arr instance. It carries no behaviour: every call to
 // an instance goes through Service.
 type Arr struct {
-	Name             string `json:"name"`
-	Host             string `json:"host"`
-	Token            string `json:"token"`
-	Type             Type   `json:"type"`
-	SkipRepair       bool   `json:"skip_repair"`
-	DownloadUncached *bool  `json:"download_uncached"`
-	SelectedDebrid   string `json:"selected_debrid,omitempty"`
-	Source           Source `json:"source,omitempty"`
+	Name             string                `json:"name"`
+	Host             string                `json:"host"`
+	Token            string                `json:"token"`
+	Type             Type                  `json:"type"`
+	SkipRepair       bool                  `json:"skip_repair"`
+	DownloadUncached *bool                 `json:"download_uncached"`
+	SelectedDebrid   string                `json:"selected_debrid,omitempty"`
+	DownloadAction   config.DownloadAction `json:"download_action,omitempty"`
+	Source           Source                `json:"source,omitempty"`
+}
+
+// EffectiveDownloadAction returns the action configured for this instance, or
+// fallback (the global default) when the instance does not set one.
+func (a Arr) EffectiveDownloadAction(fallback config.DownloadAction) config.DownloadAction {
+	if a.DownloadAction != "" {
+		return a.DownloadAction
+	}
+	return fallback
 }
 
 // Reachable reports whether the instance carries enough to be called.
@@ -112,6 +122,7 @@ func fromConfig(c config.Arr) Arr {
 		SkipRepair:       c.SkipRepair,
 		DownloadUncached: c.DownloadUncached,
 		SelectedDebrid:   c.SelectedDebrid,
+		DownloadAction:   c.DownloadAction,
 		Source:           Source(c.Source),
 	}
 }
@@ -124,6 +135,7 @@ func (a Arr) toConfig() config.Arr {
 		SkipRepair:       a.SkipRepair,
 		DownloadUncached: a.DownloadUncached,
 		SelectedDebrid:   a.SelectedDebrid,
+		DownloadAction:   a.DownloadAction,
 		Source:           string(a.Source),
 	}
 }

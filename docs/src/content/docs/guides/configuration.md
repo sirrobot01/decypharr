@@ -477,6 +477,7 @@ See the [Health Checker & Repair guide](../repair/) for the full model, API, and
 | `skip_repair`       | Skip repair for this Arr         | `false`     |
 | `download_uncached` | Download uncached torrents       | `false`     |
 | `selected_debrid`   | Force specific Debrid provider   | `""` (auto) |
+| `download_action`   | `symlink`, `download` or `none` for this Arr. Overrides `default_download_action` | `""` (use the default) |
 | `source`            | Config source (`auto`, `config`) | `config`    |
 
 ## Queue Cleanup

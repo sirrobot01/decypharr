@@ -64,17 +64,18 @@ func (q QBitTorrent) IsZero() bool {
 }
 
 type Arr struct {
-	Name             string `json:"name,omitempty"`
-	Host             string `json:"host,omitempty"`
-	Token            string `json:"token,omitempty"`
-	SkipRepair       bool   `json:"skip_repair,omitempty"`
-	DownloadUncached *bool  `json:"download_uncached,omitempty"`
-	SelectedDebrid   string `json:"selected_debrid,omitempty"`
-	Source           string `json:"source,omitempty"` // The source of the arr, e.g. "auto", "config", "". Auto means it was automatically detected from the arr
+	Name             string         `json:"name,omitempty"`
+	Host             string         `json:"host,omitempty"`
+	Token            string         `json:"token,omitempty"`
+	SkipRepair       bool           `json:"skip_repair,omitempty"`
+	DownloadUncached *bool          `json:"download_uncached,omitempty"`
+	SelectedDebrid   string         `json:"selected_debrid,omitempty"`
+	DownloadAction   DownloadAction `json:"download_action,omitempty"` // Overrides default_download_action for this arr. Empty means use the default.
+	Source           string         `json:"source,omitempty"`          // The source of the arr, e.g. "auto", "config", "". Auto means it was automatically detected from the arr
 }
 
 func (a Arr) IsZero() bool {
-	return a.Name == "" && a.Host == "" && a.Token == "" && !a.SkipRepair && a.DownloadUncached == nil && a.SelectedDebrid == "" && a.Source == ""
+	return a.Name == "" && a.Host == "" && a.Token == "" && !a.SkipRepair && a.DownloadUncached == nil && a.SelectedDebrid == "" && a.DownloadAction == "" && a.Source == ""
 }
 
 // QueueCleanup is the global policy that drives CleanupQueue. It maps

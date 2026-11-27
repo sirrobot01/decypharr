@@ -97,6 +97,7 @@ func (s *SABnzbd) authenticate(ctx context.Context, category, username, password
 		for _, configured := range cfg.Arrs {
 			if configured.Name == category {
 				instance.DownloadUncached = configured.DownloadUncached
+				instance.DownloadAction = configured.DownloadAction
 				break
 			}
 		}
