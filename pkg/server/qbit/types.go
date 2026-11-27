@@ -1,6 +1,8 @@
 package qbit
 
 import (
+	"strings"
+
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
@@ -380,6 +382,7 @@ type Torrent struct {
 	Downloaded   int64                `json:"downloaded"`
 	MagnetURI    string               `json:"magnet_uri"`
 	Files        []TorrentFile        `json:"files"`
+	Tags         string               `json:"tags"`
 
 	Ratio      int    `json:"ratio,omitempty"`
 	RatioLimit int    `json:"ratio_limit,omitempty"`
@@ -426,6 +429,7 @@ func convertToQBitTorrentTorrent(t *storage.Entry) Torrent {
 		Downloaded:   int64(float64(t.Size) * t.Progress),
 		MagnetURI:    t.Magnet,
 		Files:        getTorrentFiles(t),
+		Tags:         strings.Join(t.Tags, ", "),
 
 		UpLimit:    -1,
 		DlLimit:    -1,
