@@ -1,6 +1,7 @@
 package torbox
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/anacrolix/torrent/bencode"
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/rs/zerolog"
 	"github.com/sirrobot01/decypharr/internal/config"
 	"github.com/sirrobot01/decypharr/internal/customerror"
@@ -320,6 +323,73 @@ func TestFetchDownloadLinkNeverCachesTheRedirectURL(t *testing.T) {
 			}
 			if !dl.Empty() {
 				t.Fatalf("DownloadLink = %q, want none", dl.DownloadLink)
+			}
+		})
+	}
+}
+
+func testTorrentFile(t *testing.T, private bool) []byte {
+	t.Helper()
+	info := metainfo.Info{Name: "Release.mkv", Length: 1, PieceLength: 16384, Pieces: make([]byte, 20)}
+	if private {
+		info.Private = &private
+	}
+	infoBytes, err := bencode.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	mi := metainfo.MetaInfo{InfoBytes: infoBytes, Announce: "https://tracker.example/announce"}
+	if err := mi.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestSubmitMagnetSeedsPrivateTorrentFilesWhenEnabled(t *testing.T) {
+	config.Reset()
+	config.SetConfigPath(t.TempDir())
+	t.Cleanup(config.Reset)
+
+	tests := map[string]struct {
+		enabled, private bool
+		want             []string
+	}{
+		"enabled, private":  {enabled: true, private: true, want: []string{torboxSeed}},
+		"enabled, public":   {enabled: true, private: false},
+		"disabled, private": {enabled: false, private: true},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			var seed []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := r.ParseMultipartForm(1 << 20); err != nil {
+					t.Errorf("ParseMultipartForm() error = %v", err)
+				}
+				seed = r.MultipartForm.Value["seed"]
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprint(w, `{"success":true,"data":{"torrent_id":17}}`)
+			}))
+			t.Cleanup(server.Close)
+
+			magnet, err := utils.GetMagnetFromBytes(testTorrentFile(t, tt.private), false)
+			if err != nil {
+				t.Fatalf("GetMagnetFromBytes() error = %v", err)
+			}
+			if magnet.Private != tt.private {
+				t.Fatalf("Magnet.Private = %v, want %v", magnet.Private, tt.private)
+			}
+			tb := testTorbox(server.URL)
+			tb.config.SeedPrivateTorrents = tt.enabled
+			if _, err := tb.SubmitMagnet(&types.Torrent{
+				InfoHash:         magnet.InfoHash,
+				Magnet:           magnet,
+				DownloadUncached: true,
+			}); err != nil {
+				t.Fatalf("SubmitMagnet() error = %v", err)
+			}
+			if !slices.Equal(seed, tt.want) {
+				t.Fatalf("seed field = %q, want %q", seed, tt.want)
 			}
 		})
 	}

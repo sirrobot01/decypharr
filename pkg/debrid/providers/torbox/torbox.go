@@ -47,6 +47,10 @@ const (
 	queuedPrefix = "queued:"
 )
 
+// torboxSeed is createtorrent's "seed" value that makes TorBox seed the
+// torrent (1 is the account's preference, 3 is never).
+const torboxSeed = "2"
+
 // stateNote matches the note in a state such as "stalled (no seeds)".
 var stateNote = regexp.MustCompile(`\s*\(.*?\)\s*`)
 
@@ -285,6 +289,13 @@ func (tb *Torbox) createTorrentRequest(torrent *types.Torrent) (*http.Request, e
 	}
 	if !torrent.DownloadUncached {
 		if err := writer.WriteField("add_only_if_cached", "true"); err != nil {
+			return nil, err
+		}
+	}
+	// A private tracker expects its torrents to seed back. Without a value,
+	// TorBox applies the account's seeding preference.
+	if tb.config.SeedPrivateTorrents && torrent.Magnet.Private {
+		if err := writer.WriteField("seed", torboxSeed); err != nil {
 			return nil, err
 		}
 	}
