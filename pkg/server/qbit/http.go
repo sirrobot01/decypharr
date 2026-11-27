@@ -93,6 +93,10 @@ func (q *QBit) handleTorrentsInfo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to read the download queue", http.StatusInternalServerError)
 		return
 	}
+	_ = r.ParseForm()
+	if tag, ok := r.Form["tag"]; ok {
+		torrents = filterByTag(torrents, strings.TrimSpace(tag[0]))
+	}
 	qbitTorrents := make([]Torrent, len(torrents))
 	for i, t := range torrents {
 		qbitTorrents[i] = convertToQBitTorrentTorrent(t)
@@ -143,6 +147,7 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 		_arr = arr.Arr{Name: category}
 	}
 	atleastOne := false
+	var addedHashes []string
 
 	// Handle magnet URLs
 	if urls := r.FormValue("urls"); urls != "" {
@@ -151,11 +156,13 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 			urlList = append(urlList, strings.TrimSpace(u))
 		}
 		for _, url := range urlList {
-			if err := q.addMagnet(ctx, url, _arr, debridName, action, cfg.Notifications.CallbackURL, rmTrackerUrls, cfg.SkipMultiSeason); err != nil {
+			hash, err := q.addMagnet(ctx, url, _arr, debridName, action, cfg.Notifications.CallbackURL, rmTrackerUrls, cfg.SkipMultiSeason)
+			if err != nil {
 				q.logger.Debug().Msgf("Error adding magnet: %s", err.Error())
 				writeTorrentAddError(w, err)
 				return
 			}
+			addedHashes = append(addedHashes, hash)
 			atleastOne = true
 		}
 	}
@@ -164,11 +171,13 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 	if r.MultipartForm != nil && r.MultipartForm.File != nil {
 		if files := r.MultipartForm.File["torrents"]; len(files) > 0 {
 			for _, fileHeader := range files {
-				if err := q.addTorrent(ctx, fileHeader, _arr, debridName, action, cfg.Notifications.CallbackURL, rmTrackerUrls, cfg.SkipMultiSeason); err != nil {
+				hash, err := q.addTorrent(ctx, fileHeader, _arr, debridName, action, cfg.Notifications.CallbackURL, rmTrackerUrls, cfg.SkipMultiSeason)
+				if err != nil {
 					q.logger.Debug().Err(err).Str("torrent", fileHeader.Filename).Msgf("Error adding torrent")
 					writeTorrentAddError(w, err)
 					return
 				}
+				addedHashes = append(addedHashes, hash)
 				atleastOne = true
 			}
 		}
@@ -177,6 +186,10 @@ func (q *QBit) handleTorrentsAdd(w http.ResponseWriter, r *http.Request) {
 	if !atleastOne {
 		http.Error(w, "No valid URLs or torrents provided", http.StatusBadRequest)
 		return
+	}
+
+	if tags := splitTags(r.FormValue("tags")); len(tags) > 0 {
+		q.tagAddedTorrents(addedHashes, tags)
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -414,4 +427,23 @@ func (q *QBit) handleCreateTags(w http.ResponseWriter, r *http.Request) {
 	}
 	q.addTags(tags)
 	utils.JSONResponse(w, nil, http.StatusOK)
+}
+
+// handleTorrentFilePrio accepts qBittorrent's file priority call. A debrid
+// provider always fetches the whole torrent, so there is nothing to change.
+func (q *QBit) handleTorrentFilePrio(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
+		return
+	}
+	hash := strings.TrimSpace(r.FormValue("hash"))
+	if hash == "" {
+		http.Error(w, "No hash provided", http.StatusBadRequest)
+		return
+	}
+	if _, err := q.manager.Queue().GetTorrent(hash); err != nil {
+		http.Error(w, "Torrent not found", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }

@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/sirrobot01/decypharr/internal/config"
@@ -16,37 +17,68 @@ import (
 	"github.com/sirrobot01/decypharr/pkg/storage"
 )
 
-func (q *QBit) addMagnet(ctx context.Context, url string, arr arr.Arr, debrid string, action config.DownloadAction, callbackURL string, rmTrackerUrls, skipMultiSeason bool) error {
+func (q *QBit) addMagnet(ctx context.Context, url string, arr arr.Arr, debrid string, action config.DownloadAction, callbackURL string, rmTrackerUrls, skipMultiSeason bool) (string, error) {
 	magnet, err := utils.GetMagnetFromUrl(url, rmTrackerUrls)
 	if err != nil {
-		return customerror.NewError(fmt.Errorf("error parsing magnet link: %w", err), http.StatusBadRequest, "invalid_magnet", false, false).Permanent()
+		return "", customerror.NewError(fmt.Errorf("error parsing magnet link: %w", err), http.StatusBadRequest, "invalid_magnet", false, false).Permanent()
 	}
 
 	importReq := manager.NewTorrentRequest(debrid, q.downloadFolder, magnet, arr, action, arr.DownloadUncached, callbackURL, manager.ImportTypeQBit, skipMultiSeason)
 
 	err = q.manager.AddNewTorrent(ctx, importReq)
 	if err != nil {
-		return fmt.Errorf("failed to process torrent: %w", err)
+		return "", fmt.Errorf("failed to process torrent: %w", err)
 	}
-	return nil
+	return magnet.InfoHash, nil
 }
 
-func (q *QBit) addTorrent(ctx context.Context, fileHeader *multipart.FileHeader, arr arr.Arr, debrid string, action config.DownloadAction, callbackURL string, rmTrackerUrls, skipMultiSeason bool) error {
+func (q *QBit) addTorrent(ctx context.Context, fileHeader *multipart.FileHeader, arr arr.Arr, debrid string, action config.DownloadAction, callbackURL string, rmTrackerUrls, skipMultiSeason bool) (string, error) {
 	file, err := fileHeader.Open()
 	if err != nil {
-		return customerror.NewError(fmt.Errorf("error opening torrent file: %w", err), http.StatusBadRequest, "invalid_torrent", false, false).Permanent()
+		return "", customerror.NewError(fmt.Errorf("error opening torrent file: %w", err), http.StatusBadRequest, "invalid_torrent", false, false).Permanent()
 	}
 	defer file.Close()
 	magnet, err := utils.GetMagnetFromFile(file, fileHeader.Filename, rmTrackerUrls)
 	if err != nil {
-		return customerror.NewError(fmt.Errorf("error reading file %s: %w", fileHeader.Filename, err), http.StatusBadRequest, "invalid_torrent", false, false).Permanent()
+		return "", customerror.NewError(fmt.Errorf("error reading file %s: %w", fileHeader.Filename, err), http.StatusBadRequest, "invalid_torrent", false, false).Permanent()
 	}
 	importReq := manager.NewTorrentRequest(debrid, q.downloadFolder, magnet, arr, action, arr.DownloadUncached, callbackURL, manager.ImportTypeQBit, skipMultiSeason)
 	err = q.manager.AddNewTorrent(ctx, importReq)
 	if err != nil {
-		return fmt.Errorf("failed to process torrent: %w", err)
+		return "", fmt.Errorf("failed to process torrent: %w", err)
 	}
-	return nil
+	return magnet.InfoHash, nil
+}
+
+// splitTags turns a comma separated tag list into trimmed, non empty tags.
+func splitTags(raw string) []string {
+	var tags []string
+	for tag := range strings.SplitSeq(raw, ",") {
+		if tag = strings.TrimSpace(tag); tag != "" {
+			tags = append(tags, tag)
+		}
+	}
+	return tags
+}
+
+// tagAddedTorrents applies the tags sent with torrents/add to the torrents that call queued.
+func (q *QBit) tagAddedTorrents(hashes, tags []string) {
+	for _, hash := range hashes {
+		if t, err := q.manager.Queue().GetTorrent(hash); err == nil {
+			q.setTorrentTags(t, tags)
+		}
+	}
+}
+
+// filterByTag implements the torrents/info tag filter. An empty tag keeps only untagged torrents.
+func filterByTag(torrents []*storage.Entry, tag string) []*storage.Entry {
+	kept := torrents[:0:0]
+	for _, t := range torrents {
+		if (tag == "" && len(t.Tags) == 0) || (tag != "" && slices.Contains(t.Tags, tag)) {
+			kept = append(kept, t)
+		}
+	}
+	return kept
 }
 
 func (q *QBit) ResumeTorrent(t *storage.Entry) bool {
