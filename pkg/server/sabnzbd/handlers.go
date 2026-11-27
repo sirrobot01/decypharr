@@ -301,7 +301,7 @@ func (s *SABnzbd) handleAddURL(w http.ResponseWriter, r *http.Request) {
 	urls := r.FormValue("name")
 
 	cfg := config.Get()
-	action := cfg.DefaultDownloadAction
+	action := _arr.EffectiveDownloadAction(cfg.DefaultDownloadAction)
 	if r.FormValue("action") != "" {
 		action = config.DownloadAction(r.FormValue("action"))
 	}
@@ -379,7 +379,7 @@ func (s *SABnzbd) handleAddFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := config.Get()
-	action := cfg.DefaultDownloadAction
+	action := _arr.EffectiveDownloadAction(cfg.DefaultDownloadAction)
 	if r.FormValue("action") != "" {
 		action = config.DownloadAction(r.FormValue("action"))
 	}
