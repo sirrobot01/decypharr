@@ -15,7 +15,9 @@ func newTestServer(t *testing.T) *Server {
 	return &Server{
 		urlBase: "/",
 		logger:  zerolog.Nop(),
-		templates: template.Must(template.ParseFS(
+		templates: template.Must(template.New("").Funcs(template.FuncMap{
+			"assetVersion": assetVersion,
+		}).ParseFS(
 			content,
 			"templates/layout.html",
 			"templates/setup_layout.html",
